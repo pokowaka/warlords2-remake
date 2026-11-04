@@ -1,0 +1,117 @@
+#include "warlords/ai/personality.hpp"
+
+#include <algorithm>
+
+namespace w2::ai::personality {
+
+namespace {
+
+// Trait order:
+// [0] AGGRESSION, [1] HONOUR, [2] AVARICE, [3] SCORCHED_EARTH, [4] HERO_FOCUS,
+// [5] COALITION_DRIVE, [6] CAVALRY_AFFINITY, [7] FLIER_AFFINITY, [8] SIEGE_AFFINITY, [9] CAUTION
+const Profile PROFILES[3][9] = {
+    // Knights (Level 0)
+    {
+        {0, 0, "Standard Knight", "Chivalrous Defender",
+         "We honour our treaties and defend our realm.",
+         {-0.2f, 0.7f, -0.2f, -0.8f, 0.2f, 0.3f, 0.0f, 0.0f, 0.0f, 0.6f}},
+        {0, 1, "Winston the Woeful", "Cautious Spearman",
+         "A wall of pikes keeps the wicked at bay.",
+         {-0.4f, 0.8f, -0.1f, -0.9f, 0.0f, 0.4f, -0.3f, -0.2f, 0.2f, 0.8f}},
+        {0, 2, "Brave Brave Sir Robin", "Pacifist Isolationist",
+         "When danger rears its ugly head, we bravely turn and flee!",
+         {-0.8f, 0.6f, 0.1f, -1.0f, 0.3f, 0.7f, 0.4f, 0.3f, -0.5f, 0.9f}},
+        {0, 3, "Morgan the Moribund", "Heavy Garrison Turtle",
+         "Our stone walls shall outlast your ambition.",
+         {-0.5f, 0.7f, 0.2f, -0.7f, -0.2f, 0.3f, -0.5f, -0.3f, 0.5f, 0.8f}},
+        {0, 4, "Timmy the Tremulous", "Fast Scout & Skirmisher",
+         "Swift riders see all and strike where none stand.",
+         {-0.2f, 0.5f, 0.0f, -0.6f, 0.4f, 0.4f, 0.7f, 0.5f, -0.4f, 0.6f}},
+        {0, 5, "Ulfrid the Unlucky", "Overeager Crusader",
+         "Glory awaits in the next charge!",
+         {0.2f, 0.6f, -0.3f, -0.5f, 0.5f, 0.2f, 0.2f, 0.1f, 0.0f, 0.2f}},
+        {0, 6, "Simon the Superfluous", "Erratic Opportunist",
+         "Who knows where our banners will march tomorrow?",
+         {0.1f, -0.1f, 0.3f, -0.2f, 0.3f, 0.1f, 0.2f, 0.3f, 0.1f, 0.3f}},
+        {0, 7, "Charles the Craven", "Blustering Hoarder",
+         "Pay due tribute and our mighty host may spare thee.",
+         {-0.3f, 0.2f, 0.8f, -0.4f, 0.1f, 0.5f, 0.0f, 0.1f, 0.2f, 0.7f}},
+        {0, 8, "Ethel the Unready", "Scattered Builder",
+         "Our cities grow prosperous while we prepare.",
+         {-0.3f, 0.5f, 0.4f, -0.6f, 0.1f, 0.4f, 0.0f, 0.0f, 0.1f, 0.5f}},
+    },
+    // Lords (Level 1)
+    {
+        {1, 0, "Standard Lord", "Feudal Tactician",
+         "Strength and statecraft rule this land.",
+         {0.2f, 0.3f, 0.1f, -0.3f, 0.3f, 0.3f, 0.2f, 0.2f, 0.2f, 0.1f}},
+        {1, 1, "Rowan the Rancorous", "Treacherous Brawler",
+         "A treaty is merely a pause to sharpen the blade.",
+         {0.7f, -0.7f, 0.2f, 0.2f, 0.3f, -0.3f, 0.3f, 0.1f, 0.2f, -0.3f}},
+        {1, 2, "Roland the Rabid", "Pyromaniac Razer",
+         "Ashes and cinders leave no rebels behind!",
+         {0.8f, -0.5f, 0.4f, 0.95f, 0.2f, -0.4f, 0.4f, 0.2f, 0.3f, -0.4f}},
+        {1, 3, "Raymond Ratsbane", "Vendetta Assassin",
+         "Cross us once and we shall hunt your throne to the end.",
+         {0.6f, -0.6f, 0.1f, 0.3f, 0.6f, -0.2f, 0.4f, 0.5f, 0.1f, -0.1f}},
+        {1, 4, "Rebecca the Rapacious", "Mercenary Extortionist",
+         "Gold buys peace, or gold buys the armies that take your cities.",
+         {0.3f, -0.2f, 0.95f, 0.4f, 0.4f, 0.4f, 0.3f, 0.2f, 0.1f, 0.2f}},
+        {1, 5, "Rodney the Ravager", "Siege Juggernaut",
+         "Slow and unstoppable, our engines crush every fortress.",
+         {0.5f, 0.1f, 0.2f, 0.5f, 0.1f, 0.1f, -0.2f, -0.1f, 0.9f, 0.2f}},
+        {1, 6, "Rodrik the Retrograde", "Stubborn Traditionalist",
+         "What we claim is ours by ancient right.",
+         {0.2f, 0.6f, 0.1f, -0.4f, 0.1f, 0.2f, 0.1f, -0.2f, 0.4f, 0.4f}},
+        {1, 7, "Randal the Rampageous", "Snowball Conqueror",
+         "Each victory feeds the next campaign!",
+         {0.7f, -0.5f, 0.3f, 0.3f, 0.5f, -0.1f, 0.6f, 0.4f, 0.3f, -0.2f}},
+        {1, 8, "Richard the Riotous", "Relentless Raider",
+         "Your treasuries and border towns are ripe for plunder!",
+         {0.6f, -0.4f, 0.8f, 0.7f, 0.3f, -0.2f, 0.6f, 0.3f, 0.0f, -0.2f}},
+    },
+    // Warlords (Level 2)
+    {
+        {2, 0, "Standard Warlord", "Imperial Warlord",
+         "All crowns shall bow before our empire.",
+         {0.6f, 0.0f, 0.3f, 0.0f, 0.6f, 0.5f, 0.4f, 0.5f, 0.5f, -0.1f}},
+        {2, 1, "Attila the Hun", "Outrider Blitzkrieg",
+         "Our horsemen cross the plains faster than word of our coming!",
+         {0.9f, -0.6f, 0.4f, 0.5f, 0.5f, 0.3f, 0.95f, 0.4f, 0.1f, -0.4f}},
+        {2, 2, "Margaret the Ferrous", "Iron-Willed Hegemon",
+         "This lady is not for turning. Surrender or be broken.",
+         {0.6f, 0.5f, 0.2f, -0.2f, 0.5f, 0.6f, 0.3f, 0.4f, 0.7f, 0.2f}},
+        {2, 3, "Ian the Infamous", "Heavy Monster & Siege Lord",
+         "War elephants and ancient beasts trample every wall.",
+         {0.7f, -0.3f, 0.3f, 0.2f, 0.6f, 0.4f, 0.2f, 0.3f, 0.95f, 0.0f}},
+        {2, 4, "Nikolas the Nefarious", "Chaos Machiavellian",
+         "Alliances are masks worn until the dagger finds its mark.",
+         {0.7f, -0.9f, 0.6f, 0.4f, 0.7f, 0.6f, 0.4f, 0.7f, 0.3f, -0.2f}},
+        {2, 5, "Steven the Insidious", "Relentless Swarm Master",
+         "Cut down one host and three more march from our citadels.",
+         {0.8f, -0.4f, 0.3f, 0.1f, 0.5f, 0.5f, 0.5f, 0.6f, 0.5f, -0.2f}},
+        {2, 6, "Hand the Hammer", "Decapitation Striker",
+         "We strike straight for the throat and the capital!",
+         {0.95f, -0.3f, 0.2f, 0.3f, 0.7f, 0.3f, 0.6f, 0.8f, 0.6f, -0.4f}},
+        {2, 7, "Roger the Unrepentant", "Hero & Ruin Warlord",
+         "Ancient artifacts and blessed champions make us invincible.",
+         {0.75f, -0.5f, 0.5f, 0.3f, 0.95f, 0.4f, 0.4f, 0.8f, 0.4f, -0.1f}},
+        {2, 8, "William the Wily", "Scheming Coalitionist",
+         "Why fight alone when the world can be turned against our rival?",
+         {0.5f, -0.6f, 0.7f, -0.1f, 0.6f, 0.95f, 0.4f, 0.6f, 0.4f, 0.2f}},
+    },
+};
+
+}  // namespace
+
+const Profile& profileFor(int level, int card) {
+  int lv = std::clamp(level, 0, 2);
+  int cd = std::clamp(card, 0, 8);
+  return PROFILES[lv][cd];
+}
+
+const Profile& forSide(const Side& side) {
+  return profileFor(side.level, side.card);
+}
+
+}  // namespace w2::ai::personality

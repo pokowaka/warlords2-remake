@@ -995,9 +995,19 @@ static std::vector<uint8_t>* maskFor(Game& g, int side, bool make) {
 
 bool seen(const Game& g, int side, int x, int y) {
   if (g.map->options.hiddenMap == 0) return true;
+  if (x < 0 || y < 0 || x >= g.map->width || y >= g.map->height) return false;
+  int idx = y * g.map->width + x;
   auto it = g.explored.find(side);
-  if (it == g.explored.end()) return false;
-  return it->second[y * g.map->width + x] == 1;
+  if (it != g.explored.end() && it->second[idx] == 1) return true;
+  if (side >= 0 && side < 8) {
+    for (int b = 0; b < 8; b++) {
+      if (b != side && g.diplomacy.allied[side * 8 + b]) {
+        auto bit = g.explored.find(b);
+        if (bit != g.explored.end() && bit->second[idx] == 1) return true;
+      }
+    }
+  }
+  return false;
 }
 
 int reveal(Game& g, int side, int x, int y, bool flying) {

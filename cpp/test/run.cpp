@@ -21,9 +21,13 @@
 
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
+#include "warlords/ai/belief.hpp"
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/diplomacy.hpp"
 #include "warlords/ai/groups.hpp"
+#include "warlords/ai/ml_policy.hpp"
+#include "warlords/ai/modern_ai.hpp"
+#include "warlords/ai/personality.hpp"
 #include "warlords/aicard.hpp"
 #include "warlords/armytype.hpp"
 #include "warlords/combat.hpp"
@@ -3136,6 +3140,147 @@ static void testSound() {
   eq(cues::advisor(g, side, first), 54, "on a seventh turn, short of gold: VGOLD00");
 }
 
+static void testModernAi() {
+  printf("modern learnable AI & diplomacy\n");
+
+  // 1. All 27 personality profiles exist and have bounded 10D traits
+  for (int lv = 0; lv < 3; lv++) {
+    for (int c = 0; c < 9; c++) {
+      const auto& p = ai::personality::profileFor(lv, c);
+      ok(!p.name.empty() && !p.archetype.empty() && !p.motto.empty(), "card profile has name, archetype, motto");
+      for (float t : p.traits) {
+        ok(t >= -1.0f && t <= 1.0f, "trait in [-1, 1]");
+      }
+    }
+  }
+
+  // 2. Fair-information fog-of-war pathblocking when classicAi == false
+  {
+    auto gp = newGame("ERYTHEA", seedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
+    Game& g = *gp;
+    Side* s0 = g.map->side(0);
+    s0->computer = true;
+    s0->classicAi = false;
+    int ux = NONE, uy = NONE;
+    for (int y = 5; y < g.map->height - 5 && ux == NONE; y++) {
+      for (int x = 5; x < g.map->width - 5 && ux == NONE; x++) {
+        if (!game::seen(g, 0, x, y) && scn::terrainAt(*g.map, x, y) == movement::PLAIN) {
+          ux = x;
+          uy = y;
+        }
+      }
+    }
+    ok(ux != NONE, "found unseen plain tile under hiddenMap");
+    auto grid = movement::grid(g, 0);
+    auto prep = movement::prepare(g, grid, 0, movement::LAND, 0, 0);
+    int idx = uy * g.map->width + ux;
+    eq(prep[idx], movement::SHUT, "modern AI cannot pathfind through unseen fog tiles");
+  }
+
+  // 3. ALLIED shared fog-of-war vision, truce timers, tribute transfer, and joint war pact
+  {
+    auto gp = newGame("ERYTHEA", seedWith(1, {{"hiddenMap", 1}}));
+    Game& g = *gp;
+    int tx = 50, ty = 50;
+    eq(game::seen(g, 0, tx, ty), false, "side 0 has not seen (50,50)");
+    game::reveal(g, 1, tx, ty, false);
+    eq(game::seen(g, 1, tx, ty), true, "side 1 sees (50,50)");
+    eq(game::seen(g, 0, tx, ty), false, "unallied side 0 still cannot see side 1's tile");
+
+    int gold0Before = g.map->sides[0].gold;
+    int gold1Before = g.map->sides[1].gold;
+    diplomacy::propose(g, 0, 1, diplomacy::PEACE);
+    diplomacy::proposeAlliance(g, 0, 1, true);
+    diplomacy::setGoldOffer(g, 0, 1, 50);
+    diplomacy::setWarTarget(g, 0, 1, 2);
+
+    diplomacy::propose(g, 1, 0, diplomacy::PEACE);
+    diplomacy::proposeAlliance(g, 1, 0, true);
+    diplomacy::apply(g, g.map->sides[1]);
+
+    eq(diplomacy::isAllied(g, 0, 1), true, "sides 0 and 1 are now ALLIED");
+    eq(diplomacy::truceTurns(g, 0, 1), 15, "15-turn alliance truce active");
+    eq(g.map->sides[0].gold, gold0Before - 50, "tribute deducted from proposer");
+    eq(g.map->sides[1].gold, gold1Before + 50, "tribute credited to recipient");
+    eq(diplomacy::state(g, 1, 2), diplomacy::WAR, "joint war target activated");
+    eq(game::seen(g, 0, tx, ty), true, "ALLIED side 0 now shares side 1's fog-of-war vision");
+
+    auto bd = diplomacy::computeAttitude(g, 1, 0);
+    ok(!bd.factors.empty() && !bd.whatItTakes.empty(), "attitude ledger produces itemized factors and forecast");
+  }
+
+  // 4. SideBelief under viewEnemies == 0 and RNG preservation in estimateCombat
+  {
+    auto gp = newGame("ERYTHEA", seedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
+    Game& g = *gp;
+    Side& s0 = g.map->sides[0];
+    s0.computer = true;
+    s0.classicAi = false;
+    ai::belief::update(g, s0);
+    const SideBelief& b = ai::belief::ensure(s0);
+    for (City* c : b.visibleCities) {
+      ok(ai::belief::isCityVisible(g, 0, *c), "all visibleCities in SideBelief are genuinely seen by side 0");
+    }
+    uint32_t rngBefore = g.rng.state;
+    std::vector<Army*> myArmies = game::sideArmies(g, s0);
+    if (!myArmies.empty() && !b.visibleCities.empty()) {
+      std::vector<Army*> testStack = {myArmies[0]};
+      auto est = ai::belief::estimateCombat(g, s0, testStack, b.visibleCities[0]->x, b.visibleCities[0]->y);
+      ok(est.winProb >= 0.0f && est.winProb <= 1.0f, "estimateCombat returns probability in [0, 1]");
+    }
+    eq(g.rng.state, rngBefore, "estimateCombat never mutates Game::rng");
+  }
+
+  // 5. PolicyNetwork 4 heads and JSON serialization roundtrip
+  {
+    ai::ml::PolicyNetwork net;
+    auto gp = newGame("TUTORIA", seed(1));
+    Game& g = *gp;
+    Side& s0 = g.map->sides[0];
+    s0.classicAi = false;
+    ai::belief::update(g, s0);
+    auto ctx = ai::ml::buildContext(g, s0);
+    float v = net.evaluateValue(ctx);
+    ok(v >= -1.0f && v <= 1.0f, "Value head outputs in [-1, 1]");
+
+    auto flat1 = net.flatten();
+    eq((int)flat1.size(), ai::ml::PolicyNetwork::TOTAL_PARAMS, "flattened parameter count matches TOTAL_PARAMS");
+    std::filesystem::path tmpPath = std::filesystem::temp_directory_path() / "w2_test_weights.json";
+    ok(net.saveJson(tmpPath), "saved PolicyNetwork JSON");
+    ai::ml::PolicyNetwork net2;
+    ok(net2.loadJson(tmpPath), "loaded PolicyNetwork JSON");
+    std::filesystem::remove(tmpPath);
+    auto flat2 = net2.flatten();
+    float maxDiff = 0.0f;
+    for (size_t i = 0; i < flat1.size(); i++) {
+      maxDiff = std::max(maxDiff, std::abs(flat1[i] - flat2[i]));
+    }
+    ok(maxDiff < 1e-4f, "PolicyNetwork JSON roundtrip preserves weights");
+  }
+
+  // 6. Multi-turn game execution with 100% Learnable AI on TUTORIA
+  {
+    GameOpts opts = seedWith(3, {{"hiddenMap", 1}, {"viewEnemies", 0}});
+    for (int i = 0; i < 8; i++) {
+      opts.sides[i].computer = true;
+      opts.sides[i].level = 2;
+    }
+    auto gp = newGame("TUTORIA", opts);
+    Game& g = *gp;
+    for (auto& s : g.map->sides) {
+      if (s.inUse) s.classicAi = false;
+    }
+    Side* cur = game::begin(g);
+    int turnsPlayed = 0;
+    while (cur && !g.over && g.turn <= 8) {
+      ai::playTurn(g, *cur);
+      turnsPlayed++;
+      cur = game::endTurn(g);
+    }
+    ok(turnsPlayed >= 4, "modern learnable AI plays multiple turns cleanly under hiddenMap + viewEnemies=0");
+  }
+}
+
 // --------------------------------------------------------------------- main
 
 int main() {
@@ -3186,6 +3331,7 @@ int main() {
   if (fileExists(DATA + "/TUTORIA/TUTORIA.SCN")) testTutorialHero();
   testVerified();
   testSound();
+  testModernAi();
   printf("\n%d passed, %d failed\n", passed, failed);
   return failed == 0 ? 0 : 1;
 }

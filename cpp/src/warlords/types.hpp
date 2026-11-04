@@ -28,6 +28,7 @@ struct Army;
 struct Item;
 struct Game;
 struct AIData;
+struct SideBelief;
 
 // ------------------------------------------------------------- army types
 
@@ -181,6 +182,32 @@ struct Promotion {
   int gain = 0;
 };
 
+/** A scored macro-action recorded by the modern ML AI for the in-game F10 Brain Inspector. */
+struct AIThought {
+  std::string category;
+  std::string actorName;
+  std::string targetName;
+  int sx = NONE, sy = NONE;
+  int tx = NONE, ty = NONE;
+  float score = 0.0f;
+  float winProb = 0.0f;
+  bool stageNear = false;
+  std::string detail;
+};
+
+/** A turn-start diplomatic parley missive sent from an AI side to a player side. */
+struct DiplomaticMissive {
+  int fromSide = NONE;
+  int toSide = NONE;
+  int proposedState = NONE;
+  bool proposeAlliance = false;
+  int goldDemand = 0;      // > 0: fromSide demands gold; < 0: fromSide offers gold
+  int jointWarTarget = NONE;
+  std::string headline;
+  std::string body;
+  std::string reasonSummary;
+};
+
 struct Side {
   int index = 0;
   std::string name;
@@ -188,6 +215,7 @@ struct Side {
   int gold = 0;
   int capX = 0, capY = 0;
   bool computer = false;
+  bool classicAi = true;
   int level = 0;
   bool enhanced = false;
   bool observe = false;
@@ -204,6 +232,11 @@ struct Side {
   std::shared_ptr<Quest> quest;
   std::shared_ptr<QuestResult> questNews;
   std::shared_ptr<AIData> ai;
+  std::shared_ptr<SideBelief> belief;
+  std::vector<AIThought> aiThoughts;
+  std::vector<DiplomaticMissive> missives;
+  std::array<int, 8> lastMissiveTurn{};
+  float lastBoardValue = 0.0f;
   int aiSolidarity = 0;
   Advisor advisor;
   // where the capital now stands (67cc:10d7); NONE until the first turn
@@ -319,6 +352,13 @@ struct Neighbours;
 struct Diplomacy {
   std::array<int, 64> state{};
   std::array<int, 64> proposal{};   // NONE where none was made
+  std::array<bool, 64> allied{};
+  std::array<bool, 64> proposeAllied{};
+  std::array<int, 64> truceTurns{};
+  std::array<int, 64> goldOffer{};  // > 0 offered by a to b; < 0 demanded by a from b
+  std::array<int, 64> warTarget{};  // NONE or target side index 0..7 for joint war pact
+  std::array<int, 64> trust{};      // relational trust from a toward b (-100..+100)
+  std::array<int, 8> alliedTargetCity{NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE};
 };
 
 struct Game {

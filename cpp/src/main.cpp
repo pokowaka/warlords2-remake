@@ -46,6 +46,7 @@
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/groups.hpp"
+#include "warlords/ai/ml_policy.hpp"
 #include "warlords/armytype.hpp"
 #include "warlords/cues.hpp"
 #include "warlords/diplomacy.hpp"
@@ -979,7 +980,13 @@ static void afterOffer() {
   front::stratDirty();
   auto cap = capOf(G.player);
   City* city = game::cityAt(*G.g, cap.first, cap.second);
-  if (G.g->turn == 1 && city) city::open(city, city::PRODUCTION);
+  if (G.g->turn == 1 && city) {
+    city::open(city, city::PRODUCTION);
+    return;
+  }
+  if (!G.player->missives.empty()) {
+    diplomacyui::pollMissives();
+  }
 }
 
 static void refuseOffer() {
@@ -1025,8 +1032,8 @@ static int progressOf(const std::string& phase) {
   static const std::map<std::string, int> P = {
       {"diplomacy", 10}, {"move hero", 15}, {"move search", 20}, {"move explore", 25}, {"assault", 30},
       {"move #1", 40}, {"rescue", 45}, {"evaluate", 50}, {"clean city", 55}, {"neutral", 60},
-      {"move #2", 65}, {"assault XX", 70}, {"specials", 75}, {"rebuilding", 80}, {"last rescue", 85},
-      {"production", 90}, {"vectoring", 95}};
+      {"missions", 60}, {"move #2", 65}, {"assault XX", 70}, {"specials", 75}, {"rebuilding", 80},
+      {"last rescue", 85}, {"production", 90}, {"economy", 92}, {"vectoring", 95}};
   auto it = P.find(phase);
   return it == P.end() ? (G.aiStatus ? G.aiStatus->progress : 0) : it->second;
 }
@@ -1454,6 +1461,24 @@ void front::drawStrategicMap(int x, int y, const City* mark, bool noCities, cons
     gfx::rectangle(gfx::FILL, mx - 1, my + 9, 10, 1);
     gfx::rectangle(gfx::FILL, mx - 1, my - 1, 1, 10);
     gfx::rectangle(gfx::FILL, mx + 9, my - 1, 1, 10);
+  }
+  // Highlight any Allied partner's broadcasted war target city on the strategic map
+  if (!noCities && G.player) {
+    for (int s = 0; s < 8; s++) {
+      if (s != G.player->index && w2::diplomacy::isAllied(*G.g, G.player->index, s)) {
+        int tc = w2::diplomacy::alliedTargetCity(*G.g, s);
+        if (const City* ac = G.g->map->city(tc)) {
+          if (!ac->razed && game::seen(*G.g, G.player->index, ac->x, ac->y)) {
+            int mx = x + ac->x * 2 - 1, my = y + ac->y * 2 - 1;
+            palColour(11);
+            gfx::rectangle(gfx::FILL, mx - 2, my - 2, 12, 1);
+            gfx::rectangle(gfx::FILL, mx - 2, my + 10, 12, 1);
+            gfx::rectangle(gfx::FILL, mx - 2, my - 2, 1, 12);
+            gfx::rectangle(gfx::FILL, mx + 10, my - 2, 1, 12);
+          }
+        }
+      }
+    }
   }
   gfx::setScissor();
 }
@@ -3061,6 +3086,8 @@ static void keypressed(const std::string& k) {
     else say("Could not save.");
   } else if (k == "f9") {
     if (auto loaded = savegame::readSlot("quick")) front::takeLoaded(std::move(loaded));
+  } else if (k == "f10") {
+    diplomacyui::openBrainInspector();
   } else {
     std::string accel;
     if (ctrl && k == "q") accel = "^Q";
@@ -3411,10 +3438,13 @@ static int fail(const std::string& msg) {
 }
 
 int main(int argc, char** argv) {
-  std::string scenario, scriptFile;
+  std::string scenario, scriptFile, weightsFile;
   double seed = 0;
   int sizeW = 0, sizeH = 0;
   bool windowed = prefs::get("screen") == "window";
+  bool useClassicAi = false;
+  bool forceDiplomacy = false;
+  bool forceHiddenMap = false;
   G.dataDir = "original";
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -3426,6 +3456,19 @@ int main(int argc, char** argv) {
     else if (a == "--fullscreen") windowed = false;
     else if (a == "--script") scriptFile = next();
     else if (a == "--size") sscanf(next().c_str(), "%dx%d", &sizeW, &sizeH);
+    else if (a == "--classic-ai") useClassicAi = true;
+    else if (a == "--weights") weightsFile = next();
+    else if (a == "--diplomacy") forceDiplomacy = true;
+    else if (a == "--hidden-map") forceHiddenMap = true;
+  }
+  // Default interactive games to the new 100% Learnable Fair-Information AI
+  w2::ai::setDefaultClassicAi(useClassicAi);
+  if (!weightsFile.empty()) {
+    w2::ai::ml::activePolicy().loadJson(weightsFile);
+  } else if (w2::fileExists("cpp/ai_weights.json")) {
+    w2::ai::ml::activePolicy().loadJson("cpp/ai_weights.json");
+  } else if (w2::fileExists("ai_weights.json")) {
+    w2::ai::ml::activePolicy().loadJson("ai_weights.json");
   }
   if (!w2::fileExists(G.dataDir + "/TERRAIN0/ARMYTYPE.DAT"))
     return fail("cannot find the game's files in '" + G.dataDir + "': run from the repository root, or pass --data DIR");
@@ -3445,6 +3488,10 @@ int main(int argc, char** argv) {
   SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
   SDL_Renderer* ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
   if (!ren) ren = SDL_CreateRenderer(win, -1, 0);
+  if (!ren) {
+    SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+    ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+  }
   if (!ren) {
     return fail(std::string("SDL renderer: ") + SDL_GetError());
   }
@@ -3479,6 +3526,11 @@ int main(int argc, char** argv) {
       G.scenario = scenario;
       game::NewGameOptions o;
       o.seed = seed != 0 ? seed : (double)(time(nullptr) % 1000000007);
+      if (forceDiplomacy) o.options.push_back({"diplomacy", 1});
+      if (forceHiddenMap) {
+        o.options.push_back({"hiddenMap", 1});
+        o.options.push_back({"viewEnemies", 0});
+      }
       if (scenario == w2::randommap::DIR) {
         // RANDOM: a random world with the start menu's first settings, made
         // from the seed, in place of the last one the original left on disk
@@ -3492,6 +3544,7 @@ int main(int argc, char** argv) {
       for (size_t i = 0; i < G.g->sides.size(); i++) G.g->sides[i]->computer = i > 0;
       syncLayout();
       beginGame();
+      if (G.g->side && G.g->side->computer) playComputers(G.g->side);
     }
   } catch (const std::exception& e) {
     fprintf(stderr, "could not start: %s\n", e.what());

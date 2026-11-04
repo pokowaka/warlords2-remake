@@ -3,6 +3,7 @@
 __pycache__/
 *.pyc
 build/
+bld/
 
 # the remake's saved games
 warlords-save*.lua

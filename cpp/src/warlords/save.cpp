@@ -40,15 +40,15 @@ std::map<int, int> readIntMap(const Json& j) {
   for (auto& [k, v] : j.entries()) m[std::stoi(k)] = (int)v.integer();
   return m;
 }
-template <size_t N>
-Json intArray(const std::array<int, N>& a) {
+template <typename T, size_t N>
+Json intArray(const std::array<T, N>& a) {
   Json o = Json::array();
-  for (int v : a) o.push(v);
+  for (T v : a) o.push((int)v);
   return o;
 }
-template <size_t N>
-void readIntArray(const Json& j, std::array<int, N>& a) {
-  for (size_t i = 0; i < N && i < j.size(); i++) a[i] = (int)j[i].integer();
+template <typename T, size_t N>
+void readIntArray(const Json& j, std::array<T, N>& a) {
+  for (size_t i = 0; i < N && i < j.size(); i++) a[i] = (T)j[i].integer();
 }
 Json optInt(int v) { return v == NONE ? Json() : Json(v); }
 int readOpt(const Json& j) { return j.isNull() ? NONE : (int)j.integer(); }
@@ -247,6 +247,7 @@ std::string encode(const Game& g) {
     if (s->productionDue) o.set("productionDue", true);
     o.set("diploScore", s->diploScore); o.set("income", s->income); o.set("upkeepTotal", s->upkeepTotal);
     o.set("aiSolidarity", s->aiSolidarity); o.set("card", s->card);
+    if (!s->classicAi) o.set("classicAi", false);
     Json adv = Json::object();
     adv.set("dir", s->advisor.dir);
     adv.set("mark", s->advisor.mark);
@@ -323,6 +324,17 @@ std::string encode(const Game& g) {
   Json dip = Json::object();
   dip.set("state", intArray(g.diplomacy.state));
   dip.set("proposal", intArray(g.diplomacy.proposal));
+  auto hasNonDefault = [](const auto& arr, int dflt) {
+    for (int v : arr) if (v != dflt) return true;
+    return false;
+  };
+  if (hasNonDefault(g.diplomacy.allied, 0)) dip.set("allied", intArray(g.diplomacy.allied));
+  if (hasNonDefault(g.diplomacy.proposeAllied, 0)) dip.set("proposeAllied", intArray(g.diplomacy.proposeAllied));
+  if (hasNonDefault(g.diplomacy.truceTurns, 0)) dip.set("truceTurns", intArray(g.diplomacy.truceTurns));
+  if (hasNonDefault(g.diplomacy.goldOffer, 0)) dip.set("goldOffer", intArray(g.diplomacy.goldOffer));
+  if (hasNonDefault(g.diplomacy.warTarget, NONE)) dip.set("warTarget", intArray(g.diplomacy.warTarget));
+  if (hasNonDefault(g.diplomacy.trust, 0)) dip.set("trust", intArray(g.diplomacy.trust));
+  if (hasNonDefault(g.diplomacy.alliedTargetCity, NONE)) dip.set("alliedTargetCity", intArray(g.diplomacy.alliedTargetCity));
 
   Json fight = Json::array();
   for (auto& row : g.map->fightOrder) {
@@ -459,6 +471,13 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
   g.greatest = state["greatest"].boolean();
   readIntArray(state["diplomacy"]["state"], g.diplomacy.state);
   readIntArray(state["diplomacy"]["proposal"], g.diplomacy.proposal);
+  if (state["diplomacy"].has("allied")) readIntArray(state["diplomacy"]["allied"], g.diplomacy.allied);
+  if (state["diplomacy"].has("proposeAllied")) readIntArray(state["diplomacy"]["proposeAllied"], g.diplomacy.proposeAllied);
+  if (state["diplomacy"].has("truceTurns")) readIntArray(state["diplomacy"]["truceTurns"], g.diplomacy.truceTurns);
+  if (state["diplomacy"].has("goldOffer")) readIntArray(state["diplomacy"]["goldOffer"], g.diplomacy.goldOffer);
+  if (state["diplomacy"].has("warTarget")) readIntArray(state["diplomacy"]["warTarget"], g.diplomacy.warTarget);
+  if (state["diplomacy"].has("trust")) readIntArray(state["diplomacy"]["trust"], g.diplomacy.trust);
+  if (state["diplomacy"].has("alliedTargetCity")) readIntArray(state["diplomacy"]["alliedTargetCity"], g.diplomacy.alliedTargetCity);
   g.log.clear();
   for (auto& l : state["log"].items()) g.log.push_back(l.str());
 
@@ -599,6 +618,7 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     s->productionDue = saved["productionDue"].boolean();
     s->income = (int)saved["income"].integer(); s->upkeepTotal = (int)saved["upkeepTotal"].integer();
     s->aiSolidarity = (int)saved["aiSolidarity"].integer(); s->card = (int)saved["card"].integer();
+    if (saved.has("classicAi")) s->classicAi = saved["classicAi"].boolean(true);
     s->advisor.dir = (int)saved["advisor"]["dir"].integer();
     s->advisor.mark = (int)saved["advisor"]["mark"].integer();
     if (saved["ai"].isObject()) {

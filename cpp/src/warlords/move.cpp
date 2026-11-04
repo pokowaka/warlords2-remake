@@ -214,13 +214,21 @@ int distance(int x1, int y1, int x2, int y2) {
 std::vector<int> prepare(Game& g, const std::vector<int>& grid, int sideIndex, int mode, int dx, int dy) {
   int W = g.map->width, H = g.map->height;
   Side* side = g.map->side(sideIndex);
-  bool fog = g.map->options.hiddenMap != 0 && side && !side->computer;
+  bool fog = g.map->options.hiddenMap != 0 && side && (!side->computer || !side->classicAi);
+  City* destCity = (dx >= 0 && dy >= 0 && dx < W && dy < H) ? g.map->cityTile[dy * W + dx] : nullptr;
+  bool destCitySeen = false;
+  if (destCity && fog) {
+    for (int oy = 0; oy <= 1; oy++)
+      for (int ox = 0; ox <= 1; ox++)
+        if (game::seen(g, sideIndex, destCity->x + ox, destCity->y + oy)) destCitySeen = true;
+  }
   std::vector<int> dist(W * H);
   for (int y = 0; y < H; y++) {
     for (int x = 0; x < W; x++) {
       int k = y * W + x;
       int b = grid[k];
-      bool hidden = fog && !game::seen(g, sideIndex, x, y);
+      bool isDestCityTile = destCitySeen && g.map->cityTile[k] == destCity;
+      bool hidden = fog && !isDestCityTile && !game::seen(g, sideIndex, x, y);
       bool shut;
       if (mode == LAND) shut = b % 8 == 0 || (hidden && !(x == dx && y == dy));
       else if (mode == BOAT) shut = !has(b, WATER_F) || (hidden && x != dx && y != dy);

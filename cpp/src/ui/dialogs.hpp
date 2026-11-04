@@ -142,6 +142,12 @@ void open();
 void action();
 /** Which face the shield button shows: 183, 184 or 185. */
 int buttonFor(w2::Game& g, int side);
+/** Open Parley & Attitude Ledger for a specific side. */
+void openParley(int otherSide, bool returnToAction = false);
+/** Show any queued Turn-Start Envoy Missives for the current human player. */
+void pollMissives(kit::Done after = nullptr);
+/** Open the F10 AI Brain & Neural Policy Inspector modal. */
+void openBrainInspector(int initialSide = w2::NONE);
 }
 namespace heroinfo { void open(); }
 namespace historyui {

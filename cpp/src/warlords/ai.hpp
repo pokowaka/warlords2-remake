@@ -40,6 +40,11 @@ struct Hooks {
 };
 extern Hooks hooks;
 
+/** Whether newly initialized computer sides default to the 1993 Classic AI
+ *  (true for legacy parity tests) or the 100% Learnable ML AI (false in app). */
+bool defaultClassicAi();
+void setDefaultClassicAi(bool classic);
+
 /** A side's AI data at game start (ai_init_side, 59bf:084d). */
 AIData& initSide(Game& g, Side& side);
 /** Set the computer players up for a new game (79fa:0000). */

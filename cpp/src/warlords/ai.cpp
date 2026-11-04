@@ -2,11 +2,13 @@
 
 #include <algorithm>
 
+#include "warlords/ai/belief.hpp"
 #include "warlords/ai/cities.hpp"
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/diplomacy.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/heroes.hpp"
+#include "warlords/ai/modern_ai.hpp"
 #include "warlords/ai/moves.hpp"
 #include "warlords/aicard.hpp"
 #include "warlords/hero.hpp"
@@ -17,6 +19,7 @@ namespace w2::ai {
 Hooks hooks;
 
 namespace {
+bool g_defaultClassicAi = true;
 // The level's built-in settings (59bf:0d7b).
 void levelDefaults(Game& g, AIData& d, int level) {
   Rng& r = g.rng;
@@ -146,7 +149,12 @@ void turnSetup(Game& g, Side& side) {
 }
 }  // namespace
 
+bool defaultClassicAi() { return g_defaultClassicAi; }
+void setDefaultClassicAi(bool classic) { g_defaultClassicAi = classic; }
+
 AIData& initSide(Game& g, Side& side) {
+  side.classicAi = g_defaultClassicAi;
+  belief::ensure(side);
   side.ai = std::make_shared<AIData>(core::newData());
   AIData& d = *side.ai;
   bool quick = g.map->options.quickStart != 0;
@@ -177,6 +185,10 @@ void startGame(Game& g) {
 }
 
 void playTurn(Game& g, Side& side, const std::function<void(const char*)>& pause) {
+  if (!side.classicAi) {
+    modern::playTurn(g, side, pause);
+    return;
+  }
   auto p = [&](const char* name) { if (pause) pause(name); };
   bool hidden = g.map->options.hiddenMap != 0;
 
@@ -210,6 +222,9 @@ void walked(Game& g, const std::vector<Army*>& stack, const move::WalkResult& r)
 }
 
 City* heroCity(Game& g, Side& side, City* dflt) {
+  if (!side.classicAi) {
+    return modern::selectHeroCity(g, side, dflt);
+  }
   AIData& d = core::data(g, side);
   City* best = dflt;
   int bestScore = 0;
@@ -256,6 +271,9 @@ void recordBattle(Game& g, int defender, int attacker, int x, int y, int heroesL
     d.cityBattles[attacker]++;
     if (allLost) d.citiesLost[attacker]++;
   }
+  // Update fair-information belief state for both participants
+  belief::recordBattleObservation(g, defender, x, y);
+  belief::recordBattleObservation(g, attacker, x, y);
 }
 
 }  // namespace w2::ai
