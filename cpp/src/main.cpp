@@ -3586,14 +3586,18 @@ int main(int argc, char** argv) {
     else if (a == "--hidden-map") forceHiddenMap = true;
     else if (a == "--spectate" || a == "--all-ai") spectateAllAi = true;
   }
-  // Default interactive games to the new 100% Learnable Fair-Information AI
+  // Modern AI by default; its trained weights come from --weights or ai_weights.json
   w2::ai::setDefaultClassicAi(useClassicAi);
-  if (!weightsFile.empty()) {
-    w2::ai::ml::activePolicy().loadJson(weightsFile);
-  } else if (w2::fileExists("cpp/ai_weights.json")) {
-    w2::ai::ml::activePolicy().loadJson("cpp/ai_weights.json");
-  } else if (w2::fileExists("ai_weights.json")) {
-    w2::ai::ml::activePolicy().loadJson("ai_weights.json");
+  std::string weightsPath = !weightsFile.empty()                   ? weightsFile
+                            : w2::fileExists("cpp/ai_weights.json") ? std::string("cpp/ai_weights.json")
+                            : w2::fileExists("ai_weights.json")     ? std::string("ai_weights.json")
+                                                                    : std::string();
+  if (weightsPath.empty() || !w2::ai::ml::activePolicy().loadJson(weightsPath)) {
+    fprintf(stderr,
+            "warning: Modern AI weights %s%s%s could not be loaded (missing, or trained for a different network "
+            "size); the Modern AI will play with untrained random weights. Retrain with cpp/test/train.sh or "
+            "pass --weights PATH.\n",
+            weightsPath.empty() ? "(none found)" : "'", weightsPath.c_str(), weightsPath.empty() ? "" : "'");
   }
   if (!w2::fileExists(G.dataDir + "/TERRAIN0/ARMYTYPE.DAT"))
     return fail("cannot find the game's files in '" + G.dataDir + "': run from the repository root, or pass --data DIR");
