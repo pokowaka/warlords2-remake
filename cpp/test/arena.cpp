@@ -94,7 +94,7 @@ struct Config {
   float lrStart = 3.0e-3f;
   float lrEnd = 3.0e-4f;
   float tempStart = 1.0f;
-  float tempEnd = 0.6f;
+  float tempEnd = ml::DEPLOY_TEMPERATURE;   // end where real games are played
   float clipEps = 0.2f;
   float entCoef = 0.01f;
   float valueCoef = 0.5f;

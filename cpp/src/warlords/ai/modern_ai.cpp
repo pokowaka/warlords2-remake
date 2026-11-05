@@ -1614,6 +1614,18 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
 void playTurn(Game& g, Side& side, const PauseCallback& pause,
               const ml::PolicyNetwork* customPolicy, ml::RolloutSampler* sampler) {
   const ml::PolicyNetwork& policy = customPolicy ? *customPolicy : ml::activePolicy();
+  // Outside training the policy is still sampled, as in training, but at the
+  // deployment temperature and from a generator seeded by the game state (never
+  // advancing the game's own dice), so play stays reproducible. Taking the single
+  // best-scoring option instead would follow a different policy from the one
+  // trained: for a spread-out distribution its mode is not its typical behaviour.
+  ml::RolloutSampler deploySampler;
+  if (!sampler) {
+    deploySampler.temperature = ml::DEPLOY_TEMPERATURE;
+    deploySampler.rngState = (g.rng.state * 2654435761u) ^ (uint32_t)(g.turn * 40503u) ^
+                             (uint32_t)((side.index + 1) * 2246822519u);
+    sampler = &deploySampler;
+  }
   for (Army* a : g.armies) {
     if (a->owner == side.index) a->aiMoved = false;
   }

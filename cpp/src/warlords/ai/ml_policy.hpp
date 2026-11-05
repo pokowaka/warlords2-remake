@@ -43,6 +43,9 @@ constexpr int ECON_OUT_DIM = 1;
 constexpr int VALUE_IN_DIM = CONTEXT_DIM;                         // 24
 constexpr int VALUE_OUT_DIM = 1;
 
+/** Sampling temperature the Modern AI plays real games at (training anneals to it). */
+constexpr float DEPLOY_TEMPERATURE = 0.5f;
+
 using ContextVec = std::array<float, CONTEXT_DIM>;
 using RivalVec = std::array<float, RIVAL_DIM>;
 using StackVec = std::array<float, STACK_DIM>;
