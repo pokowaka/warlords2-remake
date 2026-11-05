@@ -962,7 +962,12 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
     });
 
     core::Flood landFlood = core::floodFrom(g, me, lg.x, lg.y, 72, move::LAND, me);
-    core::Flood flyFlood = core::floodFrom(g, me, lg.x, lg.y, 72, move::FLYING, me);
+    // The flying flood only matters to a coalition that can fly; skipping it
+    // for flightless groups also keeps land stacks off fog only fliers can reach
+    bool anyFlier = false;
+    for (Army* a : pool) anyFlier = anyFlier || core::flies(g, a);
+    core::Flood flyFlood = anyFlier ? core::floodFrom(g, me, lg.x, lg.y, 72, move::FLYING, me) : core::Flood{};
+    auto flyDist = [&](int x, int y) { return anyFlier ? core::floodAt(flyFlood, x, y) : core::UNREACHED; };
 
     // Ensure local reachable fog frontiers (land or coastal sea) are included near this stack
     if (g.map->options.hiddenMap != 0) {
@@ -1030,7 +1035,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
       for (size_t ti = 0; ti < targets.size(); ti++) {
         if (targets[ti].kind != TargetKind::FOG_FRONTIER) continue;
         int dLand = core::floodAt(landFlood, targets[ti].x, targets[ti].y);
-        int dFly = core::floodAt(flyFlood, targets[ti].x, targets[ti].y);
+        int dFly = flyDist(targets[ti].x, targets[ti].y);
         int bestD = std::min(dLand, dFly);
         if (bestD >= core::UNREACHED) continue;
         if (targets[ti].isWater) seaFogs.emplace_back(bestD, ti);
@@ -1127,6 +1132,11 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
       std::vector<JointOption> options;
       options.reserve(targets.size() * preStacks.size());
 
+      // Scoring options only reads the board: answer per-tile army queries
+      // (combat estimates) from one index instead of scanning every army.
+      // The scope closes before the chosen stack moves.
+      {
+      belief::ScopedTileIndex scoringIndex(g);
       for (size_t ti = 0; ti < targets.size(); ti++) {
         if (blockedTargets.count(ti)) continue;
         const CandidateTarget& tgt = targets[ti];
@@ -1137,7 +1147,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         }
         if (tgt.kind == TargetKind::ENEMY_STACK && belief::isTileVisible(g, me, tgt.x, tgt.y)) {
           // Only re-check stacks still in view; one that walked into fog stays a belief
-          auto curAt = game::armiesAt(g, tgt.x, tgt.y);
+          auto curAt = belief::armiesAt(g, tgt.x, tgt.y);
           if (curAt.empty() || curAt[0]->owner == me) continue;
         }
         if (tgt.kind == TargetKind::RUIN_OR_SAGE && tgt.site && !core::siteOpen(*tgt.site)) continue;
@@ -1200,6 +1210,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
               JointOption{ti, si, mIn, tv, ml::MissionOutput{raw[0], raw[1]}});
         }
       }
+      }  // scoringIndex
 
       if (options.empty()) {
         seed->aiMoved = true;

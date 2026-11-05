@@ -40,6 +40,34 @@ bool isSiteVisible(const Game& g, int sideIndex, const Site& site) {
   return s && site::shownTo(site, *s);
 }
 
+namespace {
+thread_local const ScopedTileIndex* activeIndex = nullptr;
+}
+
+ScopedTileIndex::ScopedTileIndex(const Game& g) : g_(g), prev_(activeIndex) {
+  byTile_.resize((size_t)g.map->width * g.map->height);
+  // newest army first, as game::armiesAt lists them
+  for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+    Army* a = g.armies[i];
+    if (a->transit || a->x < 0 || a->y < 0 || a->x >= g.map->width || a->y >= g.map->height) continue;
+    byTile_[(size_t)a->y * g.map->width + a->x].push_back(a);
+  }
+  activeIndex = this;
+}
+
+ScopedTileIndex::~ScopedTileIndex() { activeIndex = prev_; }
+
+const std::vector<Army*>& ScopedTileIndex::at(int x, int y) const {
+  static const std::vector<Army*> none;
+  if (x < 0 || y < 0 || x >= g_.map->width || y >= g_.map->height) return none;
+  return byTile_[(size_t)y * g_.map->width + x];
+}
+
+std::vector<Army*> armiesAt(const Game& g, int x, int y) {
+  if (activeIndex && &activeIndex->game() == &g) return activeIndex->at(x, y);
+  return game::armiesAt(g, x, y);
+}
+
 void recordBattleObservation(Game& g, int observerSide, int x, int y) {
   if (observerSide < 0 || observerSide >= 8) return;
   Side* side = g.map->side(observerSide);
@@ -84,6 +112,7 @@ void recordBattleObservation(Game& g, int observerSide, int x, int y) {
 
 void update(Game& g, Side& side) {
   SideBelief& b = ensure(side);
+  ScopedTileIndex tileIndex(g);   // nothing moves while the belief is rebuilt
   b.updatedTurn = g.turn;
   int me = side.index;
   int W = g.map->width, H = g.map->height;
@@ -108,7 +137,7 @@ void update(Game& g, Side& side) {
         continue;
       }
       int key = y * W + x;
-      auto armies = game::armiesAt(g, x, y);
+      auto armies = armiesAt(g, x, y);
       if (!armies.empty() && armies[0]->owner != me && armies[0]->owner != NONE) {
         int owner = armies[0]->owner;
         bool tower = game::towerAt(g, x, y);
@@ -329,7 +358,7 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
     if (!isTileVisible(g, me, dx, dy)) continue;
     seenTiles++;
     int key = dy * g.map->width + dx;
-    auto actual = game::armiesAt(g, dx, dy);
+    auto actual = armiesAt(g, dx, dy);
     if (actual.empty() || actual[0]->owner == me) continue;
 
     if (fullView) {

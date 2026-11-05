@@ -102,5 +102,29 @@ void recordBattleObservation(Game& g, int observerSide, int x, int y);
 CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*>& attackers,
                               int tx, int ty, float cautionBias = 0.0f);
 
+/**
+ * While alive, answers belief's per-tile army queries from an index built once
+ * from `g` (same order as game::armiesAt) instead of scanning every army per
+ * tile. Only valid while no army moves: open it around read-only work such as
+ * scoring a stack's options, never across a walk or a battle. Scopes nest.
+ */
+class ScopedTileIndex {
+ public:
+  explicit ScopedTileIndex(const Game& g);
+  ~ScopedTileIndex();
+  ScopedTileIndex(const ScopedTileIndex&) = delete;
+  ScopedTileIndex& operator=(const ScopedTileIndex&) = delete;
+  const std::vector<Army*>& at(int x, int y) const;
+  const Game& game() const { return g_; }
+
+ private:
+  const Game& g_;
+  std::vector<std::vector<Army*>> byTile_;
+  const ScopedTileIndex* prev_;
+};
+
+/** game::armiesAt, answered by the innermost ScopedTileIndex for `g` when one is open. */
+std::vector<Army*> armiesAt(const Game& g, int x, int y);
+
 }  // namespace ai::belief
 }  // namespace w2
