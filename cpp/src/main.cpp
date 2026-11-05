@@ -1009,9 +1009,7 @@ static Coroutine* aiCo = nullptr;     // the turn being played, from inside it
 static Side* aiResult = nullptr;      // where the round ended
 
 static bool humansLeft() {
-  for (Side* s : G.g->sides)
-    if (s->alive && !s->computer && !game::sideCities(*G.g, *s).empty()) return true;
-  return false;
+  return G.g && game::hasActiveHuman(*G.g);
 }
 
 static bool shownSide(const Side* side) { return side && (side->observe || !humansLeft()); }
@@ -1194,7 +1192,7 @@ static void resumeComputer() {
 
 // Called every frame: carry the computer on once nothing is in its way.
 static void stepComputer() {
-  if (!G.aiRun || !G.aiWait || G.walk || G.assault || kit::top()) return;
+  if (!G.aiRun || !G.aiWait || G.walk || G.assault || kit::top() || G.openMenu >= 0) return;
   if (G.aiResumeAt > 0) {
     if (w2::now() < G.aiResumeAt && !G.aiSkip) return;
     G.aiResumeAt = 0;
@@ -1299,10 +1297,11 @@ static int stackFigure(const std::vector<Army*>& stack) {
 // The hidden map (8611:24c2): over each unseen tile, black through its
 // HIDDEN.PCK cell; cell 14, a tile with nothing seen round it, is black.
 static void drawFog() {
-  if (G.g->map->options.hiddenMap == 0) return;
+  int viewer = game::viewerSide(*G.g, G.player);
+  if (G.g->map->options.hiddenMap == 0 || viewer == NONE) return;
   for (int my = G.view[1]; my <= G.view[3]; my++) {
     for (int mx = G.view[0]; mx <= G.view[2]; mx++) {
-      int cell = game::fogCell(*G.g, G.player->index, mx, my);
+      int cell = game::fogCell(*G.g, viewer, mx, my);
       if (cell == NONE) continue;
       int sx = mx * TILE, sy = my * TILE;
       if (cell == game::FOG_BLACK) {
@@ -1435,9 +1434,15 @@ static void drawMap() {
   }
 }
 
+static int stratViewer = -99;
+
 void front::drawStrategicMap(int x, int y, const City* mark, bool noCities, const std::vector<int>* owners, int scroll,
                              int rows) {
-  if (!G.stratImage) G.stratImage = screen::strategicImage(*G.screen, *G.g, G.player->index);
+  int viewer = game::viewerSide(*G.g, G.player);
+  if (!G.stratImage || stratViewer != viewer) {
+    G.stratImage = screen::strategicImage(*G.screen, *G.g, viewer);
+    stratViewer = viewer;
+  }
   gfx::setScissor(x, y, 224, rows);
   y -= scroll;
   gfx::setColor(1, 1, 1);
@@ -1448,7 +1453,7 @@ void front::drawStrategicMap(int x, int y, const City* mark, bool noCities, cons
       const City& c = cities[i];
       int owner = owners && i < owners->size() ? (*owners)[i] : NONE;
       bool gone = owners ? owner == 0xff : c.razed;
-      if (!gone && game::seen(*G.g, G.player->index, c.x, c.y)) {
+      if (!gone && game::seen(*G.g, viewer, c.x, c.y)) {
         int side = owners ? owner : ownerOr8(c.ownerIndex);
         gfx::draw(G.atransShields, gfx::newQuad(side * 16, 30, 8, 8), x + c.x * 2 - 1, y + c.y * 2 - 1);
       }
@@ -1463,12 +1468,12 @@ void front::drawStrategicMap(int x, int y, const City* mark, bool noCities, cons
     gfx::rectangle(gfx::FILL, mx + 9, my - 1, 1, 10);
   }
   // Highlight any Allied partner's broadcasted war target city on the strategic map
-  if (!noCities && G.player) {
+  if (!noCities && G.player && viewer != NONE) {
     for (int s = 0; s < 8; s++) {
       if (s != G.player->index && w2::diplomacy::isAllied(*G.g, G.player->index, s)) {
         int tc = w2::diplomacy::alliedTargetCity(*G.g, s);
         if (const City* ac = G.g->map->city(tc)) {
-          if (!ac->razed && game::seen(*G.g, G.player->index, ac->x, ac->y)) {
+          if (!ac->razed && game::seen(*G.g, viewer, ac->x, ac->y)) {
             int mx = x + ac->x * 2 - 1, my = y + ac->y * 2 - 1;
             palColour(11);
             gfx::rectangle(gfx::FILL, mx - 2, my - 2, 12, 1);
@@ -1484,9 +1489,10 @@ void front::drawStrategicMap(int x, int y, const City* mark, bool noCities, cons
 }
 
 void front::drawSiteMarkers(int x, int y, const w2::Site* highlight) {
+  int viewer = game::viewerSide(*G.g, G.player);
   gfx::setScissor(x, y, 224, 312);
   for (auto& s : G.g->map->sites) {
-    if (!(w2::site::shownTo(s, *G.player) && game::seen(*G.g, G.player->index, s.x, s.y))) continue;
+    if (!(viewer == NONE || (w2::site::shownTo(s, *G.player) && game::seen(*G.g, viewer, s.x, s.y)))) continue;
     int sx, sy;
     if (s.content == w2::site::TEMPLE) { sx = 112; sy = 20; }
     else if (s.searched) { sx = 112; sy = 10; }
@@ -1537,7 +1543,10 @@ static void drawStrategic() {
   gfx::setScissor();
 }
 
-void front::stratDirty() { G.stratImage.reset(); }
+void front::stratDirty() {
+  G.stratImage.reset();
+  stratViewer = -99;
+}
 
 // The four configurable buttons are painted a second time from MENUBUTT.PCK
 // at the rect the assigned item carries in UDB.DAT (545c:030a).
@@ -1572,9 +1581,10 @@ static void drawTurnStrip() {
   std::string turn = w2::fmt("Turn %d", G.g->turn);
   const Font& f = G.bigFont->colours(0, 15);
   f.draw(turn, (8 - n) * 16 + 508 - f.width(turn), 0);
+  const Side* activeSide = (G.aiSide && !humansLeft()) ? G.aiSide : G.player;
   for (int k = 0; k < n; k++) {
     int x = (8 - n + k) * 16 + 512;
-    if (alive[k] == G.player) {
+    if (alive[k] == activeSide) {
       palColour(0);
       gfx::rectangle(gfx::FILL, x - 3, 1, 17, 15);
     }
@@ -2448,10 +2458,41 @@ static void flushKeys() {
 // While the computer plays: a key hurries a battle, or runs the rest of the
 // round through unwatched. True when it took the input.
 static bool computerInput(const std::string& k) {
-  if (!(G.aiRun && !kit::top())) return false;
+  if (!(G.aiRun && !kit::top() && G.openMenu < 0)) return false;
   if (G.assault && G.assault->computer) { pressAssault(); return true; }
+  // Allow opening the F10 AI Brain Inspector, panning, or adjusting zoom while spectating AI turns
+  if (k == "f10") {
+    diplomacyui::openBrainInspector(G.aiSide ? G.aiSide->index : NONE);
+    return true;
+  }
+  if (k == "kp+" || k == "pageup" || k == "=") { front::setZoom(G.zoom + 1); return true; }
+  if (k == "kp-" || k == "pagedown" || k == "-") { front::setZoom(G.zoom - 1); return true; }
+  if (k == "up") { G.cy -= 1; clampCamera(); return true; }
+  if (k == "down") { G.cy += 1; clampCamera(); return true; }
+  if (k == "left") { G.cx -= 1; clampCamera(); return true; }
+  if (k == "right") { G.cx += 1; clampCamera(); return true; }
   // Shift and Alt are held to reach Settings, not pressed to skip
-  if (w2::endsWith(k, "shift") || w2::endsWith(k, "alt")) return true;
+  if (w2::endsWith(k, "shift") || w2::endsWith(k, "alt") || w2::endsWith(k, "ctrl") || w2::endsWith(k, "gui")) {
+    return true;
+  }
+  if (!humansLeft()) {
+    // In AI-vs-AI spectator mode, let Space toggle fast-forward and allow read-only spectator dialogs/quit
+    if (k == "space") {
+      G.aiSkip = !G.aiSkip;
+      if (G.aiSkip && G.walk && G.walk->computer) {
+        G.walk.reset();
+        resumeComputer();
+      }
+      return true;
+    }
+    if (k == "escape") { settings::open(); return true; }
+    if (held({"lctrl", "rctrl", "lgui", "rgui"}) && k == "q") return false;
+    if (k == "c" || k == "." || k == "a" || k == "k" || k == "g" || k == "n" || k == "w" ||
+        k == "h" || k == "e" || k == "j" || k == "y" || k == "l" || k == "?") {
+      return false;
+    }
+    return true;
+  }
   G.aiSkip = true;
   if (G.walk && G.walk->computer) {
     G.walk.reset();
@@ -2468,7 +2509,44 @@ static void mousepressed(int x, int y, int button) {
   if (busyWalking()) return;
   syncLayout();
   int fx = x - G.layout.dialog.x, fy = y - G.layout.dialog.y;
-  if (computerInput("")) return;
+  if (G.aiRun && !kit::top()) {
+    if (G.assault && G.assault->computer) { pressAssault(); return; }
+    if (!humansLeft()) {
+      // AI-vs-AI spectator mouse controls: menu bar, right-click tile/stack inspect, minimap jump, and map drag
+      int hit = menu::titleAt(G.menuLayout, x, y);
+      if (hit >= 0) {
+        G.openMenu = G.openMenu == hit ? -1 : hit;
+        return;
+      }
+      if (G.openMenu >= 0) {
+        const menu::Row* row = menu::rowAt(G.menuLayout, G.openMenu, x, y);
+        G.openMenu = -1;
+        std::string rk = row ? (row->key.empty() ? row->act : row->key) : "";
+        if (!rk.empty() && menuEnabled(rk)) menuPick(rk);
+        return;
+      }
+      if (G.g && G.screen) {
+        if (auto r = screen::regionAt(*G.screen, x, y)) {
+          if (r->id == screen::MAP) {
+            if (button == 2) {
+              if (auto tile = tileAtPoint(x, y)) tileinfo::open(tile->first, tile->second);
+              return;
+            }
+            if (button == 1) {
+              G.drag = Drag{G.cx, G.cy, 0, 0};
+              return;
+            }
+          } else if (r->id == screen::STRATEGIC && button == 1) {
+            int tx = (x - r->x) / 2, ty = (y - r->y + stratScroll) / 2;
+            centreOn(tx, ty);
+            return;
+          }
+        }
+      }
+      return;
+    }
+    if (computerInput("")) return;
+  }
   // 7ecb:0142: the banner eats the click that dismisses it
   if (G.banner) { dismissBanner(); return; }
   if (G.assault) { pressAssault(); return; }
@@ -2805,10 +2883,11 @@ static void mousereleased(int x, int y, int button) {
 // The city nearest the view's centre, then the city dialog in that mode.
 static void viewCity(int mode) {
   auto [cx, cy] = front::viewCentre();
+  int viewer = game::viewerSide(*G.g, G.player);
   City* best = nullptr;
   int bestD = NONE;
   for (auto& c : G.g->map->cities) {
-    bool ok = game::seen(*G.g, G.player->index, c.x, c.y) && (mode == city::INFO || c.ownerIndex == G.player->index);
+    bool ok = game::seen(*G.g, viewer, c.x, c.y) && (mode == city::INFO || c.ownerIndex == G.player->index);
     if (ok) {
       int d = std::max(std::abs(c.x - cx), std::abs(c.y - cy));
       if (bestD == NONE || d < bestD) { best = &c; bestD = d; }
@@ -2963,6 +3042,13 @@ static bool menuEnabled(const std::string& k) {
   if (G.starting || !G.g) {
     return k == "^Q" || (k == "alt L" && savegame::used() > 0) || w2::startsWith(k, "ui scale ") ||
            w2::startsWith(k, "screen ") || music;
+  }
+  // While AI-vs-AI spectating is running, only enable read-only spectator reports, display/audio settings, and quit
+  if (G.aiRun && !humansLeft()) {
+    if (k == "h" || k == "e" || k == "j" || k == "y") return G.g->turn != 1;
+    return k == "^Q" || k == "alt X" || k == "?" || k == "c" || k == "." || k == "a" || k == "k" ||
+           k == "g" || k == "n" || k == "w" || k == "l" || w2::startsWith(k, "map zoom ") ||
+           w2::startsWith(k, "ui scale ") || w2::startsWith(k, "screen ") || music;
   }
   w2::Game& g = *G.g;
   auto sideHasHero = [&]() {
@@ -3445,6 +3531,7 @@ int main(int argc, char** argv) {
   bool useClassicAi = false;
   bool forceDiplomacy = false;
   bool forceHiddenMap = false;
+  bool spectateAllAi = false;
   G.dataDir = "original";
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -3460,6 +3547,7 @@ int main(int argc, char** argv) {
     else if (a == "--weights") weightsFile = next();
     else if (a == "--diplomacy") forceDiplomacy = true;
     else if (a == "--hidden-map") forceHiddenMap = true;
+    else if (a == "--spectate" || a == "--all-ai") spectateAllAi = true;
   }
   // Default interactive games to the new 100% Learnable Fair-Information AI
   w2::ai::setDefaultClassicAi(useClassicAi);
@@ -3541,7 +3629,7 @@ int main(int argc, char** argv) {
         w2::randommap::install(G.dataDir, w2::randommap::generateNow(ro));
       }
       G.g = game::newGame(G.dataDir, scenario, o);
-      for (size_t i = 0; i < G.g->sides.size(); i++) G.g->sides[i]->computer = i > 0;
+      for (size_t i = 0; i < G.g->sides.size(); i++) G.g->sides[i]->computer = spectateAllAi || (i > 0);
       syncLayout();
       beginGame();
       if (G.g->side && G.g->side->computer) playComputers(G.g->side);

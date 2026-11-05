@@ -79,8 +79,9 @@ struct Ruin : kit::Modal {
 w2::Site* nearest(int x, int y) {
   w2::Site* best = nullptr;
   int bestD = w2::NONE;
+  int viewer = w2::game::viewerSide(*G.g, G.player);
   for (auto& s : G.g->map->sites) {
-    if (w2::site::shownTo(s, *G.player) && w2::game::seen(*G.g, G.player->index, s.x, s.y)) {
+    if (viewer == w2::NONE || (w2::site::shownTo(s, *G.player) && w2::game::seen(*G.g, viewer, s.x, s.y))) {
       double dx = s.x - x, dy = s.y - y;
       int dd = (int)std::floor(std::sqrt(dx * dx + dy * dy));
       if (bestD == w2::NONE || dd < bestD) { best = &s; bestD = dd; }

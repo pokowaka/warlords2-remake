@@ -363,7 +363,7 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
 
   // Relational trust & treaty history
   if (out.trustScore != 0) {
-    pushFactor("Treaty & trust track record", out.trustScore / 2);
+    pushFactor("Treaty and trust track record", out.trustScore / 2);
   }
   if (isAllied(g, aiSide, targetSide)) {
     pushFactor("Sworn military alliance", 35);
@@ -401,7 +401,7 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
     int grudge = me.ai->citiesLost[targetSide] * 10 + me.ai->heroesKilled[targetSide] * 8 +
                  me.ai->lost[targetSide] * 3;
     if (grudge > 0) {
-      pushFactor("Blood feud (cities & heroes lost to you)", -std::min(50, grudge));
+      pushFactor("Blood feud (cities and heroes lost)", -std::min(50, grudge));
     }
   }
   if (citiesTakenFromMe > 0) {
@@ -427,7 +427,7 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
   if (them.diploScore > 60) {
     int atrocityPen = -std::min(35, (them.diploScore - 40) / 4);
     if (prof.traits[ai::personality::HONOUR] > 0.0f) {
-      pushFactor("Your reputation for razing & treachery", atrocityPen);
+      pushFactor("Your reputation for razing and treachery", atrocityPen);
     }
   }
 
@@ -444,29 +444,29 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
   // Compute clear stance summary and "What It Takes" forecast
   int curState = state(g, aiSide, targetSide);
   if (isAllied(g, aiSide, targetSide)) {
-    out.stanceSummary = "Allied Partner (Shared Vision & War Coordination)";
+    out.stanceSummary = "Allied Partner";
     out.whatItTakes = "Alliance is strong. Coordinate strikes against shared foes!";
     out.peaceGoldNeeded = 0;
     out.allyGoldNeeded = 0;
   } else if (me.capital && me.capital->ownerIndex == targetSide) {
-    out.stanceSummary = "Sworn Mortal Enemy (Capital Occupied)";
+    out.stanceSummary = "Mortal Enemy (Capital Held)";
     out.whatItTakes = "Refuses Peace while you hold " + me.capital->name + "!";
     out.peaceGoldNeeded = NONE;
     out.allyGoldNeeded = NONE;
   } else {
     float greedMult = std::max(0.5f, 1.2f - 0.5f * prof.traits[ai::personality::AVARICE]);
     if (out.totalScore >= 35) {
-      out.stanceSummary = "Friendly & Cooperative";
+      out.stanceSummary = "Friendly, Cooperative";
       out.peaceGoldNeeded = 0;
       out.allyGoldNeeded = 0;
       out.whatItTakes = "Willing to accept Peace or forge a full Alliance!";
     } else if (out.totalScore >= 0) {
-      out.stanceSummary = (curState == WAR) ? "Weary of War (Open to Truce)" : "Cautious & Pragmatic";
+      out.stanceSummary = (curState == WAR) ? "Weary of War" : "Cautious, Pragmatic";
       out.peaceGoldNeeded = 0;
       out.allyGoldNeeded = std::max(50, (int)std::round((35 - out.totalScore) * 8.0f / greedMult) / 25 * 25);
       out.whatItTakes = fmt("Accepts Peace freely; Alliance for ~%d gold (or shared war).", out.allyGoldNeeded);
     } else if (out.totalScore >= -45) {
-      out.stanceSummary = "Hostile & Distrustful";
+      out.stanceSummary = "Hostile, Distrustful";
       out.peaceGoldNeeded = std::max(50, (int)std::round((-out.totalScore + 10) * 6.0f / greedMult) / 25 * 25);
       out.allyGoldNeeded = NONE;
       out.whatItTakes = fmt("Demands %d gold tribute (or border withdrawal) for Peace.", out.peaceGoldNeeded);

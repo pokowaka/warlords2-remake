@@ -42,7 +42,8 @@ struct TileBox : kit::Modal {
 
 void open(int tx, int ty) {
   w2::Game& g = *G.g;
-  if (!w2::game::seen(g, G.player->index, tx, ty)) return;
+  int viewer = w2::game::viewerSide(g, G.player);
+  if (!w2::game::seen(g, viewer, tx, ty)) return;
   const auto& L = G.layout;
   auto [fcx, fcy] = front::mapToUI(tx + 0.5, ty + 0.5);
   int cx = (int)std::floor(fcx), cy = (int)std::floor(fcy);
@@ -68,8 +69,8 @@ void open(int tx, int ty) {
     kit::centred(f, b, bx + W / 2 - 8, by + 35);
   };
 
-  if (!armies.empty() && (g.map->options.viewEnemies != 0 || owner == me->index || tower)) {
-    if (owner != me->index && tower && g.map->options.viewEnemies == 0) {
+  if (!armies.empty() && (viewer == w2::NONE || g.map->options.viewEnemies != 0 || owner == me->index || tower)) {
+    if (viewer != w2::NONE && owner != me->index && tower && g.map->options.viewEnemies == 0) {
       d->paint = [twoLines]() { twoLines(kit::text(0x82, 0), kit::text(0x82, 1), false); };
     } else {
       d->paint = [armies, bx, by]() {

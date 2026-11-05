@@ -109,11 +109,12 @@ struct QuestDialog : kit::Modal {
     gfx::setScissor(MAP_X, MAP_Y, 224, 312);
     if (q->type == SLAY_TYPE || q->type == SLAUGHTER) {
       std::set<int> done;
+      int viewer = w2::game::viewerSide(*G.g, G.player);
       for (w2::Army* a : G.g->armies) {
         bool match = (q->type == SLAY_TYPE && q->armyType && a->type == q->armyType->id) ||
                      (q->type == SLAUGHTER && q->side && a->owner == q->side->index);
         if (match && a->x != w2::NONE && a->owner != G.player->index && !done.count(a->x + a->y * 1000) &&
-            w2::game::seen(*G.g, G.player->index, a->x, a->y)) {
+            w2::game::seen(*G.g, viewer, a->x, a->y)) {
           done.insert(a->x + a->y * 1000);
           gfx::setColor(1, 1, 1);
           int owner = a->owner == w2::NONE ? 8 : a->owner;

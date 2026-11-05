@@ -41,10 +41,11 @@ void drawArmyBanners() {
   std::set<int> done;
   gfx::setScissor(MAP_X, MAP_Y, 224, 312);
   gfx::setColor(1, 1, 1);
+  int viewer = w2::game::viewerSide(*G.g, G.player);
   for (w2::Army* a : G.g->armies) {
     if (!a->transit && a->x != w2::NONE) {
       int k = a->y * 1000 + a->x;
-      if (!done.count(k) && w2::game::seen(*G.g, G.player->index, a->x, a->y) && !w2::game::cityAt(*G.g, a->x, a->y)) {
+      if (!done.count(k) && w2::game::seen(*G.g, viewer, a->x, a->y) && !w2::game::cityAt(*G.g, a->x, a->y)) {
         done.insert(k);
         int side = a->owner == w2::NONE ? 8 : a->owner;
         gfx::draw(G.atransShields, gfx::newQuad(side * 16, 164, 16, 10), MAP_X + std::max(0, a->x * 2 - 1),

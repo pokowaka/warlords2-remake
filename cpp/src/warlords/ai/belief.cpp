@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "warlords/combat.hpp"
+#include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
 #include "warlords/move.hpp"
 #include "warlords/scn.hpp"
@@ -142,11 +143,12 @@ void update(Game& g, Side& side) {
         refreshed[key] = std::move(obs);
       }
 
-      // Check if this visible tile is on the fog frontier (walkable land and adjacent to unseen)
+      // Record visible land and coastal/sea tiles bordering unseen fog
       if (g.map->options.hiddenMap != 0) {
         int terr = g.map->terrainType[g.map->tiles[key] & 0xff];
-        if (terr != move::WATER && terr != move::SHORE && terr != move::MOUNTAINS) {
-          bool isRoad = (scn::roadAt(*g.map, x, y) % 0x20 != 0);
+        if (terr != move::MOUNTAINS) {
+          bool isWater = (terr == move::WATER || terr == move::SHORE);
+          bool isRoad = !isWater && (scn::roadAt(*g.map, x, y) % 0x20 != 0);
           int adjUnseen = 0;
           for (int dy = -1; dy <= 1; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
@@ -156,9 +158,8 @@ void update(Game& g, Side& side) {
               }
             }
           }
-          if (adjUnseen >= 2 || (isRoad && adjUnseen >= 1)) {
-            int weight = adjUnseen + (isRoad ? 6 : 0);
-            rawFrontiers.push_back(FrontierCluster{x, y, weight, weight});
+          if (adjUnseen >= 1) {
+            rawFrontiers.push_back(FrontierCluster{x, y, adjUnseen, adjUnseen, isWater, isRoad});
           }
         }
       }
@@ -182,22 +183,30 @@ void update(Game& g, Side& side) {
       da = std::min(da, move::distance(fa.x, fa.y, ax, ay));
       db = std::min(db, move::distance(fb.x, fb.y, ax, ay));
     }
-    return da - fa.unseenNeighbours < db - fb.unseenNeighbours;
+    return da < db;
   });
 
-  // Cluster fog frontiers so they are spaced at least 3 tiles apart, keeping the closest
-  // anchor tile (never overwriting with a tile across water/mountains)
+  // Cluster land frontiers separately from water frontiers so coastal land does not suppress
+  // amphibious sea lanes (and vice versa)
+  int landCount = 0, waterCount = 0;
   for (const auto& fc : rawFrontiers) {
     bool merged = false;
     for (auto& existing : b.fogFrontiers) {
-      if (move::distance(fc.x, fc.y, existing.x, existing.y) < 3) {
+      if (existing.isWater == fc.isWater && move::distance(fc.x, fc.y, existing.x, existing.y) < 3) {
         existing.regionUnseenCount += fc.unseenNeighbours;
+        if (fc.onRoad) existing.onRoad = true;
         merged = true;
         break;
       }
     }
-    if (!merged && b.fogFrontiers.size() < 64) {
-      b.fogFrontiers.push_back(fc);
+    if (!merged) {
+      if (!fc.isWater && landCount < 48) {
+        b.fogFrontiers.push_back(fc);
+        landCount++;
+      } else if (fc.isWater && waterCount < 24) {
+        b.fogFrontiers.push_back(fc);
+        waterCount++;
+      }
     }
   }
 
@@ -220,7 +229,7 @@ void update(Game& g, Side& side) {
     }
   }
 
-  // Compute per-city threat and nearest non-friendly distance using visible information only
+  // Compute per-city threat and nearest visible rival distance using fair-information state only
   size_t nCities = g.map->cities.size();
   b.cityThreat1Turn.assign(nCities, 0.0f);
   b.cityThreat2Turn.assign(nCities, 0.0f);
@@ -229,14 +238,17 @@ void update(Game& g, Side& side) {
   for (City* c : b.visibleCities) {
     float minDist = 200.0f;
     for (City* other : b.visibleCities) {
-      if (other->ownerIndex != me && !other->razed) {
+      if (other->ownerIndex >= 0 && other->ownerIndex != me && !other->razed &&
+          !diplomacy::isAllied(g, me, other->ownerIndex)) {
         float d = (float)move::distance(c->x, c->y, other->x, other->y);
         if (d < minDist) minDist = d;
       }
     }
-    for (const auto& fc : b.fogFrontiers) {
-      float d = (float)move::distance(c->x, c->y, fc.x, fc.y);
-      if (d < minDist) minDist = d;
+    for (const auto& [tileKey, obs] : b.stacksByTile) {
+      if (obs.owner >= 0 && obs.owner != me && !diplomacy::isAllied(g, me, obs.owner)) {
+        float d = (float)move::distance(c->x, c->y, obs.x, obs.y);
+        if (d < minDist) minDist = d;
+      }
     }
     b.cityNearestEnemyDist[c->index] = minDist;
 
@@ -312,8 +324,10 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
   synthPool.reserve(32);
   std::vector<Army*> defenders;
 
+  int seenTiles = 0;
   for (auto [dx, dy] : defTiles) {
     if (!isTileVisible(g, me, dx, dy)) continue;
+    seenTiles++;
     int key = dy * g.map->width + dx;
     auto actual = game::armiesAt(g, dx, dy);
     if (actual.empty() || actual[0]->owner == me) continue;
@@ -358,7 +372,7 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
           const ArmyType* at = g.types.byId(topType);
           syn.strength = at ? at->strength : estUnderStr;
         } else {
-          syn.type = 2;  // standard infantry baseline type
+          syn.type = 2;
           syn.strength = estUnderStr;
         }
         synthPool.push_back(syn);
@@ -369,22 +383,36 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
     }
   }
 
-  if (defenders.empty() && city && city->ownerIndex != me && !city->razed) {
-    // If any of the 4 tiles of a 2x2 city is still in the fog (e.g. Classic AI places garrisons
-    // on (city->x + 1, city->y)), a fair human player knows an unprobed Neutral or Enemy city
-    // has a standard garrison on its unseen tile(s) rather than 0 defenders!
-    bool allCityTilesSeen = true;
-    for (int dy = 0; dy <= 1; dy++) {
-      for (int dx = 0; dx <= 1; dx++) {
-        if (!isTileVisible(g, me, city->x + dx, city->y + dy)) allCityTilesSeen = false;
+  est.seenTileFraction = defTiles.empty() ? 1.0f : (float)seenTiles / (float)defTiles.size();
+
+  // Calibrated partial-visibility belief when some tiles of a 2x2 city remain in fog
+  // and no defenders were observed on the visible tiles:
+  int unseenEnemyTiles = 0;
+  std::vector<Army*> unseenFallbackDefenders;
+  if (defenders.empty() && city && city->ownerIndex != me && !city->razed && seenTiles < 4) {
+    if (city->ownerIndex == NONE) {
+      // Neutral garrisons strictly occupy (city->x, city->y). Only when (city->x, city->y)
+      // itself is unseen can a neutral garrison be hidden there.
+      if (!isTileVisible(g, me, city->x, city->y)) {
+        Army syn;
+        syn.owner = NONE;
+        syn.x = city->x;
+        syn.y = city->y;
+        syn.type = (g.map->options.neutralCities <= 0) ? 0 : 2;
+        syn.strength = (g.map->options.neutralCities <= 0) ? 1 : 4;
+        synthPool.push_back(syn);
+        defenders.push_back(&synthPool.back());
+        est.estimatedDefenderCount = 1;
+        est.estimatedDefenderStrength = (float)syn.strength;
       }
-    }
-    if (!allCityTilesSeen) {
+    } else {
+      // Enemy city with unseen corner(s): sample unseen garrison occupancy proportionally
+      // to (4 - seenTiles) / 4 across the Monte Carlo rollouts rather than assuming a guaranteed 3-stack
+      unseenEnemyTiles = 4 - seenTiles;
       int owner = city->ownerIndex;
-      int estCount = (owner == NONE) ? std::max(1, g.map->options.neutralCities + 1) : 3;
-      float avgStr = (owner >= 0 && owner < 8) ? b.seenEnemyAvgStrength[owner] : 3.5f;
+      float avgStr = (owner >= 0 && owner < 8) ? b.seenEnemyAvgStrength[owner] : 4.0f;
       int estStr = std::clamp((int)std::round(avgStr + cautionBias), 2, 7);
-      for (int i = 0; i < estCount; i++) {
+      for (int i = 0; i < 2; i++) {
         Army syn;
         syn.owner = owner;
         syn.x = city->x;
@@ -392,14 +420,15 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
         syn.type = 2;
         syn.strength = estStr;
         synthPool.push_back(syn);
-        defenders.push_back(&synthPool.back());
-        est.estimatedDefenderStrength += (float)estStr;
+        unseenFallbackDefenders.push_back(&synthPool.back());
       }
-      est.estimatedDefenderCount += estCount;
+      float unseenFrac = (float)unseenEnemyTiles / 4.0f;
+      est.estimatedDefenderCount = (int)std::round(2.0f * unseenFrac);
+      est.estimatedDefenderStrength = 2.0f * (float)estStr * unseenFrac;
     }
   }
 
-  if (defenders.empty()) {
+  if (defenders.empty() && unseenFallbackDefenders.empty()) {
     est.winProb = 1.0f;
     est.expectedSurvivors = (float)attackers.size();
     return est;
@@ -415,7 +444,16 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
   int totalSurv = 0;
   int totalEnemyDead = 0;
   for (int i = 0; i < SIMS; i++) {
-    Battle res = combat::resolve(g, attackers, defenders, tx, ty);
+    const std::vector<Army*>& simDefs =
+        !defenders.empty()
+            ? defenders
+            : ((i * 4 < unseenEnemyTiles * SIMS) ? unseenFallbackDefenders : defenders);
+    if (simDefs.empty()) {
+      wins++;
+      totalSurv += (int)attackers.size();
+      continue;
+    }
+    Battle res = combat::resolve(g, attackers, simDefs, tx, ty);
     if (res.won) wins++;
     totalSurv += (int)res.attackers.size();
     totalEnemyDead += (int)res.deadDefenders.size();

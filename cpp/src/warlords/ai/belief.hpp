@@ -29,6 +29,8 @@ struct FrontierCluster {
   int x = 0, y = 0;
   int unseenNeighbours = 0;
   int regionUnseenCount = 0;
+  bool isWater = false;
+  bool onRoad = false;
 };
 
 struct SideBelief {
@@ -56,6 +58,7 @@ struct CombatEstimate {
   float expectedEnemyLosses = 0.0f;
   int estimatedDefenderCount = 0;
   float estimatedDefenderStrength = 0.0f;
+  float seenTileFraction = 1.0f;
 };
 
 /**

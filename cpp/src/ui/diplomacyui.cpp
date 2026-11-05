@@ -26,6 +26,14 @@ bool playing(const w2::Game& g, int i) {
   return i >= 0 && i < 8 && g.map->sides[i].inUse && g.map->sides[i].alive;
 }
 
+int activeViewerIndex(const w2::Game& g) {
+  if (G.player && G.player->index >= 0 && G.player->index < 8) return G.player->index;
+  for (int i = 0; i < 8; i++) {
+    if (playing(g, i)) return i;
+  }
+  return 0;
+}
+
 void diplom(int sx, int sy, int w, int h, int x, int y) {
   if (auto art = G.screen->artFor(47)) {
     gfx::setColor(1, 1, 1);
@@ -45,20 +53,63 @@ void blank(int x, int y) {
   gfx::rectangle(gfx::FILL, x + 1, y + 1, 38, 38);
 }
 
-void drawButton(int x, int y, int w, int h, const std::string& label, bool active = false, bool disabled = false) {
-  kit::setPal(active ? 11 : 2);
-  gfx::rectangle(gfx::FILL, x, y, w, h);
-  kit::bevel(x, y, w, h, active ? 0 : 15, active ? 15 : 0);
-  const Font& f = kit::font(0).colours(disabled ? 3 : (active ? 15 : 0), active ? 0 : 15);
-  gfx::setColor(1, 1, 1);
-  kit::centred(f, label, x + w / 2, y + (h - f.lineHeight) / 2);
+// Sanitize UTF-8 punctuation and bitmap-font repurposed glyphs:
+// In SSG's TEXT.FNT (smallFont == true), ASCII '&' (38) is the menu checkmark
+// glyph and '`' (96) is a solid block.
+std::string cleanText(const std::string& raw, bool smallFont = true) {
+  std::string out;
+  out.reserve(raw.size() + 8);
+  for (size_t i = 0; i < raw.size(); i++) {
+    unsigned char c = (unsigned char)raw[i];
+    // UTF-8 em-dash / en-dash (E2 80 93 / E2 80 94) and curly quotes
+    if (c == 0xe2 && i + 2 < raw.size() && (unsigned char)raw[i + 1] == 0x80) {
+      unsigned char c2 = (unsigned char)raw[i + 2];
+      if (c2 == 0x93 || c2 == 0x94) { out += '-'; i += 2; continue; }
+      if (c2 == 0x98 || c2 == 0x99) { out += '\''; i += 2; continue; }
+      if (c2 == 0x9c || c2 == 0x9d) { out += '"'; i += 2; continue; }
+    }
+    if (c < 32 || c >= 127) continue;
+    if (smallFont && c == '&') {
+      if (!out.empty() && out.back() == ' ' && i + 1 < raw.size() && raw[i + 1] == ' ') {
+        out += "and";
+      } else {
+        out += '+';
+      }
+      continue;
+    }
+    if (c == '`') {
+      out += '\'';
+      continue;
+    }
+    out += (char)c;
+  }
+  return out;
 }
 
-std::vector<std::string> wrapText(const Font& f, const std::string& text, int maxW) {
+std::string fitText(const Font& f, const std::string& raw, int maxW, bool smallFont = true) {
+  std::string s = cleanText(raw, smallFont);
+  if (maxW <= 0) return "";
+  if (f.width(s) <= maxW) return s;
+  const std::string ell = "..";
+  int ellW = f.width(ell);
+  if (ellW >= maxW) return "";
+  while (!s.empty() && f.width(s) + ellW > maxW) {
+    s.pop_back();
+  }
+  while (!s.empty() && s.back() == ' ') s.pop_back();
+  return s + ell;
+}
+
+std::vector<std::string> wrapText(const Font& f, const std::string& raw, int maxW, bool smallFont = true) {
+  std::string cleaned = cleanText(raw, smallFont);
   std::vector<std::string> lines;
-  std::istringstream iss(text);
+  if (maxW <= 0 || cleaned.empty()) return lines;
+  std::istringstream iss(cleaned);
   std::string word, cur;
   while (iss >> word) {
+    if (f.width(word) > maxW) {
+      word = fitText(f, word, maxW, false);
+    }
     std::string test = cur.empty() ? word : cur + " " + word;
     if (f.width(test) <= maxW || cur.empty()) {
       cur = test;
@@ -69,6 +120,58 @@ std::vector<std::string> wrapText(const Font& f, const std::string& text, int ma
   }
   if (!cur.empty()) lines.push_back(cur);
   return lines;
+}
+
+// Recessed dark-slate Warlords II information well with optional gold/cyan header strip.
+void drawSunkenPanel(int x, int y, int w, int h,
+                     const std::string& leftHdr = "",
+                     const std::string& rightHdr = "",
+                     int rightPal = 5) {
+  kit::setPal(4);  // deep charcoal interior (31,31,31)
+  gfx::rectangle(gfx::FILL, x, y, w, h);
+  kit::bevel(x, y, w, h, 0, 1);  // sunken 3D stone bevel: black top/left, silver bottom/right
+  if (!leftHdr.empty() || !rightHdr.empty()) {
+    kit::setPal(3);  // subtle slate header band (44,44,44)
+    gfx::rectangle(gfx::FILL, x + 1, y + 1, w - 2, 17);
+    kit::setPal(0);
+    gfx::rectangle(gfx::FILL, x + 1, y + 18, w - 2, 1);
+    const Font& fSm = kit::font(0);
+    gfx::setColor(1, 1, 1);
+    int availW = w - 14;
+    std::string rClean = rightHdr.empty() ? "" : fitText(fSm, rightHdr, availW / 2 + 36);
+    int rW = rClean.empty() ? 0 : fSm.width(rClean) + 10;
+    if (!leftHdr.empty()) {
+      std::string lClean = fitText(fSm, leftHdr, std::max(24, availW - rW));
+      fSm.colours(7, 0).draw(lClean, x + 7, y + 3);
+    }
+    if (!rClean.empty()) {
+      kit::right(fSm.colours(rightPal, 0), rClean, x + w - 7, y + 3);
+    }
+  }
+}
+
+// Raised 3D stone button with crisp black-outlined text and semantic active fill.
+void drawButton(int x, int y, int w, int h, const std::string& label,
+                bool active = false, bool disabled = false, int accentPal = 11) {
+  kit::setPal(0);
+  kit::outline(x, y, w, h);
+  kit::setPal(disabled ? 3 : (active ? accentPal : 2));
+  gfx::rectangle(gfx::FILL, x + 1, y + 1, w - 2, h - 2);
+  kit::bevel(x + 1, y + 1, w - 2, h - 2, active ? 7 : (disabled ? 2 : 1), 0);
+
+  const Font& fSm = kit::font(0);
+  int glyph = disabled ? 2 : (active ? 7 : 15);
+  const Font& f = fSm.colours(glyph, 0);
+  std::string fitted = fitText(fSm, label, w - 8);
+  gfx::setColor(1, 1, 1);
+  kit::centred(f, fitted, x + w / 2, y + (h - f.lineHeight) / 2);
+}
+
+// High-contrast heraldic font for dark slate panels (lifts Lich King black/navy to crisp readable tones).
+const Font& sideBannerFont(const Font& fBig, const w2::Side& s) {
+  if (s.colour == 0) return fBig.colours(15, s.edge == 0 ? 9 : s.edge);
+  if (s.colour == 6) return fBig.colours(5, 0);
+  return fBig.colours(s.colour, s.edge);
 }
 
 void openReport();
@@ -105,34 +208,39 @@ struct Report : kit::Modal {
           else if (st == dip::PEACE) {
             diplom(320, 0, 32, 29, x, y);
             if (dip::isAllied(g, col, row)) {
-              kit::setPal(11);
+              kit::setPal(10);
               kit::outline(x + 1, y + 1, 30, 27);
               gfx::setColor(1, 1, 1);
-              tf.colours(15, 0).draw("ALLY", x + 3, y + 2);
+              tf.colours(7, 0).draw("ALLY", x + 3, y + 2);
             }
           }
         }
       }
     }
-    kit::setPal(0);
-    kit::outline(392, 110, 160, 262);
+    // Recessed ratings panel on the right
+    kit::setPal(4);
+    gfx::rectangle(gfx::FILL, 392, 110, 160, 262);
+    kit::bevel(392, 110, 160, 262, 0, 1);
     const Font& f = kit::font(2);
     gfx::setColor(1, 1, 1);
-    kit::centred(f, kit::text(0x6d, 0), 472, 116);
+    kit::centred(f.colours(7, 0), kit::text(0x6d, 0), 472, 116);
+    kit::setPal(0);
+    gfx::rectangle(gfx::FILL, 394, 138, 156, 1);
     for (size_t i = 0; i < order.size(); i++) {
       int y = 146 + 29 * (int)i;
       smallShield(order[i]->index, 400, y);
       gfx::setColor(1, 1, 1);
-      f.draw(titles[order[i]->index], 432, y);
+      std::string rTitle = fitText(f, titles[order[i]->index], 120, false);
+      f.draw(rTitle, 424, y);
     }
+    // Centered cleanly between ACTION (96..160) and DONE (480..544)
     gfx::setColor(1, 1, 1);
-    tf.colours(0, 15).draw("Click any shield to Parley  |  F10: AI Brain", 92, 384);
+    kit::centred(tf.colours(7, 0), "Click any shield to Parley  -  F10: AI Brain", 320, 384);
     kit::drawControls(v);
   }
   void mousepressed(int x, int y, int) override {
     w2::Game& g = *G.g;
-    int me = G.player->index;
-    // Check clicks on top/left/rating shields to open Parley Ledger
+    int me = activeViewerIndex(g);
     for (int i = 0; i < 8; i++) {
       if (i == me || !playing(g, i)) continue;
       kit::Rect topSh{120 + 32 * i, 110, 32, 28};
@@ -189,7 +297,8 @@ struct Action : kit::Modal {
   std::vector<int> others;
   void draw() override {
     w2::Game& g = *G.g;
-    int me = G.player->index;
+    int me = activeViewerIndex(g);
+    const w2::Side& mySide = g.map->sides[me];
     kit::popup(R);
     gfx::setColor(1, 1, 1);
     kit::centred(kit::font(1), kit::text(0x6c, 0), 320, 64);
@@ -197,7 +306,7 @@ struct Action : kit::Modal {
     const Font& f = kit::font(2);
     const Font& tf = kit::font(0);
     gfx::setColor(1, 1, 1);
-    f.draw(G.player->name, 144, 122);
+    sideBannerFont(f, mySide).draw(fitText(f, mySide.name, 122, false), 144, 122);
     const int ys[7] = {165, 205, 251, 271, 291, 311, 331};
     for (int i = 0; i < 7; i++) f.draw(kit::text(0x6e, i), 104, ys[i]);
     for (size_t col = 0; col < others.size(); col++) {
@@ -210,15 +319,15 @@ struct Action : kit::Modal {
         int st = dip::state(g, other, me);
         diplom(80 + 120 * st, 45, 40, 40, x, 151);
         if (dip::isAllied(g, other, me)) {
-          kit::setPal(11);
+          kit::setPal(10);
           kit::outline(x + 1, 152, 38, 38);
           gfx::setColor(1, 1, 1);
-          tf.colours(15, 0).draw("ALLY", x + 6, 153);
+          tf.colours(7, 0).draw("ALLY", x + 6, 153);
         }
         int tr = dip::truceTurns(g, me, other);
         if (tr > 0) {
           gfx::setColor(1, 1, 1);
-          tf.colours(15, 0).draw(w2::fmt("T:%d", tr), x + 8, 179);
+          tf.colours(7, 0).draw(w2::fmt("T:%d", tr), x + 8, 177);
         }
 
         int theirs = dip::proposal(g, other, me);
@@ -228,7 +337,7 @@ struct Action : kit::Modal {
           diplom(80 + 120 * theirs, 45, 40, 40, x, 191);
           if (theirAlly) {
             gfx::setColor(1, 1, 1);
-            tf.colours(15, 0).draw("ALLY", x + 6, 193);
+            tf.colours(7, 0).draw("ALLY", x + 6, 193);
           }
         }
 
@@ -238,26 +347,28 @@ struct Action : kit::Modal {
           diplom(120 * k + (mine == k ? 40 : 0), 45, 40, 40, x, 245 + 40 * k);
         }
         if (myAlly && mine == dip::PEACE) {
-          kit::setPal(11);
+          kit::setPal(10);
           kit::outline(x + 1, 246, 38, 38);
           gfx::setColor(1, 1, 1);
-          tf.colours(15, 0).draw("ALLY", x + 6, 247);
+          tf.colours(7, 0).draw("ALLY", x + 6, 247);
         }
         int gOff = dip::goldOffer(g, me, other);
         if (gOff > 0) {
           gfx::setColor(1, 1, 1);
-          tf.colours(15, 0).draw(w2::fmt("+%dg", gOff), x + 3, 273);
+          tf.colours(7, 0).draw(w2::fmt("+%dg", gOff), x + 3, 271);
         }
       }
     }
+    // Centered cleanly between BACK (96..160) and OK (480..544)
     gfx::setColor(1, 1, 1);
-    tf.colours(0, 15).draw("Click a faction shield above for Parley, Tribute & Alliance", 92, 384);
+    kit::centred(tf.colours(7, 0), "Click a top shield to Parley  -  F10: AI Brain", 320, 384);
     std::set<int> h;
     for (int k = 0; k <= 2; k++) for (int i = 0; i <= 6; i++) h.insert(OFFER[k] + i);
     kit::drawControls(v, h);
   }
   void mousepressed(int x, int y, int) override {
     w2::Game& g = *G.g;
+    int me = activeViewerIndex(g);
     for (size_t col = 0; col < others.size(); col++) {
       int other = others[col];
       if (!playing(g, other)) continue;
@@ -280,12 +391,11 @@ struct Action : kit::Modal {
       int i = c->id - OFFER[k];
       if (i >= 0 && i < 7 && i < (int)others.size()) {
         int other = others[i];
-        if (k == dip::PEACE && dip::proposal(g, G.player->index, other) == dip::PEACE) {
-          // Clicking Peace a second time toggles Propose Alliance!
-          bool nextAlly = !dip::proposalAllied(g, G.player->index, other);
-          dip::proposeAlliance(g, G.player->index, other, nextAlly);
+        if (k == dip::PEACE && dip::proposal(g, me, other) == dip::PEACE) {
+          bool nextAlly = !dip::proposalAllied(g, me, other);
+          dip::proposeAlliance(g, me, other, nextAlly);
         } else {
-          dip::propose(g, G.player->index, other, k);
+          dip::propose(g, me, other, k);
         }
       }
     }
@@ -303,8 +413,9 @@ void openAction() {
   auto d = std::make_shared<Action>();
   d->v = kit::view(ACT);
   d->view = &d->v;
+  int me = activeViewerIndex(*G.g);
   for (auto& c : d->v.dialog.controls) d->v.state[c.id] = w2::uidata::NORMAL;
-  for (int i = 0; i < 8; i++) if (i != G.player->index) d->others.push_back(i);
+  for (int i = 0; i < 8; i++) if (i != me) d->others.push_back(i);
   kit::push(d);
 }
 
@@ -313,59 +424,127 @@ struct ParleyModal : kit::Modal {
   int other = 0;
   bool returnToAction = false;
 
-  const kit::Rect btnAlly{368, 134, 176, 22};
-  const kit::Rect btnPeace{368, 160, 176, 22};
-  const kit::Rect btnUneasy{368, 186, 176, 22};
-  const kit::Rect btnWar{368, 212, 176, 22};
-  const kit::Rect btnGoldMinus{368, 240, 84, 22};
-  const kit::Rect btnGoldPlus{460, 240, 84, 22};
-  const kit::Rect btnJointWar{368, 266, 176, 22};
-  const kit::Rect btnBrain{368, 374, 92, 24};
-  const kit::Rect btnBack{468, 374, 76, 24};
+  const kit::Rect box{60, 44, 520, 384};
+  const kit::Rect btnAlly{387, 166, 174, 21};
+  const kit::Rect btnPeace{387, 189, 174, 21};
+  const kit::Rect btnUneasy{387, 212, 174, 21};
+  const kit::Rect btnWar{387, 235, 174, 21};
+  const kit::Rect btnGoldMinus{387, 260, 84, 21};
+  const kit::Rect btnGoldPlus{477, 260, 84, 21};
+  const kit::Rect btnJointWar{387, 283, 174, 21};
+  const kit::Rect btnBrain{352, 395, 116, 25};
+  const kit::Rect btnBack{476, 395, 92, 25};
+
+  std::vector<int> rivalList(const w2::Game& g, int me) const {
+    std::vector<int> out;
+    for (int i = 0; i < 8; i++) {
+      if (i != me && playing(g, i)) out.push_back(i);
+    }
+    return out;
+  }
 
   void draw() override {
     w2::Game& g = *G.g;
-    int me = G.player->index;
+    int me = activeViewerIndex(g);
+    if (!playing(g, other) || other == me) {
+      auto rv = rivalList(g, me);
+      if (!rv.empty()) other = rv[0];
+    }
     const w2::Side& oSide = g.map->sides[other];
+    const w2::Side& mySide = g.map->sides[me];
     const auto& prof = w2::ai::personality::forSide(oSide);
     auto att = dip::computeAttitude(g, other, me);
 
-    kit::popup(R);
-    kit::shield(other, 94, 68);
-
+    kit::popup(box);
     const Font& fBig = kit::font(2);
     const Font& fSm = kit::font(0);
+
+    // Top Title & Clickable Rival Switcher Shields
     gfx::setColor(1, 1, 1);
-    fBig.colours(0, 15).draw(oSide.name + "  —  " + prof.name + " (" + prof.archetype + ")", 142, 68);
-    fSm.colours(0, 15).draw("\"" + prof.motto + "\"", 142, 88);
+    fBig.colours(7, 0).draw("DIPLOMATIC PARLEY", 74, 50);
+
+    auto rivals = rivalList(g, me);
+    int shStartX = 568 - (int)rivals.size() * 24;
+    for (size_t idx = 0; idx < rivals.size(); idx++) {
+      int rSide = rivals[idx];
+      int sx = shStartX + (int)idx * 24;
+      if (rSide == other) {
+        kit::setPal(7);
+        gfx::rectangle(gfx::FILL, sx - 2, 49, 20, 20);
+        kit::setPal(0);
+        kit::outline(sx - 3, 48, 22, 22);
+      }
+      smallShield(rSide, sx, 51);
+    }
+
+    // Ruler Bio & Stance Banner (72, 73, 496 x 64)
+    drawSunkenPanel(72, 73, 496, 64);
+    kit::shield(other, 80, 85);
+
+    std::string archTag = "[" + cleanText(prof.archetype) + "]";
+    int archW = fSm.width(archTag);
+    int maxTitleW = 432 - archW - 10;
+    std::string sideLabel = cleanText(oSide.name, false);
+    int sideW = fBig.width(sideLabel);
+    gfx::setColor(1, 1, 1);
+    sideBannerFont(fBig, oSide).draw(sideLabel, 128, 77);
+    if (sideW + 16 < maxTitleW) {
+      std::string rulerPart = fitText(fBig, " - " + prof.name, maxTitleW - sideW, false);
+      fBig.draw(rulerPart, 128 + sideW, 77);
+    }
+    kit::right(fSm.colours(7, 0), archTag, 560, 79);
+
+    gfx::setColor(1, 1, 1);
+    fSm.colours(5, 0).draw(fitText(fSm, "\"" + prof.motto + "\"", 432), 128, 97);
 
     int st = dip::state(g, me, other);
     bool allied = dip::isAllied(g, me, other);
-    std::string stName = allied ? "ALLIED (Shared Vision)" :
-                         (st == dip::PEACE ? "AT PEACE" : (st == dip::INTERMEDIATE ? "UNEASY" : "AT WAR"));
+    std::string stName = allied ? "ALLIED" :
+                         (st == dip::PEACE ? "PEACE" : (st == dip::INTERMEDIATE ? "UNEASY" : "AT WAR"));
+    int stPal = (allied || st == dip::PEACE) ? 10 : (st == dip::INTERMEDIATE ? 7 : 8);
     int tr = dip::truceTurns(g, me, other);
-    std::string statusLine = w2::fmt("Stance: %s   |   Truce: %d turns   |   Trust: %+d   |   Attitude: %+d (%s)",
-                                     stName.c_str(), tr, att.trustScore, att.totalScore, att.stanceSummary.c_str());
-    fSm.colours(0, 15).draw(statusLine, 142, 104);
+    int attPal = att.totalScore >= 15 ? 10 : (att.totalScore <= -15 ? 8 : 7);
 
-    // Left box: "Why They Feel This Way" Attitude Ledger
-    kit::setPal(0);
-    kit::outline(94, 130, 264, 162);
-    fSm.colours(0, 15).draw("ATTITUDE LEDGER (WHY THEY FEEL THIS WAY):", 100, 135);
-    kit::setPal(0);
-    gfx::rectangle(gfx::FILL, 96, 148, 260, 1);
+    int cx = 128;
+    cx += fSm.colours(stPal, 0).draw("[" + stName + "]", cx, 115);
+    std::string midMeta = w2::fmt("  Truce:%d  Trust:%+d  Attitude:", tr, att.trustScore);
+    cx += fSm.colours(1, 0).draw(midMeta, cx, 115);
+    std::string attTail = fitText(fSm, w2::fmt(" %+d (%s)", att.totalScore, att.stanceSummary.c_str()),
+                                  std::max(20, 560 - cx));
+    fSm.colours(attPal, 0).draw(attTail, cx, 115);
 
-    int fy = 153;
-    for (const auto& fac : att.factors) {
-      if (fy > 276) break;
-      std::string deltaStr = w2::fmt("%+d", fac.delta);
-      int col = fac.delta > 0 ? 11 : (fac.delta < 0 ? 6 : 0);
-      fSm.colours(col, 15).draw(deltaStr, 102, fy);
-      fSm.colours(0, 15).draw(fac.label, 138, fy);
-      fy += 15;
+    // Left Panel: Attitude Ledger (72, 143, 300 x 167)
+    int netPal = att.totalScore > 0 ? 10 : (att.totalScore < 0 ? 8 : 7);
+    drawSunkenPanel(72, 143, 300, 167, "ATTITUDE LEDGER",
+                    w2::fmt("Total: %+d", att.totalScore), netPal);
+
+    gfx::setScissor(74, 163, 296, 145);
+    if (att.factors.empty()) {
+      fSm.colours(1, 0).draw("No active grievances or modifiers.", 82, 172);
+    } else {
+      int fy = 166;
+      for (const auto& fac : att.factors) {
+        if (fy > 294) break;
+        std::string deltaStr = w2::fmt("%+d", fac.delta);
+        int dCol = fac.delta > 0 ? 10 : (fac.delta < 0 ? 8 : 1);
+        kit::right(fSm.colours(dCol, 0), deltaStr, 110, fy);
+
+        auto fLines = wrapText(fSm, fac.label, 246);
+        int shownLines = 0;
+        for (const auto& ln : fLines) {
+          if (shownLines >= 2 || fy > 296) break;
+          fSm.draw(ln, 118, fy);
+          fy += 13;
+          shownLines++;
+        }
+        fy += 3;
+      }
     }
+    gfx::setScissor();
 
-    // Right column: Interactive Deal & Pact Controls
+    // Right Panel: Treaty & Tribute Controls (380, 143, 188 x 167)
+    drawSunkenPanel(380, 143, 188, 167, "PROPOSE TREATY");
+
     int myProp = dip::proposal(g, me, other);
     bool myAllyProp = dip::proposalAllied(g, me, other);
     int gOff = dip::goldOffer(g, me, other);
@@ -373,50 +552,68 @@ struct ParleyModal : kit::Modal {
     std::string wTgtName = (wTgt >= 0 && wTgt < 8 && playing(g, wTgt)) ? g.map->sides[wTgt].name : "None";
 
     drawButton(btnAlly.x, btnAlly.y, btnAlly.w, btnAlly.h,
-               myAllyProp ? "* Propose Alliance *" : "Propose Alliance", myAllyProp);
+               myAllyProp ? "* Propose Alliance *" : "Propose Alliance", myAllyProp, false, 11);
     drawButton(btnPeace.x, btnPeace.y, btnPeace.w, btnPeace.h,
                (!myAllyProp && myProp == dip::PEACE) ? "* Propose Peace *" : "Propose Peace",
-               !myAllyProp && myProp == dip::PEACE);
+               !myAllyProp && myProp == dip::PEACE, false, 11);
     drawButton(btnUneasy.x, btnUneasy.y, btnUneasy.w, btnUneasy.h,
                myProp == dip::INTERMEDIATE ? "* Propose Uneasy *" : "Propose Uneasy",
-               myProp == dip::INTERMEDIATE);
+               myProp == dip::INTERMEDIATE, false, 13);
     drawButton(btnWar.x, btnWar.y, btnWar.w, btnWar.h,
                myProp == dip::WAR ? "* Propose War *" : "Declare / Propose War",
-               myProp == dip::WAR);
+               myProp == dip::WAR, false, 9);
 
-    drawButton(btnGoldMinus.x, btnGoldMinus.y, btnGoldMinus.w, btnGoldMinus.h, "Gift -50g", false, gOff <= 0);
+    drawButton(btnGoldMinus.x, btnGoldMinus.y, btnGoldMinus.w, btnGoldMinus.h,
+               "Gift -50g", false, gOff <= 0, 13);
     drawButton(btnGoldPlus.x, btnGoldPlus.y, btnGoldPlus.w, btnGoldPlus.h,
-               w2::fmt("Gift +%dg", gOff + 50), gOff > 0, gOff + 50 > G.player->gold);
+               w2::fmt("Gift +%dg", gOff + 50), gOff > 0, gOff + 50 > mySide.gold, 13);
 
     drawButton(btnJointWar.x, btnJointWar.y, btnJointWar.w, btnJointWar.h,
-               "War Target: " + wTgtName.substr(0, 12), wTgt != w2::NONE);
+               "War Target: " + wTgtName, wTgt != w2::NONE, false, 9);
 
-    // Bottom box: "What It Takes" Forecast & Active Deal Summary
-    kit::setPal(0);
-    kit::outline(94, 298, 450, 68);
-    fSm.colours(0, 15).draw(w2::fmt("DIPLOMATIC FORECAST  (Your Treasury: %d gp  |  Current Gift Offer: %d gp):",
-                                    G.player->gold, gOff), 100, 303);
-    auto wrapped = wrapText(fSm, att.whatItTakes, 436);
-    int wy = 320;
-    for (const auto& ln : wrapped) {
-      if (wy > 352) break;
-      fSm.colours(0, 15).draw(ln, 100, wy);
+    // Bottom Panel: Diplomatic Forecast (72, 316, 496 x 72)
+    drawSunkenPanel(72, 316, 496, 72, "DIPLOMATIC FORECAST",
+                    w2::fmt("Treasury: %d gp   Gift Offer: %d gp", mySide.gold, gOff), 5);
+
+    gfx::setScissor(74, 336, 492, 50);
+    auto wrapped = wrapText(fSm, att.whatItTakes, 478);
+    int wy = 339;
+    for (size_t i = 0; i < wrapped.size() && i < 2; i++) {
+      fSm.draw(wrapped[i], 80, wy);
       wy += 14;
     }
     if (allied && dip::alliedTargetCity(g, other) != w2::NONE) {
       if (const w2::City* ac = g.map->city(dip::alliedTargetCity(g, other))) {
-        fSm.colours(11, 15).draw(w2::fmt("Allied War Target Broadcast: %s (%d,%d)", ac->name.c_str(), ac->x, ac->y),
-                                 100, 350);
+        std::string bc = fitText(fSm, w2::fmt("Allied War Target: %s (%d, %d)", ac->name.c_str(), ac->x, ac->y), 478);
+        fSm.colours(10, 0).draw(bc, 80, 369);
       }
+    } else if (wy <= 368) {
+      int theirProp = dip::proposal(g, other, me);
+      bool theirAlly = dip::proposalAllied(g, other, me);
+      std::string theirStr = theirAlly ? "Alliance" :
+                             (theirProp == dip::PEACE ? "Peace" : (theirProp == dip::INTERMEDIATE ? "Uneasy" : "War"));
+      fSm.colours(1, 0).draw(fitText(fSm, "Their current posture toward you: " + theirStr, 478), 80, 369);
     }
+    gfx::setScissor();
 
+    // Footer Hints & Action Buttons
+    fSm.colours(1, 0).draw("Left/Right or click top shields to switch", 74, 401);
     drawButton(btnBrain.x, btnBrain.y, btnBrain.w, btnBrain.h, "AI Brain (F10)");
     drawButton(btnBack.x, btnBack.y, btnBack.w, btnBack.h, "Back");
   }
 
   void mousepressed(int x, int y, int) override {
     w2::Game& g = *G.g;
-    int me = G.player->index;
+    int me = activeViewerIndex(g);
+    auto rivals = rivalList(g, me);
+    int shStartX = 568 - (int)rivals.size() * 24;
+    for (size_t idx = 0; idx < rivals.size(); idx++) {
+      kit::Rect sh{shStartX + (int)idx * 24 - 2, 49, 20, 20};
+      if (sh.contains(x, y)) {
+        other = rivals[idx];
+        return;
+      }
+    }
     if (btnAlly.contains(x, y)) {
       dip::propose(g, me, other, dip::PEACE);
       dip::proposeAlliance(g, me, other, true);
@@ -433,7 +630,7 @@ struct ParleyModal : kit::Modal {
       dip::setGoldOffer(g, me, other, std::max(0, cur - 50));
     } else if (btnGoldPlus.contains(x, y)) {
       int cur = dip::goldOffer(g, me, other);
-      if (cur + 50 <= G.player->gold) {
+      if (cur + 50 <= g.map->sides[me].gold) {
         dip::setGoldOffer(g, me, other, cur + 50);
       }
     } else if (btnJointWar.contains(x, y)) {
@@ -458,6 +655,18 @@ struct ParleyModal : kit::Modal {
   }
 
   void keypressed(const std::string& key) override {
+    w2::Game& g = *G.g;
+    int me = activeViewerIndex(g);
+    if (key == "left" || key == "right") {
+      auto rivals = rivalList(g, me);
+      if (!rivals.empty()) {
+        auto it = std::find(rivals.begin(), rivals.end(), other);
+        int idx = (it == rivals.end()) ? 0 : (int)(it - rivals.begin());
+        int n = (int)rivals.size();
+        other = rivals[(idx + (key == "right" ? 1 : n - 1)) % n];
+      }
+      return;
+    }
     if (key == "f10") {
       openBrainInspector(other);
       return;
@@ -476,10 +685,10 @@ struct MissiveModal : kit::Modal {
   w2::DiplomaticMissive m;
   kit::Done after;
 
-  const kit::Rect box{110, 85, 420, 290};
-  const kit::Rect btnAccept{128, 336, 120, 26};
-  const kit::Rect btnParley{260, 336, 120, 26};
-  const kit::Rect btnDecline{392, 336, 120, 26};
+  const kit::Rect box{88, 72, 464, 316};
+  const kit::Rect btnAccept{100, 348, 148, 28};
+  const kit::Rect btnParley{258, 348, 136, 28};
+  const kit::Rect btnDecline{404, 348, 136, 28};
 
   void finish() {
     auto cb = after;
@@ -488,57 +697,70 @@ struct MissiveModal : kit::Modal {
   }
 
   void draw() override {
+    w2::Game& g = *G.g;
+    const w2::Side& from = g.map->sides[std::clamp(m.fromSide, 0, 7)];
     kit::popup(box);
-    kit::shield(m.fromSide, 128, 102);
 
     const Font& fBig = kit::font(2);
     const Font& fSm = kit::font(0);
+
+    // Top Envoy Banner
+    drawSunkenPanel(100, 84, 440, 56);
+    kit::shield(m.fromSide, 108, 92);
+
     gfx::setColor(1, 1, 1);
-    fBig.colours(0, 15).draw(m.headline, 178, 104);
+    sideBannerFont(fBig, from).draw(fitText(fBig, m.headline, 372, false), 156, 90);
 
     std::string dealTag = m.proposeAlliance ? "Proposal: Military Alliance (Shared Vision)" :
                           (m.proposedState == dip::PEACE ? "Proposal: Peace Treaty" :
                            (m.proposedState == dip::INTERMEDIATE ? "Notice: Border Warning / Uneasy" : "Declaration"));
-    if (m.goldDemand > 0) dealTag += w2::fmt(" (Tribute Demand: %d gp)", m.goldDemand);
-    else if (m.goldDemand < 0) dealTag += w2::fmt(" (Tribute Gift: +%d gp)", -m.goldDemand);
-    fSm.colours(11, 15).draw(dealTag, 178, 126);
+    if (m.goldDemand > 0) dealTag += w2::fmt("  -  Tribute Demand: %d gp", m.goldDemand);
+    else if (m.goldDemand < 0) dealTag += w2::fmt("  -  Tribute Gift: +%d gp", -m.goldDemand);
+    int dealPal = (m.proposeAlliance || m.proposedState == dip::PEACE) ? 10 :
+                  (m.proposedState == dip::INTERMEDIATE ? 7 : 8);
+    fSm.colours(dealPal, 0).draw(fitText(fSm, dealTag, 372), 156, 114);
 
-    kit::setPal(0);
-    kit::outline(128, 152, 384, 96);
-    auto bodyLines = wrapText(fBig, m.body, 368);
-    int by = 160;
+    // Envoy Message Box
+    drawSunkenPanel(100, 146, 440, 108, "ROYAL ENVOY DISPATCH");
+    gfx::setScissor(102, 166, 436, 86);
+    auto bodyLines = wrapText(fBig, m.body, 420, false);
+    int by = 170;
     for (const auto& ln : bodyLines) {
-      if (by > 230) break;
-      fBig.colours(0, 15).draw(ln, 136, by);
-      by += 18;
+      if (by > 236) break;
+      fBig.draw(ln, 108, by);
+      by += 19;
     }
+    gfx::setScissor();
 
-    kit::setPal(0);
-    kit::outline(128, 256, 384, 68);
-    fSm.colours(0, 15).draw("DIPLOMATIC CONTEXT:", 136, 262);
-    auto ctxLines = wrapText(fSm, m.reasonSummary, 368);
-    int cy = 278;
+    // Diplomatic Context Box
+    drawSunkenPanel(100, 260, 440, 78, "DIPLOMATIC CONTEXT",
+                    w2::fmt("Your Treasury: %d gp", G.player ? G.player->gold : 0), 5);
+    gfx::setScissor(102, 280, 436, 56);
+    auto ctxLines = wrapText(fSm, m.reasonSummary, 420);
+    int cy = 283;
     for (const auto& ln : ctxLines) {
-      if (cy > 312) break;
-      fSm.colours(0, 15).draw(ln, 136, cy);
+      if (cy > 322) break;
+      fSm.draw(ln, 108, cy);
       cy += 14;
     }
+    gfx::setScissor();
 
-    bool canAfford = (m.goldDemand <= 0 || G.player->gold >= m.goldDemand);
+    int myGold = G.player ? G.player->gold : 0;
+    bool canAfford = (m.goldDemand <= 0 || myGold >= m.goldDemand);
     drawButton(btnAccept.x, btnAccept.y, btnAccept.w, btnAccept.h,
-               m.goldDemand > 0 ? w2::fmt("Pay %dg & Accept", m.goldDemand) : "Accept Proposal",
-               true, !canAfford);
+               m.goldDemand > 0 ? w2::fmt("Pay %dg + Accept", m.goldDemand) : "Accept Proposal",
+               canAfford, !canAfford, 11);
     drawButton(btnParley.x, btnParley.y, btnParley.w, btnParley.h, "Open Parley");
-    drawButton(btnDecline.x, btnDecline.y, btnDecline.w, btnDecline.h, "Decline");
+    drawButton(btnDecline.x, btnDecline.y, btnDecline.w, btnDecline.h, "Decline", false, false, 9);
   }
 
   void mousepressed(int x, int y, int) override {
     w2::Game& g = *G.g;
-    int me = G.player->index;
+    int me = activeViewerIndex(g);
     if (btnAccept.contains(x, y)) {
-      if (m.goldDemand > 0 && G.player->gold < m.goldDemand) return;
+      if (m.goldDemand > 0 && g.map->sides[me].gold < m.goldDemand) return;
       if (m.goldDemand > 0) {
-        G.player->gold -= m.goldDemand;
+        g.map->sides[me].gold -= m.goldDemand;
         g.map->sides[m.fromSide].gold += m.goldDemand;
       }
       dip::propose(g, me, m.fromSide, m.proposedState);
@@ -580,9 +802,9 @@ struct MissiveModal : kit::Modal {
 // ------------------------------------------------------------------ F10 AI Brain & Policy Inspector
 struct BrainInspectorModal : kit::Modal {
   int sideIdx = 0;
-  const kit::Rect box{56, 42, 528, 396};
-  const kit::Rect btnToggleEngine{352, 82, 136, 22};
-  const kit::Rect btnClose{496, 82, 72, 22};
+  const kit::Rect box{44, 34, 552, 412};
+  const kit::Rect btnToggleEngine{380, 71, 128, 19};
+  const kit::Rect btnClose{514, 71, 64, 19};
 
   void draw() override {
     w2::Game& g = *G.g;
@@ -590,6 +812,7 @@ struct BrainInspectorModal : kit::Modal {
       for (int s = 0; s < 8; s++) {
         if (playing(g, s) && g.map->sides[s].computer) { sideIdx = s; break; }
       }
+      if (!playing(g, sideIdx)) sideIdx = activeViewerIndex(g);
     }
     w2::Side& s = g.map->sides[sideIdx];
     const auto& prof = w2::ai::personality::forSide(s);
@@ -600,108 +823,139 @@ struct BrainInspectorModal : kit::Modal {
     const Font& fSm = kit::font(0);
 
     gfx::setColor(1, 1, 1);
-    fBig.colours(0, 15).draw("AI BRAIN & NEURAL POLICY INSPECTOR (F10)", 72, 50);
+    fBig.colours(7, 0).draw("AI BRAIN INSPECTOR (F10)", 56, 42);
 
     // Top row of clickable faction shields
     for (int i = 0; i < 8; i++) {
       if (!playing(g, i)) continue;
-      int sx = 352 + i * 26;
+      int sx = 376 + i * 26;
       if (i == sideIdx) {
-        kit::setPal(11);
-        gfx::rectangle(gfx::FILL, sx - 2, 48, 20, 20);
+        kit::setPal(7);
+        gfx::rectangle(gfx::FILL, sx - 2, 41, 20, 20);
+        kit::setPal(0);
+        kit::outline(sx - 3, 40, 22, 22);
       }
-      smallShield(i, sx, 50);
+      smallShield(i, sx, 43);
     }
 
-    kit::shield(sideIdx, 72, 74);
-    fBig.colours(0, 15).draw(s.name + "  [" + prof.name + " — " + prof.archetype + "]", 120, 74);
-    fSm.colours(0, 15).draw("\"" + prof.motto + "\"", 120, 92);
+    // Faction Bio & Value Head Summary Banner (56, 67, 528 x 58)
+    drawSunkenPanel(56, 67, 528, 58);
+    kit::shield(sideIdx, 64, 76);
 
-    int unseenPct = (int)std::round((1.0f - b.frontierRatio) * 100.0f);
-    std::string evalStr = w2::fmt("Value Head V(s): %+.2f   |   Map Explored: %d%%   |   Vis Cities: %d   |   Gold: %dgp",
-                                  s.lastBoardValue, unseenPct, (int)b.visibleCities.size(), s.gold);
-    fSm.colours(11, 15).draw(evalStr, 120, 106);
+    std::string sideTitle = cleanText(s.name, false);
+    int stW = fBig.width(sideTitle);
+    gfx::setColor(1, 1, 1);
+    sideBannerFont(fBig, s).draw(fitText(fBig, sideTitle, 260, false), 112, 71);
+    if (stW + 16 < 262) {
+      fBig.draw(fitText(fBig, " - " + prof.name, 262 - stW, false), 112 + stW, 71);
+    }
+    fSm.colours(5, 0).draw(fitText(fSm, "\"" + prof.motto + "\"", 464), 112, 91);
+
+    int exploredPct = (int)std::round((1.0f - b.frontierRatio) * 100.0f);
+    std::string evalStr = w2::fmt("[%s]  V(s):%+.2f  Expl:%d%%  Cit:%d  Gold:%d gp",
+                                  prof.archetype.c_str(), s.lastBoardValue, exploredPct,
+                                  (int)b.visibleCities.size(), s.gold);
+    int valPal = s.lastBoardValue >= 0.05f ? 10 : (s.lastBoardValue <= -0.05f ? 8 : 7);
+    fSm.colours(valPal, 0).draw(fitText(fSm, evalStr, 464), 112, 106);
 
     drawButton(btnToggleEngine.x, btnToggleEngine.y, btnToggleEngine.w, btnToggleEngine.h,
-               s.classicAi ? "AI: 1993 Classic" : "AI: Learnable ML", !s.classicAi);
+               s.classicAi ? "AI: 1993 Classic" : "AI: Learnable RL", !s.classicAi, false, 11);
     drawButton(btnClose.x, btnClose.y, btnClose.w, btnClose.h, "Close");
 
-    // Left panel: 10D Personality Vector Trait Bars
-    kit::setPal(0);
-    kit::outline(72, 124, 188, 168);
-    fSm.colours(0, 15).draw("10D PERSONALITY VECTOR:", 78, 129);
+    // Left Panel: 10D Personality Vector Trait Bars (56, 130, 212 x 165)
+    drawSunkenPanel(56, 130, 212, 165, "10D PERSONALITY TRAITS");
     static const char* const TRAIT_LABELS[10] = {
-        "Aggression", "Honour", "Avarice", "ScorchedEarth", "HeroFocus",
+        "Aggression", "Honour", "Avarice", "Scorched", "HeroFocus",
         "Coalition", "Cavalry", "Fliers", "Siege", "Caution"};
     for (int t = 0; t < 10; t++) {
-      int ty = 145 + t * 14;
-      fSm.colours(0, 15).draw(TRAIT_LABELS[t], 78, ty);
-      int barX = 166, barW = 84, midX = barX + barW / 2;
-      kit::setPal(2);
-      gfx::rectangle(gfx::FILL, barX, ty + 2, barW, 8);
-      kit::setPal(0);
-      gfx::rectangle(gfx::FILL, midX, ty + 1, 1, 10);
+      int ty = 150 + t * 14;
+      fSm.draw(TRAIT_LABELS[t], 64, ty);
+      int barX = 160, barW = 98, midX = barX + barW / 2;
+      kit::setPal(3);
+      gfx::rectangle(gfx::FILL, barX, ty + 3, barW, 8);
+      kit::bevel(barX, ty + 3, barW, 8, 0, 2);
       float val = std::clamp(prof.traits[t], -1.0f, 1.0f);
-      int fillW = (int)std::round(std::abs(val) * (barW / 2));
-      kit::setPal(val >= 0 ? 11 : 6);
-      if (val >= 0) gfx::rectangle(gfx::FILL, midX + 1, ty + 2, fillW, 8);
-      else gfx::rectangle(gfx::FILL, midX - fillW, ty + 2, fillW, 8);
+      int fillW = (int)std::round(std::abs(val) * (barW / 2 - 2));
+      kit::setPal(val >= 0 ? 10 : 8);
+      if (fillW > 0) {
+        if (val >= 0) gfx::rectangle(gfx::FILL, midX + 1, ty + 4, fillW, 6);
+        else gfx::rectangle(gfx::FILL, midX - fillW, ty + 4, fillW, 6);
+      }
+      kit::setPal(15);
+      gfx::rectangle(gfx::FILL, midX, ty + 2, 1, 10);
     }
 
-    // Right panel: Fair-Information Belief Summary
+    // Right Panel: Fair-Information Belief Summary (276, 130, 308 x 165)
+    drawSunkenPanel(276, 130, 308, 165, "BELIEF MEMORY",
+                    w2::fmt("Fog:%d Stacks:%d", (int)b.fogFrontiers.size(), (int)b.stacksByTile.size()), 5);
+    gfx::setScissor(278, 150, 304, 143);
+    fSm.colours(1, 0).draw("Rival", 284, 151);
+    kit::right(fSm.colours(1, 0), "Cit", 434, 151);
+    kit::right(fSm.colours(1, 0), "Str", 478, 151);
+    kit::right(fSm.colours(1, 0), "Us / Them", 574, 151);
     kit::setPal(0);
-    kit::outline(268, 124, 300, 168);
-    fSm.colours(0, 15).draw("FAIR-INFORMATION BELIEF MEMORY (NO CHEATING):", 274, 129);
-    fSm.colours(0, 15).draw(w2::fmt("- Active Fog Frontier Clusters: %d", (int)b.fogFrontiers.size()), 274, 146);
-    fSm.colours(0, 15).draw(w2::fmt("- Tracked Enemy Stacks in Sight: %d", (int)b.stacksByTile.size()), 274, 161);
-    fSm.colours(0, 15).draw(w2::fmt("- Visible Sites / Ruins: %d", (int)b.visibleSites.size()), 274, 176);
-    int rby = 194;
+    gfx::rectangle(gfx::FILL, 282, 165, 296, 1);
+
+    int rby = 169;
     for (int o = 0; o < 8; o++) {
       if (o == sideIdx || !playing(g, o)) continue;
-      if (rby > 276) break;
-      std::string rLine = w2::fmt("vs %-11s: VisCities=%d  EstStr=%.1f  Border=%.0f/%.0f",
-                                  g.map->sides[o].name.substr(0, 11).c_str(),
-                                  b.visibleCitiesBySide[o], b.seenEnemyAvgStrength[o],
-                                  b.myBorderStrength[o], b.theirBorderStrength[o]);
-      fSm.colours(0, 15).draw(rLine, 274, rby);
-      rby += 13;
+      if (rby > 279) break;
+      smallShield(o, 284, rby - 1);
+      std::string rName = fitText(fSm, g.map->sides[o].name, 106);
+      fSm.draw(rName, 304, rby);
+      kit::right(fSm.colours(7, 0), w2::fmt("%d", b.visibleCitiesBySide[o]), 434, rby);
+      kit::right(fSm.colours(5, 0), w2::fmt("%.1f", b.seenEnemyAvgStrength[o]), 478, rby);
+      std::string bdr = w2::fmt("%.0f / %.0f", b.myBorderStrength[o], b.theirBorderStrength[o]);
+      int bPal = b.myBorderStrength[o] >= b.theirBorderStrength[o] ? 10 : 8;
+      kit::right(fSm.colours(bPal, 0), bdr, 574, rby);
+      rby += 17;
     }
+    gfx::setScissor();
 
-    // Bottom panel: Top Scored Neural Policy Thoughts (Head 1, Head 2, Head 3)
-    kit::setPal(0);
-    kit::outline(72, 298, 496, 130);
-    fSm.colours(0, 15).draw("RECENT NEURAL POLICY DECISIONS (4-HEAD RESIDUAL MLP, 6,534 PARAMS):", 78, 303);
-    kit::setPal(0);
-    gfx::rectangle(gfx::FILL, 74, 316, 492, 1);
-
+    // Bottom Panel: Top Scored Neural Policy Decisions (56, 301, 528 x 135)
+    drawSunkenPanel(56, 301, 528, 135, "RECENT NEURAL POLICY DECISIONS",
+                    "Left/Right: Switch Side", 1);
+    gfx::setScissor(58, 321, 524, 113);
     if (s.aiThoughts.empty()) {
-      fSm.colours(0, 15).draw("No neural thoughts recorded yet (end turn to let computer sides play).", 78, 326);
+      fSm.colours(1, 0).draw("No neural thoughts recorded yet (advance a turn to watch this AI act).", 66, 330);
     } else {
-      int ty = 321;
+      int ty = 323;
       int shown = 0;
-      // Show Mission, Economy, and Spoils thoughts first, then Diplomacy
       for (int pass = 0; pass < 2; pass++) {
         for (const auto& th : s.aiThoughts) {
           bool isDiplo = (th.category == "Diplomacy");
           if ((pass == 0 && isDiplo) || (pass == 1 && !isDiplo)) continue;
-          if (shown >= 7 || ty > 412) break;
-          std::string line = w2::fmt("[%s] %s -> %s : %s",
-                                     th.category.c_str(), th.actorName.c_str(),
-                                     th.targetName.c_str(), th.detail.c_str());
-          if ((int)line.size() > 78) line = line.substr(0, 78);
-          fSm.colours(th.stageNear ? 11 : 0, 15).draw(line, 78, ty);
-          ty += 14;
+          if (shown >= 7 || ty > 420) break;
+          int catPal = 15;
+          if (th.stageNear) catPal = 7;
+          else if (th.category == "Economy") catPal = 5;
+          else if (th.category == "Spoils") catPal = 8;
+          else if (th.category == "Diplomacy") catPal = 10;
+
+          std::string shortCat = th.category == "Mission" ? "Move" :
+                                 (th.category == "Economy" ? "Econ" :
+                                  (th.category == "Diplomacy" ? "Diplo" : th.category));
+          std::string actorCompact = th.actorName;
+          size_t uPos = actorCompact.find("-unit stack");
+          if (uPos != std::string::npos) actorCompact.replace(uPos, 11, "u");
+          std::string tag = "[" + shortCat + "] ";
+          int tagW = fSm.colours(catPal, 0).draw(tag, 64, ty);
+          std::string rest = fitText(fSm, actorCompact + " -> " + th.targetName + ": " + th.detail,
+                                     512 - tagW);
+          fSm.draw(rest, 64 + tagW, ty);
+          ty += 15;
           shown++;
         }
       }
     }
+    gfx::setScissor();
   }
 
   void mousepressed(int x, int y, int) override {
     w2::Game& g = *G.g;
     for (int i = 0; i < 8; i++) {
       if (!playing(g, i)) continue;
-      kit::Rect sh{350 + i * 26, 48, 20, 20};
+      kit::Rect sh{374 + i * 26, 41, 20, 20};
       if (sh.contains(x, y)) {
         sideIdx = i;
         return;

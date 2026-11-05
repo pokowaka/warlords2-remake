@@ -1,11 +1,11 @@
-// Clean-slate 100% learnable AI turn engine.
+// Clean-slate 100% learnable Fair-Information AI turn engine.
 //
 // Architectural Role: Executes a computer player's turn using human-equivalent
-// fair observations (SideBelief) and the 4-head neural PolicyNetwork (ml_policy).
-// All strategic, operational, tactical, and economic choices—garrison retention,
-// marginal stack assembly, AttackNow vs StageNear siege synchronization, upkeep
-// disbanding, production buying, vector routing, capture spoils, and diplomacy—are
-// determined by neural utility evaluation without hardcoded strategic thresholds.
+// fair observations (SideBelief) and the 4-head differentiable PolicyNetwork
+// (ml_policy). Rules code computes only normalized physical observables and
+// executes legal actions without strategic heuristics, fake feature injections,
+// or actuator vetoes. Supports stochastic rollout recording via RolloutSampler
+// for Proximal Policy Optimization (PPO) self-play training.
 #pragma once
 
 #include <functional>
@@ -16,16 +16,25 @@
 
 namespace w2::ai::modern {
 
+using PauseCallback = std::function<void(const char*)>;
+
 /**
- * Plays a full turn for `side` using the given `policy` network (or activePolicy()
- * by default) under strict human-equivalent fog-of-war and stack visibility rules.
+ * Plays a full turn for `side` using `customPolicy` (or activePolicy() when null)
+ * under strict human-equivalent fog-of-war and stack visibility rules.
+ *
+ * @param g Active game state.
+ * @param side Computer side whose turn is executing.
+ * @param pause Optional UI pacing hook invoked between turn phases.
+ * @param customPolicy Optional policy network override (used during arena evaluation/training).
+ * @param sampler Optional stochastic rollout sampler & trajectory recorder for PPO training.
  */
-void playTurn(Game& g, Side& side, const std::function<void(const char*)>& pause = nullptr,
-              const ml::PolicyNetwork* customPolicy = nullptr);
+void playTurn(Game& g, Side& side, const PauseCallback& pause = nullptr,
+              const ml::PolicyNetwork* customPolicy = nullptr,
+              ml::RolloutSampler* sampler = nullptr);
 
 /**
  * Selects which owned city a newly hired hero should appear in, scored by the
- * neural policy's mission/economy evaluation.
+ * neural policy's economy head.
  */
 City* selectHeroCity(Game& g, Side& side, City* dflt, const ml::PolicyNetwork* customPolicy = nullptr);
 

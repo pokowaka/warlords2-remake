@@ -125,8 +125,9 @@ struct HeroInfo : kit::Modal {
     w2::City* inCity = w2::game::cityAt(*G.g, h->x, h->y);
     w2::City* near = nullptr;
     int nearD = w2::NONE;
+    int viewer = w2::game::viewerSide(*G.g, G.player);
     for (auto& c : G.g->map->cities) {
-      if (w2::game::seen(*G.g, G.player->index, c.x, c.y)) {
+      if (w2::game::seen(*G.g, viewer, c.x, c.y)) {
         int dd = std::max(std::abs(c.x - h->x), std::abs(c.y - h->y));
         if (nearD == w2::NONE || dd < nearD) { near = &c; nearD = dd; }
       }

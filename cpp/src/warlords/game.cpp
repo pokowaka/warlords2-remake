@@ -993,9 +993,22 @@ static std::vector<uint8_t>* maskFor(Game& g, int side, bool make) {
   return &m;
 }
 
+bool hasActiveHuman(const Game& g) {
+  for (const Side* s : g.sides) {
+    if (s && s->alive && !s->computer && !sideCities(g, *s).empty()) return true;
+  }
+  return false;
+}
+
+int viewerSide(const Game& g, const Side* player) {
+  if (!hasActiveHuman(g)) return NONE;
+  return player ? player->index : NONE;
+}
+
 bool seen(const Game& g, int side, int x, int y) {
   if (g.map->options.hiddenMap == 0) return true;
   if (x < 0 || y < 0 || x >= g.map->width || y >= g.map->height) return false;
+  if (side == NONE) return true;
   int idx = y * g.map->width + x;
   auto it = g.explored.find(side);
   if (it != g.explored.end() && it->second[idx] == 1) return true;

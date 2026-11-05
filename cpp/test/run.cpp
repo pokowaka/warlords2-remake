@@ -3279,6 +3279,180 @@ static void testModernAi() {
     }
     ok(turnsPlayed >= 4, "modern learnable AI plays multiple turns cleanly under hiddenMap + viewEnemies=0");
   }
+
+  // Tabula rasa initialization, honest partial-visibility belief, enemy distance, and island frontiers
+  {
+    ai::ml::PolicyNetwork freshNet;
+    float maxSkip = 0.0f;
+    for (float w : freshNet.missionNet.wSkip) maxSkip = std::max(maxSkip, std::abs(w));
+    ok(maxSkip <= 0.25f, "PolicyNetwork starts tabula rasa with zero hand-coded skip priors");
+
+    auto gp = newGame("ERYTHEA", seedWith(7, {{"hiddenMap", 1}, {"viewEnemies", 0}, {"neutralCities", 2}}));
+    Game& g = *gp;
+    Side& s7 = g.map->sides[7];
+    s7.computer = true;
+    s7.classicAi = false;
+
+    // Reveal a neutral city's top-left (x, y) tile while leaving (x + 1, y + 1) unseen
+    City* targetNeutral = nullptr;
+    for (auto& c : g.map->cities) {
+      if (c.ownerIndex == NONE && !c.razed && !game::seen(g, 7, c.x + 1, c.y + 1)) {
+        targetNeutral = &c;
+        break;
+      }
+    }
+    ok(targetNeutral != nullptr, "found unseen neutral city on ERYTHEA");
+    if (targetNeutral) {
+      // Remove any garrison on (x, y) so (x, y) is visibly empty while (x+1, y+1) is in fog
+      for (Army* a : game::armiesAt(g, targetNeutral->x, targetNeutral->y)) {
+        a->x = NONE;
+        a->y = NONE;
+      }
+      g.explored[7][targetNeutral->y * g.map->width + targetNeutral->x] = true;
+      eq(game::seen(g, 7, targetNeutral->x, targetNeutral->y), true, "top-left neutral city tile is seen");
+      eq(game::seen(g, 7, targetNeutral->x + 1, targetNeutral->y + 1), false, "bottom-right neutral city tile is unseen");
+      ai::belief::update(g, s7);
+      std::vector<Army*> myArmies = game::sideArmies(g, s7);
+      ok(!myArmies.empty(), "side 7 has starting army");
+      auto est = ai::belief::estimateCombat(g, s7, {myArmies[0]}, targetNeutral->x, targetNeutral->y);
+      eq(est.estimatedDefenderCount, 0,
+         "partially-seen neutral city with visibly empty (x,y) does not fabricate 3 phantom defenders");
+    }
+
+    // With no rival cities or stacks visible to side 7, cityNearestEnemyDist should not treat fog/neutrals as enemies
+    const SideBelief& b7 = ai::belief::ensure(s7);
+    if (s7.capital && s7.capital->index < (int)b7.cityNearestEnemyDist.size()) {
+      ok(b7.cityNearestEnemyDist[s7.capital->index] > 50.0f,
+         "cityNearestEnemyDist ignores neutral cities and fog frontiers when no rivals are visible");
+    }
+
+    // Reveal only side 7's home island land tiles (x < 27, y < 32) while surrounding sea remains unseen
+    g.explored[7].assign(g.map->width * g.map->height, false);
+    for (int y = 0; y < 32; y++) {
+      for (int x = 0; x < 27; x++) {
+        int terr = scn::terrainAt(*g.map, x, y);
+        if (terr != movement::WATER && terr != movement::SHORE) {
+          game::reveal(g, 7, x, y, false);
+        }
+      }
+    }
+    ai::belief::update(g, s7);
+    bool hasWaterFrontier = false;
+    for (const auto& fc : ai::belief::ensure(s7).fogFrontiers) {
+      if (fc.isWater) hasWaterFrontier = true;
+    }
+    ok(hasWaterFrontier,
+       "island faction generates coastal/water fog frontiers after exploring local island land");
+
+    // Analytical backpropagation finite-difference gradient check on ResidualMLP
+    ai::ml::MissionInVec testIn{};
+    for (size_t i = 0; i < testIn.size(); i++) {
+      testIn[i] = std::sin((float)(i + 1) * 0.37f);
+    }
+    std::array<float, ai::ml::MISSION_OUT_DIM> dOut = {0.75f, -0.45f};
+    ai::ml::PolicyNetwork::MissionNet gradAnalytical{};
+    gradAnalytical.zero();
+    freshNet.missionNet.backward(testIn, dOut, gradAnalytical);
+    std::vector<float> flatGrad;
+    gradAnalytical.toFlat(flatGrad);
+    std::vector<float> baseParams;
+    freshNet.missionNet.toFlat(baseParams);
+
+    float maxGradErr = 0.0f;
+    constexpr float eps = 1e-3f;
+    for (size_t idx = 0; idx < baseParams.size(); idx += 17) {
+      std::vector<float> plusP = baseParams;
+      std::vector<float> minusP = baseParams;
+      plusP[idx] += eps;
+      minusP[idx] -= eps;
+      ai::ml::PolicyNetwork::MissionNet netPlus{}, netMinus{};
+      netPlus.fromFlat(plusP, 0);
+      netMinus.fromFlat(minusP, 0);
+      auto yPlus = netPlus.forward(testIn);
+      auto yMinus = netMinus.forward(testIn);
+      float lossPlus = dOut[0] * yPlus[0] + dOut[1] * yPlus[1];
+      float lossMinus = dOut[0] * yMinus[0] + dOut[1] * yMinus[1];
+      float numGrad = (lossPlus - lossMinus) / (2.0f * eps);
+      maxGradErr = std::max(maxGradErr, std::abs(numGrad - flatGrad[idx]));
+    }
+    ok(maxGradErr < 1e-3f, "ResidualMLP analytical backward matches finite-difference gradients");
+
+    // Hidden-map potential shaping strictly rewards revealing unseen castles, while capture dominates discovery
+    City* unseenNeutral = nullptr;
+    for (auto& c : g.map->cities) {
+      if (c.ownerIndex == NONE && !ai::belief::isCityVisible(g, 7, c)) {
+        unseenNeutral = &c;
+        break;
+      }
+    }
+    ok(unseenNeutral != nullptr, "found an unseen neutral castle on hidden-map ERYTHEA");
+    if (unseenNeutral) {
+      float phiHidden = ai::ml::computeEmpirePotential(g, 7);
+      game::reveal(g, 7, unseenNeutral->x, unseenNeutral->y, false);
+      float phiRevealed = ai::ml::computeEmpirePotential(g, 7);
+      int prevOwner = unseenNeutral->ownerIndex;
+      unseenNeutral->ownerIndex = 7;
+      float phiCaptured = ai::ml::computeEmpirePotential(g, 7);
+      unseenNeutral->ownerIndex = prevOwner;
+
+      float discoveryGain = phiRevealed - phiHidden;
+      float captureGain = phiCaptured - phiRevealed;
+      ok(discoveryGain > 0.0f,
+         "Hidden-map potential increases monotonically when fog exploration uncovers a castle");
+      ok(captureGain > 5.0f * discoveryGain,
+         "Castle capture potential gain strictly dominates mere reconnaissance discovery");
+    }
+
+    // Recorded MissionStepRecord carries 16D StackVec with origin-city guard/threat observability
+    s7.gold = 200;
+    for (Army* a : game::sideArmies(g, s7)) {
+      a->moves = a->maxMoves;
+      a->aiMoved = false;
+    }
+    ai::ml::RolloutSampler recSampler;
+    ai::ml::TurnStepRecord recTurn;
+    recSampler.currentTurn = &recTurn;
+    ai::modern::playTurn(g, s7, nullptr, &freshNet, &recSampler);
+    ok(!recTurn.missionSteps.empty() && !recTurn.missionSteps[0].candidates.empty(),
+       "RolloutSampler records joint (target, coalition) MissionStepRecord candidates");
+
+    // Multiplicity-balanced sampling gives equal family probability to 1 Hold vs 40 Fog options at zero utility
+    std::vector<float> zeroLogits(41, 0.0f);
+    std::vector<float> testLogMult(41, std::log(40.0f));
+    testLogMult[0] = 0.0f;
+    ai::ml::RolloutSampler multSampler;
+    multSampler.rngState = 12345u;
+    multSampler.temperature = 1.0f;
+    int holdPicks = 0;
+    for (int trial = 0; trial < 2000; trial++) {
+      if (ai::ml::selectFromLogits(zeroLogits, &multSampler, nullptr, &testLogMult) == 0) {
+        holdPicks++;
+      }
+    }
+    ok(holdPicks >= 900 && holdPicks <= 1100,
+       "multiplicity-balanced selectFromLogits assigns 50/50 family mass to 1 Hold vs 40 Fog options at zero utility");
+
+    // Spectator visibility: AI-vs-AI games reveal the whole map to the viewer while keeping per-AI fog intact
+    {
+      GameOpts humanOpts = seedWith(11, {{"hiddenMap", 1}});
+      for (int i = 0; i < 8; i++) humanOpts.sides[i].computer = (i > 0);
+      auto gpHuman = newGame("ERYTHEA", humanOpts);
+      Game& gh = *gpHuman;
+      eq(game::hasActiveHuman(gh), true, "game with human player reports active human");
+      eq(game::viewerSide(gh, gh.sides[0]), gh.sides[0]->index, "human viewerSide uses human side index");
+      eq(game::seen(gh, game::viewerSide(gh, gh.sides[0]), 0, 0), false, "human viewer still has fog-of-war on unseen corner");
+
+      GameOpts aiOpts = seedWith(11, {{"hiddenMap", 1}});
+      for (int i = 0; i < 8; i++) aiOpts.sides[i].computer = true;
+      auto gpAi = newGame("ERYTHEA", aiOpts);
+      Game& ga = *gpAi;
+      eq(game::hasActiveHuman(ga), false, "all-AI game reports no active human");
+      eq(game::viewerSide(ga, ga.sides[0]), NONE, "all-AI viewerSide returns NONE (spectator full map)");
+      eq(game::seen(ga, game::viewerSide(ga, ga.sides[0]), 0, 0), true, "spectator viewer sees unseen corner (0,0)");
+      eq(game::fogCell(ga, game::viewerSide(ga, ga.sides[0]), 0, 0), NONE, "spectator viewer draws no fog shroud");
+      eq(game::seen(ga, ga.sides[0]->index, 0, 0), false, "individual AI side still obeys its own Hidden Map fog");
+    }
+  }
 }
 
 // --------------------------------------------------------------------- main

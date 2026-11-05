@@ -159,8 +159,12 @@ void raze(Game& g, Side& side, City& city, const std::vector<Army*>& stack, bool
 /** Order > Resign (7721:1608). */
 void resign(Game& g, Side& side);
 
-/** Has this side seen the tile? Always true with Hidden Map off. */
+/** Has this side seen the tile? Always true with Hidden Map off or for spectator (side == NONE). */
 bool seen(const Game& g, int side, int x, int y);
+/** Returns true if at least one living human side still holds a city in `g`. */
+bool hasActiveHuman(const Game& g);
+/** Returns `player->index` while a human is in the game, or `NONE` (full-map spectator) in AI-vs-AI. */
+int viewerSide(const Game& g, const Side* player);
 /** Uncover the tiles around (x, y): 2 out for a flier or on a city, else 1
  *  (FUN_8611_1298). Returns how many were new. */
 int reveal(Game& g, int side, int x, int y, bool flying);
