@@ -31,7 +31,12 @@ constexpr int TARGET_DIM = 21;
 constexpr int MISSION_IN_DIM = CONTEXT_DIM + STACK_DIM + TARGET_DIM;  // 61
 constexpr int MISSION_OUT_DIM = 2;
 
-constexpr int ECON_FEAT_DIM = 20;
+// EconVec layout: [0..6] action one-hot (HoldGold, ProduceSlot, StopProd, BuySlot,
+// VectorCity, RetainArmy, CaptureSpoils); [7..19] unit/cost/city features;
+// [20] "is the current choice" (the slot already building, the vector already
+// set), so the policy can see what switching would throw away.
+constexpr int ECON_FEAT_DIM = 21;
+constexpr int ECON_CURRENT = 20;
 constexpr int ECON_IN_DIM = CONTEXT_DIM + ECON_FEAT_DIM;          // 44
 constexpr int ECON_OUT_DIM = 1;
 
@@ -50,8 +55,8 @@ using EconInVec = std::array<float, ECON_IN_DIM>;
 
 struct DiploOutput {
   std::array<float, 4> stanceLogits{};  // [0]=Allied, [1]=Peace, [2]=Uneasy, [3]=War
-  float tributeSignal = 0.0f;           // >0 demand gold, <0 offer gold
-  float jointWarSignal = 0.0f;          // >0 request joint war
+  float tributeLogit = 0.0f;            // >0: offer gold to end a war (binary decision)
+  float jointWarLogit = 0.0f;           // >0: ask the partner to join our war (binary decision)
 };
 
 struct MissionOutput {
@@ -163,6 +168,13 @@ struct DiploStepRecord {
   DiploInVec input{};
   int chosenStance = 1;
   float oldStanceLogProb = 0.0f;
+  // Optional binary sub-decisions taken alongside a Peace/Ally stance
+  bool hasTribute = false;      // offer gold to end a war (output 4)
+  bool tributeChosen = false;
+  float oldTributeLogProb = 0.0f;
+  bool hasJointWar = false;     // ask the partner to join our war (output 5)
+  bool jointWarChosen = false;
+  float oldJointWarLogProb = 0.0f;
 };
 
 struct TurnStepRecord {
@@ -202,6 +214,14 @@ EconInVec packEconInput(const ContextVec& ctx, const EconVec& econ);
  */
 int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler,
                      float* outLogProb = nullptr, const std::vector<float>* logMult = nullptr);
+
+/**
+ * A binary (yes/no) policy decision with logit `logit`: samples
+ * Bernoulli(sigmoid(logit / temperature)) when `sampler != nullptr`, or
+ * returns `logit > 0` (the mode) when `sampler == nullptr`. Writes the log
+ * probability of the outcome to `outLogProb` if non-null.
+ */
+bool selectBinary(float logit, RolloutSampler* sampler, float* outLogProb = nullptr);
 
 /**
  * Computes pure outcome-based empire state potential Phi(g, sideIndex) from

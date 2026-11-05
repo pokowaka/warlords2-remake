@@ -37,6 +37,15 @@ enum class TargetKind : int {
   REINFORCE_CITY = 7,
 };
 
+// May `me` choose an attack on `owner` (at `city`, or a field stack when null)?
+// Same rule the actuator enforces: no declaration needed, or DiploNet is no
+// longer proposing peace to that side (so the attack declares war).
+bool attackable(const Game& g, int me, int owner, const City* city) {
+  if (owner == NONE) return true;
+  return !diplomacy::mustDeclare(g, me, owner, city) ||
+         diplomacy::proposal(g, me, owner) != diplomacy::PEACE;
+}
+
 struct CandidateTarget {
   TargetKind kind = TargetKind::HOLD_GARRISON;
   int x = 0, y = 0;
@@ -295,16 +304,11 @@ void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     ml::DiploInVec dIn = ml::packDiploInput(ctx, rv);
     auto raw = policy.diploNet.forward(dIn);
     std::vector<float> stanceVec = {raw[0], raw[1], raw[2], raw[3]};
-    float stanceLogProb = 0.0f;
-    int bestChoice = ml::selectFromLogits(stanceVec, sampler, &stanceLogProb);
+    ml::DiploStepRecord rec;
+    rec.input = dIn;
+    int bestChoice = ml::selectFromLogits(stanceVec, sampler, &rec.oldStanceLogProb);
+    rec.chosenStance = bestChoice;
     float bestLogit = stanceVec[bestChoice];
-    float tributeSignal = std::tanh(raw[4]);
-    float jointWarSignal = std::tanh(raw[5]);
-
-    if (sampler && sampler->currentTurn) {
-      sampler->currentTurn->diploSteps.push_back(
-          ml::DiploStepRecord{dIn, bestChoice, stanceLogProb});
-    }
 
     if (bestChoice == 0) {
       diplomacy::propose(g, me, otherIdx, diplomacy::PEACE);
@@ -319,16 +323,28 @@ void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       if (primaryEnemy == NONE) primaryEnemy = otherIdx;
     }
 
-    if ((bestChoice == 0 || bestChoice == 1) && curSt == diplomacy::WAR &&
-        tributeSignal < -0.25f && side.gold >= 100) {
-      int offer = std::clamp((int)std::round(std::abs(tributeSignal) * (float)side.gold * 0.25f) / 25 * 25,
-                             50, std::min(300, side.gold / 2));
-      diplomacy::setGoldOffer(g, me, otherIdx, offer);
+    // Binary sub-decision (output 4): sweeten a peace offer to a side we are at war with
+    bool friendly = (bestChoice == 0 || bestChoice == 1);
+    diplomacy::setGoldOffer(g, me, otherIdx, 0);
+    if (friendly && curSt == diplomacy::WAR && side.gold >= 100) {
+      rec.hasTribute = true;
+      rec.tributeChosen = ml::selectBinary(raw[4], sampler, &rec.oldTributeLogProb);
+      if (rec.tributeChosen) {
+        int offer = std::clamp(side.gold / 4 / 25 * 25, 50, std::min(300, side.gold / 2));
+        diplomacy::setGoldOffer(g, me, otherIdx, offer);
+      }
     }
 
-    if ((bestChoice == 0 || bestChoice == 1) && jointWarSignal > 0.30f &&
-        primaryEnemy != NONE && primaryEnemy != otherIdx) {
-      diplomacy::setWarTarget(g, me, otherIdx, primaryEnemy);
+    // Binary sub-decision (output 5): ask a friendly side to join our war
+    diplomacy::setWarTarget(g, me, otherIdx, NONE);
+    if (friendly && primaryEnemy != NONE && primaryEnemy != otherIdx) {
+      rec.hasJointWar = true;
+      rec.jointWarChosen = ml::selectBinary(raw[5], sampler, &rec.oldJointWarLogProb);
+      if (rec.jointWarChosen) diplomacy::setWarTarget(g, me, otherIdx, primaryEnemy);
+    }
+
+    if (sampler && sampler->currentTurn) {
+      sampler->currentTurn->diploSteps.push_back(rec);
     }
 
     const char* stanceNames[4] = {"ALLIED", "PEACE", "UNEASY", "WAR"};
@@ -358,7 +374,9 @@ void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
         m.proposedState = diplomacy::INTERMEDIATE;
         m.headline = fmt("Border Warning from %s (%s)", side.name.c_str(), prof.name.c_str());
         m.body = "Your armies mass along our frontier. Withdraw them or our peace shall end!";
-      } else if (bestChoice == 2 && curSt == diplomacy::PEACE && tributeSignal > 0.35f) {
+      } else if (bestChoice == 2 && curSt == diplomacy::PEACE && rv[9] > 0.35f) {
+        // Human-only flavour (never reached in all-AI training): demand tribute
+        // when our border forces clearly outmatch theirs.
         sendMissive = true;
         m.proposedState = diplomacy::PEACE;
         m.goldDemand = std::max(75, att.peaceGoldNeeded > 0 ? att.peaceGoldNeeded : 100);
@@ -472,16 +490,33 @@ bool executeStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
   std::map<Army*, int> startMoves;
   for (Army* a : stack) startMoves[a] = a->moves;
 
-  // Gather stack members sitting on different corners of the same owned 2x2 city
-  if (City* startCity = game::cityAt(g, stack[0]->x, stack[0]->y)) {
-    if (startCity->ownerIndex == me) {
-      for (Army* a : stack) {
-        if (game::cityAt(g, a->x, a->y) == startCity) {
-          a->x = stack[0]->x;
-          a->y = stack[0]->y;
-        }
+  // A coalition drawn from one owned 2x2 city may stand on different corners.
+  // Members walk (by the normal rules, paying moves) onto the leader's tile;
+  // any that cannot join without breaking the 8-army stack limit stay behind
+  // and remain free for later waves.
+  {
+    int lx = stack[0]->x, ly = stack[0]->y;
+    int onLeaderTile = (int)game::armiesAt(g, lx, ly).size();
+    std::vector<Army*> joined;
+    for (Army* a : stack) {
+      if (a->x == lx && a->y == ly) {
+        joined.push_back(a);
+        continue;
+      }
+      if (onLeaderTile + 1 > rules::MAX_STACK) continue;
+      auto path = move::findPath(g, {a}, a->x, a->y, lx, ly);
+      if (!path || path->empty()) continue;
+      move::WalkResult jr = move::walk(g, {a}, *path);
+      if (g.alive(a) && a->x == lx && a->y == ly && jr.steps > 0) {
+        ai::walked(g, {a}, jr);
+        joined.push_back(a);
+        onLeaderTile++;
       }
     }
+    stack = std::move(joined);
+    stack.erase(std::remove_if(stack.begin(), stack.end(), [&](Army* a) { return a->moves <= 0; }),
+                stack.end());
+    if (stack.empty()) return false;
   }
 
   int destX = tgt.x, destY = tgt.y;
@@ -595,15 +630,13 @@ bool executeStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
       auto defArmies = game::armiesAt(g, ax, ay);
       int defOwner = defArmies.empty() ? (attCity ? attCity->ownerIndex : NONE) : defArmies[0]->owner;
 
-      bool allowed = diplomacy::mayAttack(g, me, defOwner);
-      if (!allowed && defOwner != NONE &&
-          (diplomacy::proposal(g, me, defOwner) != diplomacy::PEACE ||
-           diplomacy::state(g, me, defOwner) == diplomacy::INTERMEDIATE ||
-           (attCity && attCity == tgt.city))) {
+      // Breaking a treaty is DiploNet's call, not the mission's: an attack that
+      // needs a declaration (the game's own mustDeclare rule) only goes ahead
+      // when this side is no longer proposing peace to the defender.
+      if (diplomacy::mustDeclare(g, me, defOwner, attCity)) {
+        if (diplomacy::proposal(g, me, defOwner) == diplomacy::PEACE) break;
         diplomacy::attackAnyway(g, me, defOwner);
-        allowed = true;
       }
-      if (!allowed) break;
 
       // Gather friendly units on the launching tile so converged allies fight as one combined force
       std::vector<Army*> combinedHere = core::collect(g, me, sel.leader->x, sel.leader->y, 1);
@@ -807,8 +840,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
       neut.enemyThreat = threat;
       neut.label = "Capture Neutral " + c->name;
       targets.push_back(std::move(neut));
-    } else if (diplomacy::mayAttack(g, me, c->ownerIndex) ||
-               diplomacy::proposal(g, me, c->ownerIndex) != diplomacy::PEACE) {
+    } else if (attackable(g, me, c->ownerIndex, c)) {
       CandidateTarget enem;
       enem.kind = TargetKind::ENEMY_CITY;
       enem.x = c->x;
@@ -828,10 +860,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
   for (const auto& [tileKey, obs] : b.stacksByTile) {
     if (obs.owner == me || obs.owner == NONE) continue;
     if (game::cityAt(g, obs.x, obs.y)) continue;
-    if (!diplomacy::mayAttack(g, me, obs.owner) &&
-        diplomacy::proposal(g, me, obs.owner) == diplomacy::PEACE) {
-      continue;
-    }
+    if (!attackable(g, me, obs.owner, nullptr)) continue;
     CandidateTarget st;
     st.kind = TargetKind::ENEMY_STACK;
     st.x = obs.x;
@@ -1106,7 +1135,8 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
             tgt.city && (tgt.city->ownerIndex == me || tgt.city->razed)) {
           continue;
         }
-        if (tgt.kind == TargetKind::ENEMY_STACK) {
+        if (tgt.kind == TargetKind::ENEMY_STACK && belief::isTileVisible(g, me, tgt.x, tgt.y)) {
+          // Only re-check stacks still in view; one that walked into fog stays a belief
           auto curAt = game::armiesAt(g, tgt.x, tgt.y);
           if (curAt.empty() || curAt[0]->owner == me) continue;
         }
@@ -1205,15 +1235,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
       bool stageNear = false;
       float stageLogProb = 0.0f;
       if (isCombatTarget) {
-        float invT = sampler ? (1.0f / std::max(0.05f, sampler->temperature)) : 1.0f;
-        float sLogit = std::clamp(chosenOpt.out.stageNearLogit * invT, -15.0f, 15.0f);
-        float pStage = 1.0f / (1.0f + std::exp(-sLogit));
-        if (sampler) {
-          stageNear = (sampler->nextUniform01() < pStage);
-          stageLogProb = std::log(std::max(1e-12f, stageNear ? pStage : (1.0f - pStage)));
-        } else {
-          stageNear = (chosenOpt.out.stageNearLogit > 0.0f);
-        }
+        stageNear = ml::selectBinary(chosenOpt.out.stageNearLogit, sampler, &stageLogProb);
       }
 
       float phiBefore = (sampler && sampler->currentTurn) ? ml::computeEmpirePotential(g, me) : 0.0f;
@@ -1283,8 +1305,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                 neut.isEnemyCapital = isEnemyCap;
                 neut.label = "Capture Neutral " + c.name;
                 targets.push_back(std::move(neut));
-              } else if (diplomacy::mayAttack(g, me, c.ownerIndex) ||
-                         diplomacy::proposal(g, me, c.ownerIndex) != diplomacy::PEACE) {
+              } else if (attackable(g, me, c.ownerIndex, &c)) {
                 CandidateTarget enem;
                 enem.kind = TargetKind::ENEMY_CITY;
                 enem.x = c.x;
@@ -1334,9 +1355,13 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     return ml::packEconInput(curCtx, e);
   };
 
-  // Army retention vs disbanding surplus rear garrisons
+  // Army retention vs disbanding: only offered when upkeep exceeds income, the
+  // one situation where the rules make disbanding worth anything. Keeping an
+  // irreversible action off the table otherwise stops an untrained policy from
+  // dissolving its own army during early training.
   std::vector<Army*> myArmies = game::sideArmies(g, side);
-  if (myArmies.size() > 3) {
+  bool overBudget = game::upkeep(g, side) > game::income(g, side);
+  if (overBudget && myArmies.size() > 3) {
     for (Army* a : myArmies) {
       if (!g.alive(a) || a->hero() || a->transit || a->x == NONE) continue;
       City* c = game::cityAt(g, a->x, a->y);
@@ -1366,6 +1391,7 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       e[13] = (a->maxMoves >= 14 && (!at || !at->flies)) ? 1.0f : 0.0f;
       e[14] = std::tanh(threat / 25.0f);
       e[15] = std::tanh(distE / 60.0f);
+      e[ml::ECON_CURRENT] = 1.0f;   // keeping the army is the status quo
       ml::EconInVec keepIn = ml::packEconInput(curCtx, e);
 
       std::vector<ml::EconInVec> cands = {keepIn, holdIn};
@@ -1401,6 +1427,7 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     stopVec[14] = std::tanh(threat / 25.0f);
     stopVec[15] = std::tanh(distE / 60.0f);
     stopVec[16] = std::tanh((float)garCount / 6.0f);
+    stopVec[ml::ECON_CURRENT] = game::producing(*c) ? 0.0f : 1.0f;
 
     std::vector<ml::EconInVec> cands = {ml::packEconInput(ctx, stopVec)};
     for (size_t si = 0; si < c->slots.size(); si++) {
@@ -1423,6 +1450,7 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       e[14] = std::tanh(threat / 25.0f);
       e[15] = std::tanh(distE / 60.0f);
       e[16] = std::tanh((float)garCount / 6.0f);
+      e[ml::ECON_CURRENT] = (game::producing(*c) && c->producing == (int)si) ? 1.0f : 0.0f;
       cands.push_back(ml::packEconInput(ctx, e));
     }
 
@@ -1511,11 +1539,11 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     }
   }
 
-  // City vectoring
-  for (City* c : ownCities) c->vectorTo = NONE;
-  std::map<int, int> vecCount;
+  // City vectoring: re-evaluated each turn, but the vector already set is a
+  // flagged candidate (ECON_CURRENT) rather than wiped, so keeping it is a choice
   for (City* src : ownCities) {
     if (!game::producing(*src) || src->producing < 0 || src->producing >= (int)src->slots.size()) {
+      src->vectorTo = NONE;
       continue;
     }
     const Slot& sl = src->slots[src->producing];
@@ -1527,12 +1555,15 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     keepHere[14] = std::tanh(srcThreat / 25.0f);
     keepHere[15] = std::tanh(srcDistE / 60.0f);
     keepHere[17] = 0.0f;
+    keepHere[ml::ECON_CURRENT] = src->vectorTo == NONE ? 1.0f : 0.0f;
 
     std::vector<City*> destCities = {nullptr};
     std::vector<ml::EconInVec> cands = {ml::packEconInput(ctx, keepHere)};
 
     for (City* dst : ownCities) {
-      if (dst == src || vecCount[dst->index] >= game::MAX_VECTORED_TO) continue;
+      if (dst == src) continue;
+      bool isCurrent = (src->vectorTo == dst->index);
+      if (!isCurrent && (int)game::vectoredTo(g, dst).size() >= game::MAX_VECTORED_TO) continue;
       int vTurns = std::max(1, move::distance(src->x, src->y, dst->x, dst->y) / 14 + 1);
       if (vTurns > 4) continue;
       float dstThreat = dst->index < (int)b.cityThreat2Turn.size() ? b.cityThreat2Turn[dst->index] : 0.0f;
@@ -1547,6 +1578,7 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       v[14] = std::tanh(dstThreat / 25.0f);
       v[15] = std::tanh(dstDistE / 60.0f);
       v[17] = std::tanh(threatGain);
+      v[ml::ECON_CURRENT] = isCurrent ? 1.0f : 0.0f;
       destCities.push_back(dst);
       cands.push_back(ml::packEconInput(ctx, v));
     }
@@ -1565,9 +1597,8 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
             ml::EconStepRecord{std::move(cands), std::move(logMult), pick, lp});
       }
       City* bestDest = destCities[pick];
+      game::vector(g, *src, bestDest);
       if (bestDest) {
-        game::vector(g, *src, bestDest);
-        vecCount[bestDest->index]++;
         side.aiThoughts.push_back(AIThought{
             "Economy", src->name, bestDest->name, src->x, src->y, bestDest->x, bestDest->y,
             logits[pick], 1.0f, false,
@@ -1625,25 +1656,18 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
 }
 
 City* selectHeroCity(Game& g, Side& side, City* dflt, const ml::PolicyNetwork* customPolicy) {
-  const ml::PolicyNetwork& policy = customPolicy ? *customPolicy : ml::activePolicy();
+  // No policy head is trained for where a new hero appears, so this is an
+  // explicit rule rather than an untrained proxy: the own city under the
+  // highest visible threat, else the game's default (the capital).
+  (void)customPolicy;
   belief::update(g, side);
   const SideBelief& b = belief::ensure(side);
-  ml::ContextVec ctx = ml::buildContext(g, side);
-
   City* best = dflt;
-  float bestScore = -1e9f;
+  float bestThreat = 0.0f;
   for (City* c : game::sideCities(g, side)) {
     float threat = c->index < (int)b.cityThreat2Turn.size() ? b.cityThreat2Turn[c->index] : 0.0f;
-    float distE = c->index < (int)b.cityNearestEnemyDist.size() ? b.cityNearestEnemyDist[c->index] : 100.0f;
-    ml::EconVec e{};
-    e[1] = 1.0f;
-    e[7] = 0.8f;
-    e[8] = 0.7f;
-    e[14] = std::tanh(threat / 25.0f);
-    e[15] = std::tanh(distE / 60.0f);
-    float sc = policy.scoreEconomy(ctx, e);
-    if (sc > bestScore) {
-      bestScore = sc;
+    if (threat > bestThreat) {
+      bestThreat = threat;
       best = c;
     }
   }

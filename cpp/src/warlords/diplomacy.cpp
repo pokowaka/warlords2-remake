@@ -330,12 +330,14 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
   out.trustScore = trust(g, aiSide, targetSide);
   out.truceRemaining = truceTurns(g, aiSide, targetSide);
 
+  // Only cities the AI side can actually see count, so the attitude score (which
+  // feeds the diplomacy policy) never leaks the true map under Hidden Map.
   int totalStandingCities = 0;
   int theirCities = 0, leaderCities = 0, leaderSide = NONE;
   int citiesTakenFromMe = 0;
   std::array<int, 8> sideCities{};
   for (const auto& c : g.map->cities) {
-    if (c.razed) continue;
+    if (c.razed || !ai::belief::isCityVisible(g, aiSide, c)) continue;
     totalStandingCities++;
     if (c.ownerIndex >= 0 && c.ownerIndex < 8) {
       sideCities[c.ownerIndex]++;

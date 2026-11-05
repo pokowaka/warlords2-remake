@@ -3272,12 +3272,18 @@ static void testModernAi() {
     }
     Side* cur = game::begin(g);
     int turnsPlayed = 0;
+    int worstStack = 0;
     while (cur && !g.over && g.turn <= 8) {
       ai::playTurn(g, *cur);
       turnsPlayed++;
+      std::map<int, int> perTile;
+      for (Army* a : g.armies) {
+        if (a->x != NONE && !a->transit) worstStack = std::max(worstStack, ++perTile[a->y * g.map->width + a->x]);
+      }
       cur = game::endTurn(g);
     }
     ok(turnsPlayed >= 4, "modern learnable AI plays multiple turns cleanly under hiddenMap + viewEnemies=0");
+    ok(worstStack <= rules::MAX_STACK, "modern AI never puts more than 8 armies on one tile");
   }
 
   // Tabula rasa initialization, honest partial-visibility belief, enemy distance, and island frontiers
@@ -3432,6 +3438,34 @@ static void testModernAi() {
     ok(holdPicks >= 900 && holdPicks <= 1100,
        "multiplicity-balanced selectFromLogits assigns 50/50 family mass to 1 Hold vs 40 Fog options at zero utility");
 
+    // Greedy play picks the mode of the training distribution: with every option
+    // scored equally, the single Hold beats each of 40 Fog options (whose
+    // individual probability is 1/80), at any temperature.
+    eq(ai::ml::selectFromLogits(zeroLogits, nullptr, nullptr, &testLogMult), 0,
+       "greedy selectFromLogits applies the multiplicity prior (argmax of u - logMult)");
+    std::vector<float> fogFavoured = zeroLogits;
+    fogFavoured[7] = std::log(40.0f) + 0.1f;   // one fog option slightly above Hold in policy logits
+    eq(ai::ml::selectFromLogits(fogFavoured, nullptr, nullptr, &testLogMult), 7,
+       "greedy selectFromLogits picks a fog option once its u - logMult exceeds Hold's");
+    multSampler.temperature = 0.35f;
+    int fogSevenPicks = 0;
+    for (int trial = 0; trial < 2000; trial++) {
+      if (ai::ml::selectFromLogits(fogFavoured, &multSampler, nullptr, &testLogMult) == 7) fogSevenPicks++;
+    }
+    holdPicks = 0;
+    for (int trial = 0; trial < 2000; trial++) {
+      if (ai::ml::selectFromLogits(fogFavoured, &multSampler, nullptr, &testLogMult) == 0) holdPicks++;
+    }
+    ok(fogSevenPicks > holdPicks, "the sampled mode at low temperature agrees with the greedy choice");
+
+    // Binary decisions: greedy returns the mode, sampling follows sigmoid(logit / T)
+    eq(ai::ml::selectBinary(0.3f, nullptr), true, "greedy selectBinary is logit > 0");
+    eq(ai::ml::selectBinary(-0.3f, nullptr), false, "greedy selectBinary is false for logit < 0");
+    multSampler.temperature = 1.0f;
+    int yes = 0;
+    for (int trial = 0; trial < 2000; trial++) yes += ai::ml::selectBinary(std::log(3.0f), &multSampler) ? 1 : 0;
+    ok(yes >= 1400 && yes <= 1600, "sampled selectBinary with logit ln 3 says yes about 75% of the time");
+
     // Spectator visibility: AI-vs-AI games reveal the whole map to the viewer while keeping per-AI fog intact
     {
       GameOpts humanOpts = seedWith(11, {{"hiddenMap", 1}});
@@ -3475,14 +3509,32 @@ static void testModernAi() {
       auto decodedModern = save::decode(modernJson, DATA);
       eq(decodedModern->sides[0]->classicAi, false, "Modern AI save stays Modern AI even when app default is Classic AI");
 
-      // Mid-game live switch between Classic AI and Modern AI runs cleanly
+      // Mid-game live switch between Classic AI and Modern AI: alternate engines
+      // turn by turn for several rounds and check the game stays legal
       for (Side* s : decodedModern->sides) s->computer = true;
-      Side* first = game::begin(*decodedModern);
-      ok(first != nullptr, "mid-game switch test game begins");
-      ai::playTurn(*decodedModern, *first);
-      for (auto& s : decodedModern->map->sides) s.classicAi = true;
-      ai::playTurn(*decodedModern, *first);
-      ok(true, "switching active game side from Modern AI to Classic AI mid-game executes cleanly");
+      Side* cur = game::begin(*decodedModern);
+      ok(cur != nullptr, "mid-game switch test game begins");
+      int switchedTurns = 0, worstTile = 0;
+      bool positionsValid = true;
+      while (cur && !decodedModern->over && decodedModern->turn <= 6) {
+        bool classic = (decodedModern->turn % 2 == 0);
+        for (auto& s : decodedModern->map->sides) s.classicAi = classic;
+        ai::playTurn(*decodedModern, *cur);
+        switchedTurns++;
+        std::map<int, int> perTile;
+        for (Army* a : decodedModern->armies) {
+          if (a->x == NONE || a->transit) continue;
+          if (a->x < 0 || a->y < 0 || a->x >= decodedModern->map->width || a->y >= decodedModern->map->height) {
+            positionsValid = false;
+          } else {
+            worstTile = std::max(worstTile, ++perTile[a->y * decodedModern->map->width + a->x]);
+          }
+        }
+        cur = game::endTurn(*decodedModern);
+      }
+      ok(switchedTurns >= 20, "Classic and Modern AI alternate over several rounds without stalling");
+      ok(positionsValid, "every army stays on the map while engines alternate");
+      ok(worstTile <= rules::MAX_STACK, "no tile exceeds 8 armies while engines alternate");
 
       ai::setDefaultClassicAi(prevDefault);
     }

@@ -260,7 +260,7 @@ void accumulateCategoricalPPO(
 
   auto effZ = [&](size_t i) {
     float lm = (logMult && i < logMult->size()) ? (*logMult)[i] : 0.0f;
-    return rawLogits[i] * invTemp - lm;
+    return (rawLogits[i] - lm) * invTemp;
   };
 
   float maxZ = effZ(0);

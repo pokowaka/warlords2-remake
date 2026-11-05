@@ -207,8 +207,8 @@ DiploOutput PolicyNetwork::scoreDiplomacy(const ContextVec& ctx, const RivalVec&
   auto raw = diploNet.forward(packDiploInput(ctx, rival));
   DiploOutput out;
   out.stanceLogits = {raw[0], raw[1], raw[2], raw[3]};
-  out.tributeSignal = std::tanh(raw[4]);
-  out.jointWarSignal = std::tanh(raw[5]);
+  out.tributeLogit = raw[4];
+  out.jointWarLogit = raw[5];
   return out;
 }
 
@@ -297,20 +297,25 @@ int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler,
     if (outLogProb) *outLogProb = 0.0f;
     return 0;
   }
+  // The policy's logit for option i is z_i = u_i - logMult_i: the multiplicity
+  // prior is part of the policy itself, not of the exploration temperature, so
+  // greedy play (argmax z) picks the mode of the very distribution training
+  // samples from (softmax(z / T)) at every temperature.
+  auto policyZ = [&](size_t i) {
+    float lm = (logMult && i < logMult->size()) ? (*logMult)[i] : 0.0f;
+    return logits[i] - lm;
+  };
   if (!sampler || logits.size() == 1) {
     int best = 0;
     for (size_t i = 1; i < logits.size(); i++) {
-      if (logits[i] > logits[best]) best = (int)i;
+      if (policyZ(i) > policyZ(best)) best = (int)i;
     }
     if (outLogProb) *outLogProb = 0.0f;
     return best;
   }
 
   float invT = 1.0f / std::max(0.05f, sampler->temperature);
-  auto effZ = [&](size_t i) {
-    float lm = (logMult && i < logMult->size()) ? (*logMult)[i] : 0.0f;
-    return logits[i] * invT - lm;
-  };
+  auto effZ = [&](size_t i) { return policyZ(i) * invT; };
   float maxL = effZ(0);
   for (size_t i = 1; i < logits.size(); i++) {
     maxL = std::max(maxL, effZ(i));
@@ -338,6 +343,19 @@ int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler,
     *outLogProb = std::log(std::max(1e-12f, probs[chosen]));
   }
   return chosen;
+}
+
+bool selectBinary(float logit, RolloutSampler* sampler, float* outLogProb) {
+  if (!sampler) {
+    if (outLogProb) *outLogProb = 0.0f;
+    return logit > 0.0f;
+  }
+  float invT = 1.0f / std::max(0.05f, sampler->temperature);
+  float z = std::clamp(logit * invT, -15.0f, 15.0f);
+  float p = 1.0f / (1.0f + std::exp(-z));
+  bool yes = sampler->nextUniform01() < p;
+  if (outLogProb) *outLogProb = std::log(std::max(1e-12f, yes ? p : 1.0f - p));
+  return yes;
 }
 
 float computeEmpirePotential(const Game& g, int sideIndex) {
