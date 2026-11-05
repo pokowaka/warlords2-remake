@@ -3,6 +3,10 @@
 __pycache__/
 *.pyc
 build/
+build-train/
+
+# Modern-AI training runs (cpp/test/train.sh)
+runs/
 
 # the remake's saved games
 warlords-save*.lua

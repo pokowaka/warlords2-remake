@@ -100,6 +100,7 @@ struct Config {
   float valueCoef = 0.5f;
   float gamma = 0.97f;
   float gaeLambda = 0.95f;
+  float localWeight = 1.0f;
   float targetKL = 0.03f;
   float maxGradNorm = 0.5f;
   float classicFrac = 0.0f;
@@ -225,10 +226,12 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
   return out;
 }
 
-// GAE over each side's own turns. Mission decisions get the turn's advantage
-// plus a centred local term (their own score change minus the turn's mean),
-// which shifts credit between the stacks of one turn without changing its sum.
-void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda) {
+// GAE over each side's own turns. A mission decision gets the turn's advantage
+// plus `localWeight` times its own score change while it acted (a capture, a
+// lost battle), centred on the turn's mean when `localWeight` <= 1 and taken
+// as-is above that. The per-turn reward in an 8-side game is dominated by the
+// rivals' turns; what a stack achieved itself is the cleanest signal there is.
+void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda, float localWeight) {
   for (auto& ep : episodes) {
     const int T = (int)ep.turns.size();
     float gae = 0.0f;
@@ -246,7 +249,10 @@ void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
       float meanLocal = 0.0f;
       for (const auto& ms : cur.missionSteps) meanLocal += ms.immediateDeltaScore;
       if (!cur.missionSteps.empty()) meanLocal /= (float)cur.missionSteps.size();
-      for (auto& ms : cur.missionSteps) ms.advantage = cur.advantage + (ms.immediateDeltaScore - meanLocal);
+      if (localWeight > 1.0f) meanLocal = 0.0f;
+      for (auto& ms : cur.missionSteps) {
+        ms.advantage = cur.advantage + localWeight * (ms.immediateDeltaScore - meanLocal);
+      }
     }
   }
 }
@@ -527,6 +533,8 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
     else if (a == "--minibatches") cfg.minibatches = std::max(1, std::stoi(next()));
     else if (a == "--lr") cfg.lrStart = std::stof(next());
     else if (a == "--classic-frac") cfg.classicFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+    else if (a == "--lambda") cfg.gaeLambda = std::clamp(std::stof(next()), 0.0f, 1.0f);
+    else if (a == "--local-weight") cfg.localWeight = std::max(0.0f, std::stof(next()));
     else if (a == "--out") cfg.outPath = next();
     else if (a == "--log") cfg.logPath = next();
     else if (a == "--data") cfg.dataDir = next();
@@ -622,7 +630,7 @@ int main(int argc, char** argv) {
       neutrals += gs.neutralsLeft;
       for (auto& ep : gs.episodes) episodes.push_back(std::move(ep));
     }
-    computeAdvantages(episodes, cfg.gamma, cfg.gaeLambda);
+    computeAdvantages(episodes, cfg.gamma, cfg.gaeLambda, cfg.localWeight);
 
     std::vector<const ml::TurnStepRecord*> turns;
     std::vector<float> mAdv, eAdv, dAdv;

@@ -10,6 +10,16 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-sign-compare)
 endif()
 
+# W2_BUILD_GAME=OFF builds only the rules core, the tests and the AI trainer
+# (w2arena): no SDL2 needed, e.g. on a headless training server.
+option(W2_BUILD_GAME "Build the SDL2 game (warlords2)" ON)
+# W2_NATIVE=ON tunes for the build machine's CPU (-march=native): faster
+# training runs, but the binaries may not run on other machines.
+option(W2_NATIVE "Optimise for the build machine's CPU" OFF)
+if(W2_NATIVE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  add_compile_options(-march=native)
+endif()
+
 # The rules core and the computer player: no SDL, so the tests link it alone.
 file(GLOB CORE_SOURCES CONFIGURE_DEPENDS src/util/*.cpp src/warlords/*.cpp src/warlords/ai/*.cpp)
 add_library(w2core STATIC ${CORE_SOURCES})
@@ -17,6 +27,7 @@ target_include_directories(w2core PUBLIC src)
 find_package(Threads REQUIRED)
 target_link_libraries(w2core PUBLIC Threads::Threads)
 
+if(W2_BUILD_GAME)
 # The game: the slim layer over SDL2, the front end and the dialogs.
 find_package(SDL2 CONFIG QUIET)
 if(NOT SDL2_FOUND)
@@ -55,6 +66,7 @@ if(VORBISFILE_FOUND)
 else()
   message(STATUS "libvorbisfile not found: the recorded music is left out")
 endif()
+endif()  # W2_BUILD_GAME
 
 # Tests: the rules suite and the Lua-vs-C++ trace.
 add_executable(w2test test/run.cpp)
