@@ -122,7 +122,7 @@ class PolicyNetwork {
   /** Evaluates Head 3 (Unified Economy, Unit Retention, Production, Vectoring, and Capture Spoils). */
   float scoreEconomy(const ContextVec& ctx, const EconVec& econ) const;
 
-  /** Evaluates Head 4 (Expected game outcome value in [-1, 1]). */
+  /** Evaluates Head 4 (critic: expected discounted return in empire-score units, unbounded). */
   float evaluateValue(const ContextVec& ctx) const;
 
   /** Flattens all 4 heads into a single vector of length TOTAL_PARAMS. */
@@ -131,8 +131,8 @@ class PolicyNetwork {
   /** Loads parameters from a flat vector of length TOTAL_PARAMS. */
   void unflatten(const std::vector<float>& params);
 
-  /** Saves the network weights and training metadata to a JSON file. */
-  bool saveJson(const std::filesystem::path& path, int generation = 0, float elo = 1500.0f) const;
+  /** Saves the weights with the training iteration and the held-out selection score. */
+  bool saveJson(const std::filesystem::path& path, int generation = 0, float selectionCityShare = 0.0f) const;
 
   /** Loads the network weights from a JSON file; returns false if missing or invalid. */
   bool loadJson(const std::filesystem::path& path);
@@ -153,8 +153,8 @@ struct MissionStepRecord {
   bool hasStageChoice = false;
   bool stageChosen = false;
   float oldStageLogProb = 0.0f;
-  float immediateDeltaPhi = 0.0f;
-  float causalAdvantage = 0.0f;
+  float immediateDeltaScore = 0.0f;   // change in empire score while this stack acted
+  float advantage = 0.0f;             // filled by the trainer
 };
 
 struct EconStepRecord {
@@ -180,11 +180,9 @@ struct DiploStepRecord {
 struct TurnStepRecord {
   ContextVec startCtx{};
   float valuePred = 0.0f;
-  float startPhi = 0.0f;
-  float postTurnPhi = 0.0f;
-  float advantage = 0.0f;
-  float restAdvantage = 0.0f;
-  float returnTarget = 0.0f;
+  float startScore = 0.0f;            // empire score as the turn begins
+  float advantage = 0.0f;             // GAE, filled by the trainer
+  float returnTarget = 0.0f;          // critic target, filled by the trainer
   std::vector<MissionStepRecord> missionSteps;
   std::vector<EconStepRecord> econSteps;
   std::vector<DiploStepRecord> diploSteps;
@@ -224,11 +222,15 @@ int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler,
 bool selectBinary(float logit, RolloutSampler* sampler, float* outLogProb = nullptr);
 
 /**
- * Computes pure outcome-based empire state potential Phi(g, sideIndex) from
- * owned city share, income share, and surviving army strength (used strictly for
- * potential-based reward shaping during offline RL training, never as a policy input).
+ * The empire score S(g, side) whose per-turn change is the training reward:
+ *   S = 2 * cityShare + 0.5 * incomeShare + 0.25 * armyShare (+ recon <= 0.15
+ *       under Hidden Map), and 0 once the side is eliminated.
+ * Shares are of all standing cities / income / armies, so S is a hand-chosen
+ * definition of "doing well" -- the one deliberate prior of the trainer. It
+ * reads the true game state and is used only for offline training rewards,
+ * never as a policy input.
  */
-float computeEmpirePotential(const Game& g, int sideIndex);
+float computeEmpireScore(const Game& g, int sideIndex);
 
 /** Returns the global active PolicyNetwork used by computer players in the game. */
 PolicyNetwork& activePolicy();

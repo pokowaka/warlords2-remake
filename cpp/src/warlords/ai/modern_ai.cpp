@@ -1238,7 +1238,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         stageNear = ml::selectBinary(chosenOpt.out.stageNearLogit, sampler, &stageLogProb);
       }
 
-      float phiBefore = (sampler && sampler->currentTurn) ? ml::computeEmpirePotential(g, me) : 0.0f;
+      float scoreBefore = (sampler && sampler->currentTurn) ? ml::computeEmpireScore(g, me) : 0.0f;
 
       if (chosenTgt.kind == TargetKind::HOLD_GARRISON) {
         for (Army* a : currentStack) a->aiMoved = true;
@@ -1323,7 +1323,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
       }
 
       if (sampler && sampler->currentTurn && (options.size() > 1 || isCombatTarget)) {
-        float phiAfter = ml::computeEmpirePotential(g, me);
+        float scoreAfter = ml::computeEmpireScore(g, me);
         ml::MissionStepRecord rec;
         rec.candidates.reserve(options.size());
         for (const auto& op : options) rec.candidates.push_back(op.inVec);
@@ -1333,7 +1333,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         rec.hasStageChoice = isCombatTarget;
         rec.stageChosen = stageNear;
         rec.oldStageLogProb = stageLogProb;
-        rec.immediateDeltaPhi = phiAfter - phiBefore;
+        rec.immediateDeltaScore = scoreAfter - scoreBefore;
         sampler->currentTurn->missionSteps.push_back(std::move(rec));
       }
     }
@@ -1628,7 +1628,7 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
       if (sampler && sampler->currentTurn) {
         sampler->currentTurn->startCtx = waveCtx;
         sampler->currentTurn->valuePred = v;
-        sampler->currentTurn->startPhi = ml::computeEmpirePotential(g, side.index);
+        sampler->currentTurn->startScore = ml::computeEmpireScore(g, side.index);
       }
       runDiplomacyPhase(g, side, policy, waveCtx, sampler);
       if (pause) pause("diplomacy");
@@ -1649,9 +1649,6 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
   side.lastBoardValue = policy.evaluateValue(ctx);
 
   runEconomyPhase(g, side, policy, ctx, sampler);
-  if (sampler && sampler->currentTurn) {
-    sampler->currentTurn->postTurnPhi = ml::computeEmpirePotential(g, side.index);
-  }
   if (pause) pause("economy");
 }
 

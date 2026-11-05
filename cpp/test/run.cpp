@@ -3241,7 +3241,7 @@ static void testModernAi() {
     ai::belief::update(g, s0);
     auto ctx = ai::ml::buildContext(g, s0);
     float v = net.evaluateValue(ctx);
-    ok(v >= -1.0f && v <= 1.0f, "Value head outputs in [-1, 1]");
+    ok(std::isfinite(v) && std::abs(v) < 5.0f, "linear value head gives a finite, small estimate at random init");
 
     auto flat1 = net.flatten();
     eq((int)flat1.size(), ai::ml::PolicyNetwork::TOTAL_PARAMS, "flattened parameter count matches TOTAL_PARAMS");
@@ -3393,12 +3393,12 @@ static void testModernAi() {
     }
     ok(unseenNeutral != nullptr, "found an unseen neutral castle on hidden-map ERYTHEA");
     if (unseenNeutral) {
-      float phiHidden = ai::ml::computeEmpirePotential(g, 7);
+      float phiHidden = ai::ml::computeEmpireScore(g, 7);
       game::reveal(g, 7, unseenNeutral->x, unseenNeutral->y, false);
-      float phiRevealed = ai::ml::computeEmpirePotential(g, 7);
+      float phiRevealed = ai::ml::computeEmpireScore(g, 7);
       int prevOwner = unseenNeutral->ownerIndex;
       unseenNeutral->ownerIndex = 7;
-      float phiCaptured = ai::ml::computeEmpirePotential(g, 7);
+      float phiCaptured = ai::ml::computeEmpireScore(g, 7);
       unseenNeutral->ownerIndex = prevOwner;
 
       float discoveryGain = phiRevealed - phiHidden;

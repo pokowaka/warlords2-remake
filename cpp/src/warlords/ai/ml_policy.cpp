@@ -223,7 +223,9 @@ float PolicyNetwork::scoreEconomy(const ContextVec& ctx, const EconVec& econ) co
 }
 
 float PolicyNetwork::evaluateValue(const ContextVec& ctx) const {
-  return std::tanh(valueNet.forward(ctx)[0]);
+  // Linear: the critic predicts discounted return in empire-score units, which
+  // is not bounded to [-1, 1]
+  return valueNet.forward(ctx)[0];
 }
 
 std::vector<float> PolicyNetwork::flatten() const {
@@ -244,14 +246,14 @@ void PolicyNetwork::unflatten(const std::vector<float>& params) {
   valueNet.fromFlat(params, off);
 }
 
-bool PolicyNetwork::saveJson(const std::filesystem::path& path, int generation, float elo) const {
+bool PolicyNetwork::saveJson(const std::filesystem::path& path, int generation, float selectionCityShare) const {
   std::ofstream out(path);
   if (!out.is_open()) return false;
   auto weights = flatten();
   out << "{\n";
-  out << "  \"version\": 2,\n";
+  out << "  \"version\": 3,\n";
   out << "  \"generation\": " << generation << ",\n";
-  out << "  \"elo\": " << elo << ",\n";
+  out << "  \"selectionCityShare\": " << selectionCityShare << ",\n";
   out << "  \"paramCount\": " << weights.size() << ",\n";
   out << "  \"weights\": [";
   for (size_t i = 0; i < weights.size(); i++) {
@@ -358,9 +360,9 @@ bool selectBinary(float logit, RolloutSampler* sampler, float* outLogProb) {
   return yes;
 }
 
-float computeEmpirePotential(const Game& g, int sideIndex) {
+float computeEmpireScore(const Game& g, int sideIndex) {
   if (sideIndex < 0 || sideIndex >= 8 || !g.map->sides[sideIndex].alive) {
-    return -0.5f;
+    return 0.0f;
   }
   int totalStanding = 0, totalIncome = 0;
   int myCities = 0, myIncome = 0;
@@ -380,7 +382,8 @@ float computeEmpirePotential(const Game& g, int sideIndex) {
   totalStanding = std::max(1, totalStanding);
   totalIncome = std::max(1, totalIncome);
 
-  float reconTerm = 0.20f;
+  // Reconnaissance only counts under Hidden Map, and stays small next to cities
+  float reconTerm = 0.0f;
   if (g.map->options.hiddenMap != 0) {
     int sampled = 0, seenSampled = 0;
     const int W = g.map->width, H = g.map->height;
@@ -392,21 +395,22 @@ float computeEmpirePotential(const Game& g, int sideIndex) {
     }
     float seenTileFrac = (float)seenSampled / (float)std::max(1, sampled);
     float revCityFrac = (float)revealedCities / (float)totalStanding;
-    reconTerm = 0.14f * revCityFrac + 0.06f * seenTileFrac;
+    reconTerm = 0.10f * revCityFrac + 0.05f * seenTileFrac;
   }
 
-  float myArmyStr = 0.0f;
+  // Army strength as a share of all sides' armies (zero-sum, so hoarding
+  // only pays relative to rivals)
+  float myArmyStr = 0.0f, allArmyStr = 0.0f;
   for (const Army* a : g.armies) {
-    if (a->owner == sideIndex && a->x != NONE) {
-      myArmyStr += (float)a->strength;
-    }
+    if (a->x == NONE || a->owner < 0 || a->owner >= 8) continue;
+    allArmyStr += (float)a->strength;
+    if (a->owner == sideIndex) myArmyStr += (float)a->strength;
   }
+  float armyShare = allArmyStr > 0.0f ? myArmyStr / allArmyStr : 0.0f;
 
   float cityShare = (float)myCities / (float)totalStanding;
   float incShare = (float)myIncome / (float)totalIncome;
-  float citySublinear = std::sqrt((float)myCities) * 0.14f;
-  float armyTerm = std::min(0.6f, myArmyStr * 0.0035f);
-  return citySublinear + 1.5f * cityShare + 0.8f * incShare + armyTerm + reconTerm;
+  return 2.0f * cityShare + 0.5f * incShare + 0.25f * armyShare + reconTerm;
 }
 
 PolicyNetwork& activePolicy() {
