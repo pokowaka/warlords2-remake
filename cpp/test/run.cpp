@@ -3452,6 +3452,40 @@ static void testModernAi() {
       eq(game::fogCell(ga, game::viewerSide(ga, ga.sides[0]), 0, 0), NONE, "spectator viewer draws no fog shroud");
       eq(game::seen(ga, ga.sides[0]->index, 0, 0), false, "individual AI side still obeys its own Hidden Map fog");
     }
+
+    // Classic AI vs Modern AI default toggle, mid-game switch, and save/load preservation
+    {
+      bool prevDefault = ai::defaultClassicAi();
+      ai::setDefaultClassicAi(true);
+      auto gpClassic = newGame("ERYTHEA", seed(13));
+      eq(gpClassic->sides[0]->classicAi, true, "defaultClassicAi(true) initializes sides with Classic 1993 AI");
+      std::string classicJson = save::encode(*gpClassic);
+
+      ai::setDefaultClassicAi(false);
+      auto gpModern = newGame("ERYTHEA", seed(13));
+      eq(gpModern->sides[0]->classicAi, false, "defaultClassicAi(false) initializes sides with Modern RL AI");
+      std::string modernJson = save::encode(*gpModern);
+
+      // Decoding a Classic AI save while the app default is Modern AI must keep Classic AI
+      auto decodedClassic = save::decode(classicJson, DATA);
+      eq(decodedClassic->sides[0]->classicAi, true, "Classic AI save stays Classic AI even when app default is Modern AI");
+
+      // Decoding a Modern AI save while the app default is Classic AI must keep Modern AI
+      ai::setDefaultClassicAi(true);
+      auto decodedModern = save::decode(modernJson, DATA);
+      eq(decodedModern->sides[0]->classicAi, false, "Modern AI save stays Modern AI even when app default is Classic AI");
+
+      // Mid-game live switch between Classic AI and Modern AI runs cleanly
+      for (Side* s : decodedModern->sides) s->computer = true;
+      Side* first = game::begin(*decodedModern);
+      ok(first != nullptr, "mid-game switch test game begins");
+      ai::playTurn(*decodedModern, *first);
+      for (auto& s : decodedModern->map->sides) s.classicAi = true;
+      ai::playTurn(*decodedModern, *first);
+      ok(true, "switching active game side from Modern AI to Classic AI mid-game executes cleanly");
+
+      ai::setDefaultClassicAi(prevDefault);
+    }
   }
 }
 

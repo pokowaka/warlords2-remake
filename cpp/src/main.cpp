@@ -45,6 +45,8 @@
 #include "util/json.hpp"
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
+#include "warlords/ai/belief.hpp"
+#include "warlords/ai/core.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/armytype.hpp"
@@ -343,6 +345,30 @@ static void toggleCRT() {
   prefs::set("crt", display::d.crt ? "on" : "off");
 }
 
+static bool activeClassicAi() {
+  if (G.g && G.g->map && !G.starting) {
+    for (const auto& s : G.g->map->sides) {
+      if (s.inUse && s.computer) return s.classicAi;
+    }
+    for (const auto& s : G.g->map->sides) {
+      if (s.inUse) return s.classicAi;
+    }
+  }
+  return w2::ai::defaultClassicAi();
+}
+
+static void setAiMode(bool classic) {
+  w2::ai::setDefaultClassicAi(classic);
+  prefs::set("ai", classic ? "classic" : "modern");
+  if (G.g && G.g->map) {
+    for (auto& s : G.g->map->sides) {
+      s.classicAi = classic;
+      if (!s.ai) s.ai = std::make_shared<w2::AIData>(w2::ai::core::newData());
+      if (!classic) w2::ai::belief::ensure(s);
+    }
+  }
+}
+
 // The interface's scale in use; a short one stays ticked on the start
 // screens, which are drawn as with none chosen.
 static std::string uiScaleKey() {
@@ -356,7 +382,8 @@ static bool menuTicked(const std::string& k) {
          k == std::string("screen ") + (display::d.windowed ? "window" : "full") ||
          (k == "screen 4:3" && display::d.wanted) || (k == "screen fit" && !display::d.wanted) ||
          (k == "screen crt" && display::d.crt) ||
-         k == "music " + sound::synth();
+         k == "music " + sound::synth() ||
+         k == (activeClassicAi() ? "ai classic" : "ai modern");
 }
 
 // ------------------------------------------------------------------ walking
@@ -984,8 +1011,10 @@ static void afterOffer() {
     city::open(city, city::PRODUCTION);
     return;
   }
-  if (!G.player->missives.empty()) {
+  if (G.modernUi && !G.player->missives.empty()) {
     diplomacyui::pollMissives();
+  } else {
+    G.player->missives.clear();
   }
 }
 
@@ -1468,7 +1497,7 @@ void front::drawStrategicMap(int x, int y, const City* mark, bool noCities, cons
     gfx::rectangle(gfx::FILL, mx + 9, my - 1, 1, 10);
   }
   // Highlight any Allied partner's broadcasted war target city on the strategic map
-  if (!noCities && G.player && viewer != NONE) {
+  if (G.modernUi && !noCities && G.player && viewer != NONE) {
     for (int s = 0; s < 8; s++) {
       if (s != G.player->index && w2::diplomacy::isAllied(*G.g, G.player->index, s)) {
         int tc = w2::diplomacy::alliedTargetCity(*G.g, s);
@@ -2460,8 +2489,8 @@ static void flushKeys() {
 static bool computerInput(const std::string& k) {
   if (!(G.aiRun && !kit::top() && G.openMenu < 0)) return false;
   if (G.assault && G.assault->computer) { pressAssault(); return true; }
-  // Allow opening the F10 AI Brain Inspector, panning, or adjusting zoom while spectating AI turns
-  if (k == "f10") {
+  // Allow opening the F10 AI Brain Inspector (under --modern-ui), panning, or adjusting zoom while spectating AI turns
+  if (G.modernUi && k == "f10") {
     diplomacyui::openBrainInspector(G.aiSide ? G.aiSide->index : NONE);
     return true;
   }
@@ -2488,7 +2517,7 @@ static bool computerInput(const std::string& k) {
     if (k == "escape") { settings::open(); return true; }
     if (held({"lctrl", "rctrl", "lgui", "rgui"}) && k == "q") return false;
     if (k == "c" || k == "." || k == "a" || k == "k" || k == "g" || k == "n" || k == "w" ||
-        k == "h" || k == "e" || k == "j" || k == "y" || k == "l" || k == "?") {
+        k == "d" || k == "h" || k == "e" || k == "j" || k == "y" || k == "l" || k == "?") {
       return false;
     }
     return true;
@@ -3023,6 +3052,8 @@ static std::map<std::string, std::function<void()>>& menuDoes() {
     std::string synth = s;
     M["music " + synth] = [synth]() { sound::setSynth(synth); };
   }
+  M["ai modern"] = []() { setAiMode(false); };
+  M["ai classic"] = []() { setAiMode(true); };
   return M;
 }
 
@@ -3037,18 +3068,20 @@ static bool menuEnabled(const std::string& k) {
   auto& M = menuDoes();
   if (k.empty() || !M.count(k)) return false;
   bool music = w2::startsWith(k, "music ");
+  bool aiOpt = w2::startsWith(k, "ai ");
   if (music && !sound::synthAvailable(k.substr(6))) return false;
   // 7f77:0200: on the start screens every menu is greyed but Quit and Load
   if (G.starting || !G.g) {
     return k == "^Q" || (k == "alt L" && savegame::used() > 0) || w2::startsWith(k, "ui scale ") ||
-           w2::startsWith(k, "screen ") || music;
+           w2::startsWith(k, "screen ") || music || aiOpt;
   }
   // While AI-vs-AI spectating is running, only enable read-only spectator reports, display/audio settings, and quit
   if (G.aiRun && !humansLeft()) {
     if (k == "h" || k == "e" || k == "j" || k == "y") return G.g->turn != 1;
+    if (k == "d") return G.g->map->options.diplomacy != 0;
     return k == "^Q" || k == "alt X" || k == "?" || k == "c" || k == "." || k == "a" || k == "k" ||
            k == "g" || k == "n" || k == "w" || k == "l" || w2::startsWith(k, "map zoom ") ||
-           w2::startsWith(k, "ui scale ") || w2::startsWith(k, "screen ") || music;
+           w2::startsWith(k, "ui scale ") || w2::startsWith(k, "screen ") || music || aiOpt;
   }
   w2::Game& g = *G.g;
   auto sideHasHero = [&]() {
@@ -3172,7 +3205,7 @@ static void keypressed(const std::string& k) {
     else say("Could not save.");
   } else if (k == "f9") {
     if (auto loaded = savegame::readSlot("quick")) front::takeLoaded(std::move(loaded));
-  } else if (k == "f10") {
+  } else if (G.modernUi && k == "f10") {
     diplomacyui::openBrainInspector();
   } else {
     std::string accel;
@@ -3528,10 +3561,11 @@ int main(int argc, char** argv) {
   double seed = 0;
   int sizeW = 0, sizeH = 0;
   bool windowed = prefs::get("screen") == "window";
-  bool useClassicAi = false;
+  bool useClassicAi = prefs::get("ai") == "classic";
   bool forceDiplomacy = false;
   bool forceHiddenMap = false;
   bool spectateAllAi = false;
+  G.modernUi = false;
   G.dataDir = "original";
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
@@ -3544,6 +3578,9 @@ int main(int argc, char** argv) {
     else if (a == "--script") scriptFile = next();
     else if (a == "--size") sscanf(next().c_str(), "%dx%d", &sizeW, &sizeH);
     else if (a == "--classic-ai") useClassicAi = true;
+    else if (a == "--modern-ai") useClassicAi = false;
+    else if (a == "--modern-ui") G.modernUi = true;
+    else if (a == "--classic-ui") G.modernUi = false;
     else if (a == "--weights") weightsFile = next();
     else if (a == "--diplomacy") forceDiplomacy = true;
     else if (a == "--hidden-map") forceHiddenMap = true;

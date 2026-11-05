@@ -46,6 +46,9 @@ std::vector<Menu> withZooms(int maxUI, int maxMap, double smoothUI, double mapSh
           n.items.push_back({"AdLib music", "", "music fm"});
           n.items.push_back({"MT-32 music", "", "music mt32"});
           n.items.push_back({"SC-55 music", "", "music sc55"});
+          n.items.push_back({"-", "", ""});
+          n.items.push_back({"Modern AI", "", "ai modern"});
+          n.items.push_back({"Classic AI", "", "ai classic"});
         }
       }
     } else if (m.title == "View") {
@@ -75,7 +78,7 @@ std::vector<Menu> withZooms(int maxUI, int maxMap, double smoothUI, double mapSh
 // is a diamond 5 pixels wide in the key column.
 static const int TICK_W = 5;
 static bool tickable(const std::string& act) {
-  for (const char* p : {"map zoom ", "ui scale ", "screen ", "music "})
+  for (const char* p : {"map zoom ", "ui scale ", "screen ", "music ", "ai "})
     if (act.rfind(p, 0) == 0) return true;
   return false;
 }

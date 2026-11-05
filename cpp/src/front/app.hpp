@@ -162,6 +162,7 @@ struct App {
   double lastSelectClick = -1;   // when the select pointer was last clicked (1b62:0405)
   std::vector<std::string> keyBuffer;
   std::string status;
+  bool modernUi = false;
   bool quitRequested = false;
 };
 extern App G;

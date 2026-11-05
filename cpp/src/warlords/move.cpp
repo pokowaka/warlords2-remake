@@ -217,7 +217,7 @@ std::vector<int> prepare(Game& g, const std::vector<int>& grid, int sideIndex, i
   bool fog = g.map->options.hiddenMap != 0 && side && (!side->computer || !side->classicAi);
   City* destCity = (dx >= 0 && dy >= 0 && dx < W && dy < H) ? g.map->cityTile[dy * W + dx] : nullptr;
   bool destCitySeen = false;
-  if (destCity && fog) {
+  if (destCity && fog && side && side->computer && !side->classicAi) {
     for (int oy = 0; oy <= 1; oy++)
       for (int ox = 0; ox <= 1; ox++)
         if (game::seen(g, sideIndex, destCity->x + ox, destCity->y + oy)) destCitySeen = true;

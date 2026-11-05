@@ -5,6 +5,7 @@
 #include <stdexcept>
 
 #include "util/json.hpp"
+#include "warlords/ai/belief.hpp"
 #include "warlords/ai/core.hpp"
 #include "warlords/armytype.hpp"
 #include "warlords/game.hpp"
@@ -618,7 +619,8 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     s->productionDue = saved["productionDue"].boolean();
     s->income = (int)saved["income"].integer(); s->upkeepTotal = (int)saved["upkeepTotal"].integer();
     s->aiSolidarity = (int)saved["aiSolidarity"].integer(); s->card = (int)saved["card"].integer();
-    if (saved.has("classicAi")) s->classicAi = saved["classicAi"].boolean(true);
+    s->classicAi = saved.has("classicAi") ? saved["classicAi"].boolean(true) : true;
+    ai::belief::ensure(*s);
     s->advisor.dir = (int)saved["advisor"]["dir"].integer();
     s->advisor.mark = (int)saved["advisor"]["mark"].integer();
     if (saved["ai"].isObject()) {

@@ -147,11 +147,11 @@ Starting from **100% random zero-mean weights (`--from-scratch`)** in [`w2arena`
 ## 7. CLI & Training Reference
 
 ```bash
-# Build all targets (Release):
-cmake -B cpp/build -S cpp -DCMAKE_BUILD_TYPE=Release
-cmake --build cpp/build -j8
+# Build all targets with Ninja (Release):
+cmake -G Ninja -B cpp/build -S cpp -DCMAKE_BUILD_TYPE=Release
+cmake --build cpp/build
 
-# Run full unit & regression test suite (9,855 assertions):
+# Run full unit & regression test suite:
 ./cpp/build/w2test
 
 # Train from 100% Tabula Rasa random weights via multi-threaded PPO Pure Self-Play:
@@ -160,9 +160,15 @@ cmake --build cpp/build -j8
 # Run read-only external benchmark suite against the 1993 Classic AI:
 ./cpp/build/w2arena --benchmark-only --turns 25 --out cpp/ai_weights.json
 
-# Launch the interactive game with the learned RL policy, Diplomacy, and Hidden Map:
+# Default launch: Modern RL AI + Classic 1993 UI (AI mode is also toggleable via Game > Modern AI / Classic AI):
 ./cpp/build/warlords2 --window --scenario ERYTHEA --diplomacy --hidden-map
 
+# Opt into the overhauled Parley / Diplomacy / Envoy Missive / F10 Brain Inspector UI:
+./cpp/build/warlords2 --window --modern-ui --scenario ERYTHEA --diplomacy --hidden-map
+
+# Force the original 1993 Classic AI from the command line:
+./cpp/build/warlords2 --window --classic-ai --scenario ERYTHEA --diplomacy --hidden-map
+
 # Watch an 8-AI battle royale with full-map spectator visibility (each AI still obeys Hidden Map fog!):
-./cpp/build/warlords2 --window --scenario ERYTHEA --diplomacy --hidden-map --spectate
+./cpp/build/warlords2 --window --modern-ui --scenario ERYTHEA --diplomacy --hidden-map --spectate
 ```

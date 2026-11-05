@@ -53,6 +53,151 @@ void blank(int x, int y) {
   gfx::rectangle(gfx::FILL, x + 1, y + 1, 38, 38);
 }
 
+// ---------------------------------------------------------------------------
+// 1993 Classic Diplomacy UI (default unless --modern-ui is enabled)
+// ---------------------------------------------------------------------------
+
+void openClassicAction();
+
+struct ClassicReport : kit::Modal {
+  screen::View v;
+  std::map<int, std::string> titles;
+  std::vector<w2::Side*> order;
+  void draw() override {
+    w2::Game& g = *G.g;
+    kit::popup(R);
+    gfx::setColor(1, 1, 1);
+    kit::centred(kit::font(1), kit::text(0x6b, 0), 320, 64);
+    kit::setPal(1);
+    gfx::rectangle(gfx::FILL, 88, 139, 1, 232);
+    for (int i = 0; i <= 8; i++) gfx::rectangle(gfx::FILL, 120 + 32 * i, 110, 1, 261);
+    gfx::rectangle(gfx::FILL, 120, 110, 256, 1);
+    for (int i = 0; i <= 8; i++) gfx::rectangle(gfx::FILL, 88, 139 + 29 * i, 288, 1);
+    for (int i = 0; i < 8; i++) {
+      if (playing(g, i)) {
+        smallShield(i, 128 + 32 * i, 117);
+        smallShield(i, 96, 146 + 29 * i);
+      }
+    }
+    for (int col = 0; col < 8; col++) {
+      for (int row = 0; row < 8; row++) {
+        int x = 120 + 32 * col, y = 139 + 29 * row;
+        if (col == row) diplom(384, 29, 32, 29, x, y);
+        else if (playing(g, col) && playing(g, row)) {
+          int st = dip::state(g, col, row);
+          if (st == dip::WAR) diplom(384, 0, 32, 29, x, y);
+          else if (st == dip::PEACE) diplom(320, 0, 32, 29, x, y);
+        }
+      }
+    }
+    kit::setPal(0);
+    kit::outline(392, 110, 160, 262);
+    const Font& f = kit::font(2);
+    gfx::setColor(1, 1, 1);
+    kit::centred(f, kit::text(0x6d, 0), 472, 116);
+    for (size_t i = 0; i < order.size(); i++) {
+      int y = 146 + 29 * (int)i;
+      smallShield(order[i]->index, 400, y);
+      gfx::setColor(1, 1, 1);
+      f.draw(titles[order[i]->index], 432, y);
+    }
+    kit::drawControls(v, hidden);
+  }
+  void mousepressed(int x, int y, int) override {
+    auto c = kit::controlAt(v, x, y, hidden);
+    if (!c) return;
+    if (c->id == DONE) kit::pop(this);
+    else if (c->id == ACTION) {
+      kit::pop(this);
+      openClassicAction();
+    }
+  }
+  void keypressed(const std::string& key) override {
+    if (key == "return" || key == "kpenter" || key == "escape") kit::pop(this);
+  }
+};
+
+void openClassicReport() {
+  auto d = std::make_shared<ClassicReport>();
+  d->v = kit::view(REPORT);
+  d->view = &d->v;
+  d->v.state[DONE] = d->v.state[ACTION] = w2::uidata::NORMAL;
+  if (!w2::game::hasActiveHuman(*G.g)) d->hidden.insert(ACTION);
+  d->titles = dip::ratings(*G.g);
+  for (w2::Side* s : G.g->sides) if (s->alive) d->order.push_back(s);
+  w2::luaSort(d->order, [](w2::Side* p, w2::Side* q) {
+    if (p->diploScore != q->diploScore) return p->diploScore < q->diploScore;
+    return p->index < q->index;
+  });
+  kit::push(d);
+}
+
+struct ClassicAction : kit::Modal {
+  screen::View v;
+  std::vector<int> others;
+  void draw() override {
+    w2::Game& g = *G.g;
+    int me = activeViewerIndex(g);
+    const w2::Side& mySide = g.map->sides[me];
+    kit::popup(R);
+    gfx::setColor(1, 1, 1);
+    kit::centred(kit::font(1), kit::text(0x6c, 0), 320, 64);
+    kit::shield(me, 96, 111);
+    const Font& f = kit::font(2);
+    gfx::setColor(1, 1, 1);
+    f.draw(mySide.name, 144, 122);
+    const int ys[7] = {165, 205, 251, 271, 291, 311, 331};
+    for (int i = 0; i < 7; i++) f.draw(kit::text(0x6e, i), 104, ys[i]);
+    for (size_t col = 0; col < others.size(); col++) {
+      int other = others[col];
+      int x = 272 + 40 * (int)col;
+      kit::shield(other, x, 111);
+      if (!playing(g, other)) {
+        for (int y : {151, 191, 245, 285, 325}) blank(x, y);
+      } else {
+        int st = dip::state(g, other, me);
+        diplom(80 + 120 * st, 45, 40, 40, x, 151);
+        int theirs = dip::proposal(g, other, me);
+        if (theirs == st) blank(x, 191);
+        else diplom(80 + 120 * theirs, 45, 40, 40, x, 191);
+        int mine = dip::proposal(g, me, other);
+        for (int k = 0; k <= 2; k++) diplom(120 * k + (mine == k ? 40 : 0), 45, 40, 40, x, 245 + 40 * k);
+      }
+    }
+    std::set<int> h;
+    for (int k = 0; k <= 2; k++) for (int i = 0; i <= 6; i++) h.insert(OFFER[k] + i);
+    kit::drawControls(v, h);
+  }
+  void mousepressed(int x, int y, int) override {
+    auto c = kit::controlAt(v, x, y);
+    if (!c) return;
+    if (c->id == OK) { kit::pop(this); return; }
+    if (c->id == BACK) {
+      kit::pop(this);
+      openClassicReport();
+      return;
+    }
+    int me = activeViewerIndex(*G.g);
+    for (int k = 0; k <= 2; k++) {
+      int i = c->id - OFFER[k];
+      if (i >= 0 && i < 7 && i < (int)others.size()) dip::propose(*G.g, me, others[i], k);
+    }
+  }
+  void keypressed(const std::string& key) override {
+    if (key == "return" || key == "kpenter" || key == "escape") kit::pop(this);
+  }
+};
+
+void openClassicAction() {
+  auto d = std::make_shared<ClassicAction>();
+  d->v = kit::view(ACT);
+  d->view = &d->v;
+  for (auto& c : d->v.dialog.controls) d->v.state[c.id] = w2::uidata::NORMAL;
+  int me = activeViewerIndex(*G.g);
+  for (int i = 0; i < 8; i++) if (i != me) d->others.push_back(i);
+  kit::push(d);
+}
+
 // Sanitize UTF-8 punctuation and bitmap-font repurposed glyphs:
 // In SSG's TEXT.FNT (smallFont == true), ASCII '&' (38) is the menu checkmark
 // glyph and '`' (96) is a solid block.
@@ -993,16 +1138,18 @@ struct BrainInspectorModal : kit::Modal {
 
 void open() {
   if (G.g->map->options.diplomacy == 0) return;
-  openReport();
+  if (G.modernUi) openReport();
+  else openClassicReport();
 }
 
 void action() {
   if (G.g->map->options.diplomacy == 0) return;
-  openAction();
+  if (G.modernUi) openAction();
+  else openClassicAction();
 }
 
 void openParley(int otherSide, bool returnToAction) {
-  if (!G.g || otherSide < 0 || otherSide >= 8) return;
+  if (!G.modernUi || !G.g || otherSide < 0 || otherSide >= 8) return;
   auto d = std::make_shared<ParleyModal>();
   d->other = otherSide;
   d->returnToAction = returnToAction;
@@ -1010,6 +1157,11 @@ void openParley(int otherSide, bool returnToAction) {
 }
 
 void pollMissives(kit::Done after) {
+  if (!G.modernUi) {
+    if (G.player) G.player->missives.clear();
+    if (after) after();
+    return;
+  }
   if (!G.g || !G.player || G.player->computer || G.player->missives.empty()) {
     if (after) after();
     return;
@@ -1027,7 +1179,7 @@ void pollMissives(kit::Done after) {
 }
 
 void openBrainInspector(int initialSide) {
-  if (!G.g) return;
+  if (!G.modernUi || !G.g) return;
   auto d = std::make_shared<BrainInspectorModal>();
   if (initialSide >= 0 && initialSide < 8 && playing(*G.g, initialSide)) {
     d->sideIdx = initialSide;
@@ -1051,6 +1203,8 @@ int buttonFor(w2::Game& g, int me) {
       if (p != st) {
         if (p < st) friendlier = true;
         else hostile = true;
+      } else if (G.modernUi && dip::proposalAllied(g, s, me) && !dip::isAllied(g, s, me)) {
+        friendlier = true;
       }
     }
   }
