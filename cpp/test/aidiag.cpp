@@ -99,6 +99,7 @@ int main(int argc, char** argv) {
 
   std::map<std::string, int> missions, built;
   long armyTurns = 0, moved = 0;
+  long cityTurns = 0, producingTurns = 0, purchases = 0, richTurns = 0, sideTurns = 0;
   int lastPrinted = 0;
   Side* cur = game::begin(g);
   while (cur && !g.over && !g.won && g.turn <= turns) {
@@ -106,7 +107,26 @@ int main(int argc, char** argv) {
       if (modern[cur->index]) {
         std::map<Army*, int> before;
         for (Army* a : g.armies) if (a->owner == cur->index && a->x != NONE) before[a] = a->y * 1000 + a->x;
+        std::map<int, std::vector<int>> slotsBefore;
+        for (auto& c : g.map->cities) {
+          if (c.ownerIndex != cur->index) continue;
+          for (const auto& sl : c.slots) slotsBefore[c.index].push_back(sl.type);
+        }
         ai::modern::playTurn(g, *cur, nullptr, &net, nullptr);
+        sideTurns++;
+        if (cur->gold >= 1500) richTurns++;
+        for (auto& c : g.map->cities) {
+          if (c.ownerIndex != cur->index || c.razed) continue;
+          cityTurns++;
+          if (game::producing(c)) producingTurns++;
+          auto it = slotsBefore.find(c.index);
+          for (const auto& sl : c.slots) {
+            if (it != slotsBefore.end() &&
+                std::find(it->second.begin(), it->second.end(), sl.type) == it->second.end()) {
+              purchases++;
+            }
+          }
+        }
         for (auto& [a, pos] : before) {
           if (!g.alive(a)) continue;
           armyTurns++;
@@ -135,6 +155,10 @@ int main(int argc, char** argv) {
   }
   std::printf("\nModern armies that moved on their turn: %ld of %ld army-turns (%.0f%%)\n", moved, armyTurns,
               100.0 * moved / std::max(1L, armyTurns));
+  std::printf("Modern economy: cities producing %ld of %ld city-turns (%.0f%%) | slot purchases %ld | "
+              "side-turns ending with >= 1500 gold: %ld of %ld\n",
+              producingTurns, cityTurns, 100.0 * producingTurns / std::max(1L, cityTurns), purchases, richTurns,
+              sideTurns);
   std::printf("Modern missions other than holding a city (kind: count):\n");
   for (auto& [k, v] : missions) std::printf("  %-16s %d\n", k.c_str(), v);
   std::printf("Modern city production (unit: city-turns):\n");
