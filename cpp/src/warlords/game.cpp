@@ -1,7 +1,9 @@
 #include "warlords/game.hpp"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
+#include <queue>
 #include <set>
 
 #include "util/util.hpp"
@@ -204,13 +206,175 @@ static void dealCities(Game& g) {
   }
 }
 
+// Optional scale reduction for curriculum training & fast small-map benchmarks:
+// keeps `activeSides` nearest capitals (preferring land-connected neighbours)
+// and crops the world to a padded island around them without changing MAP_W/H.
+static void applyScaleAndCrop(Map& m, const NewGameOptions& opts) {
+  std::vector<int> avail;
+  for (int i = 0; i < 8; i++) {
+    if (m.sides[i].inUse && m.sides[i].capital) avail.push_back(i);
+  }
+  if (opts.activeSides > 0 && (int)avail.size() > opts.activeSides) {
+    uint32_t h = (uint32_t)opts.seed * 2654435761u + 0x9e3779b9u;
+    int s0 = avail[h % avail.size()];
+    int ax = m.sides[s0].capX, ay = m.sides[s0].capY;
+
+    std::vector<int> landDist(MAP_W * MAP_H, INT_MAX);
+    std::queue<std::pair<int, int>> q;
+    if (ax >= 0 && ay >= 0 && ax < MAP_W && ay < MAP_H) {
+      landDist[ay * MAP_W + ax] = 0;
+      q.push({ax, ay});
+    }
+    while (!q.empty()) {
+      auto [cx, cy] = q.front();
+      q.pop();
+      int cd = landDist[cy * MAP_W + cx];
+      for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+          if (dx == 0 && dy == 0) continue;
+          int nx = cx + dx, ny = cy + dy;
+          if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+          int nk = ny * MAP_W + nx;
+          if (landDist[nk] != INT_MAX) continue;
+          if (scn::terrainAt(m, nx, ny) == move::WATER) continue;
+          landDist[nk] = cd + 1;
+          q.push({nx, ny});
+        }
+      }
+    }
+
+    auto metric = [&](int s) -> std::tuple<int, int, int, int> {
+      if (s == s0) return {0, 0, 0, s};
+      int sx = m.sides[s].capX, sy = m.sides[s].capY;
+      int ld = (sx >= 0 && sy >= 0 && sx < MAP_W && sy < MAP_H) ? landDist[sy * MAP_W + sx] : INT_MAX;
+      int dx = sx - ax, dy = sy - ay;
+      int d2 = dx * dx + dy * dy;
+      return {1, ld == INT_MAX ? 1 : 0, ld < INT_MAX ? ld : d2, s};
+    };
+    std::sort(avail.begin(), avail.end(), [&](int a, int b) { return metric(a) < metric(b); });
+    for (size_t i = (size_t)opts.activeSides; i < avail.size(); i++) {
+      Side& sd = m.sides[avail[i]];
+      if (sd.capital) sd.capital->owner = nullptr;
+      sd.capital = nullptr;
+      sd.inUse = false;
+    }
+  }
+
+  if (opts.cropMargin <= 0) return;
+
+  int minX = MAP_W, maxX = 0, minY = MAP_H, maxY = 0;
+  bool anySide = false;
+  for (const auto& sd : m.sides) {
+    if (!sd.inUse) continue;
+    minX = std::min(minX, sd.capX);
+    maxX = std::max(maxX, sd.capX + 1);
+    minY = std::min(minY, sd.capY);
+    maxY = std::max(maxY, sd.capY + 1);
+    anySide = true;
+  }
+  if (!anySide) return;
+
+  int x0 = std::max(2, minX - opts.cropMargin);
+  int x1 = std::min(MAP_W - 3, maxX + opts.cropMargin);
+  int y0 = std::max(2, minY - opts.cropMargin);
+  int y1 = std::min(MAP_H - 3, maxY + opts.cropMargin);
+  m.activeX0 = x0;
+  m.activeY0 = y0;
+  m.activeX1 = x1;
+  m.activeY1 = y1;
+
+  int plainTile = 0, waterTile = 0;
+  for (int t = 0; t < 255; t++) {
+    if (m.terrainType[t] == move::PLAIN) { plainTile = t; break; }
+  }
+  for (int t = 0; t < 255; t++) {
+    if (m.terrainType[t] == move::WATER) { waterTile = t; break; }
+  }
+
+  std::vector<City> keptCities;
+  for (auto& c : m.cities) {
+    if (c.x >= x0 && c.x + 1 <= x1 && c.y >= y0 && c.y + 1 <= y1) {
+      c.index = (int)keptCities.size();
+      c.owner = nullptr;
+      keptCities.push_back(std::move(c));
+    } else {
+      for (int dy = 0; dy <= 1; dy++) {
+        for (int dx = 0; dx <= 1; dx++) {
+          int tx = c.x + dx, ty = c.y + dy;
+          if (tx >= 0 && ty >= 0 && tx < MAP_W && ty < MAP_H) {
+            m.tiles[ty * MAP_W + tx] = plainTile;
+          }
+        }
+      }
+    }
+  }
+  m.cities = std::move(keptCities);
+  m.cityAt.assign(MAP_W * MAP_H, nullptr);
+  m.cityTile.assign(MAP_W * MAP_H, nullptr);
+  for (auto& c : m.cities) {
+    m.cityAt[c.y * MAP_W + c.x] = &c;
+    for (int dy = 0; dy <= 1; dy++) {
+      for (int dx = 0; dx <= 1; dx++) m.cityTile[(c.y + dy) * MAP_W + (c.x + dx)] = &c;
+    }
+  }
+  for (auto& sd : m.sides) {
+    sd.capital = nullptr;
+    if (!sd.inUse) continue;
+    City* cap = (sd.capX >= 0 && sd.capY >= 0 && sd.capX < MAP_W && sd.capY < MAP_H)
+                    ? m.cityAt[sd.capY * MAP_W + sd.capX]
+                    : nullptr;
+    if (cap) {
+      sd.capital = cap;
+      cap->owner = &sd;
+    } else {
+      sd.inUse = false;
+    }
+  }
+
+  std::vector<Site> keptSites;
+  for (auto& st : m.sites) {
+    if (st.x >= x0 && st.x <= x1 && st.y >= y0 && st.y <= y1) {
+      st.index = (int)keptSites.size();
+      keptSites.push_back(std::move(st));
+    } else if (st.x >= 0 && st.y >= 0 && st.x < MAP_W && st.y < MAP_H) {
+      m.tiles[st.y * MAP_W + st.x] = plainTile;
+    }
+  }
+  m.sites = std::move(keptSites);
+
+  std::vector<Sign> keptSigns;
+  for (auto& sg : m.signs) {
+    if (sg.x >= x0 && sg.x <= x1 && sg.y >= y0 && sg.y <= y1) {
+      sg.index = (int)keptSigns.size();
+      keptSigns.push_back(std::move(sg));
+    }
+  }
+  m.signs = std::move(keptSigns);
+
+  // Leave a 2-tile natural terrain ring around [x0..x1]x[y0..y1] so border
+  // cities do not artificially become coastal ports, then convert outer tiles to ocean.
+  int bx0 = std::max(0, x0 - 2), bx1 = std::min(MAP_W - 1, x1 + 2);
+  int by0 = std::max(0, y0 - 2), by1 = std::min(MAP_H - 1, y1 + 2);
+  for (int y = 0; y < MAP_H; y++) {
+    for (int x = 0; x < MAP_W; x++) {
+      if (x < bx0 || x > bx1 || y < by0 || y > by1) {
+        int k = y * MAP_W + x;
+        m.tiles[k] = waterTile;
+        m.roads[k] = '\0';
+        m.crossing[k] = false;
+      }
+    }
+  }
+}
+
 std::unique_ptr<Game> newGame(const std::string& dataDir, const std::string& scenario, const NewGameOptions& opts) {
   auto gp = std::make_unique<Game>();
   Game& g = *gp;
   g.rng = Rng(opts.seed);
   g.dataDir = dataDir;
   armytype::load(dataDir + "/TERRAIN0/ARMYTYPE.DAT", g.types);
-  g.map = scn::load(dataDir + "/" + scenario, scenario);
+  g.map = opts.memoryFiles ? scn::loadFromFiles(dataDir + "/" + scenario, scenario, *opts.memoryFiles)
+                           : scn::load(dataDir + "/" + scenario, scenario);
   g.greatest = opts.greatest;
   for (auto& [k, v] : opts.options) {
     if (int* f = g.map->options.field(k)) *f = v;
@@ -229,6 +393,9 @@ std::unique_ptr<Game> newGame(const std::string& dataDir, const std::string& sce
         s.card = o.card;
       }
     }
+  }
+  if ((opts.activeSides > 0 && opts.activeSides < 8) || opts.cropMargin > 0) {
+    applyScaleAndCrop(*g.map, opts);
   }
 
   for (auto& s : g.map->sides) {
@@ -263,7 +430,21 @@ std::unique_ptr<Game> newGame(const std::string& dataDir, const std::string& sce
   diplomacy::init(g);
   setupGarrisons(g);
   site::setup(g);
-  for (Side* s : g.sides) revealStart(g, *s);
+  for (Side* s : g.sides) {
+    revealStart(g, *s);
+    if (g.map->options.hiddenMap != 0 && opts.cropMargin > 0) {
+      int bx0 = std::max(0, g.map->activeX0 - 2), bx1 = std::min(MAP_W - 1, g.map->activeX1 + 2);
+      int by0 = std::max(0, g.map->activeY0 - 2), by1 = std::min(MAP_H - 1, g.map->activeY1 + 2);
+      auto& mask = g.explored[s->index];
+      if ((int)mask.size() == MAP_W * MAP_H) {
+        for (int y = 0; y < MAP_H; y++) {
+          for (int x = 0; x < MAP_W; x++) {
+            if (x < bx0 || x > bx1 || y < by0 || y > by1) mask[y * MAP_W + x] = 1;
+          }
+        }
+      }
+    }
+  }
   ai::startGame(g);
 
   // the turn order (.SCN 0x163), as the scenario gives it; Random Turns

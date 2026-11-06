@@ -21,6 +21,9 @@ std::vector<Sign> loadSigns(const std::string& path);
 
 /** Load a scenario from `dir` (the scenario's folder) and its name. */
 std::unique_ptr<Map> load(const std::string& dir, const std::string& name);
+/** Load a scenario primarily from in-memory extension->bytes `files`, falling back to `dir/name.EXT`. */
+std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& name,
+                                   const std::map<std::string, std::string>& files);
 
 inline int tileAt(const Map& m, int x, int y) { return m.tiles[y * MAP_W + x]; }
 inline int roadAt(const Map& m, int x, int y) { return (uint8_t)m.roads[y * MAP_W + x]; }

@@ -91,11 +91,9 @@ std::optional<std::vector<PoolItem>> loadItemPool(const std::string& path) {
   return pool;
 }
 
-std::map<int, std::array<std::string, 3>> loadDescriptions(const std::string& path) {
+static std::map<int, std::array<std::string, 3>> parseDescriptions(const std::vector<std::string>& ls) {
   std::map<int, std::array<std::string, 3>> out;
-  auto ls = lines(path);
-  if (!ls) return out;
-  for (auto& line : *ls) {
+  for (auto& line : ls) {
     // ^#(\d+)\|(.*)$
     if (line.size() < 2 || line[0] != '#') continue;
     size_t i = 1;
@@ -117,27 +115,49 @@ std::map<int, std::array<std::string, 3>> loadDescriptions(const std::string& pa
   return out;
 }
 
-std::vector<Sign> loadSigns(const std::string& path) {
+std::map<int, std::array<std::string, 3>> loadDescriptions(const std::string& path) {
+  auto ls = lines(path);
+  if (!ls) return {};
+  return parseDescriptions(*ls);
+}
+
+static std::vector<Sign> parseSigns(const std::string& s) {
   std::vector<Sign> out;
-  auto s = readFile(path);
-  if (!s) return out;
-  int n = u16(*s, 0);
+  if (s.size() < 2) return out;
+  int n = u16(s, 0);
   for (int i = 0; i < n; i++) {
     size_t o = 2 + 104 * i;
-    if (o + 104 > s->size()) break;
+    if (o + 104 > s.size()) break;
     Sign sg;
     sg.index = i;
-    sg.x = u16(*s, o);
-    sg.y = u16(*s, o + 2);
-    sg.lines = {cstr(*s, o + 4, 50), cstr(*s, o + 54, 50)};
+    sg.x = u16(s, o);
+    sg.y = u16(s, o + 2);
+    sg.lines = {cstr(s, o + 4, 50), cstr(s, o + 54, 50)};
     out.push_back(sg);
   }
   return out;
 }
 
-std::unique_ptr<Map> load(const std::string& dir, const std::string& name) {
+std::vector<Sign> loadSigns(const std::string& path) {
+  auto s = readFile(path);
+  if (!s) return {};
+  return parseSigns(*s);
+}
+
+std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& name,
+                                   const std::map<std::string, std::string>& files) {
   std::string base = dir + "/" + name;
-  std::string s = mustRead(base + ".SCN");
+  auto getOpt = [&](const char* ext) -> std::optional<std::string> {
+    auto it = files.find(ext);
+    if (it != files.end()) return it->second;
+    return readFile(base + "." + ext);
+  };
+  auto getMust = [&](const char* ext) -> std::string {
+    auto v = getOpt(ext);
+    if (!v) throw std::runtime_error("cannot open: " + base + "." + ext);
+    return *v;
+  };
+  std::string s = getMust("SCN");
   if (s.size() != 12001) throw std::runtime_error(fmt("unexpected .SCN size: %d", (int)s.size()));
   auto m = std::make_unique<Map>();
   m->name = name;
@@ -240,7 +260,7 @@ std::unique_ptr<Map> load(const std::string& dir, const std::string& name) {
   for (int i = 0; i < TERRAIN_COUNT; i++) m->terrainType[i] = u8(s, TERRAIN_TABLE + i);
 
   // terrain grid + road overlay; bit 15 of a map word marks a crossing
-  std::string mp = mustRead(base + ".MAP");
+  std::string mp = getMust("MAP");
   m->tiles.resize(MAP_W * MAP_H);
   m->crossing.resize(MAP_W * MAP_H);
   for (int i = 0; i < MAP_W * MAP_H; i++) {
@@ -248,15 +268,19 @@ std::unique_ptr<Map> load(const std::string& dir, const std::string& name) {
     m->tiles[i] = w % 0x8000;
     m->crossing[i] = w >= 0x8000;
   }
-  m->roads = mustRead(base + ".RD");
+  m->roads = getMust("RD");
   if ((int)m->roads.size() < MAP_W * MAP_H) m->roads.resize(MAP_W * MAP_H, '\0');
 
   m->itemPool = loadItemPool(base + ".ITM");
-  m->cityText = loadDescriptions(base + ".CTY");
-  m->siteText = loadDescriptions(base + ".SPC");
-  m->signs = loadSigns(base + ".SGN");
+  if (auto cty = getOpt("CTY")) m->cityText = parseDescriptions(splitLines(*cty));
+  if (auto spc = getOpt("SPC")) m->siteText = parseDescriptions(splitLines(*spc));
+  if (auto sgn = getOpt("SGN")) m->signs = parseSigns(*sgn);
   m->combatCap = u16(s, COMBAT_CAP);
   return m;
+}
+
+std::unique_ptr<Map> load(const std::string& dir, const std::string& name) {
+  return loadFromFiles(dir, name, {});
 }
 
 int cityTileBase(const City& city) {

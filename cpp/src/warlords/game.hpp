@@ -36,6 +36,9 @@ struct NewGameOptions {
   std::vector<std::pair<std::string, int>> options;   // option name, value
   std::map<int, SideSetup> sides;                     // by side index
   bool greatest = false;
+  const std::map<std::string, std::string>* memoryFiles = nullptr;
+  int activeSides = 0;   // 0 = keep all scenario sides; 2..8 = keep K nearest capitals
+  int cropMargin = 0;    // >0 = crop map to active capitals +/- cropMargin tiles
 };
 
 /** Build a fresh game from the original data files. */

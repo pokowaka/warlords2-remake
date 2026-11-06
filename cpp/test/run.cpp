@@ -3538,6 +3538,49 @@ static void testModernAi() {
 
       ai::setDefaultClassicAi(prevDefault);
     }
+
+    // Small-map scaling (activeSides + cropMargin) and thread-local in-memory random maps
+    {
+      Rng mapRng(4242.0);
+      randommap::Options ro;
+      ro.dataDir = DATA;
+      ro.rng = &mapRng;
+      ro.sliders = {3, 3, 2, 3};
+      auto rfiles = randommap::generateNow(ro);
+
+      game::NewGameOptions so;
+      so.seed = 4242.0;
+      so.memoryFiles = &rfiles;
+      so.activeSides = 2;
+      so.cropMargin = 14;
+      so.options = {{"hiddenMap", 1}, {"diplomacy", 0}, {"neutralCities", 1}, {"quests", 1}};
+      for (int i = 0; i < 8; i++) {
+        so.sides[i].computer = true;
+        so.sides[i].level = 2;
+      }
+      auto gpSmall = game::newGame(DATA, "RANDOM", so);
+      Game& gs = *gpSmall;
+      eq((int)gs.sides.size(), 2, "cropped 1v1 random map keeps exactly 2 active sides");
+      ok(gs.map->cities.size() >= 2 && gs.map->cities.size() < 45, "cropped 1v1 random map trims city count");
+      bool citiesInBox = true;
+      for (const auto& c : gs.map->cities) {
+        if (c.x < gs.map->activeX0 || c.x + 1 > gs.map->activeX1 || c.y < gs.map->activeY0 || c.y + 1 > gs.map->activeY1) {
+          citiesInBox = false;
+        }
+      }
+      ok(citiesInBox, "all cropped cities sit inside the active island box");
+      eq(scn::terrainAt(*gs.map, 0, 0), movement::WATER, "outer cropped border tile (0,0) is converted to water");
+      eq(game::seen(gs, gs.sides[0]->index, 0, 0), true, "outer cropped water is pre-marked seen under Hidden Map");
+
+      gs.sides[0]->classicAi = false;
+      gs.sides[1]->classicAi = true;
+      Side* cur = game::begin(gs);
+      while (cur && !gs.over && !gs.won && gs.turn <= 10) {
+        if (cur->alive) ai::playTurn(gs, *cur);
+        cur = game::endTurn(gs);
+      }
+      ok(gs.turn > 5 || gs.won || gs.over, "1v1 cropped random map runs Modern vs Classic cleanly");
+    }
   }
 }
 

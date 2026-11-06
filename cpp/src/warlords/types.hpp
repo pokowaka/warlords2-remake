@@ -311,6 +311,7 @@ struct Map {
   std::vector<int> tiles;
   std::string roads;
   int width = MAP_W, height = MAP_H;
+  int activeX0 = 0, activeY0 = 0, activeX1 = MAP_W - 1, activeY1 = MAP_H - 1;
 
   Side* side(int i) { return i >= 0 && i < 8 ? &sides[i] : nullptr; }
   City* city(int i) { return i >= 0 && i < (int)cities.size() ? &cities[i] : nullptr; }
