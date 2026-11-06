@@ -12,10 +12,10 @@ exactly how to continue training on a larger machine.
 > (Modern largest side in 80 / 256 instead of 55 / 256; 50 % = parity with the
 > Warlord Classic AI). It is at parity at turn 20 (51 %) but fades to ~43 % at turn
 > 40 and ~39 % at turn 80, because it leaves captured cities empty: in total-war
-> games it loses ~300 cities per game, ~88 % of them undefended. Five warm-started
+> games it loses ~300 cities per game, ~88 % of them undefended. Six warm-started
 > PPO recipe variants (better critic, higher learning rate, 4v4 games, low
-> training temperature, 60-turn games) did not measurably beat it; training
-> against Raider opponents is being evaluated. Current work: train the AI to discover defence itself through
+> training temperature, 60-turn games, 50 % Raider opponents) did not measurably
+> beat it. Current work: train the AI to discover defence itself through
 > **departure credit** and **empty-city inputs** (§6.3, §8). The original
 > curriculum results are in §6.2.
 
@@ -299,6 +299,7 @@ iterations × 432 games, paired vs installed at T = 0.02):
 | E3 | 50 % of games 4 vs 4, all learner seats recorded | +1.0 % ± 2.7 % |
 | E4 | training temperature 0.25 → 0.15 | −1.3 % ± 2.5 % |
 | E5 | 60-turn games (judged at turn 60) | −0.8 % ± 3.0 % |
+| E6 | 50 % of Classic seats are Raiders, 64 iterations | −0.8 % ± 2.9 % |
 | soups | weight average of E1–E3 checkpoints | −0.6 % / +1.0 % |
 
 KL per iteration stays ~0.001–0.002 whatever the learning rate: the recipe sits
@@ -328,7 +329,8 @@ pressure comes from training opponents (`cpp/test/opponents.cpp`). The
 **Raider** plays the Classic AI but first walks its weakest armies into every
 reachable undefended enemy city, the learner's first. Raiders take 30–40 more
 cities per game than plain Classic sides; the installed AI scores 41.1 % against
-them. Training with 50 % Raider seats (E6) — result pending.
+them. Training with 50 % Raider seats alone (E6) did not help (table above):
+the punishment is still a turn-level signal shared by every move.
 
 **Departure credit and empty-city inputs** (`7c7d995`, experiments pending):
 - `--departure-weight W`: a move that leaves an own city empty (still empty at
