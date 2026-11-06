@@ -40,10 +40,20 @@ constexpr int ECON_CURRENT = 20;
 constexpr int ECON_IN_DIM = CONTEXT_DIM + ECON_FEAT_DIM;          // 44
 constexpr int ECON_OUT_DIM = 1;
 
-constexpr int VALUE_IN_DIM = CONTEXT_DIM;                         // 24
+// Privileged critic features (asymmetric actor-critic). The two critics are
+// used only to compute training advantages, so they may read the true game
+// state (all cities, armies, opponents' types) to explain more of the return
+// variance. The policy heads never see these features. Layout: see
+// buildCriticFeatures().
+constexpr int CRITIC_DIM = 16;
+
+constexpr int VALUE_IN_DIM = CONTEXT_DIM + CRITIC_DIM;            // 40
 constexpr int VALUE_OUT_DIM = 1;
 
-constexpr int STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM;       // 40
+constexpr int STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM + CRITIC_DIM;  // 56
+// Input widths of the critics before the privileged features (weights v3/v4)
+constexpr int LEGACY_VALUE_IN_DIM = CONTEXT_DIM;                  // 24
+constexpr int LEGACY_STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM; // 40
 
 /** Sampling temperature the Modern AI plays real games at (training anneals to it). */
 constexpr float DEPLOY_TEMPERATURE = 0.5f;
@@ -53,6 +63,8 @@ using RivalVec = std::array<float, RIVAL_DIM>;
 using StackVec = std::array<float, STACK_DIM>;
 using TargetVec = std::array<float, TARGET_DIM>;
 using EconVec = std::array<float, ECON_FEAT_DIM>;
+using CriticVec = std::array<float, CRITIC_DIM>;
+using ValueInVec = std::array<float, VALUE_IN_DIM>;
 
 using DiploInVec = std::array<float, DIPLO_IN_DIM>;
 using MissionInVec = std::array<float, MISSION_IN_DIM>;
@@ -103,6 +115,13 @@ struct ResidualMLP {
   void zero();
   void toFlat(std::vector<float>& out) const;
   size_t fromFlat(const std::vector<float>& in, size_t offset);
+
+  /**
+   * Loads weights saved with a narrower input (`oldInDim` <= InDim): the first
+   * `oldInDim` input columns are copied, the extra ones start at zero, so the
+   * function computed is unchanged until training uses the new inputs.
+   */
+  size_t fromFlatNarrowInput(const std::vector<float>& in, size_t offset, int oldInDim);
 };
 
 class PolicyNetwork {
@@ -113,9 +132,14 @@ class PolicyNetwork {
   using ValueNet = ResidualMLP<VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
   using StackValueNet = ResidualMLP<STACK_VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
 
+  static constexpr int TOTAL_PARAMS = DiploNet::PARAM_COUNT + MissionNet::PARAM_COUNT + EconNet::PARAM_COUNT +
+                                      ValueNet::PARAM_COUNT + StackValueNet::PARAM_COUNT;
+  /** Parameters of the critics before the privileged inputs were added (v3/v4 files). */
+  static constexpr int LEGACY_VALUE_PARAMS = ValueNet::PARAM_COUNT - CRITIC_DIM * (1 + 24);
+  static constexpr int LEGACY_STACK_VALUE_PARAMS = StackValueNet::PARAM_COUNT - CRITIC_DIM * (1 + 24);
   static constexpr int LEGACY_V3_PARAMS =
-      DiploNet::PARAM_COUNT + MissionNet::PARAM_COUNT + EconNet::PARAM_COUNT + ValueNet::PARAM_COUNT;
-  static constexpr int TOTAL_PARAMS = LEGACY_V3_PARAMS + StackValueNet::PARAM_COUNT;
+      DiploNet::PARAM_COUNT + MissionNet::PARAM_COUNT + EconNet::PARAM_COUNT + LEGACY_VALUE_PARAMS;
+  static constexpr int LEGACY_V4_PARAMS = LEGACY_V3_PARAMS + LEGACY_STACK_VALUE_PARAMS;
 
   PolicyNetwork();
 
@@ -135,7 +159,7 @@ class PolicyNetwork {
   float scoreEconomy(const ContextVec& ctx, const EconVec& econ) const;
 
   /** Evaluates Head 4 (critic: expected discounted return in empire-score units, unbounded). */
-  float evaluateValue(const ContextVec& ctx) const;
+  float evaluateValue(const ContextVec& ctx, const CriticVec& critic) const;
 
   /** Evaluates Head 5 (per-stack local critic: expected multi-turn local score change from group state). */
   float evaluateStackValue(const StackValueInVec& stackState) const;
@@ -143,7 +167,7 @@ class PolicyNetwork {
   /** Flattens all 5 heads into a single vector of length TOTAL_PARAMS. */
   std::vector<float> flatten() const;
 
-  /** Loads parameters from a flat vector of length TOTAL_PARAMS (or LEGACY_V3_PARAMS). */
+  /** Loads parameters from a flat vector of length TOTAL_PARAMS (or LEGACY_V4/V3_PARAMS). */
   void unflatten(const std::vector<float>& params);
 
   /** Saves the weights with the training iteration and the held-out selection score. */
@@ -200,6 +224,7 @@ struct DiploStepRecord {
 
 struct TurnStepRecord {
   ContextVec startCtx{};
+  CriticVec startCritic{};            // privileged critic features as the turn begins
   float valuePred = 0.0f;
   float startScore = 0.0f;            // empire score as the turn begins
   float advantage = 0.0f;             // GAE, filled by the trainer
@@ -226,8 +251,11 @@ MissionInVec packMissionInput(const ContextVec& ctx, const StackVec& stack, cons
 /** Packs (ContextVec, EconVec) into a single EconInVec. */
 EconInVec packEconInput(const ContextVec& ctx, const EconVec& econ);
 
-/** Packs (ContextVec, StackVec) into a single StackValueInVec. */
-StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack);
+/** Packs (ContextVec, CriticVec) into a single ValueInVec. */
+ValueInVec packValueInput(const ContextVec& ctx, const CriticVec& critic);
+
+/** Packs (ContextVec, StackVec, CriticVec) into a single StackValueInVec. */
+StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack, const CriticVec& critic);
 
 /**
  * Samples an index from softmax(logits / temperature) when `sampler != nullptr`,
@@ -261,5 +289,12 @@ PolicyNetwork& activePolicy();
 
 /** Builds the 24D fair-information (Global State + Personality) context vector for `side`. */
 ContextVec buildContext(const Game& g, const Side& side);
+
+/**
+ * Builds the privileged critic features for `side` from the true game state.
+ * Training-only information: fed to ValueNet / StackValueNet, never to a
+ * policy head.
+ */
+CriticVec buildCriticFeatures(const Game& g, const Side& side);
 
 }  // namespace w2::ai::ml

@@ -133,6 +133,29 @@ size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::fromFlat(const std::vector<floa
   return offset;
 }
 
+template <int InDim, int H1Dim, int H2Dim, int OutDim>
+size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::fromFlatNarrowInput(const std::vector<float>& in, size_t offset,
+                                                                      int oldInDim) {
+  auto next = [&]() { return offset < in.size() ? in[offset++] : 0.0f; };
+  auto copyMatrix = [&](auto& arr, int rows) {
+    arr.fill(0.0f);
+    for (int r = 0; r < rows; r++) {
+      for (int c = 0; c < oldInDim; c++) arr[r * InDim + c] = next();
+    }
+  };
+  auto copySlice = [&](auto& arr) {
+    for (float& v : arr) v = next();
+  };
+  copyMatrix(wSkip, OutDim);
+  copyMatrix(w1, H1Dim);
+  copySlice(b1);
+  copySlice(w2);
+  copySlice(b2);
+  copySlice(w3);
+  copySlice(b3);
+  return offset;
+}
+
 template struct ResidualMLP<DIPLO_IN_DIM, 24, 12, DIPLO_OUT_DIM>;
 template struct ResidualMLP<MISSION_IN_DIM, 32, 16, MISSION_OUT_DIM>;
 template struct ResidualMLP<ECON_IN_DIM, 24, 12, ECON_OUT_DIM>;
@@ -207,10 +230,18 @@ EconInVec packEconInput(const ContextVec& ctx, const EconVec& econ) {
   return x;
 }
 
-StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack) {
+ValueInVec packValueInput(const ContextVec& ctx, const CriticVec& critic) {
+  ValueInVec x{};
+  std::copy(ctx.begin(), ctx.end(), x.begin());
+  std::copy(critic.begin(), critic.end(), x.begin() + CONTEXT_DIM);
+  return x;
+}
+
+StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack, const CriticVec& critic) {
   StackValueInVec x{};
   std::copy(ctx.begin(), ctx.end(), x.begin());
   std::copy(stack.begin(), stack.end(), x.begin() + CONTEXT_DIM);
+  std::copy(critic.begin(), critic.end(), x.begin() + CONTEXT_DIM + STACK_DIM);
   return x;
 }
 
@@ -233,10 +264,10 @@ float PolicyNetwork::scoreEconomy(const ContextVec& ctx, const EconVec& econ) co
   return econNet.forward(packEconInput(ctx, econ))[0];
 }
 
-float PolicyNetwork::evaluateValue(const ContextVec& ctx) const {
+float PolicyNetwork::evaluateValue(const ContextVec& ctx, const CriticVec& critic) const {
   // Linear: the critic predicts discounted return in empire-score units, which
   // is not bounded to [-1, 1]
-  return valueNet.forward(ctx)[0];
+  return valueNet.forward(packValueInput(ctx, critic))[0];
 }
 
 float PolicyNetwork::evaluateStackValue(const StackValueInVec& stackState) const {
@@ -259,9 +290,15 @@ void PolicyNetwork::unflatten(const std::vector<float>& params) {
   off = diploNet.fromFlat(params, off);
   off = missionNet.fromFlat(params, off);
   off = econNet.fromFlat(params, off);
-  off = valueNet.fromFlat(params, off);
-  if (off < params.size()) {
+  if (params.size() == (size_t)TOTAL_PARAMS) {
+    off = valueNet.fromFlat(params, off);
     stackValueNet.fromFlat(params, off);
+    return;
+  }
+  // v3/v4 files: critics without the privileged inputs (zero-initialised columns)
+  off = valueNet.fromFlatNarrowInput(params, off, LEGACY_VALUE_IN_DIM);
+  if (params.size() == (size_t)LEGACY_V4_PARAMS) {
+    stackValueNet.fromFlatNarrowInput(params, off, LEGACY_STACK_VALUE_IN_DIM);
   } else {
     stackValueNet.zero();
   }
@@ -272,7 +309,7 @@ bool PolicyNetwork::saveJson(const std::filesystem::path& path, int generation, 
   if (!out.is_open()) return false;
   auto weights = flatten();
   out << "{\n";
-  out << "  \"version\": 4,\n";
+  out << "  \"version\": 5,\n";
   out << "  \"generation\": " << generation << ",\n";
   out << "  \"selectionCityShare\": " << selectionCityShare << ",\n";
   out << "  \"paramCount\": " << weights.size() << ",\n";
@@ -295,7 +332,7 @@ bool PolicyNetwork::loadJson(const std::filesystem::path& path) {
     Json root = Json::parse(buf.str());
     const Json& arr = root["weights"];
     int n = (int)arr.size();
-    if (n != TOTAL_PARAMS && n != LEGACY_V3_PARAMS) return false;
+    if (n != TOTAL_PARAMS && n != LEGACY_V4_PARAMS && n != LEGACY_V3_PARAMS) return false;
     std::vector<float> weights(n);
     for (int i = 0; i < n; i++) {
       weights[i] = (float)arr[i].number();
@@ -520,6 +557,88 @@ ContextVec buildContext(const Game& g, const Side& side) {
     c[GLOBAL_DIM + i] = 0.0f;
   }
   return c;
+}
+
+}  // namespace w2::ai::ml
+
+namespace w2::ai::ml {
+
+CriticVec buildCriticFeatures(const Game& g, const Side& side) {
+  CriticVec f{};
+  const int me = side.index;
+  std::array<int, 8> cities{}, income{};
+  std::array<float, 8> power{};
+  int standing = 0, neutral = 0, totalIncome = 0;
+  for (const auto& c : g.map->cities) {
+    if (c.razed) continue;
+    standing++;
+    totalIncome += std::max(1, c.income);
+    if (c.ownerIndex == NONE) neutral++;
+    else if (c.ownerIndex >= 0 && c.ownerIndex < 8) {
+      cities[c.ownerIndex]++;
+      income[c.ownerIndex] += std::max(1, c.income);
+    }
+  }
+  float allPower = 0.0f;
+  for (const Army* a : g.armies) {
+    if (a->disbanded || (a->x == NONE && !a->transit) || a->owner < 0 || a->owner >= 8) continue;
+    float p = (float)(a->strength * a->strength);
+    power[a->owner] += p;
+    allPower += p;
+  }
+  int alive = 0, inUse = 0, rivals = 0, classicRivals = 0, richerRivals = 0;
+  int maxRivalCities = 0;
+  float maxRivalPower = 0.0f;
+  for (int s = 0; s < 8; s++) {
+    const Side& o = g.map->sides[s];
+    if (o.inUse) inUse++;
+    if (!o.alive) continue;
+    alive++;
+    if (s == me) continue;
+    rivals++;
+    if (o.classicAi) classicRivals++;
+    if (cities[s] > cities[me]) richerRivals++;
+    maxRivalCities = std::max(maxRivalCities, cities[s]);
+    maxRivalPower = std::max(maxRivalPower, power[s]);
+  }
+
+  // Cities where hostile strength within 6 tiles outweighs our own within 2
+  constexpr int kThreatRadius = 6, kGuardRadius = 2;
+  int myCities = 0, threatened = 0;
+  for (const auto& c : g.map->cities) {
+    if (c.razed || c.ownerIndex != me) continue;
+    myCities++;
+    float hostile = 0.0f, guard = 0.0f;
+    for (const Army* a : g.armies) {
+      if (a->disbanded || a->x == NONE || a->owner < 0 || a->owner >= 8) continue;
+      int d = std::max(std::abs(a->x - c.x), std::abs(a->y - c.y));
+      if (a->owner == me) {
+        if (d <= kGuardRadius) guard += (float)a->strength;
+      } else if (d <= kThreatRadius && !diplomacy::isAllied(g, me, a->owner)) {
+        hostile += (float)a->strength;
+      }
+    }
+    if (hostile > guard) threatened++;
+  }
+
+  const float st = (float)std::max(1, standing);
+  f[0] = std::min(2.0f, (float)g.turn / 50.0f);
+  f[1] = (float)cities[me] / st;
+  f[2] = (float)income[me] / (float)std::max(1, totalIncome);
+  f[3] = allPower > 0.0f ? power[me] / allPower : 0.0f;
+  f[4] = (float)neutral / st;
+  f[5] = (float)alive / 8.0f;
+  f[6] = (float)inUse / 8.0f;
+  f[7] = (float)standing / 80.0f;
+  f[8] = (float)maxRivalCities / st;
+  f[9] = g.map->options.hiddenMap != 0 ? 1.0f : 0.0f;
+  f[10] = g.map->options.diplomacy != 0 ? 1.0f : 0.0f;
+  f[11] = rivals > 0 ? (float)classicRivals / (float)rivals : 0.0f;
+  f[12] = myCities > 0 ? (float)threatened / (float)myCities : 0.0f;
+  f[13] = 0.5f * computeEmpireScore(g, me);
+  f[14] = rivals > 0 ? (float)richerRivals / (float)rivals : 0.0f;
+  f[15] = allPower > 0.0f ? maxRivalPower / allPower : 0.0f;
+  return f;
 }
 
 }  // namespace w2::ai::ml

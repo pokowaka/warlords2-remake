@@ -1236,8 +1236,13 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
       std::vector<Army*> currentStack = preStacks[chosenOpt.stackOptIdx].units;
       float stackStr = preStacks[chosenOpt.stackOptIdx].str;
 
-      ml::StackValueInVec preGroupState = ml::packStackValueInput(ctx, preStacks.back().sv);
-      float preGroupValue = (sampler && sampler->currentTurn) ? policy.evaluateStackValue(preGroupState) : 0.0f;
+      // The per-stack critic only matters while recording a training rollout;
+      // it reuses the privileged features computed as the turn began.
+      const bool recording = sampler && sampler->currentTurn;
+      ml::StackValueInVec preGroupState =
+          recording ? ml::packStackValueInput(ctx, preStacks.back().sv, sampler->currentTurn->startCritic)
+                    : ml::StackValueInVec{};
+      float preGroupValue = recording ? policy.evaluateStackValue(preGroupState) : 0.0f;
 
       std::vector<std::uintptr_t> chosenUnitIds;
       std::vector<std::uintptr_t> poolUnitIds;
@@ -1696,10 +1701,12 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
     belief::update(g, side);
     ml::ContextVec waveCtx = ml::buildContext(g, side);
     if (wave == 0) {
-      float v = policy.evaluateValue(waveCtx);
+      ml::CriticVec critic = ml::buildCriticFeatures(g, side);
+      float v = policy.evaluateValue(waveCtx, critic);
       side.lastBoardValue = v;
       if (sampler && sampler->currentTurn) {
         sampler->currentTurn->startCtx = waveCtx;
+        sampler->currentTurn->startCritic = critic;
         sampler->currentTurn->valuePred = v;
         sampler->currentTurn->startScore = ml::computeEmpireScore(g, side.index);
       }
@@ -1719,7 +1726,7 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
 
   belief::update(g, side);
   ml::ContextVec ctx = ml::buildContext(g, side);
-  side.lastBoardValue = policy.evaluateValue(ctx);
+  side.lastBoardValue = policy.evaluateValue(ctx, ml::buildCriticFeatures(g, side));
 
   runEconomyPhase(g, side, policy, ctx, sampler);
   if (pause) pause("economy");
