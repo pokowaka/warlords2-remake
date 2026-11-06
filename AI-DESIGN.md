@@ -5,19 +5,19 @@ what it is, how it is trained and measured, what has been learned so far, and
 exactly how to continue training on a larger machine.
 
 > [!IMPORTANT]
-> **Status (2026-11-06).** Trained via a pure-discovery small-to-large curriculum
-> (`1` Modern learner vs `K − 1` Warlord Classic AIs, `1v1 → 1v3 → 1v7`, zero
-> hand-coded `if-then-else` tactical filters) on a 72-thread Linux box, the
-> installed 5-head `8,066`-parameter checkpoint (`cpp/ai_weights.json`) reaches
-> **32.8 % ± 5.6 % city share** on **128 held-out report games** (`1,710` vs
-> `4,793` cities = 26.3 % aggregate; Modern largest side in **30 / 128**, vs the
-> handoff checkpoint's **18.4 % ± 4.9 %**, `743` vs `5,720`, `13 / 128` —
-> non-overlapping 95 % CIs) and **32.1 % ± 4.0 %** across **256 held-out games**
-> (`3,271` vs `9,423` cities; largest side in **55 / 256** vs `22 / 256` at
-> handoff; §6). It ties Classic AI `50 / 50` (`377` vs `377` cities) on cropped
-> `1v1` maps and wins `54–87 %` on smaller scenarios (`SORCERY`, `DRAGON`),
-> while full 8-player 80-city maps (where Classic AI reads Hidden Map
-> omnisciently) still favour Classic ~`2 : 1` past turn 25 (§6, §8).
+> **Status (2026-11-06, afternoon).** The installed checkpoint
+> (`cpp/ai_weights.json`, `pure_s6_1v7_unlocked`) now plays real games
+> near-greedily (`DEPLOY_TEMPERATURE` = 0.02 instead of 0.5), which alone lifts it
+> from **32.1 % to 40.9 % ± 4.0 % city share on 256 held-out report games**
+> (Modern largest side in 80 / 256 instead of 55 / 256; 50 % = parity with the
+> Warlord Classic AI). It is at parity at turn 20 (51 %) but fades to ~43 % at turn
+> 40 and ~39 % at turn 80, because it leaves captured cities empty: in total-war
+> games it loses ~300 cities per game, ~88 % of them undefended. Five warm-started
+> PPO recipe variants (better critic, higher learning rate, 4v4 games, low
+> training temperature, 60-turn games) did not measurably beat it; training
+> against Raider opponents is being evaluated. Current work: train the AI to discover defence itself through
+> **departure credit** and **empty-city inputs** (§6.3, §8). The original
+> curriculum results are in §6.2.
 
 ---
 
@@ -72,28 +72,43 @@ the hero-arrival city (most threatened own city), and the treaty rule (an attack
 needing a declaration happens only while DiploNet is not proposing peace to that
 side; `attackable()` / `mustDeclare`).
 
-**Sampling in real games.** Real games sample the policy too, at
-`DEPLOY_TEMPERATURE` = 0.5. The generator is seeded from the game's dice state,
-the turn and the side, and never advances the game's RNG, so games stay
-reproducible. Training anneals its temperature to the same value. Greedy
-argmax play was measurably worse: a spread-out policy's mode is not its typical
-behaviour.
+**Sampling in real games.** Real games sample the policy at
+`DEPLOY_TEMPERATURE` = 0.02 (`ml::deployTemperature()`), i.e. near-greedy. The
+generator is seeded from the game's dice state, the turn and the side, and
+never advances the game's RNG, so games stay reproducible. Training still
+anneals to `TRAIN_TEMPERATURE_END` = 0.5, because PPO needs exploration. A
+sweep with the installed weights (512 dev games each, turn 40) was monotonic:
+T = 0.5 → 35.9 %, 0.25 → 38.2 %, 0.15 → 39.7 %, 0.08 → 42.4 %, 0.02 → 43.4 %
+city share; on the held-out report set 32.1 % → 40.9 % (§6). (An earlier
+observation that greedy play was worse was made with the much weaker handoff
+checkpoint.)
 
 ### The network (`ml_policy.hpp`)
 Five residual MLPs, `y = W_skip·x + W3·tanh(W2·tanh(W1·x + b1) + b2) + b3`,
-**8,066 parameters** in total, with hand-written forward and backward passes
+**9,700 parameters** in total, with hand-written forward and backward passes
 (no ML library):
 
 | Head | Input | Output |
 |---|---|---|
-| DiploNet 42→24→12→6 | context 24 + rival 18 | 4 stance logits, tribute logit, joint-war logit |
-| MissionNet 61→32→16→2 | context 24 + stack 16 + target 21 | utility, stage-near logit |
-| EconNet 45→24→12→1 | context 24 + econ 21 | score (disjoint `[0..6]` selects decision type; `[20]` flags current choice) |
-| ValueNet 24→24→12→1 | context 24 | V(s), empire-level critic in empire-score units |
-| StackValueNet 40→24→12→1 | context 24 + stack 16 | V_stack(s), pre-decision pool critic for multi-turn per-stack local returns |
+| DiploNet 48→24→12→6 | context 30 + rival 18 | 4 stance logits, tribute logit, joint-war logit |
+| MissionNet 67→32→16→2 | context 30 + stack 16 + target 21 | utility, stage-near logit |
+| EconNet 51→24→12→1 | context 30 + econ 21 | score (disjoint `[0..6]` selects decision type; `[20]` flags current choice) |
+| ValueNet 46→24→12→1 | context 30 + critic 16 | V(s), empire-level critic in empire-score units |
+| StackValueNet 62→24→12→1 | context 30 + stack 16 + critic 16 | V_stack(s), pre-decision pool critic for multi-turn per-stack local returns |
 
-Context is 14 global fair-information features plus 10 personality channels,
-which are held at 0 for now.
+**Privileged critics (asymmetric actor-critic).** The two critics are only used
+to compute training advantages, so they also read 16 true-state features
+(`buildCriticFeatures`: true city/income/army shares, strongest rival, neutrals,
+map size, sides alive/in use, Hidden Map and Diplomacy flags, share of Classic
+rivals, threatened own cities, empire score, an unsaturated turn counter). The
+policy heads never see them. This raised the critic's explained variance from
+~0.56 to ~0.70 (logged as `ev` per iteration).
+
+Context is 20 global fair-information features plus 10 personality channels,
+which are held at 0 for now. Features 14–19 (added in v6) are gold, turn and own
+army strength on non-saturating scales, the share of own cities that are empty,
+the share empty *and* reachable within a turn by a visible enemy, and the budget
+balance (income − upkeep) / income.
 
 **Multiplicity prior.** Option families have very different sizes (40 fog
 frontiers vs 1 hold). The policy logit at temperature `T` is therefore
@@ -103,8 +118,11 @@ probability mass at any temperature (fixing an earlier `(u_i − ln N)/T` bug th
 penalised multi-option families by `1/N²` at `T = 0.5`). A KL pull toward the
 uniform-family prior `q_i ∝ 1 / N_family(i)` is the entropy regulariser.
 
-Weights live in `cpp/ai_weights.json` (format version 4; legacy version 3 files
-with `6,729` parameters still load cleanly with `StackValueNet` zero-initialised).
+Weights live in `cpp/ai_weights.json` (format version 6, `9,700` parameters).
+Version 5 (`8,866`), 4 (`8,066`) and 3 (`6,729`) files load function-preserving
+(`unflattenLegacy`): input columns an older format lacked start at zero (and v3's
+missing `StackValueNet` is zero-initialised), so a migrated network plays exactly
+as before until training uses the new inputs.
 
 ## 3. Fair-information rules
 - Pathing obeys Hidden Map for Modern AI sides exactly as for humans
@@ -182,7 +200,7 @@ and HADESHA, × {Beginner-Open, Interm-Diplo, Adv-Hidden, Fog-TotalWar}.
 
 ## 6. Results
 
-### Handoff baseline (16-core Mac, 32 games/iter, `d443982`)
+### 6.1 Handoff baseline (16-core Mac, 32 games/iter, `d443982`)
 
 | Run | Setup | Selection city share (iterations 10…100) | Best |
 |---|---|---|---|
@@ -191,7 +209,7 @@ and HADESHA, × {Beginner-Open, Interm-Diplo, Adv-Hidden, Fog-TotalWar}.
 | C | B + `--local-weight 5 --lambda 0.9` | 9, 15, 14, 10, 12 % … (stopped at 58) | 15.1 % @20 |
 | B report | kept checkpoint (iter 30), 48 held-out games | **19.8 % ± 8.4 %** mean share; 305 vs 2,024 cities (13.1 %); Modern largest side in 5/48 | previous `cpp/ai_weights.json` |
 
-### Pure-discovery `1 vs (K − 1)` curriculum on 72-thread Linux (`2026-11-06`)
+### 6.2 Pure-discovery `1 vs (K − 1)` curriculum on 72-thread Linux (`2026-11-06`)
 
 Trained with **zero hand-coded tactical/economic/diplomatic `if-then-else`
 filters** (`--report-seeds 0` throughout curriculum tuning; `pure_s4_1v7` was
@@ -241,6 +259,87 @@ one-time held-out report evaluation; both are reported below for transparency):
     Classic coalitions still erode Modern AI's outer cities (~`95 %` of Modern
     army-turns move rather than garrisoning rear hubs).
 
+### 6.3 Discoveries of 2026-11-06 (afternoon session)
+
+All numbers are Modern city share in mixed 4 vs 4 games against the Warlord
+Classic AI at turn 40 (50 % = parity), on the **development seed set** (750000+,
+`--dev-seeds`, never used for selection or the report) unless marked *report*.
+"Paired" means both checkpoints played the same seeds (`--compare`); with 512
+games its 95 % interval is about ± 2.8 %, so smaller effects are not resolvable.
+
+**Measurement.**
+- The benchmark is deterministic: re-running a checkpoint reproduces it exactly.
+- The selection eval used to keep the best of ~10 noisy (± 6.5 %) measurements,
+  which inflates the kept score (winner's curse). Compare finals or snapshots
+  with `--compare` on dev seeds instead.
+- Diplomacy, not Hidden Map, splits the presets: installed weights at T = 0.5
+  scored Beginner-Open (no fog, no diplomacy) 27.7 %, Interm-Diplo 55.2 %,
+  Adv-Hidden 31.9 %, Fog-TotalWar 28.9 %. Total war is the weak spot.
+- Solo 1 vs 7 (the training setup) on 8-player maps: 3–5 % vs 12.5 % parity.
+
+**Deployment temperature — the one big win.** Same weights, 512 dev games each:
+
+| T | 0.5 | 0.25 | 0.15 | 0.08 | 0.02 |
+|---|---|---|---|---|---|
+| city share | 35.9 % | 38.2 % | 39.7 % | 42.4 % | **43.4 %** |
+
+Held-out *report* (256 games): 32.1 % at T = 0.5 → **40.9 %** at T = 0.02. Every
+preset improves (Interm-Diplo reaches 61.6 %). Training still samples at 0.7 → 0.5.
+
+**Critic.** Privileged true-state critic inputs raised explained variance from
+~0.56 to ~0.70, but did not by themselves make the policy measurably stronger.
+
+**Recipe variants, all warm-started from the installed weights** (48–64
+iterations × 432 games, paired vs installed at T = 0.02):
+
+| Run | Change | Paired B − A |
+|---|---|---|
+| E1 | privileged critic, s6 recipe | +1.3 % ± 2.9 % |
+| E2 | learning rate 5e-3 (2.8×) | −0.7 % ± 2.9 % |
+| E3 | 50 % of games 4 vs 4, all learner seats recorded | +1.0 % ± 2.7 % |
+| E4 | training temperature 0.25 → 0.15 | −1.3 % ± 2.5 % |
+| E5 | 60-turn games (judged at turn 60) | −0.8 % ± 3.0 % |
+| soups | weight average of E1–E3 checkpoints | −0.6 % / +1.0 % |
+
+KL per iteration stays ~0.001–0.002 whatever the learning rate: the recipe sits
+on a plateau rather than being step-size-limited.
+
+**Hand-rule probes (diagnostics only, never part of the Modern AI)** all made it
+*weaker*, which says the learned behaviour is a coherent strategy, not a set of
+separable bugs: "always build + buy the strongest slot when ≥ 1,500 gold"
+(31.3 % vs 35.9 % at T = 0.5; 39.0 % vs 43.4 % greedy), "≥ 1 / ≥ 2 garrison per
+city" (32.6 % / 30.9 % vs 35.9 %), "leave the weakest unit behind" (39.9 % vs
+43.4 % greedy). The economy *looks* broken (1–2 slot purchases per 40-turn game,
+a third of city-turns idle, up to 18k gold banked) but is not the binding
+constraint.
+
+**Why it fades: empty cities.** Strength by game length (installed, greedy):
+turn 20 **51.3 %**, turn 40 ~43 %, turn 60 40.9 %, turn 80 39.3 %
+(Fog-TotalWar 41.5 → 26.6 → 23.8 %). `w2aidiag` capture/loss tracking over 12
+total-war games: the Modern camp loses **~300 cities per game, ~88 % with zero
+defenders**, and recaptures a similar number (much of it Modern-vs-Modern
+ping-pong over empty cities); the Classic camp loses ~90, ~70 % of them defended
+by 2+ armies. The policy already *sees* that a move empties its city (stack input
+`s[14]`), but the loss arrives during a rival's turn and is shared by the ~70
+moves of that turn, so the move that caused it learns almost nothing.
+
+**Opponents instead of rules.** The Modern AI must discover its own strategy, so
+pressure comes from training opponents (`cpp/test/opponents.cpp`). The
+**Raider** plays the Classic AI but first walks its weakest armies into every
+reachable undefended enemy city, the learner's first. Raiders take 30–40 more
+cities per game than plain Classic sides; the installed AI scores 41.1 % against
+them. Training with 50 % Raider seats (E6) — result pending.
+
+**Departure credit and empty-city inputs** (`7c7d995`, experiments pending):
+- `--departure-weight W`: a move that leaves an own city empty (still empty at
+  turn end) is charged that city's weight in the empire score if the city falls
+  before our next turn, centred over all city-emptying moves (so it learns *when*
+  to leave, not "never leave"). It only re-attributes a loss already in the
+  reward. The trainer logs "emptied X % of moves, Y % fell".
+- Six fair context inputs (v6): non-saturating gold, turn and army strength,
+  share of own cities empty, share empty *and* reachable by a visible enemy,
+  budget balance.
+
 **Throughput.** On 72 Xeon threads (`cpp/build-train`, `-DW2_NATIVE=ON`), a
 `432`-game full-map iteration (`~12,200` learner turns) takes **20–24 s**; a
 `288`-game cropped `1v1` iteration takes **2–8 s**.
@@ -280,7 +379,8 @@ cpp/build-train/w2arena --solo-learner --from-scratch \
 B=cpp/build-train
 $B/w2arena --benchmark-only --select-seeds 96 --report-seeds 0 --eval-turns 40 --out runs/X/weights.json  # 192g selection
 $B/w2arena --benchmark-only --report-seeds 64 --eval-turns 40 --out runs/X/weights.json                   # 128g held-out report
-$B/w2aidiag runs/X/weights.json ERYTHEA 800001 40          # per-side economy, mission mix, production
+$B/w2arena --out cpp/ai_weights.json --compare runs/X/weights.json --dev-seeds 256 --breakdown  # paired A/B on dev seeds
+$B/w2aidiag runs/X/weights.json ERYTHEA 750011 40 0 8 0 -1 0 raider  # economy, captures/losses by garrison, missions
 cp runs/X/weights.json cpp/ai_weights.json                 # install; commit with the report numbers
 ```
 **Resuming.** Without `--from-scratch`, `w2arena` loads `--out` if it exists.
@@ -299,7 +399,8 @@ checkpoint so high-temperature noise does not wash out learned weights.
 | `--report-seeds R` | 32 | held-out report seeds (set `0` during training/tuning!) |
 | `--epochs` / `--minibatches` | 4 / 8 | PPO passes and minibatches per iteration |
 | `--lr X` | 3e-3 | starting learning rate (decays linearly to 3e-4) |
-| `--temp-start T` | 1.0 | starting exploration temperature (anneals to `0.5`) |
+| `--temp-start T` / `--temp-end T` | 1.0 / 0.5 | training temperature, annealed linearly |
+| `--eval-temp T` | 0.02 | temperature evaluation games are played at (`DEPLOY_TEMPERATURE`) |
 | `--seed-offset N` | 0 | offset (`<= 500000`) keeping stage training seeds disjoint from `700000+` |
 | `--lambda L` | 0.95 | GAE λ |
 | `--local-weight W` | 1 | weight of `G_pool − V_stack(s)` in mission advantages |
@@ -312,29 +413,32 @@ checkpoint so high-temperature noise does not wash out learned weights.
 | `--out PATH` / `--log CSV` | `cpp/ai_weights.json` / none | checkpoint and log |
 | `--benchmark-only` | off | run selection (`--report-seeds 0`) or report (`--report-seeds > 0`) on `--out` |
 | `--data DIR` | `original` | game files |
+| `--compare PATH` | — | play `--out` (A) and PATH (B) on the same seeds; paired difference with 95 % interval |
+| `--dev-seeds N` | 0 | benchmark/compare on the development set (750000+) |
+| `--eval-mode mixed\|solo` | mixed | 4 vs 4 alternating seats, or 1 Modern vs K − 1 Classic |
+| `--eval-opponent classic\|raider` | classic | which opponent evaluation games use |
+| `--breakdown` | off | per-preset and per-scenario shares |
+| `--critic-warmup N` | 0 | first N iterations train only the critics |
+| `--mixed-frac F` | 0 | in `--solo-learner` runs, share of games played 4 vs 4 with all learner seats recorded |
+| `--raider-frac F` | 0 | share of Classic training seats played by the Raider |
+| `--departure-weight W` | 0 | departure credit (§6.3) |
+| `--save-every N` | 0 | also write `<out>.iterN.json`; the last iteration is always `<out>.final.json` |
 
 ## 8. Recommended next experiments (in order)
 
-1. **Longer-horizon full-map stage (60–80 turns).** On 80-city maps (`ERYTHEA`,
-   `ISLADIA`), Modern AI peaks at Turns 20–30 (`31` cities on `ERYTHEA 800001`)
-   and cedes border cities in Turns 30–40. Extending the final `1v7` stage to
-   `--turns 60 --eval-turns 60` directly exposes late-game consolidation and
-   garrison retention to GAE.
-2. **Symmetric combat-exchange local credit (without city-loss double counting).**
-   Subtracting rival-turn city losses a second time on top of `cur.advantage`
-   made 8-player play overly timid (`causal_s3_1v7`), whereas crediting defensive
-   enemy kills inside walled cities (`+0.25 · ΔarmyShare` during rivals' turns)
-   would reward garrisoning threatened chokepoints without double-counting city
-   losses.
-3. **$\mu$P-scaled capacity or batched GEMM / spatial encoder.** If scaling width
-   beyond `32→16`, scale hidden/output Adam learning rates by `1 / width` and use
-   per-head gradient clipping plus batched matrix multiplies so wider networks do
-   not collapse entropy or slow CPU backprop `4×`.
-4. **Fair-fog Classic benchmark toggle.** Adding an optional evaluation flag
-   where Classic AI also obeys *Hidden Map* would separate fog-of-war omniscience
-   from pure tactical/strategic strength.
-5. **Personalities.** Activate the 10 character-card trait channels in
-   `ContextVec` once late-game 80-city consolidation reaches 50 % parity.
+1. **Departure credit + empty-city inputs** (in progress): train with
+   `--departure-weight 1`, with and without Raiders, and check that "emptied …,
+   … fell" in the training log drops while the paired dev score rises.
+2. **More opponent personalities** (league of exploiters): *Rusher* (all Classic
+   sides target the learner's capital early), *Turtle* (heavy garrisons, local
+   counter-attacks only), *Hero hunter*. Mix them with plain Classic seats.
+3. **A learned exploiter**: a second Modern network trained only to beat the
+   current learner, alternating with training the learner against it.
+4. **Bigger paired evaluations** (2,000+ games) to resolve +1–2 % effects.
+5. **Fair-fog Classic benchmark toggle** and **personalities** remain open.
+
+Tried and not helpful on their own (§6.3): higher learning rate, 4v4 training
+games, low training temperature, 60-turn training games, weight averaging.
 
 ## 9. Change history of this design (`ai` branch)
 
@@ -350,6 +454,12 @@ checkpoint so high-temperature noise does not wash out learned weights.
 | `d443982` | `w2aidiag`; the game warns when weights fail to load; run B checkpoint installed (`19.8 % ± 8.4 %` on 48g; `18.4 % ± 4.9 %` on 128g); initial handoff doc. |
 | (2026-11-06) | 5th head `StackValueNet` (`8,066` params, v4 JSON with v3 compat); fixed `z_i = u_i/T − ln N` temperature-multiplicity bug, `midCountdown` & `setProduction` economy MDP, multi-unit `HOLD_GARRISON` (`optSv[14]`), decoupled `DisbandArmy`, `uintptr_t` unit lineage, thread-safe in-memory random maps & cropped-map `1 vs K−1` curriculum (`--solo-learner`); installed `pure_s6_1v7_unlocked` (`32.8 % ± 5.6 %` on 128g, `32.1 % ± 4.0 %` on 256g, `35.3 % ± 4.8 %` on 192g selection). |
 
+| `e35d923` | Privileged critic inputs (v5, 8,866 params); `--compare`, `--dev-seeds`, `--eval-mode`, `--breakdown`, `--critic-warmup`, `--mixed-frac`, `--save-every`, explained-variance logging. |
+| `391f577` | `w2aidiag` economy statistics. |
+| `b1a0da3` | Real games near-greedy (`DEPLOY_TEMPERATURE` 0.02; training anneals to `TRAIN_TEMPERATURE_END` 0.5); `--eval-temp`, `--temp-end`. Report 32.1 % → 40.9 %. |
+| `efcd30a` | Raider training opponent (`cpp/test/opponents.cpp`), `--raider-frac`, `--eval-opponent`; `w2aidiag` captures/losses by garrison. |
+| `7c7d995` | Departure credit (`--departure-weight`) and six empty-city/scale context inputs (v6, 9,700 params; v5/v4/v3 load function-preserving). |
+
 **Review items deliberately left open** (they do not affect training):
 - `Side::classicAi` doubles as the diplomacy rule-variant flag, and it is set on
   human sides too. With Modern AI + the classic UI, a human pays hidden trust
@@ -362,16 +472,17 @@ checkpoint so high-temperature noise does not wash out learned weights.
 | File | Role |
 |---|---|
 | `cpp/src/warlords/ai/modern_ai.cpp` | Turn engine: legal candidates, waves, execution, economy, diplomacy (zero `if-then-else` tactical filters) |
-| `cpp/src/warlords/ai/ml_policy.{hpp,cpp}` | 5-head residual MLP (`8,066` params), sampling (`selectFromLogits`, `selectBinary`), context features, empire score, weights I/O |
+| `cpp/src/warlords/ai/ml_policy.{hpp,cpp}` | 5-head residual MLP (`9,700` params), privileged critic features (`buildCriticFeatures`), sampling (`selectFromLogits`, `selectBinary`), context features, empire score, weights I/O |
 | `cpp/src/warlords/ai/belief.{hpp,cpp}` | Fair-information belief, fog frontiers, combat estimates, `ScopedTileIndex` |
 | `cpp/src/warlords/ai/personality.{hpp,cpp}` | 27 character-card profiles (UI, attitude score; future conditioning) |
 | `cpp/src/warlords/diplomacy.{hpp,cpp}` | Alliances, truces, tribute, trust, `computeAttitude` |
 | `cpp/src/warlords/scn.{hpp,cpp}`, `game.{hpp,cpp}` | Thread-safe in-memory random maps (`loadFromFiles`) & curriculum map scaling (`activeSides`, `cropMargin`) |
 | `cpp/test/arena.cpp` | `w2arena`: PPO self-play & `--solo-learner` curriculum trainer and Classic benchmark |
-| `cpp/test/aidiag.cpp` | `w2aidiag`: behaviour diagnostic for a checkpoint |
+| `cpp/test/aidiag.cpp` | `w2aidiag`: behaviour diagnostic for a checkpoint (economy, captures/losses by garrison, missions) |
+| `cpp/test/opponents.{hpp,cpp}` | Training-only opponent personalities on top of the Classic AI (Raider) |
 | `cpp/test/train.sh` | Headless build and training launcher |
 | `cpp/test/run.cpp` (`testModernAi`) | Unit tests: fog pathing, diplomacy, sampling, multiplicity prior, `StackValueNet`, cropped maps, engine switching |
-| `cpp/ai_weights.json` | Installed `8,066`-parameter checkpoint |
+| `cpp/ai_weights.json` | Installed checkpoint (v4 file, `8,066` parameters; loads as v5 with zero critic columns) |
 
 ## 11. Playing against it
 ```bash
