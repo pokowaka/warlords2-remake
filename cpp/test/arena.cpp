@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <random>
@@ -49,6 +50,7 @@
 
 #include "opponents.hpp"
 #include "util/util.hpp"
+#include "warlords/save.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
 #include "warlords/ai/modern_ai.hpp"
@@ -134,6 +136,9 @@ struct Config {
   float departureWeight = 0.0f;  // --departure-weight: credit a city loss to the move that emptied it
   std::string frozenPath;    // --frozen-opponent: fixed Modern checkpoint some opponent seats play
   float frozenFrac = 0.0f;   // --frozen-frac: share of non-learner training seats played by it
+  int searchK = 0;           // --search-k: candidate turns per learner turn (0 = no search training)
+  int searchR = 2;           // --search-r: rollouts (dice copies) per candidate
+  int searchH = 2;           // --search-h: rounds played on after a candidate turn
   opponents::Kind evalOpponent = opponents::Kind::Classic;  // --eval-opponent classic|raider
 };
 
@@ -186,6 +191,7 @@ struct SideEpisode {
   float terminalReward = 0.0f;   // win / elimination bonus
   float bootstrapValue = 0.0f;   // V(s) at the cut-off when not terminal
   int finalCities = 0;
+  bool searched = false;         // turns carry search-based advantages (no GAE)
 };
 
 struct RolloutSummary {
@@ -322,6 +328,126 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
   return out;
 }
 
+// ---------------------------------------------------------------- search training
+//
+// Search as a teacher (--search-k K): every learner turn is played K times from
+// the same position, each time sampled from the policy at the training
+// temperature and recorded. Each candidate turn is then copied R times
+// (different dice) and played on for H rounds by every side's normal AI; its
+// value is the learner's average empire score at the end. A candidate's
+// advantage is its value minus the mean of the K candidates, so every turn is
+// compared with alternatives from the *same* position (no critic, no GAE). The
+// game continues from the best candidate. Copies are save::encode/decode, so
+// these games use shipped scenarios only. The copies see the true game state:
+// that is privileged information, used only to train; the policy still plays
+// on fair information.
+
+std::unique_ptr<Game> copyGame(const Config& cfg, const Game& g) {
+  return save::decode(save::encode(g), cfg.dataDir);
+}
+
+RolloutSummary runSearchRollout(const Config& cfg, const std::string& scenario, const TrainingPreset& preset,
+                                uint32_t seed, float temperature, const ml::PolicyNetwork& learner) {
+  auto gp = makeArenaGame(cfg, scenario, preset, seed, false);
+  int activeCount = 0;
+  for (int s = 0; s < 8; s++) {
+    if (gp->map->sides[s].inUse) activeCount++;
+  }
+  const int soloSeat = activeCount > 0 ? (int)(seed % (uint32_t)activeCount) : 0;
+  int learnerSide = NONE;
+  std::array<opponents::Kind, 8> kind{};
+  int idx = 0;
+  for (int s = 0; s < 8; s++) {
+    Side& side = gp->map->sides[s];
+    if (!side.inUse) continue;
+    const bool me = (idx++ == soloSeat);
+    if (me) learnerSide = s;
+    side.classicAi = !me;
+    float raidRoll = (float)(((seed * 747796405u) ^ (uint32_t)((s + 1) * 2891336453u)) >> 8) / (float)(1u << 24);
+    float frozenRoll = (float)(((seed * 2654435769u) ^ (uint32_t)((s + 1) * 3266489917u)) >> 8) / (float)(1u << 24);
+    kind[s] = raidRoll < cfg.raiderFrac ? opponents::Kind::Raider : opponents::Kind::Classic;
+    if (!me && g_frozen && frozenRoll < cfg.frozenFrac) {
+      kind[s] = opponents::Kind::Frozen;
+      side.classicAi = false;
+    }
+  }
+
+  // Every side's normal play; the learner plays greedily outside its searched turn
+  auto playSide = [&](Game& g, Side& side) {
+    if (side.index == learnerSide) ai::modern::playTurn(g, side, nullptr, &learner, nullptr);
+    else opponents::playTurn(g, side, kind[side.index], g_frozen);
+  };
+  auto rolloutValue = [&](Game& g) {
+    const int stopTurn = g.turn + cfg.searchH;
+    Side* cur = game::endTurn(g);
+    int safety = 0;
+    while (cur && !g.over && !g.won && g.turn < stopTurn && safety++ < cfg.searchH * 12) {
+      if (cur->computer && cur->alive) playSide(g, *cur);
+      cur = game::endTurn(g);
+    }
+    return ml::computeEmpireScore(g, learnerSide);
+  };
+
+  RolloutSummary out;
+  SideEpisode searchEp;
+  searchEp.sideIndex = learnerSide;
+  searchEp.searched = true;
+  Side* cur = game::begin(*gp);
+  int safety = 0;
+  while (cur && !gp->over && !gp->won && gp->turn <= cfg.maxTurns && safety++ < cfg.maxTurns * 12) {
+    const int s = cur->index;
+    if (cur->computer && cur->alive && s == learnerSide) {
+      std::vector<std::unique_ptr<Game>> after;
+      std::vector<ml::TurnStepRecord> recs(cfg.searchK);
+      std::vector<double> value(cfg.searchK, 0.0);
+      for (int k = 0; k < cfg.searchK; k++) {
+        auto cand = copyGame(cfg, *gp);
+        ml::RolloutSampler sampler;
+        sampler.temperature = temperature;
+        sampler.rngState = (seed * 2654435761u) ^ (uint32_t)((gp->turn + 1) * 40503u) ^ (uint32_t)((k + 1) * 2246822519u);
+        sampler.currentTurn = &recs[k];
+        ai::modern::playTurn(*cand, *cand->map->side(s), nullptr, &learner, &sampler);
+        sampler.currentTurn = nullptr;
+        for (int r = 0; r < cfg.searchR; r++) {
+          auto copy = copyGame(cfg, *cand);
+          copy->rng.state ^= (uint32_t)((r + 1) * 0x9e3779b9u);
+          value[k] += rolloutValue(*copy);
+        }
+        value[k] /= cfg.searchR;
+        after.push_back(std::move(cand));
+      }
+      double mean = 0.0;
+      for (double v : value) mean += v;
+      mean /= std::max(1, cfg.searchK);
+      size_t best = 0;
+      for (int k = 0; k < cfg.searchK; k++) {
+        if (value[k] > value[best]) best = (size_t)k;
+        auto& tr = recs[k];
+        tr.advantage = (float)(value[k] - mean);
+        tr.returnTarget = std::numeric_limits<float>::quiet_NaN();   // no critic target
+        for (auto& ms : tr.missionSteps) {
+          ms.advantage = tr.advantage;
+          ms.stackReturnTarget = std::numeric_limits<float>::quiet_NaN();
+        }
+        searchEp.turns.push_back(std::move(tr));
+      }
+      gp = std::move(after[best]);
+      cur = gp->map->side(s);
+    } else if (cur->computer && cur->alive) {
+      playSide(*gp, *cur);
+    }
+    cur = game::endTurn(*gp);
+  }
+  for (const auto& c : gp->map->cities) {
+    if (c.razed) continue;
+    if (c.ownerIndex == NONE) out.neutralsLeft++;
+    else if (c.ownerIndex == learnerSide) out.recordedCities++;
+  }
+  out.recordedSides = 1;
+  if (!searchEp.turns.empty()) out.episodes.push_back(std::move(searchEp));
+  return out;
+}
+
 // GAE over each side's own turns, plus optional per-stack multi-turn local
 // credit tracked over non-recycled Game::pool Army* identities.
 void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda, float localWeight,
@@ -343,6 +469,7 @@ void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
   }
   const float vacMean = vacCount > 0 ? (float)(vacSum / vacCount) : 0.0f;
   for (auto& ep : episodes) {
+    if (ep.searched) continue;   // advantages came from comparing candidate turns
     const int T = (int)ep.turns.size();
     float gae = 0.0f;
     std::unordered_map<std::uintptr_t, float> unitFutureLocal;
@@ -485,20 +612,25 @@ struct Normalizers {
 void accumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& tr, const Normalizers& nz, float invT,
                     const Config& cfg, ml::PolicyNetwork& grad, HeadStats& st, std::vector<float>& u,
                     std::vector<float>& dU) {
-  // Critic: 0.5 (V - G)^2 on a linear head
-  const ml::ValueInVec valueIn = ml::packValueInput(tr.startCtx, tr.startCritic);
-  float v = net.valueNet.forward(valueIn)[0];
-  float dv = v - tr.returnTarget;
-  st.valueLoss += 0.5 * dv * dv;
-  st.turns++;
-  net.valueNet.backward(valueIn, {dv}, grad.valueNet);
+  // Critic: 0.5 (V - G)^2 on a linear head (search-trained turns have no return target)
+  const bool hasCriticTarget = !std::isnan(tr.returnTarget);
+  if (hasCriticTarget) {
+    const ml::ValueInVec valueIn = ml::packValueInput(tr.startCtx, tr.startCritic);
+    float v = net.valueNet.forward(valueIn)[0];
+    float dv = v - tr.returnTarget;
+    st.valueLoss += 0.5 * dv * dv;
+    st.turns++;
+    net.valueNet.backward(valueIn, {dv}, grad.valueNet);
+  }
 
   for (const auto& ms : tr.missionSteps) {
-    float sv = net.evaluateStackValue(ms.stackValueIn);
-    float dsv = sv - ms.stackReturnTarget;
-    st.valueLoss += 0.25 * dsv * dsv;
-    st.stackValues++;
-    net.stackValueNet.backward(ms.stackValueIn, {dsv}, grad.stackValueNet);
+    if (hasCriticTarget) {
+      float sv = net.evaluateStackValue(ms.stackValueIn);
+      float dsv = sv - ms.stackReturnTarget;
+      st.valueLoss += 0.25 * dsv * dsv;
+      st.stackValues++;
+      net.stackValueNet.backward(ms.stackValueIn, {dsv}, grad.stackValueNet);
+    }
 
     float adv = nz.mission(ms.advantage);
     const size_t K = ms.candidates.size();
@@ -802,6 +934,9 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
     else if (a == "--departure-weight") cfg.departureWeight = std::max(0.0f, std::stof(next()));
     else if (a == "--frozen-opponent") cfg.frozenPath = next();
     else if (a == "--frozen-frac") cfg.frozenFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+    else if (a == "--search-k") cfg.searchK = std::max(0, std::stoi(next()));
+    else if (a == "--search-r") cfg.searchR = std::max(1, std::stoi(next()));
+    else if (a == "--search-h") cfg.searchH = std::max(1, std::stoi(next()));
     else if (a == "--eval-opponent") {
       std::string o = next();
       if (o == "raider") cfg.evalOpponent = opponents::Kind::Raider;
@@ -935,7 +1070,8 @@ int main(int argc, char** argv) {
                           : (gi % 2 == 0)        ? Opponent::Mirror
                                                  : Opponent::League;
           const auto& snap = hallOfFame[(iter + gi) % hallOfFame.size()];
-          games[gi] = runRollout(cfg, scen, preset, seed, temperature, learner, snap, mode);
+          games[gi] = cfg.searchK > 0 ? runSearchRollout(cfg, scen, preset, seed, temperature, learner)
+                                      : runRollout(cfg, scen, preset, seed, temperature, learner, snap, mode);
         }
       });
     }
@@ -984,6 +1120,7 @@ int main(int argc, char** argv) {
     };
     std::vector<float> vTarget, vPred, svTarget, svPred;
     for (const auto* tr : turns) {
+      if (std::isnan(tr->returnTarget)) continue;
       vTarget.push_back(tr->returnTarget);
       vPred.push_back(tr->valuePred);
       for (const auto& ms : tr->missionSteps) {
