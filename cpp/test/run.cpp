@@ -3581,6 +3581,38 @@ static void testModernAi() {
       }
       ok(gs.turn > 5 || gs.won || gs.over, "1v1 cropped random map runs Modern vs Classic cleanly");
     }
+
+    // 5-head PolicyNetwork (StackValueNet, 8066 params), v3 compatibility, and temperature-multiplicity invariant
+    {
+      eq(ai::ml::PolicyNetwork::TOTAL_PARAMS, 8066, "5-head PolicyNetwork has 8066 parameters");
+      eq(ai::ml::PolicyNetwork::LEGACY_V3_PARAMS, 6729, "legacy v3 parameter count remains 6729");
+      ai::ml::PolicyNetwork net;
+      ok(net.loadJson("cpp/ai_weights.json"), "installed cpp/ai_weights.json loads cleanly");
+      std::vector<float> flat = net.flatten();
+      eq((int)flat.size(), 8066, "flattened parameter vector matches TOTAL_PARAMS");
+
+      // Legacy 6729-parameter unflatten zero-initializes StackValueNet cleanly
+      std::vector<float> v3(flat.begin(), flat.begin() + 6729);
+      ai::ml::PolicyNetwork compat;
+      compat.initRandomWeights(99);
+      compat.unflatten(v3);
+      ai::ml::StackValueInVec sv{};
+      eq(compat.evaluateStackValue(sv), 0.0f, "legacy v3 weights zero-initialize StackValueNet");
+
+      // At T = 0.5 with equal utilities (0.0), a singleton family and a 20-item family
+      // with logMult = ln(20) receive equal 50/50 probability mass (z_i = u_i/T - logMult_i)
+      std::vector<float> u(21, 0.0f);
+      std::vector<float> lm(21, std::log(20.0f));
+      lm[0] = 0.0f;
+      ai::ml::RolloutSampler samp;
+      samp.rngState = 1234567u;
+      samp.temperature = 0.5f;
+      int picks0 = 0;
+      for (int i = 0; i < 2000; i++) {
+        if (ai::ml::selectFromLogits(u, &samp, nullptr, &lm) == 0) picks0++;
+      }
+      ok(picks0 > 880 && picks0 < 1120, "multiplicity prior stays balanced across families at T = 0.5");
+    }
   }
 }
 

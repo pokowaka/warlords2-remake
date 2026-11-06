@@ -43,6 +43,8 @@ constexpr int ECON_OUT_DIM = 1;
 constexpr int VALUE_IN_DIM = CONTEXT_DIM;                         // 24
 constexpr int VALUE_OUT_DIM = 1;
 
+constexpr int STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM;       // 40
+
 /** Sampling temperature the Modern AI plays real games at (training anneals to it). */
 constexpr float DEPLOY_TEMPERATURE = 0.5f;
 
@@ -55,6 +57,7 @@ using EconVec = std::array<float, ECON_FEAT_DIM>;
 using DiploInVec = std::array<float, DIPLO_IN_DIM>;
 using MissionInVec = std::array<float, MISSION_IN_DIM>;
 using EconInVec = std::array<float, ECON_IN_DIM>;
+using StackValueInVec = std::array<float, STACK_VALUE_IN_DIM>;
 
 struct DiploOutput {
   std::array<float, 4> stanceLogits{};  // [0]=Allied, [1]=Peace, [2]=Uneasy, [3]=War
@@ -73,6 +76,10 @@ struct MissionOutput {
  */
 template <int InDim, int H1Dim, int H2Dim, int OutDim>
 struct ResidualMLP {
+  static constexpr int IN_DIM = InDim;
+  static constexpr int H1_DIM = H1Dim;
+  static constexpr int H2_DIM = H2Dim;
+  static constexpr int OUT_DIM = OutDim;
   static constexpr int PARAM_COUNT =
       (OutDim * InDim) + (H1Dim * InDim + H1Dim) + (H2Dim * H1Dim + H2Dim) + (OutDim * H2Dim + OutDim);
 
@@ -104,9 +111,11 @@ class PolicyNetwork {
   using MissionNet = ResidualMLP<MISSION_IN_DIM, 32, 16, MISSION_OUT_DIM>;
   using EconNet = ResidualMLP<ECON_IN_DIM, 24, 12, ECON_OUT_DIM>;
   using ValueNet = ResidualMLP<VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
+  using StackValueNet = ResidualMLP<STACK_VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
 
-  static constexpr int TOTAL_PARAMS =
+  static constexpr int LEGACY_V3_PARAMS =
       DiploNet::PARAM_COUNT + MissionNet::PARAM_COUNT + EconNet::PARAM_COUNT + ValueNet::PARAM_COUNT;
+  static constexpr int TOTAL_PARAMS = LEGACY_V3_PARAMS + StackValueNet::PARAM_COUNT;
 
   PolicyNetwork();
 
@@ -128,10 +137,13 @@ class PolicyNetwork {
   /** Evaluates Head 4 (critic: expected discounted return in empire-score units, unbounded). */
   float evaluateValue(const ContextVec& ctx) const;
 
-  /** Flattens all 4 heads into a single vector of length TOTAL_PARAMS. */
+  /** Evaluates Head 5 (per-stack local critic: expected multi-turn local score change from group state). */
+  float evaluateStackValue(const StackValueInVec& stackState) const;
+
+  /** Flattens all 5 heads into a single vector of length TOTAL_PARAMS. */
   std::vector<float> flatten() const;
 
-  /** Loads parameters from a flat vector of length TOTAL_PARAMS. */
+  /** Loads parameters from a flat vector of length TOTAL_PARAMS (or LEGACY_V3_PARAMS). */
   void unflatten(const std::vector<float>& params);
 
   /** Saves the weights with the training iteration and the held-out selection score. */
@@ -144,6 +156,7 @@ class PolicyNetwork {
   MissionNet missionNet;
   EconNet econNet;
   ValueNet valueNet;
+  StackValueNet stackValueNet;
 };
 
 // --- Trajectory Recording & Stochastic Exploration Primitives for PPO Self-Play ---
@@ -157,6 +170,11 @@ struct MissionStepRecord {
   bool stageChosen = false;
   float oldStageLogProb = 0.0f;
   float immediateDeltaScore = 0.0f;   // change in empire score while this stack acted
+  StackValueInVec stackValueIn{};     // pre-decision group state for per-stack baseline
+  float stackValuePred = 0.0f;        // V_stack(s) at decision time
+  float stackReturnTarget = 0.0f;     // multi-turn local return achieved by pre-decision group
+  std::vector<std::uintptr_t> unitIds;      // non-recycled Game::pool Army* IDs in chosen stack
+  std::vector<std::uintptr_t> poolUnitIds;  // non-recycled Game::pool Army* IDs matching stackValueIn
   float advantage = 0.0f;             // filled by the trainer
 };
 
@@ -207,6 +225,9 @@ MissionInVec packMissionInput(const ContextVec& ctx, const StackVec& stack, cons
 
 /** Packs (ContextVec, EconVec) into a single EconInVec. */
 EconInVec packEconInput(const ContextVec& ctx, const EconVec& econ);
+
+/** Packs (ContextVec, StackVec) into a single StackValueInVec. */
+StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack);
 
 /**
  * Samples an index from softmax(logits / temperature) when `sampler != nullptr`,

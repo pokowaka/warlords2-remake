@@ -286,7 +286,7 @@ struct HeadStats {
 };
 
 // Clipped-surrogate gradient for a categorical choice over options with policy
-// logits z_i = (u_i - logMult_i) / T, plus a KL pull toward the multiplicity
+// logits z_i = u_i / T - logMult_i, plus a KL pull toward the multiplicity
 // prior q_i ~ exp(-logMult_i) (entropy regularisation over action families).
 // Writes dLoss/du_i into dU.
 void categoricalPPO(const std::vector<float>& u, const std::vector<float>* logMult, int chosen, float oldLogProb,
@@ -298,7 +298,7 @@ void categoricalPPO(const std::vector<float>& u, const std::vector<float>* logMu
   float maxZ = -1e30f;
   std::vector<float> z(K);
   for (size_t i = 0; i < K; i++) {
-    z[i] = (u[i] - lmOf(i)) * invT;
+    z[i] = u[i] * invT - lmOf(i);
     maxZ = std::max(maxZ, z[i]);
   }
   std::vector<float> p(K);

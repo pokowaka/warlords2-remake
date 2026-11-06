@@ -137,6 +137,7 @@ template struct ResidualMLP<DIPLO_IN_DIM, 24, 12, DIPLO_OUT_DIM>;
 template struct ResidualMLP<MISSION_IN_DIM, 32, 16, MISSION_OUT_DIM>;
 template struct ResidualMLP<ECON_IN_DIM, 24, 12, ECON_OUT_DIM>;
 template struct ResidualMLP<VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
+template struct ResidualMLP<STACK_VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
 
 PolicyNetwork::PolicyNetwork() {
   initRandomWeights(42);
@@ -158,20 +159,22 @@ void PolicyNetwork::initRandomWeights(uint32_t seed) {
     }
   };
 
-  auto initMlp = [&](auto& mlp, float inScale, float h1Scale) {
+  auto initMlp = [&](auto& mlp) {
+    using MlpT = std::decay_t<decltype(mlp)>;
     initArr(mlp.wSkip, 0.04f);
-    initArr(mlp.w1, inScale);
+    initArr(mlp.w1, 1.0f / std::sqrt((float)MlpT::IN_DIM));
     mlp.b1.fill(0.0f);
-    initArr(mlp.w2, h1Scale);
+    initArr(mlp.w2, 1.0f / std::sqrt((float)MlpT::H1_DIM));
     mlp.b2.fill(0.0f);
-    initArr(mlp.w3, 0.05f);
+    initArr(mlp.w3, 0.2f / std::sqrt((float)MlpT::H2_DIM));
     mlp.b3.fill(0.0f);
   };
 
-  initMlp(diploNet, 1.0f / std::sqrt((float)DIPLO_IN_DIM), 1.0f / std::sqrt(24.0f));
-  initMlp(missionNet, 1.0f / std::sqrt((float)MISSION_IN_DIM), 1.0f / std::sqrt(32.0f));
-  initMlp(econNet, 1.0f / std::sqrt((float)ECON_IN_DIM), 1.0f / std::sqrt(24.0f));
-  initMlp(valueNet, 1.0f / std::sqrt((float)VALUE_IN_DIM), 1.0f / std::sqrt(24.0f));
+  initMlp(diploNet);
+  initMlp(missionNet);
+  initMlp(econNet);
+  initMlp(valueNet);
+  initMlp(stackValueNet);
 }
 
 void PolicyNetwork::zero() {
@@ -179,6 +182,7 @@ void PolicyNetwork::zero() {
   missionNet.zero();
   econNet.zero();
   valueNet.zero();
+  stackValueNet.zero();
 }
 
 DiploInVec packDiploInput(const ContextVec& ctx, const RivalVec& rival) {
@@ -200,6 +204,13 @@ EconInVec packEconInput(const ContextVec& ctx, const EconVec& econ) {
   EconInVec x{};
   std::copy(ctx.begin(), ctx.end(), x.begin());
   std::copy(econ.begin(), econ.end(), x.begin() + CONTEXT_DIM);
+  return x;
+}
+
+StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack) {
+  StackValueInVec x{};
+  std::copy(ctx.begin(), ctx.end(), x.begin());
+  std::copy(stack.begin(), stack.end(), x.begin() + CONTEXT_DIM);
   return x;
 }
 
@@ -228,6 +239,10 @@ float PolicyNetwork::evaluateValue(const ContextVec& ctx) const {
   return valueNet.forward(ctx)[0];
 }
 
+float PolicyNetwork::evaluateStackValue(const StackValueInVec& stackState) const {
+  return stackValueNet.forward(stackState)[0];
+}
+
 std::vector<float> PolicyNetwork::flatten() const {
   std::vector<float> out;
   out.reserve(TOTAL_PARAMS);
@@ -235,6 +250,7 @@ std::vector<float> PolicyNetwork::flatten() const {
   missionNet.toFlat(out);
   econNet.toFlat(out);
   valueNet.toFlat(out);
+  stackValueNet.toFlat(out);
   return out;
 }
 
@@ -243,7 +259,12 @@ void PolicyNetwork::unflatten(const std::vector<float>& params) {
   off = diploNet.fromFlat(params, off);
   off = missionNet.fromFlat(params, off);
   off = econNet.fromFlat(params, off);
-  valueNet.fromFlat(params, off);
+  off = valueNet.fromFlat(params, off);
+  if (off < params.size()) {
+    stackValueNet.fromFlat(params, off);
+  } else {
+    stackValueNet.zero();
+  }
 }
 
 bool PolicyNetwork::saveJson(const std::filesystem::path& path, int generation, float selectionCityShare) const {
@@ -251,7 +272,7 @@ bool PolicyNetwork::saveJson(const std::filesystem::path& path, int generation, 
   if (!out.is_open()) return false;
   auto weights = flatten();
   out << "{\n";
-  out << "  \"version\": 3,\n";
+  out << "  \"version\": 4,\n";
   out << "  \"generation\": " << generation << ",\n";
   out << "  \"selectionCityShare\": " << selectionCityShare << ",\n";
   out << "  \"paramCount\": " << weights.size() << ",\n";
@@ -273,9 +294,10 @@ bool PolicyNetwork::loadJson(const std::filesystem::path& path) {
   try {
     Json root = Json::parse(buf.str());
     const Json& arr = root["weights"];
-    if ((int)arr.size() != TOTAL_PARAMS) return false;
-    std::vector<float> weights(TOTAL_PARAMS);
-    for (int i = 0; i < TOTAL_PARAMS; i++) {
+    int n = (int)arr.size();
+    if (n != TOTAL_PARAMS && n != LEGACY_V3_PARAMS) return false;
+    std::vector<float> weights(n);
+    for (int i = 0; i < n; i++) {
       weights[i] = (float)arr[i].number();
     }
     unflatten(weights);
@@ -299,25 +321,25 @@ int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler,
     if (outLogProb) *outLogProb = 0.0f;
     return 0;
   }
-  // The policy's logit for option i is z_i = u_i - logMult_i: the multiplicity
-  // prior is part of the policy itself, not of the exploration temperature, so
-  // greedy play (argmax z) picks the mode of the very distribution training
-  // samples from (softmax(z / T)) at every temperature.
-  auto policyZ = [&](size_t i) {
-    float lm = (logMult && i < logMult->size()) ? (*logMult)[i] : 0.0f;
-    return logits[i] - lm;
+  // Option i has policy probability p_i ~ exp(-logMult_i) * exp(u_i / T), i.e.
+  // effective logit z_i = u_i / T - logMult_i, so the multiplicity prior q_i ~ 1/M_i
+  // keeps family probabilities invariant to temperature T rather than raising (1/M_i)
+  // to the 1/T power at deployment temperature.
+  auto lmOf = [&](size_t i) {
+    return (logMult && i < logMult->size()) ? (*logMult)[i] : 0.0f;
   };
   if (!sampler || logits.size() == 1) {
+    float deployInvT = 1.0f / DEPLOY_TEMPERATURE;
     int best = 0;
     for (size_t i = 1; i < logits.size(); i++) {
-      if (policyZ(i) > policyZ(best)) best = (int)i;
+      if (logits[i] * deployInvT - lmOf(i) > logits[best] * deployInvT - lmOf(best)) best = (int)i;
     }
     if (outLogProb) *outLogProb = 0.0f;
     return best;
   }
 
   float invT = 1.0f / std::max(0.05f, sampler->temperature);
-  auto effZ = [&](size_t i) { return policyZ(i) * invT; };
+  auto effZ = [&](size_t i) { return logits[i] * invT - lmOf(i); };
   float maxL = effZ(0);
   for (size_t i = 1; i < logits.size(); i++) {
     maxL = std::max(maxL, effZ(i));
@@ -386,25 +408,27 @@ float computeEmpireScore(const Game& g, int sideIndex) {
   float reconTerm = 0.0f;
   if (g.map->options.hiddenMap != 0) {
     int sampled = 0, seenSampled = 0;
-    const int W = g.map->width, H = g.map->height;
-    for (int y = 0; y < H; y += 2) {
-      for (int x = 0; x < W; x += 2) {
+    const int x0 = std::max(0, g.map->activeX0), x1 = std::min(g.map->width - 1, g.map->activeX1);
+    const int y0 = std::max(0, g.map->activeY0), y1 = std::min(g.map->height - 1, g.map->activeY1);
+    for (int y = y0; y <= y1; y += 2) {
+      for (int x = x0; x <= x1; x += 2) {
         sampled++;
         if (game::seen(g, sideIndex, x, y)) seenSampled++;
       }
     }
     float seenTileFrac = (float)seenSampled / (float)std::max(1, sampled);
     float revCityFrac = (float)revealedCities / (float)totalStanding;
-    reconTerm = 0.10f * revCityFrac + 0.05f * seenTileFrac;
+    reconTerm = 0.08f * revCityFrac + 0.02f * seenTileFrac;
   }
 
-  // Army strength as a share of all sides' armies (zero-sum, so hoarding
-  // only pays relative to rivals)
+  // Army combat power (Lanchester square law in sequential 1v1 duels, including
+  // vectored units in transit) as a zero-sum share of all sides' forces.
   float myArmyStr = 0.0f, allArmyStr = 0.0f;
   for (const Army* a : g.armies) {
-    if (a->x == NONE || a->owner < 0 || a->owner >= 8) continue;
-    allArmyStr += (float)a->strength;
-    if (a->owner == sideIndex) myArmyStr += (float)a->strength;
+    if (a->disbanded || (a->x == NONE && !a->transit) || a->owner < 0 || a->owner >= 8) continue;
+    float power = (float)(a->strength * a->strength);
+    allArmyStr += power;
+    if (a->owner == sideIndex) myArmyStr += power;
   }
   float armyShare = allArmyStr > 0.0f ? myArmyStr / allArmyStr : 0.0f;
 
@@ -450,19 +474,21 @@ ContextVec buildContext(const Game& g, const Side& side) {
 
   int myArmies = 0, myHeroes = 0;
   for (Army* a : g.armies) {
-    if (a->owner == me && a->x != NONE) {
+    if (a->owner == me && !a->disbanded && (a->x != NONE || a->transit)) {
       myArmies++;
       if (a->hero()) myHeroes++;
     }
   }
 
-  int wars = 0, allies = 0;
+  int wars = 0, allies = 0, aliveRivals = 0;
   for (int s = 0; s < 8; s++) {
     if (s != me && g.map->sides[s].alive) {
+      aliveRivals++;
       if (diplomacy::state(g, me, s) == diplomacy::WAR) wars++;
       if (diplomacy::isAllied(g, me, s)) allies++;
     }
   }
+  float rivalDenom = (float)std::max(1, aliveRivals);
 
   float capThreat = 0.0f;
   if (side.capital && side.capital->ownerIndex == me &&
@@ -476,12 +502,12 @@ ContextVec buildContext(const Game& g, const Side& side) {
   c[0] = std::tanh((float)g.turn / 30.0f) * 2.0f - 1.0f;
   c[1] = (float)myCities / (float)std::max(1, totalVisCities);
   c[2] = std::tanh((float)myArmies / 24.0f);
-  c[3] = std::tanh((float)side.gold / 300.0f);
+  c[3] = std::tanh((float)side.gold / 600.0f);
   c[4] = std::tanh((float)(inc - upk) / 40.0f);
   c[5] = std::tanh((float)visNeutralCities / 6.0f);
   c[6] = std::tanh((float)visEnemyCities / 6.0f);
-  c[7] = (float)wars / 7.0f;
-  c[8] = (float)allies / 7.0f;
+  c[7] = (float)wars / rivalDenom;
+  c[8] = (float)allies / rivalDenom;
   c[9] = (float)maxCities / (float)std::max(1, totalVisCities);
   c[10] = b.frontierRatio;
   c[11] = capThreat;
