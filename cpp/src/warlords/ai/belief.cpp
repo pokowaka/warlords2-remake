@@ -195,10 +195,11 @@ void update(Game& g, Side& side) {
     }
   }
   b.stacksByTile = std::move(refreshed);
-  b.frontierRatio = (float)unseenTotal / (float)(W * H);
+  int activeArea = std::max(1, (g.map->activeX1 - g.map->activeX0 + 1) * (g.map->activeY1 - g.map->activeY0 + 1));
+  b.frontierRatio = std::min(1.0f, (float)unseenTotal / (float)activeArea);
 
-  // Sort rawFrontiers by proximity to our own cities/armies so local expansion frontiers
-  // are always represented in the top clusters
+  // Sort rawFrontiers by proximity to our own cities/armies (preferring road tiles
+  // that connect cities) so local expansion frontiers are represented in top clusters.
   std::vector<std::pair<int, int>> myAnchors;
   for (const auto& c : g.map->cities) {
     if (!c.razed && c.ownerIndex == me) myAnchors.emplace_back(c.x, c.y);
@@ -212,18 +213,25 @@ void update(Game& g, Side& side) {
       da = std::min(da, move::distance(fa.x, fa.y, ax, ay));
       db = std::min(db, move::distance(fb.x, fb.y, ax, ay));
     }
-    return da < db;
+    int sa = da - (fa.onRoad ? 4 : 0);
+    int sb = db - (fb.onRoad ? 4 : 0);
+    if (sa != sb) return sa < sb;
+    return fa.onRoad > fb.onRoad;
   });
 
   // Cluster land frontiers separately from water frontiers so coastal land does not suppress
-  // amphibious sea lanes (and vice versa)
+  // amphibious sea lanes (and vice versa); snap cluster anchor onto road tiles when merged.
   int landCount = 0, waterCount = 0;
   for (const auto& fc : rawFrontiers) {
     bool merged = false;
     for (auto& existing : b.fogFrontiers) {
       if (existing.isWater == fc.isWater && move::distance(fc.x, fc.y, existing.x, existing.y) < 3) {
         existing.regionUnseenCount += fc.unseenNeighbours;
-        if (fc.onRoad) existing.onRoad = true;
+        if (fc.onRoad && !existing.onRoad) {
+          existing.x = fc.x;
+          existing.y = fc.y;
+          existing.onRoad = true;
+        }
         merged = true;
         break;
       }
@@ -283,11 +291,11 @@ void update(Game& g, Side& side) {
 
     float t1 = 0.0f, t2 = 0.0f;
     for (const auto& [tileKey, obs] : b.stacksByTile) {
-      if (obs.owner == me || obs.owner == NONE) continue;
+      if (obs.owner == me || obs.owner == NONE || diplomacy::isAllied(g, me, obs.owner)) continue;
       int d = move::distance(c->x, c->y, obs.x, obs.y);
       const ArmyType* topAt = g.types.byId(obs.topType);
       int estMove = topAt ? std::max(10, topAt->move) : 12;
-      int reach1 = std::max(6, estMove / 2);
+      int reach1 = std::max(8, (estMove * 3) / 4);
       int reach2 = reach1 * 2;
       float estStr = 0.0f;
       if (!obs.knownStrengths.empty()) {

@@ -189,7 +189,8 @@ ml::TargetVec buildTargetFeatures(Game& g, const Side& side, const std::vector<A
 }
 
 void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
-                       const ml::ContextVec& ctx, ml::RolloutSampler* sampler) {
+                       const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
+                       std::array<bool, 8>& decided) {
   if (g.map->options.diplomacy == 0) return;
   int me = side.index;
   const SideBelief& b = belief::ensure(side);
@@ -207,9 +208,15 @@ void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
   int activeWars = 0;
   int primaryEnemy = NONE;
   for (int s = 0; s < 8; s++) {
-    if (s != me && g.map->sides[s].alive && diplomacy::state(g, me, s) == diplomacy::WAR) {
+    if (s != me && g.map->sides[s].inUse && g.map->sides[s].alive &&
+        (diplomacy::state(g, me, s) == diplomacy::WAR ||
+         (decided[s] && diplomacy::proposal(g, me, s) != diplomacy::PEACE))) {
       activeWars++;
-      if (primaryEnemy == NONE) primaryEnemy = s;
+      if (primaryEnemy == NONE &&
+          (diplomacy::state(g, me, s) == diplomacy::WAR ||
+           diplomacy::proposal(g, me, s) == diplomacy::WAR)) {
+        primaryEnemy = s;
+      }
     }
   }
 
@@ -218,6 +225,9 @@ void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     if (a->owner == me && a->x != NONE && !a->transit) totalMyMobileStr += (float)a->strength;
   }
 
+  auto myCitiesList = game::sideCities(g, side);
+  std::array<float, 8> rivalMinDist;
+  rivalMinDist.fill(120.0f);
   int closestRival = NONE;
   float closestRivalDist = 999.0f;
   for (int otherIdx = 0; otherIdx < 8; otherIdx++) {
@@ -225,39 +235,35 @@ void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     if (otherIdx == me || !other.inUse || !other.alive) continue;
     if (b.visibleCitiesBySide[otherIdx] == 0 && b.theirBorderStrength[otherIdx] == 0.0f) continue;
     float md = 120.0f;
-    for (City* mc : game::sideCities(g, side)) {
+    for (City* mc : myCitiesList) {
       for (City* vc : b.visibleCities) {
         if (vc->ownerIndex == otherIdx) {
           md = std::min(md, (float)move::distance(mc->x, mc->y, vc->x, vc->y));
         }
       }
     }
+    rivalMinDist[otherIdx] = md;
     if (md < closestRivalDist) {
       closestRivalDist = md;
       closestRival = otherIdx;
     }
   }
 
+  int warsCommitted = activeWars;
+
   for (int otherIdx = 0; otherIdx < 8; otherIdx++) {
     Side& other = g.map->sides[otherIdx];
-    if (otherIdx == me || !other.inUse || !other.alive) continue;
+    if (otherIdx == me || !other.inUse || !other.alive || decided[otherIdx]) continue;
     int curSt = diplomacy::state(g, me, otherIdx);
     if (g.map->options.hiddenMap != 0 && b.visibleCitiesBySide[otherIdx] == 0 &&
         b.theirBorderStrength[otherIdx] == 0.0f && curSt != diplomacy::WAR) {
       continue;
     }
+    decided[otherIdx] = true;
 
     auto att = diplomacy::computeAttitude(g, me, otherIdx);
     bool curAllied = diplomacy::isAllied(g, me, otherIdx);
-
-    float minDist = 120.0f;
-    for (City* mc : game::sideCities(g, side)) {
-      for (City* vc : b.visibleCities) {
-        if (vc->ownerIndex == otherIdx) {
-          minDist = std::min(minDist, (float)move::distance(mc->x, mc->y, vc->x, vc->y));
-        }
-      }
-    }
+    float minDist = rivalMinDist[otherIdx];
 
     int sharedWars = 0;
     for (int s = 0; s < 8; s++) {
@@ -274,7 +280,7 @@ void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
                side.ai->lost[otherIdx] * 2;
     }
 
-    int otherWars = activeWars - (curSt == diplomacy::WAR ? 1 : 0);
+    int otherWars = warsCommitted - (curSt == diplomacy::WAR ? 1 : 0);
     float effMyStr = std::max(b.myBorderStrength[otherIdx],
                               totalMyMobileStr * std::clamp(1.1f - minDist / 45.0f, 0.0f, 0.8f));
     bool isLeaderOrClosest =
@@ -318,8 +324,10 @@ void runDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       diplomacy::proposeAlliance(g, me, otherIdx, false);
     } else if (bestChoice == 2) {
       diplomacy::propose(g, me, otherIdx, diplomacy::INTERMEDIATE);
+      if (curSt != diplomacy::WAR) warsCommitted++;
     } else {
       diplomacy::propose(g, me, otherIdx, diplomacy::WAR);
+      if (curSt != diplomacy::WAR) warsCommitted++;
       if (primaryEnemy == NONE) primaryEnemy = otherIdx;
     }
 
@@ -588,8 +596,8 @@ bool executeStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
     if (!path || path->empty()) break;
 
     std::vector<move::Step> walkSteps = *path;
-    if (isFogMission && walkSteps.size() > 3) {
-      walkSteps.resize(3);
+    if (isFogMission && walkSteps.size() > 6) {
+      walkSteps.resize(6);
     }
 
     int seenBoxBefore = 0;
@@ -812,8 +820,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
       hold.label = "Hold " + c->name;
       targets.push_back(std::move(hold));
 
-      float cDistE = c->index < (int)b.cityNearestEnemyDist.size() ? b.cityNearestEnemyDist[c->index] : 200.0f;
-      if ((threat > 0.0f || cDistE <= 24.0f) && existingCount < 16) {
+      if (existingCount < 32) {
         CandidateTarget reinf;
         reinf.kind = TargetKind::REINFORCE_CITY;
         reinf.x = c->x;
@@ -1052,9 +1059,6 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
     }
 
     std::set<size_t> blockedTargets;
-    float lgDistE = (lg.city && lg.city->index < (int)b.cityNearestEnemyDist.size())
-                        ? b.cityNearestEnemyDist[lg.city->index]
-                        : 100.0f;
 
     while (!pool.empty()) {
       Army* seed = pool.front();
@@ -1156,6 +1160,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
           continue;
         }
         if (tgt.kind == TargetKind::FOG_FRONTIER && g.map->options.hiddenMap != 0) {
+          if (tgt.assignedStacks >= 1) continue;
           if (!localFogIndices.empty() && !localFogIndices.count(ti)) continue;
           bool stillHasUnseen = false;
           for (int oy = -1; oy <= 1 && !stillHasUnseen; oy++) {
@@ -1171,13 +1176,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         }
 
         if (tgt.kind == TargetKind::HOLD_GARRISON && tgt.city != lg.city) continue;
-        if (tgt.kind == TargetKind::REINFORCE_CITY) {
-          if (tgt.city == lg.city) continue;
-          float tgtDistE = (tgt.city && tgt.city->index < (int)b.cityNearestEnemyDist.size())
-                               ? b.cityNearestEnemyDist[tgt.city->index]
-                               : 200.0f;
-          if (tgtDistE >= lgDistE && tgt.enemyThreat <= 0.0f) continue;
-        }
+        if (tgt.kind == TargetKind::REINFORCE_CITY && tgt.city == lg.city) continue;
         if (tgt.kind == TargetKind::RUIN_OR_SAGE && !seed->hero()) continue;
         if (tgt.kind == TargetKind::TEMPLE_OR_ITEM && tgt.item && !seed->hero()) continue;
         if (tgt.kind == TargetKind::TEMPLE_OR_ITEM && tgt.site &&
@@ -1187,24 +1186,26 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         if (tgt.kind == TargetKind::TEMPLE_OR_ITEM && tgt.assignedStacks >= 1) continue;
         if (tgt.kind == TargetKind::RUIN_OR_SAGE && tgt.assignedStacks >= 1) continue;
 
-        size_t maxOptCount = (tgt.kind == TargetKind::HOLD_GARRISON) ? 1 : preStacks.size();
-        for (size_t si = 0; si < maxOptCount; si++) {
+        bool isCombatTgt = (tgt.kind == TargetKind::NEUTRAL_CITY ||
+                            tgt.kind == TargetKind::ENEMY_CITY ||
+                            tgt.kind == TargetKind::ENEMY_STACK);
+        for (size_t si = 0; si < preStacks.size(); si++) {
           const PrebuiltStack& ps = preStacks[si];
           const core::Flood& activeFlood = ps.flies ? flyFlood : landFlood;
           int pCost = targetPathCost(g, activeFlood, tgt);
           if (pCost >= core::UNREACHED) continue;
 
           float nearStr = 0.0f;
+          ml::StackVec optSv = ps.sv;
           if (tgt.kind == TargetKind::HOLD_GARRISON) {
-            nearStr = std::max(0.0f, remGroupStr - ps.str);
-          } else if (tgt.kind == TargetKind::NEUTRAL_CITY ||
-                     tgt.kind == TargetKind::ENEMY_CITY ||
-                     tgt.kind == TargetKind::ENEMY_STACK) {
+            nearStr = remGroupStr;
+            optSv[14] = std::tanh((committedCityGuardStr + ps.str) / 10.0f);
+          } else if (isCombatTgt) {
             nearStr = std::max(0.0f, tgt.nearbyFriendlyStr - remGroupStr);
           }
 
           ml::TargetVec tv = buildTargetFeatures(g, side, ps.units, tgt, nearStr, caution, pCost);
-          ml::MissionInVec mIn = ml::packMissionInput(ctx, ps.sv, tv);
+          ml::MissionInVec mIn = ml::packMissionInput(ctx, optSv, tv);
           auto raw = policy.missionNet.forward(mIn);
           options.push_back(
               JointOption{ti, si, mIn, tv, ml::MissionOutput{raw[0], raw[1]}});
@@ -1234,6 +1235,19 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
       CandidateTarget& chosenTgt = targets[chosenOpt.targetIdx];
       std::vector<Army*> currentStack = preStacks[chosenOpt.stackOptIdx].units;
       float stackStr = preStacks[chosenOpt.stackOptIdx].str;
+
+      ml::StackValueInVec preGroupState = ml::packStackValueInput(ctx, preStacks.back().sv);
+      float preGroupValue = (sampler && sampler->currentTurn) ? policy.evaluateStackValue(preGroupState) : 0.0f;
+
+      std::vector<std::uintptr_t> chosenUnitIds;
+      std::vector<std::uintptr_t> poolUnitIds;
+      if (sampler && sampler->currentTurn) {
+        chosenUnitIds.reserve(currentStack.size());
+        for (Army* a : currentStack) chosenUnitIds.push_back(reinterpret_cast<std::uintptr_t>(a));
+        const auto& fullPool = preStacks.back().units;
+        poolUnitIds.reserve(fullPool.size());
+        for (Army* a : fullPool) poolUnitIds.push_back(reinterpret_cast<std::uintptr_t>(a));
+      }
 
       for (size_t i = 1; i < currentStack.size(); i++) {
         auto it = std::find(pool.begin(), pool.end(), currentStack[i]);
@@ -1345,6 +1359,10 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         rec.stageChosen = stageNear;
         rec.oldStageLogProb = stageLogProb;
         rec.immediateDeltaScore = scoreAfter - scoreBefore;
+        rec.stackValueIn = preGroupState;
+        rec.stackValuePred = preGroupValue;
+        rec.unitIds = std::move(chosenUnitIds);
+        rec.poolUnitIds = std::move(poolUnitIds);
         sampler->currentTurn->missionSteps.push_back(std::move(rec));
       }
     }
@@ -1390,7 +1408,6 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       float distE = (c->index < (int)b.cityNearestEnemyDist.size()) ? b.cityNearestEnemyDist[c->index] : 100.0f;
 
       ml::ContextVec curCtx = ml::buildContext(g, side);
-      ml::EconInVec holdIn = makeHoldGoldIn(curCtx);
 
       ml::EconVec e{};
       e[5] = 1.0f;
@@ -1405,9 +1422,14 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       e[ml::ECON_CURRENT] = 1.0f;   // keeping the army is the status quo
       ml::EconInVec keepIn = ml::packEconInput(curCtx, e);
 
-      std::vector<ml::EconInVec> cands = {keepIn, holdIn};
+      ml::EconVec disbandVec = e;
+      disbandVec[10] = -e[10];
+      disbandVec[ml::ECON_CURRENT] = 0.0f;
+      ml::EconInVec disbandIn = ml::packEconInput(curCtx, disbandVec);
+
+      std::vector<ml::EconInVec> cands = {keepIn, disbandIn};
       std::vector<float> logits = {policy.econNet.forward(keepIn)[0],
-                                   policy.econNet.forward(holdIn)[0]};
+                                   policy.econNet.forward(disbandIn)[0]};
       float lp = 0.0f;
       int pick = ml::selectFromLogits(logits, sampler, &lp);
       if (sampler && sampler->currentTurn) {
@@ -1420,9 +1442,94 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     }
   }
 
-  // City production selection (StopProduction vs available production slots)
   std::vector<City*> ownCities = game::sideCities(g, side);
+
+  // Empire-wide slot upgrade rounds (up to 3 purchases/turn): each round asks EconNet
+  // to compare HoldGold against every legal (city, unit) upgrade, stopping immediately
+  // as soon as EconNet chooses HoldGold so multi-city empires neither hoard 10k gold
+  // nor suffer 1 - p^N treasury-draining coin-flip cascades across N cities.
+  auto menu = game::buyableTypes(g);
+  for (int buyRound = 0; buyRound < 3 && !ownCities.empty() && side.gold >= 250; buyRound++) {
+    struct BuyOption {
+      City* city = nullptr;
+      int typeId = NONE;
+      ml::EconInVec inVec{};
+    };
+    ml::ContextVec buyCtx = ml::buildContext(g, side);
+    std::vector<BuyOption> buyOpts;
+    buyOpts.push_back(BuyOption{nullptr, NONE, makeHoldGoldIn(buyCtx)});
+
+    for (City* c : ownCities) {
+      bool fullSlots = (int)c->slots.size() >= rules::PRODUCTION_SLOTS;
+      int replacePrice = (!c->slots.empty()) ? c->slots[0].price : 0;
+      int bestExistingStr = 0;
+      for (const auto& sl : c->slots) bestExistingStr = std::max(bestExistingStr, sl.strength);
+      float threat = c->index < (int)b.cityThreat2Turn.size() ? b.cityThreat2Turn[c->index] : 0.0f;
+      float distE = c->index < (int)b.cityNearestEnemyDist.size() ? b.cityNearestEnemyDist[c->index] : 100.0f;
+      for (const ArmyType* at : menu) {
+        int price = std::abs(at->price);
+        if (price <= 0 || price + 100 > side.gold) continue;
+        if (fullSlots && price <= replacePrice) continue;
+        if (!game::cannotBuy(g, side, *c, *at).empty()) continue;
+
+        ml::EconVec e{};
+        e[3] = 1.0f;
+        e[7] = (float)at->strength / 9.0f;
+        e[8] = (float)at->move / 24.0f;
+        e[9] = (float)at->time / 6.0f;
+        e[10] = (float)price / std::max(100.0f, (float)(side.gold - 80));
+        e[11] = at->flies ? 1.0f : 0.0f;
+        e[12] = (at->siege || at->bonus[48] != 0) ? 1.0f : 0.0f;
+        e[13] = (at->move >= 14 && !at->flies) ? 1.0f : 0.0f;
+        e[14] = std::tanh(threat / 25.0f);
+        e[15] = std::tanh(distE / 60.0f);
+        e[16] = (float)c->slots.size() / (float)rules::PRODUCTION_SLOTS;
+        e[17] = (float)(at->strength - bestExistingStr) / 9.0f;
+        e[18] = (float)(at->strength * at->strength) / (float)std::max(1, at->time * 16);
+        buyOpts.push_back(BuyOption{c, at->id, ml::packEconInput(buyCtx, e)});
+      }
+    }
+
+    if (buyOpts.size() <= 1) break;
+    std::vector<float> logits(buyOpts.size());
+    std::vector<float> logMult(buyOpts.size(), 0.0f);
+    for (size_t i = 0; i < buyOpts.size(); i++) {
+      logits[i] = policy.econNet.forward(buyOpts[i].inVec)[0];
+      if (i > 0 && buyOpts.size() > 2) logMult[i] = std::log((float)(buyOpts.size() - 1));
+    }
+    float lp = 0.0f;
+    int pick = ml::selectFromLogits(logits, sampler, &lp, &logMult);
+    if (sampler && sampler->currentTurn) {
+      std::vector<ml::EconInVec> cands;
+      cands.reserve(buyOpts.size());
+      for (const auto& bo : buyOpts) cands.push_back(bo.inVec);
+      sampler->currentTurn->econSteps.push_back(
+          ml::EconStepRecord{std::move(cands), std::move(logMult), pick, lp});
+    }
+    if (pick == 0 || !buyOpts[pick].city) break;
+
+    City* bestBuyCity = buyOpts[pick].city;
+    int boughtType = buyOpts[pick].typeId;
+    int slotIdx = game::buySlot(*bestBuyCity);
+    game::buyProduction(g, side, *bestBuyCity, slotIdx, boughtType);
+    game::sortProduction(*bestBuyCity);
+    for (int si = 0; si < (int)bestBuyCity->slots.size(); si++) {
+      if (bestBuyCity->slots[si].type == boughtType) {
+        game::setProduction(g, *bestBuyCity, si);
+        break;
+      }
+    }
+  }
+
+  // City production macro-action: queried whenever a city has no active build
+  // or has just completed a build (`c->countdown == slot.time`, matching
+  // game.cpp:1331), so multi-turn unit builds complete without mid-countdown
+  // cancellation while cities remain free to switch units after each build.
+  ml::ContextVec prodCtx = ml::buildContext(g, side);
   for (City* c : ownCities) {
+    bool midCountdown = (c->producing >= 0 && c->producing < (int)c->slots.size() &&
+                         c->countdown > 0 && c->countdown < c->slots[c->producing].time);
+    if (c->slots.empty() || midCountdown) continue;
     float threat = c->index < (int)b.cityThreat2Turn.size() ? b.cityThreat2Turn[c->index] : 0.0f;
     float distE = c->index < (int)b.cityNearestEnemyDist.size() ? b.cityNearestEnemyDist[c->index] : 100.0f;
     int garCount = 0;
@@ -1438,22 +1545,22 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     stopVec[14] = std::tanh(threat / 25.0f);
     stopVec[15] = std::tanh(distE / 60.0f);
     stopVec[16] = std::tanh((float)garCount / 6.0f);
-    stopVec[ml::ECON_CURRENT] = game::producing(*c) ? 0.0f : 1.0f;
+    stopVec[ml::ECON_CURRENT] = (c->producing == NONE) ? 1.0f : 0.0f;
 
-    std::vector<ml::EconInVec> cands = {ml::packEconInput(ctx, stopVec)};
+    std::vector<int> slotIndices = {NONE};
+    std::vector<ml::EconInVec> cands = {ml::packEconInput(prodCtx, stopVec)};
     for (size_t si = 0; si < c->slots.size(); si++) {
       const Slot& sl = c->slots[si];
       const ArmyType* at = g.types.byId(sl.type);
       bool isFlier = at && at->flies;
       bool isSiegeOrSpec = at && (at->siege || at->bonus[48] != 0 || at->bonus[52] != 0);
       bool isCav = sl.move >= 14 && !isFlier;
-      int turnsLeft = (c->producing == (int)si && c->countdown > 0) ? c->countdown : sl.time;
 
       ml::EconVec e{};
       e[1] = 1.0f;
       e[7] = (float)sl.strength / 9.0f;
       e[8] = (float)sl.move / 24.0f;
-      e[9] = (float)turnsLeft / 6.0f;
+      e[9] = (float)sl.time / 6.0f;
       e[10] = (float)sl.cost / 20.0f;
       e[11] = isFlier ? 1.0f : 0.0f;
       e[12] = isSiegeOrSpec ? 1.0f : 0.0f;
@@ -1461,8 +1568,15 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       e[14] = std::tanh(threat / 25.0f);
       e[15] = std::tanh(distE / 60.0f);
       e[16] = std::tanh((float)garCount / 6.0f);
-      e[ml::ECON_CURRENT] = (game::producing(*c) && c->producing == (int)si) ? 1.0f : 0.0f;
-      cands.push_back(ml::packEconInput(ctx, e));
+      e[18] = (float)(sl.strength * sl.strength) / (float)std::max(1, sl.time * 16);
+      e[ml::ECON_CURRENT] = (c->producing == (int)si) ? 1.0f : 0.0f;
+      slotIndices.push_back((int)si);
+      cands.push_back(ml::packEconInput(prodCtx, e));
+    }
+
+    if (cands.size() == 1) {
+      game::setProduction(g, *c, NONE);
+      continue;
     }
 
     std::vector<float> logits(cands.size());
@@ -1473,80 +1587,15 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     }
     float lp = 0.0f;
     int pick = ml::selectFromLogits(logits, sampler, &lp, &logMult);
-    if (sampler && sampler->currentTurn && cands.size() > 1) {
+    if (sampler && sampler->currentTurn) {
       sampler->currentTurn->econSteps.push_back(
           ml::EconStepRecord{std::move(cands), std::move(logMult), pick, lp});
     }
 
     if (pick == 0) {
       game::setProduction(g, *c, NONE);
-    } else {
-      int bestSlot = pick - 1;
-      if (c->producing != bestSlot || !game::producing(*c)) {
-        game::setCityProduction(g, &side, *c, bestSlot);
-      }
-    }
-  }
-
-  // Production slot buying with surplus treasury
-  if (!ownCities.empty() && side.gold >= 250) {
-    struct BuyOption {
-      City* city = nullptr;
-      int typeId = NONE;
-      ml::EconInVec inVec{};
-    };
-    std::vector<BuyOption> buyOpts;
-    buyOpts.push_back(BuyOption{nullptr, NONE, makeHoldGoldIn(ctx)});
-    auto menu = game::buyableTypes(g);
-
-    for (City* c : ownCities) {
-      if ((int)c->slots.size() >= rules::PRODUCTION_SLOTS) continue;
-      float threat = c->index < (int)b.cityThreat2Turn.size() ? b.cityThreat2Turn[c->index] : 0.0f;
-      float distE = c->index < (int)b.cityNearestEnemyDist.size() ? b.cityNearestEnemyDist[c->index] : 100.0f;
-      for (const ArmyType* at : menu) {
-        if (!game::cannotBuy(g, side, *c, *at).empty()) continue;
-        int price = std::abs(at->price);
-        if (price <= 0 || price + 100 > side.gold) continue;
-        ml::EconVec e{};
-        e[3] = 1.0f;
-        e[7] = (float)at->strength / 9.0f;
-        e[8] = (float)at->move / 24.0f;
-        e[9] = (float)at->time / 6.0f;
-        e[10] = (float)price / std::max(100.0f, (float)(side.gold - 80));
-        e[11] = at->flies ? 1.0f : 0.0f;
-        e[12] = (at->siege || at->bonus[48] != 0) ? 1.0f : 0.0f;
-        e[13] = (at->move >= 14 && !at->flies) ? 1.0f : 0.0f;
-        e[14] = std::tanh(threat / 25.0f);
-        e[15] = std::tanh(distE / 60.0f);
-        buyOpts.push_back(BuyOption{c, at->id, ml::packEconInput(ctx, e)});
-      }
-    }
-
-    if (buyOpts.size() > 1) {
-      std::vector<float> logits(buyOpts.size());
-      std::vector<float> logMult(buyOpts.size(), 0.0f);
-      for (size_t i = 0; i < buyOpts.size(); i++) {
-        logits[i] = policy.econNet.forward(buyOpts[i].inVec)[0];
-        if (i > 0 && buyOpts.size() > 2) logMult[i] = std::log((float)(buyOpts.size() - 1));
-      }
-      float lp = 0.0f;
-      int pick = ml::selectFromLogits(logits, sampler, &lp, &logMult);
-      if (sampler && sampler->currentTurn) {
-        std::vector<ml::EconInVec> cands;
-        cands.reserve(buyOpts.size());
-        for (const auto& bo : buyOpts) cands.push_back(bo.inVec);
-        sampler->currentTurn->econSteps.push_back(
-            ml::EconStepRecord{std::move(cands), std::move(logMult), pick, lp});
-      }
-      if (pick > 0 && buyOpts[pick].city) {
-        City* bestBuyCity = buyOpts[pick].city;
-        int slotIdx = game::buySlot(*bestBuyCity);
-        game::buyProduction(g, side, *bestBuyCity, slotIdx, buyOpts[pick].typeId);
-        game::sortProduction(*bestBuyCity);
-        if (!game::producing(*bestBuyCity) && !bestBuyCity->slots.empty()) {
-          game::setCityProduction(g, &side, *bestBuyCity, (int)bestBuyCity->slots.size() - 1);
-        }
-      }
+    } else if (c->producing != slotIndices[pick] || !game::producing(*c)) {
+      game::setProduction(g, *c, slotIndices[pick]);
     }
   }
 
@@ -1569,7 +1618,7 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     keepHere[ml::ECON_CURRENT] = src->vectorTo == NONE ? 1.0f : 0.0f;
 
     std::vector<City*> destCities = {nullptr};
-    std::vector<ml::EconInVec> cands = {ml::packEconInput(ctx, keepHere)};
+    std::vector<ml::EconInVec> cands = {ml::packEconInput(prodCtx, keepHere)};
 
     for (City* dst : ownCities) {
       if (dst == src) continue;
@@ -1591,7 +1640,7 @@ void runEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
       v[17] = std::tanh(threatGain);
       v[ml::ECON_CURRENT] = isCurrent ? 1.0f : 0.0f;
       destCities.push_back(dst);
-      cands.push_back(ml::packEconInput(ctx, v));
+      cands.push_back(ml::packEconInput(prodCtx, v));
     }
 
     if (cands.size() > 1) {
@@ -1642,6 +1691,7 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
   }
   side.aiThoughts.clear();
 
+  std::array<bool, 8> diploDecided{};
   for (int wave = 0; wave < 6; wave++) {
     belief::update(g, side);
     ml::ContextVec waveCtx = ml::buildContext(g, side);
@@ -1653,9 +1703,9 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
         sampler->currentTurn->valuePred = v;
         sampler->currentTurn->startScore = ml::computeEmpireScore(g, side.index);
       }
-      runDiplomacyPhase(g, side, policy, waveCtx, sampler);
-      if (pause) pause("diplomacy");
     }
+    runDiplomacyPhase(g, side, policy, waveCtx, sampler, diploDecided);
+    if (wave == 0 && pause) pause("diplomacy");
     runMilitaryAndExplorationPhase(g, side, policy, waveCtx, wave == 0 ? pause : nullptr, sampler);
     bool anyLeft = false;
     for (Army* a : g.armies) {
