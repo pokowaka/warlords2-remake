@@ -134,13 +134,17 @@ size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::fromFlat(const std::vector<floa
 }
 
 template <int InDim, int H1Dim, int H2Dim, int OutDim>
-size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::fromFlatNarrowInput(const std::vector<float>& in, size_t offset,
-                                                                      int oldInDim) {
+size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::fromFlatWidenInput(const std::vector<float>& in, size_t offset,
+                                                                     int oldInDim, int insertAt, int insertCount) {
   auto next = [&]() { return offset < in.size() ? in[offset++] : 0.0f; };
   auto copyMatrix = [&](auto& arr, int rows) {
     arr.fill(0.0f);
     for (int r = 0; r < rows; r++) {
-      for (int c = 0; c < oldInDim; c++) arr[r * InDim + c] = next();
+      for (int c = 0; c < oldInDim; c++) {
+        float v = next();
+        int nc = c < insertAt ? c : c + insertCount;
+        if (nc < InDim) arr[r * InDim + nc] = v;
+      }
     }
   };
   auto copySlice = [&](auto& arr) {
@@ -290,17 +294,27 @@ void PolicyNetwork::unflatten(const std::vector<float>& params) {
   off = diploNet.fromFlat(params, off);
   off = missionNet.fromFlat(params, off);
   off = econNet.fromFlat(params, off);
-  if (params.size() == (size_t)TOTAL_PARAMS) {
-    off = valueNet.fromFlat(params, off);
-    stackValueNet.fromFlat(params, off);
-    return;
-  }
-  // v3/v4 files: critics without the privileged inputs (zero-initialised columns)
-  off = valueNet.fromFlatNarrowInput(params, off, LEGACY_VALUE_IN_DIM);
-  if (params.size() == (size_t)LEGACY_V4_PARAMS) {
-    stackValueNet.fromFlatNarrowInput(params, off, LEGACY_STACK_VALUE_IN_DIM);
-  } else {
+  off = valueNet.fromFlat(params, off);
+  stackValueNet.fromFlat(params, off);
+}
+
+void PolicyNetwork::unflattenLegacy(const std::vector<float>& params) {
+  // Legacy files lack the 6 added context features (inserted after the 14
+  // original ones); v3/v4 also lack the critics' privileged inputs (at the
+  // end); v3 has no StackValueNet. Missing columns start at zero.
+  const bool v5 = params.size() == (size_t)LEGACY_V5_PARAMS;
+  const bool v3 = params.size() == (size_t)LEGACY_V3_PARAMS;
+  const int at = LEGACY_GLOBAL_DIM, add = ADDED_GLOBAL_DIM;
+  const int criticDrop = v5 ? V5_DROPPED : V4_CRITIC_DROPPED;
+  size_t off = 0;
+  off = diploNet.fromFlatWidenInput(params, off, DiploNet::IN_DIM - V5_DROPPED, at, add);
+  off = missionNet.fromFlatWidenInput(params, off, MissionNet::IN_DIM - V5_DROPPED, at, add);
+  off = econNet.fromFlatWidenInput(params, off, EconNet::IN_DIM - V5_DROPPED, at, add);
+  off = valueNet.fromFlatWidenInput(params, off, ValueNet::IN_DIM - criticDrop, at, add);
+  if (v3) {
     stackValueNet.zero();
+  } else {
+    stackValueNet.fromFlatWidenInput(params, off, StackValueNet::IN_DIM - criticDrop, at, add);
   }
 }
 
@@ -309,7 +323,7 @@ bool PolicyNetwork::saveJson(const std::filesystem::path& path, int generation, 
   if (!out.is_open()) return false;
   auto weights = flatten();
   out << "{\n";
-  out << "  \"version\": 5,\n";
+  out << "  \"version\": 6,\n";
   out << "  \"generation\": " << generation << ",\n";
   out << "  \"selectionCityShare\": " << selectionCityShare << ",\n";
   out << "  \"paramCount\": " << weights.size() << ",\n";
@@ -332,12 +346,13 @@ bool PolicyNetwork::loadJson(const std::filesystem::path& path) {
     Json root = Json::parse(buf.str());
     const Json& arr = root["weights"];
     int n = (int)arr.size();
-    if (n != TOTAL_PARAMS && n != LEGACY_V4_PARAMS && n != LEGACY_V3_PARAMS) return false;
+    if (n != TOTAL_PARAMS && n != LEGACY_V5_PARAMS && n != LEGACY_V4_PARAMS && n != LEGACY_V3_PARAMS) return false;
     std::vector<float> weights(n);
     for (int i = 0; i < n; i++) {
       weights[i] = (float)arr[i].number();
     }
-    unflatten(weights);
+    if (n == TOTAL_PARAMS) unflatten(weights);
+    else unflattenLegacy(weights);
     return true;
   } catch (...) {
     return false;
@@ -517,12 +532,31 @@ ContextVec buildContext(const Game& g, const Side& side) {
     }
   }
 
-  int myArmies = 0, myHeroes = 0;
+  int myArmies = 0, myHeroes = 0, myStrength = 0;
   for (Army* a : g.armies) {
     if (a->owner == me && !a->disbanded && (a->x != NONE || a->transit)) {
       myArmies++;
+      myStrength += a->strength;
       if (a->hero()) myHeroes++;
     }
+  }
+
+  // Own cities without a single own army inside, and those of them a visible
+  // hostile stack could reach within a turn (belief threat map: fair information)
+  std::vector<char> garrisoned(g.map->cities.size(), 0);
+  for (Army* a : g.armies) {
+    if (a->owner != me || a->disbanded || a->transit || a->x == NONE) continue;
+    if (City* in = game::cityAt(g, a->x, a->y)) {
+      if (in->index >= 0 && in->index < (int)garrisoned.size()) garrisoned[in->index] = 1;
+    }
+  }
+  int ownCities = 0, emptyCities = 0, exposedCities = 0;
+  for (const auto& city : g.map->cities) {
+    if (city.razed || city.ownerIndex != me) continue;
+    ownCities++;
+    if (city.index >= 0 && city.index < (int)garrisoned.size() && garrisoned[city.index]) continue;
+    emptyCities++;
+    if (city.index < (int)b.cityThreat1Turn.size() && b.cityThreat1Turn[city.index] > 0.0f) exposedCities++;
   }
 
   int wars = 0, allies = 0, aliveRivals = 0;
@@ -558,6 +592,13 @@ ContextVec buildContext(const Game& g, const Side& side) {
   c[11] = capThreat;
   c[12] = (side.quest && side.quest->hasTarget()) ? 1.0f : 0.0f;
   c[13] = std::min(1.0f, (float)myHeroes / 3.0f);
+  // v6 additions: non-saturating scales and empty-city exposure
+  c[14] = 0.5f * std::log1p((float)std::max(0, side.gold) / 1000.0f);
+  c[15] = std::min(2.0f, (float)g.turn / 50.0f);
+  c[16] = 0.5f * std::log1p((float)myStrength / 50.0f);
+  c[17] = ownCities > 0 ? (float)emptyCities / (float)ownCities : 0.0f;
+  c[18] = ownCities > 0 ? (float)exposedCities / (float)ownCities : 0.0f;
+  c[19] = std::clamp((float)(inc - upk) / (float)std::max(1, inc), -1.0f, 1.0f);
 
   // Keep the 10D personality conditioning channels neutral (0.0f) for the base tabula-rasa
   // policy so no hand-authored trait biases fragment hidden-layer activations across sides.

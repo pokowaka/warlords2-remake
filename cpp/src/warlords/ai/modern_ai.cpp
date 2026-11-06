@@ -1352,6 +1352,23 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         }
       }
 
+      // Departure credit (training only): did this move leave its own city empty?
+      int vacatedCity = NONE;
+      if (recording && lg.city && lg.city->ownerIndex == me && chosenTgt.kind != TargetKind::HOLD_GARRISON) {
+        bool anyLeft = false;
+        for (int dy = 0; dy <= 1 && !anyLeft; dy++) {
+          for (int dx = 0; dx <= 1 && !anyLeft; dx++) {
+            for (Army* a : game::armiesAt(g, lg.city->x + dx, lg.city->y + dy)) {
+              if (a->owner == me) {
+                anyLeft = true;
+                break;
+              }
+            }
+          }
+        }
+        if (!anyLeft) vacatedCity = lg.city->index;
+      }
+
       if (sampler && sampler->currentTurn && (options.size() > 1 || isCombatTarget)) {
         float scoreAfter = ml::computeEmpireScore(g, me);
         ml::MissionStepRecord rec;
@@ -1368,6 +1385,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         rec.stackValuePred = preGroupValue;
         rec.unitIds = std::move(chosenUnitIds);
         rec.poolUnitIds = std::move(poolUnitIds);
+        rec.vacatedCity = vacatedCity;
         sampler->currentTurn->missionSteps.push_back(std::move(rec));
       }
     }
@@ -1722,6 +1740,24 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
       }
     }
     if (!anyLeft) break;
+  }
+
+  // A city emptied by one move but re-garrisoned by a later one was not left open
+  if (sampler && sampler->currentTurn) {
+    for (auto& ms : sampler->currentTurn->missionSteps) {
+      if (ms.vacatedCity == NONE || ms.vacatedCity >= (int)g.map->cities.size()) continue;
+      const City& vc = g.map->cities[ms.vacatedCity];
+      for (int dy = 0; dy <= 1 && ms.vacatedCity != NONE; dy++) {
+        for (int dx = 0; dx <= 1 && ms.vacatedCity != NONE; dx++) {
+          for (Army* a : game::armiesAt(g, vc.x + dx, vc.y + dy)) {
+            if (a->owner == side.index) {
+              ms.vacatedCity = NONE;
+              break;
+            }
+          }
+        }
+      }
+    }
   }
 
   belief::update(g, side);

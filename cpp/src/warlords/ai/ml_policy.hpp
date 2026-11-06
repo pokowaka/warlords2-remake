@@ -19,8 +19,13 @@
 
 namespace w2::ai::ml {
 
-constexpr int GLOBAL_DIM = 14;
-constexpr int CONTEXT_DIM = GLOBAL_DIM + personality::TRAIT_DIM;  // 24
+// Global context: 14 original features, then 6 added in weights v6 (gold,
+// turn and army size on scales that do not saturate, empty and exposed own
+// cities, budget balance). Personality channels follow.
+constexpr int LEGACY_GLOBAL_DIM = 14;
+constexpr int ADDED_GLOBAL_DIM = 6;
+constexpr int GLOBAL_DIM = LEGACY_GLOBAL_DIM + ADDED_GLOBAL_DIM;  // 20
+constexpr int CONTEXT_DIM = GLOBAL_DIM + personality::TRAIT_DIM;  // 30
 
 constexpr int RIVAL_DIM = 18;
 constexpr int DIPLO_IN_DIM = CONTEXT_DIM + RIVAL_DIM;             // 42
@@ -47,13 +52,10 @@ constexpr int ECON_OUT_DIM = 1;
 // buildCriticFeatures().
 constexpr int CRITIC_DIM = 16;
 
-constexpr int VALUE_IN_DIM = CONTEXT_DIM + CRITIC_DIM;            // 40
+constexpr int VALUE_IN_DIM = CONTEXT_DIM + CRITIC_DIM;            // 46
 constexpr int VALUE_OUT_DIM = 1;
 
-constexpr int STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM + CRITIC_DIM;  // 56
-// Input widths of the critics before the privileged features (weights v3/v4)
-constexpr int LEGACY_VALUE_IN_DIM = CONTEXT_DIM;                  // 24
-constexpr int LEGACY_STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM; // 40
+constexpr int STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM + CRITIC_DIM;  // 62
 
 /**
  * Default sampling temperature the Modern AI plays real games at. Lower than
@@ -130,12 +132,21 @@ struct ResidualMLP {
   size_t fromFlat(const std::vector<float>& in, size_t offset);
 
   /**
-   * Loads weights saved with a narrower input (`oldInDim` <= InDim): the first
-   * `oldInDim` input columns are copied, the extra ones start at zero, so the
-   * function computed is unchanged until training uses the new inputs.
+   * Loads weights saved with a narrower input of `oldInDim` columns: old column
+   * c goes to c (c < insertAt) or c + insertCount (c >= insertAt); every new
+   * column starts at zero, so the function computed is unchanged until
+   * training uses the new inputs.
    */
-  size_t fromFlatNarrowInput(const std::vector<float>& in, size_t offset, int oldInDim);
+  size_t fromFlatWidenInput(const std::vector<float>& in, size_t offset, int oldInDim, int insertAt,
+                            int insertCount);
 };
+
+/** Parameters of a residual MLP like `Mlp` but with an input `in` columns wide. */
+template <typename Mlp>
+constexpr int mlpParamsWithInput(int in) {
+  return Mlp::OUT_DIM * in + Mlp::H1_DIM * in + Mlp::H1_DIM + Mlp::H2_DIM * Mlp::H1_DIM + Mlp::H2_DIM +
+         Mlp::OUT_DIM * Mlp::H2_DIM + Mlp::OUT_DIM;
+}
 
 class PolicyNetwork {
  public:
@@ -147,12 +158,24 @@ class PolicyNetwork {
 
   static constexpr int TOTAL_PARAMS = DiploNet::PARAM_COUNT + MissionNet::PARAM_COUNT + EconNet::PARAM_COUNT +
                                       ValueNet::PARAM_COUNT + StackValueNet::PARAM_COUNT;
-  /** Parameters of the critics before the privileged inputs were added (v3/v4 files). */
-  static constexpr int LEGACY_VALUE_PARAMS = ValueNet::PARAM_COUNT - CRITIC_DIM * (1 + 24);
-  static constexpr int LEGACY_STACK_VALUE_PARAMS = StackValueNet::PARAM_COUNT - CRITIC_DIM * (1 + 24);
+
+  // Legacy files: v5 lacks the 6 added context features; v4/v3 also lack the
+  // privileged critic inputs; v3 also lacks StackValueNet.
+  static constexpr int V5_DROPPED = ADDED_GLOBAL_DIM;
+  static constexpr int V4_CRITIC_DROPPED = ADDED_GLOBAL_DIM + CRITIC_DIM;
+  static constexpr int LEGACY_V5_PARAMS =
+      mlpParamsWithInput<DiploNet>(DiploNet::IN_DIM - V5_DROPPED) +
+      mlpParamsWithInput<MissionNet>(MissionNet::IN_DIM - V5_DROPPED) +
+      mlpParamsWithInput<EconNet>(EconNet::IN_DIM - V5_DROPPED) +
+      mlpParamsWithInput<ValueNet>(ValueNet::IN_DIM - V5_DROPPED) +
+      mlpParamsWithInput<StackValueNet>(StackValueNet::IN_DIM - V5_DROPPED);
   static constexpr int LEGACY_V3_PARAMS =
-      DiploNet::PARAM_COUNT + MissionNet::PARAM_COUNT + EconNet::PARAM_COUNT + LEGACY_VALUE_PARAMS;
-  static constexpr int LEGACY_V4_PARAMS = LEGACY_V3_PARAMS + LEGACY_STACK_VALUE_PARAMS;
+      mlpParamsWithInput<DiploNet>(DiploNet::IN_DIM - V5_DROPPED) +
+      mlpParamsWithInput<MissionNet>(MissionNet::IN_DIM - V5_DROPPED) +
+      mlpParamsWithInput<EconNet>(EconNet::IN_DIM - V5_DROPPED) +
+      mlpParamsWithInput<ValueNet>(ValueNet::IN_DIM - V4_CRITIC_DROPPED);
+  static constexpr int LEGACY_V4_PARAMS =
+      LEGACY_V3_PARAMS + mlpParamsWithInput<StackValueNet>(StackValueNet::IN_DIM - V4_CRITIC_DROPPED);
 
   PolicyNetwork();
 
@@ -180,8 +203,11 @@ class PolicyNetwork {
   /** Flattens all 5 heads into a single vector of length TOTAL_PARAMS. */
   std::vector<float> flatten() const;
 
-  /** Loads parameters from a flat vector of length TOTAL_PARAMS (or LEGACY_V4/V3_PARAMS). */
+  /** Loads parameters from a flat vector of length TOTAL_PARAMS (or LEGACY_V5/V4/V3_PARAMS). */
   void unflatten(const std::vector<float>& params);
+
+  /** Loads a legacy (v5/v4/v3) flat vector, widening the inputs function-preservingly. */
+  void unflattenLegacy(const std::vector<float>& params);
 
   /** Saves the weights with the training iteration and the held-out selection score. */
   bool saveJson(const std::filesystem::path& path, int generation = 0, float selectionCityShare = 0.0f) const;
@@ -212,6 +238,8 @@ struct MissionStepRecord {
   float stackReturnTarget = 0.0f;     // multi-turn local return achieved by pre-decision group
   std::vector<std::uintptr_t> unitIds;      // non-recycled Game::pool Army* IDs in chosen stack
   std::vector<std::uintptr_t> poolUnitIds;  // non-recycled Game::pool Army* IDs matching stackValueIn
+  int vacatedCity = NONE;             // own city this move left without defenders (still empty at turn end)
+  float vacatedLoss = 0.0f;           // filled by the trainer: that city's score weight if lost by our next turn
   float advantage = 0.0f;             // filled by the trainer
 };
 

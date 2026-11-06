@@ -3582,78 +3582,111 @@ static void testModernAi() {
       ok(gs.turn > 5 || gs.won || gs.over, "1v1 cropped random map runs Modern vs Classic cleanly");
     }
 
-    // 5-head PolicyNetwork with privileged critics (8866 params), v3/v4 compatibility,
-    // and temperature-multiplicity invariant
+    // 5-head PolicyNetwork (v6: 30-wide context, privileged critics; 9700 params),
+    // v5/v4/v3 compatibility, and temperature-multiplicity invariant
     {
       namespace ml = ai::ml;
-      eq(ml::PolicyNetwork::TOTAL_PARAMS, 8866, "5-head PolicyNetwork with privileged critics has 8866 parameters");
-      eq(ml::PolicyNetwork::LEGACY_V4_PARAMS, 8066, "legacy v4 parameter count remains 8066");
-      eq(ml::PolicyNetwork::LEGACY_V3_PARAMS, 6729, "legacy v3 parameter count remains 6729");
+      using PN = ml::PolicyNetwork;
+      eq(PN::TOTAL_PARAMS, 9700, "v6 PolicyNetwork has 9700 parameters");
+      eq(PN::LEGACY_V5_PARAMS, 8866, "legacy v5 parameter count remains 8866");
+      eq(PN::LEGACY_V4_PARAMS, 8066, "legacy v4 parameter count remains 8066");
+      eq(PN::LEGACY_V3_PARAMS, 6729, "legacy v3 parameter count remains 6729");
       ml::PolicyNetwork net;
       ok(net.loadJson("cpp/ai_weights.json"), "installed cpp/ai_weights.json loads cleanly");
       std::vector<float> flat = net.flatten();
-      eq((int)flat.size(), 8866, "flattened parameter vector matches TOTAL_PARAMS");
+      eq((int)flat.size(), 9700, "flattened parameter vector matches TOTAL_PARAMS");
 
-      // Build a legacy (narrow-critic) flat vector from a random network
+      // Legacy flat vectors synthesised from a random v6 network by dropping
+      // the input columns an older format did not have
       ml::PolicyNetwork src;
       src.initRandomWeights(7);
-      auto narrow = [](const auto& mlp, int oldIn, std::vector<float>& out) {
+      auto addedCtx = [](int c) { return c >= ml::LEGACY_GLOBAL_DIM && c < ml::GLOBAL_DIM; };
+      auto narrow = [](const auto& mlp, auto dropped, std::vector<float>& out) {
         using M = std::decay_t<decltype(mlp)>;
         for (int r = 0; r < M::OUT_DIM; r++)
-          for (int c = 0; c < oldIn; c++) out.push_back(mlp.wSkip[r * M::IN_DIM + c]);
+          for (int c = 0; c < M::IN_DIM; c++)
+            if (!dropped(c)) out.push_back(mlp.wSkip[r * M::IN_DIM + c]);
         for (int r = 0; r < M::H1_DIM; r++)
-          for (int c = 0; c < oldIn; c++) out.push_back(mlp.w1[r * M::IN_DIM + c]);
+          for (int c = 0; c < M::IN_DIM; c++)
+            if (!dropped(c)) out.push_back(mlp.w1[r * M::IN_DIM + c]);
         out.insert(out.end(), mlp.b1.begin(), mlp.b1.end());
         out.insert(out.end(), mlp.w2.begin(), mlp.w2.end());
         out.insert(out.end(), mlp.b2.begin(), mlp.b2.end());
         out.insert(out.end(), mlp.w3.begin(), mlp.w3.end());
         out.insert(out.end(), mlp.b3.begin(), mlp.b3.end());
       };
-      std::vector<float> v4;
-      src.diploNet.toFlat(v4);
-      src.missionNet.toFlat(v4);
-      src.econNet.toFlat(v4);
-      narrow(src.valueNet, ml::LEGACY_VALUE_IN_DIM, v4);
+      auto criticDropped = [&](int in) {
+        return [&, in](int c) { return addedCtx(c) || c >= in - ml::CRITIC_DIM; };
+      };
+      std::vector<float> v5, v4;
+      for (auto* out : {&v5, &v4}) {
+        narrow(src.diploNet, addedCtx, *out);
+        narrow(src.missionNet, addedCtx, *out);
+        narrow(src.econNet, addedCtx, *out);
+      }
+      narrow(src.valueNet, addedCtx, v5);
+      narrow(src.stackValueNet, addedCtx, v5);
+      narrow(src.valueNet, criticDropped(ml::VALUE_IN_DIM), v4);
       size_t v3Size = v4.size();
-      narrow(src.stackValueNet, ml::LEGACY_STACK_VALUE_IN_DIM, v4);
-      eq((int)v3Size, 6729, "synthesised v3 prefix has 6729 parameters");
+      narrow(src.stackValueNet, criticDropped(ml::STACK_VALUE_IN_DIM), v4);
+      eq((int)v5.size(), 8866, "synthesised v5 vector has 8866 parameters");
       eq((int)v4.size(), 8066, "synthesised v4 vector has 8066 parameters");
+      eq((int)v3Size, 6729, "synthesised v3 prefix has 6729 parameters");
 
-      // v4 -> v5: the privileged columns start at zero, so the critics ignore them
-      ml::PolicyNetwork compat;
-      compat.initRandomWeights(99);
-      compat.unflatten(v4);
+      // Inputs with the columns a format lacked set to zero: the migrated
+      // network must compute exactly what the source network computes
       ml::ContextVec cx{};
-      for (int i = 0; i < ml::CONTEXT_DIM; i++) cx[i] = 0.1f * (float)(i % 7) - 0.3f;
-      ml::CriticVec zeroCrit{}, someCrit{};
+      for (int i = 0; i < ml::CONTEXT_DIM; i++) cx[i] = addedCtx(i) ? 0.0f : 0.1f * (float)(i % 7) - 0.3f;
+      ml::CriticVec someCrit{}, zeroCrit{};
       for (int i = 0; i < ml::CRITIC_DIM; i++) someCrit[i] = 0.05f * (float)(i + 1);
-      eq(compat.evaluateValue(cx, zeroCrit), compat.evaluateValue(cx, someCrit),
-         "v4 critic ignores the new privileged inputs until trained");
       ml::StackVec sv{};
       sv[3] = 0.4f;
-      eq(compat.evaluateStackValue(ml::packStackValueInput(cx, sv, zeroCrit)),
-         compat.evaluateStackValue(ml::packStackValueInput(cx, sv, someCrit)),
-         "v4 stack critic ignores the new privileged inputs until trained");
-      ml::ValueInVec srcIn{};
-      std::copy(cx.begin(), cx.end(), srcIn.begin());
-      float srcV = 0.0f;
-      {
-        // The narrow source critic's output equals the migrated one with zero privileged inputs
-        ml::PolicyNetwork::ValueNet trimmed = src.valueNet;
-        for (int r = 0; r < 24; r++)
-          for (int c = ml::LEGACY_VALUE_IN_DIM; c < ml::VALUE_IN_DIM; c++) trimmed.w1[r * ml::VALUE_IN_DIM + c] = 0.0f;
-        for (int c = ml::LEGACY_VALUE_IN_DIM; c < ml::VALUE_IN_DIM; c++) trimmed.wSkip[c] = 0.0f;
-        srcV = trimmed.forward(srcIn)[0];
-      }
-      ok(std::abs(compat.evaluateValue(cx, someCrit) - srcV) < 1e-6f, "v4 critic weights migrate unchanged");
-      eq(compat.missionNet.w1[5], src.missionNet.w1[5], "v4 policy heads load unchanged");
+      ml::TargetVec tv{};
+      tv[2] = 1.0f;
+      tv[10] = 0.6f;
+      ml::EconVec ev{};
+      ev[1] = 1.0f;
+      ev[7] = 0.5f;
+      ml::RivalVec rv{};
+      rv[0] = 0.3f;
+      auto close = [](float a, float b) { return std::abs(a - b) < 1e-5f; };
+
+      ml::PolicyNetwork m5;
+      m5.initRandomWeights(99);
+      ok(!m5.flatten().empty(), "scratch network");
+      m5.unflattenLegacy(v5);
+      ok(close(m5.scoreMission(cx, sv, tv).utility, src.scoreMission(cx, sv, tv).utility),
+         "v5 MissionNet migrates function-preserving");
+      ok(close(m5.scoreEconomy(cx, ev), src.scoreEconomy(cx, ev)), "v5 EconNet migrates function-preserving");
+      ok(close(m5.scoreDiplomacy(cx, rv).stanceLogits[3], src.scoreDiplomacy(cx, rv).stanceLogits[3]),
+         "v5 DiploNet migrates function-preserving");
+      ok(close(m5.evaluateValue(cx, someCrit), src.evaluateValue(cx, someCrit)),
+         "v5 ValueNet (with privileged inputs) migrates function-preserving");
+      ok(close(m5.evaluateStackValue(ml::packStackValueInput(cx, sv, someCrit)),
+               src.evaluateStackValue(ml::packStackValueInput(cx, sv, someCrit))),
+         "v5 StackValueNet migrates function-preserving");
+      ml::ContextVec cxNew = cx;
+      cxNew[ml::LEGACY_GLOBAL_DIM] = 0.7f;
+      ok(close(m5.scoreMission(cxNew, sv, tv).utility, m5.scoreMission(cx, sv, tv).utility),
+         "migrated network ignores the added context features until trained");
+
+      ml::PolicyNetwork m4;
+      m4.unflattenLegacy(v4);
+      ok(close(m4.scoreMission(cx, sv, tv).utility, src.scoreMission(cx, sv, tv).utility),
+         "v4 MissionNet migrates function-preserving");
+      ok(close(m4.evaluateValue(cx, someCrit), src.evaluateValue(cx, zeroCrit)),
+         "v4 ValueNet ignores the privileged inputs until trained");
+      ok(close(m4.evaluateStackValue(ml::packStackValueInput(cx, sv, someCrit)),
+               src.evaluateStackValue(ml::packStackValueInput(cx, sv, zeroCrit))),
+         "v4 StackValueNet ignores the privileged inputs until trained");
 
       // v3: no StackValueNet in the file -> zero-initialised
       std::vector<float> v3(v4.begin(), v4.begin() + (long)v3Size);
-      compat.initRandomWeights(99);
-      compat.unflatten(v3);
+      ml::PolicyNetwork m3;
+      m3.initRandomWeights(99);
+      m3.unflattenLegacy(v3);
       ml::StackValueInVec zeroSv{};
-      eq(compat.evaluateStackValue(zeroSv), 0.0f, "legacy v3 weights zero-initialize StackValueNet");
+      eq(m3.evaluateStackValue(zeroSv), 0.0f, "legacy v3 weights zero-initialize StackValueNet");
 
       // At T = 0.5 with equal utilities (0.0), a singleton family and a 20-item family
       // with logMult = ln(20) receive equal 50/50 probability mass (z_i = u_i/T - logMult_i)

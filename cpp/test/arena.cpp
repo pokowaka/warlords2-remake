@@ -131,6 +131,7 @@ struct Config {
   float mixedFrac = 0.0f;    // --mixed-frac: solo-learner games played 4 vs 4 instead (all learner seats recorded)
   int saveEvery = 0;         // --save-every: also write <out>.iterN.json snapshots
   float raiderFrac = 0.0f;   // --raider-frac: share of Classic training seats played by the Raider
+  float departureWeight = 0.0f;  // --departure-weight: credit a city loss to the move that emptied it
   opponents::Kind evalOpponent = opponents::Kind::Classic;  // --eval-opponent classic|raider
 };
 
@@ -194,6 +195,27 @@ struct RolloutSummary {
 
 enum class Opponent { Mirror, League, Classic };
 
+// Departure credit: for each move of `turn` that left an own city empty (and
+// still empty when the turn ended), record that city's weight in the empire
+// score if `side` no longer holds it now, i.e. it fell before this side's next
+// turn. The loss is already in the turn's reward; this only says which move
+// caused it.
+void markDepartures(const Game& g, int side, ml::TurnStepRecord& turn) {
+  int standing = 0, totalIncome = 0;
+  for (const auto& c : g.map->cities) {
+    if (c.razed) continue;
+    standing++;
+    totalIncome += std::max(1, c.income);
+  }
+  for (auto& ms : turn.missionSteps) {
+    if (ms.vacatedCity == NONE || ms.vacatedCity >= (int)g.map->cities.size()) continue;
+    const City& c = g.map->cities[ms.vacatedCity];
+    if (!c.razed && c.ownerIndex == side) continue;
+    ms.vacatedLoss = 2.0f / (float)std::max(1, standing) +
+                     0.5f * (float)std::max(1, c.income) / (float)std::max(1, totalIncome);
+  }
+}
+
 RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const TrainingPreset& preset,
                           uint32_t seed, float temperature, const ml::PolicyNetwork& learner,
                           const ml::PolicyNetwork& snapshot, Opponent mode) {
@@ -240,6 +262,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
     int s = cur->index;
     if (cur->computer && cur->alive) {
       if (recorded[s]) {
+        if (!eps[s].turns.empty()) markDepartures(g, s, eps[s].turns.back());
         eps[s].turns.emplace_back();
         samplers[s].currentTurn = &eps[s].turns.back();
         ai::modern::playTurn(g, *cur, nullptr, &learner, &samplers[s]);
@@ -267,6 +290,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
     if (!recorded[s] || eps[s].turns.empty()) continue;
     Side& side = g.map->sides[s];
     SideEpisode& ep = eps[s];
+    markDepartures(g, s, ep.turns.back());
     ep.finalCities = cities[s];
     ep.finalScore = ml::computeEmpireScore(g, s);
     if (!side.alive) {
@@ -289,8 +313,24 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
 
 // GAE over each side's own turns, plus optional per-stack multi-turn local
 // credit tracked over non-recycled Game::pool Army* identities.
-void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda, float localWeight) {
+void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda, float localWeight,
+                       float departureWeight) {
   constexpr float stackGamma = 0.90f;
+  // Departure credit is centred over all moves that emptied a city: emptying
+  // one that then fell scores below average, emptying one that held scores
+  // above, so the signal teaches *when* to leave, not "never leave".
+  double vacSum = 0.0;
+  int vacCount = 0;
+  for (const auto& ep : episodes) {
+    for (const auto& tr : ep.turns) {
+      for (const auto& ms : tr.missionSteps) {
+        if (ms.vacatedCity == NONE) continue;
+        vacSum += ms.vacatedLoss;
+        vacCount++;
+      }
+    }
+  }
+  const float vacMean = vacCount > 0 ? (float)(vacSum / vacCount) : 0.0f;
   for (auto& ep : episodes) {
     const int T = (int)ep.turns.size();
     float gae = 0.0f;
@@ -324,6 +364,7 @@ void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
         ms.stackReturnTarget = groupReturn;
         float localAdv = ms.stackReturnTarget - ms.stackValuePred;
         ms.advantage = cur.advantage + localWeight * localAdv;
+        if (ms.vacatedCity != NONE) ms.advantage -= departureWeight * (ms.vacatedLoss - vacMean);
       }
     }
   }
@@ -746,6 +787,7 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
     else if (a == "--mixed-frac") cfg.mixedFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
     else if (a == "--save-every") cfg.saveEvery = std::max(0, std::stoi(next()));
     else if (a == "--raider-frac") cfg.raiderFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+    else if (a == "--departure-weight") cfg.departureWeight = std::max(0.0f, std::stof(next()));
     else if (a == "--eval-opponent") {
       std::string o = next();
       if (o == "raider") cfg.evalOpponent = opponents::Kind::Raider;
@@ -879,7 +921,7 @@ int main(int argc, char** argv) {
       neutrals += gs.neutralsLeft;
       for (auto& ep : gs.episodes) episodes.push_back(std::move(ep));
     }
-    computeAdvantages(episodes, cfg.gamma, cfg.gaeLambda, cfg.localWeight);
+    computeAdvantages(episodes, cfg.gamma, cfg.gaeLambda, cfg.localWeight, cfg.departureWeight);
 
     std::vector<const ml::TurnStepRecord*> turns;
     std::vector<float> mAdv, eAdv, dAdv;
@@ -922,6 +964,16 @@ int main(int argc, char** argv) {
       }
     }
     const double evValue = explainedVariance(vTarget, vPred), evStack = explainedVariance(svTarget, svPred);
+    // How often a move empties an own city, and how often that city then falls
+    long vacated = 0, vacatedLost = 0, missionMoves = 0;
+    for (const auto* tr : turns) {
+      for (const auto& ms : tr->missionSteps) {
+        missionMoves++;
+        if (ms.vacatedCity == NONE) continue;
+        vacated++;
+        if (ms.vacatedLoss > 0.0f) vacatedLost++;
+      }
+    }
     // Critic warm-up: only the critics learn for the first --critic-warmup iterations
     const bool warmup = iter <= cfg.criticWarmup;
 
@@ -992,9 +1044,10 @@ int main(int argc, char** argv) {
     float avgNeutrals = (float)neutrals / (float)cfg.gamesPerIter;
     size_t decisions = mAdv.size() + eAdv.size() + dAdv.size();
     std::printf("[iter %3d] %.1fs T=%.2f lr=%.1e | cities/side %.2f | neutrals %.1f | ent %.3f | vloss %.4f | "
-                "ev %.2f/%.2f | kl %.4f (%d ep) | %zu turns%s\n",
+                "ev %.2f/%.2f | kl %.4f (%d ep) | %zu turns | emptied %.1f%% of moves, %.0f%% fell%s\n",
                 iter, sec, temperature, lr, avgCities, avgNeutrals, ent, vloss, evValue, evStack, kl, epochsRun,
-                turns.size(), warmup ? " | critic warm-up" : "");
+                turns.size(), 100.0 * vacated / std::max(1L, missionMoves),
+                100.0 * vacatedLost / std::max(1L, vacated), warmup ? " | critic warm-up" : "");
     std::fflush(stdout);
 
     if (cfg.saveEvery > 0 && iter % cfg.saveEvery == 0) {
