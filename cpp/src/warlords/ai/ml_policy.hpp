@@ -55,8 +55,21 @@ constexpr int STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM + CRITIC_DIM;  // 56
 constexpr int LEGACY_VALUE_IN_DIM = CONTEXT_DIM;                  // 24
 constexpr int LEGACY_STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM; // 40
 
-/** Sampling temperature the Modern AI plays real games at (training anneals to it). */
-constexpr float DEPLOY_TEMPERATURE = 0.5f;
+/**
+ * Default sampling temperature the Modern AI plays real games at. Lower than
+ * the training temperature: a sharper version of the trained policy plays
+ * measurably stronger (w2arena temperature sweep, AI-DESIGN.md).
+ */
+constexpr float DEPLOY_TEMPERATURE = 0.02f;
+
+/** Temperature PPO training anneals to (exploration still needed while learning). */
+constexpr float TRAIN_TEMPERATURE_END = 0.5f;
+
+/** Temperature real (non-training) games sample at; DEPLOY_TEMPERATURE unless overridden. */
+float deployTemperature();
+
+/** Overrides deployTemperature() process-wide (evaluation tools only; set before threads start). */
+void setDeployTemperature(float t);
 
 using ContextVec = std::array<float, CONTEXT_DIM>;
 using RivalVec = std::array<float, RIVAL_DIM>;

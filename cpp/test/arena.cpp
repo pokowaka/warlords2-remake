@@ -102,7 +102,8 @@ struct Config {
   float lrStart = 3.0e-3f;
   float lrEnd = 3.0e-4f;
   float tempStart = 1.0f;
-  float tempEnd = ml::DEPLOY_TEMPERATURE;   // end where real games are played
+  float tempEnd = ml::TRAIN_TEMPERATURE_END;
+  float evalTemp = ml::DEPLOY_TEMPERATURE;  // --eval-temp: temperature evaluation games sample at
   float clipEps = 0.2f;
   float entCoef = 0.01f;
   float valueCoef = 0.5f;
@@ -708,6 +709,8 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
     else if (a == "--minibatches") cfg.minibatches = std::max(1, std::stoi(next()));
     else if (a == "--lr") cfg.lrStart = std::stof(next());
     else if (a == "--temp-start") cfg.tempStart = std::max(0.1f, std::stof(next()));
+    else if (a == "--temp-end") cfg.tempEnd = std::max(0.1f, std::stof(next()));
+    else if (a == "--eval-temp") cfg.evalTemp = std::max(0.01f, std::stof(next()));
     else if (a == "--seed-offset") cfg.seedOffset = std::min<uint32_t>(500000u, (uint32_t)std::stoul(next()));
     else if (a == "--classic-frac") cfg.classicFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
     else if (a == "--random-map-frac") cfg.randomMapFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
@@ -756,6 +759,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   unsigned int threads = std::max(2u, std::thread::hardware_concurrency());
+  ml::setDeployTemperature(cfg.evalTemp);
 
   ml::PolicyNetwork learner;
   bool loaded = false;

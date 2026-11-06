@@ -344,6 +344,14 @@ bool PolicyNetwork::loadJson(const std::filesystem::path& path) {
   }
 }
 
+namespace {
+float g_deployTemperature = DEPLOY_TEMPERATURE;
+}  // namespace
+
+float deployTemperature() { return g_deployTemperature; }
+
+void setDeployTemperature(float t) { g_deployTemperature = std::max(0.01f, t); }
+
 float RolloutSampler::nextUniform01() {
   if (rngState == 0) rngState = 0x9e3779b9u;
   rngState ^= rngState << 13;
@@ -366,7 +374,7 @@ int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler,
     return (logMult && i < logMult->size()) ? (*logMult)[i] : 0.0f;
   };
   if (!sampler || logits.size() == 1) {
-    float deployInvT = 1.0f / DEPLOY_TEMPERATURE;
+    float deployInvT = 1.0f / deployTemperature();
     int best = 0;
     for (size_t i = 1; i < logits.size(); i++) {
       if (logits[i] * deployInvT - lmOf(i) > logits[best] * deployInvT - lmOf(best)) best = (int)i;

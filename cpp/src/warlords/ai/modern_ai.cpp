@@ -1686,7 +1686,7 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
   // trained: for a spread-out distribution its mode is not its typical behaviour.
   ml::RolloutSampler deploySampler;
   if (!sampler) {
-    deploySampler.temperature = ml::DEPLOY_TEMPERATURE;
+    deploySampler.temperature = ml::deployTemperature();
     deploySampler.rngState = (g.rng.state * 2654435761u) ^ (uint32_t)(g.turn * 40503u) ^
                              (uint32_t)((side.index + 1) * 2246822519u);
     sampler = &deploySampler;
