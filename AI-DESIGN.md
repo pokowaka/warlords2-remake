@@ -15,7 +15,9 @@ exactly how to continue training on a larger machine.
 > games it loses ~300 cities per game, ~88 % of them undefended. Six warm-started
 > PPO recipe variants (better critic, higher learning rate, 4v4 games, low
 > training temperature, 60-turn games, 50 % Raider opponents) did not measurably
-> beat it. Current work: train the AI to discover defence itself through
+> beat it. **Lookahead search** over candidate turns adds **+11.2 % ± 5.6 %**
+> (paired, 128 dev games) on the same weights — above parity — and is now used
+> as a teacher for training (§6.3). Earlier work: train the AI to discover defence itself through
 > **departure credit** and **empty-city inputs** (§6.3, §8). The original
 > curriculum results are in §6.2.
 
@@ -358,6 +360,43 @@ What happened:
   the behaviour transferring. Opponents that exploit a weakness must not learn
   alongside the learner: use frozen opponents.
 
+**Frozen opponents (E10).** 1 vs 7 with half the opponent seats played by the
+*frozen* installed Modern AI at deployment temperature, plus departure credit:
+emptied cities that fall 22 % → 18 %; −2.0 % ± 2.9 % vs Classic (paired), but
+**53.1 % ± 3.6 %** vs the frozen installed AI (installed vs itself = 50.0 %).
+Strength is opponent-dependent: training against one opponent improves play
+against that opponent first.
+
+**Lookahead search — the second big win** (`w2search`, `cpp/test/search.cpp`).
+At a Modern turn, build K candidate turns sampled from the policy (plus the
+greedy one), copy each R times with different dice (`save::encode/decode`),
+play H rounds on with everyone's normal AI, and keep the candidate with the best
+average empire score. Same installed weights, 128 dev games, paired:
+
+| Preset | no search | search (K=4, R=2, H=2) | paired difference |
+|---|---|---|---|
+| all | 44.3 % | **55.5 %** | **+11.2 % ± 5.6 %** (better in 71, worse in 28) |
+| Beginner-Open (no fog) | 38.7 % | 47.5 % | +8.9 % |
+| Interm-Diplo | 62.7 % | 69.7 % | +7.1 % |
+| Adv-Hidden | 40.8 % | 52.2 % | +11.4 % |
+| Fog-TotalWar | 35.0 % | 52.4 % | +17.5 % |
+
+Caveats: (1) the copies simulate the *true* game, so this search sees through
+fog and through stacks it has not fought; fog presets gain more, but the no-fog
+preset still gains +8.9 %. (2) Playing through a copy changes play slightly
+(no-search through the copy path: 45.7 % vs 45.2 % direct on 64 games), so the
+baseline is measured through the same path. (3) Cost ≈ 25 min of 72 threads per
+128 games (~1–2 s per searched turn).
+
+**Search as a teacher** (`--search-k K --search-r R --search-h H`): every
+learner turn is sampled K times from the same position and recorded; each
+candidate's advantage is its rollout value minus the mean of the K candidates;
+the game continues from the best one. This replaces the turn-level GAE signal
+(one noisy score shared by ~70 moves and many turns) with a comparison of
+alternatives from the same position. The privileged copies are used only to
+train; the trained policy plays on fair information. First update: KL 0.007,
+3–4× the per-iteration movement of PPO. Experiment E11 in progress.
+
 **Throughput.** On 72 Xeon threads (`cpp/build-train`, `-DW2_NATIVE=ON`), a
 `432`-game full-map iteration (`~12,200` learner turns) takes **20–24 s**; a
 `288`-game cropped `1v1` iteration takes **2–8 s**.
@@ -441,12 +480,15 @@ checkpoint so high-temperature noise does not wash out learned weights.
 | `--raider-frac F` | 0 | share of Classic training seats played by the Raider |
 | `--departure-weight W` | 0 | departure credit (§6.3) |
 | `--save-every N` | 0 | also write `<out>.iterN.json`; the last iteration is always `<out>.final.json` |
+| `--frozen-opponent PATH` / `--frozen-frac F` | — / 0 | share of non-learner training seats played by a fixed Modern checkpoint |
+| `--search-k K` / `--search-r R` / `--search-h H` | 0 / 2 / 2 | search-as-teacher training (K candidate turns, R rollouts, H rounds) |
 
 ## 8. Recommended next experiments (in order)
 
-1. **Departure credit + empty-city inputs** (in progress): train with
-   `--departure-weight 1`, with and without Raiders, and check that "emptied …,
-   … fell" in the training log drops while the paired dev score rises.
+1. **Search as a teacher** (in progress, E11): judge the trained network
+   *without* search against the installed one; if it helps, iterate (expert
+   iteration) and scale K/R/H. In parallel: a *fair* play-time search that
+   samples the unseen (fog, unfought stacks) instead of copying the true game.
 2. **More opponent personalities** (league of exploiters): *Rusher* (all Classic
    sides target the learner's capital early), *Turtle* (heavy garrisons, local
    counter-attacks only), *Hero hunter*. Mix them with plain Classic seats.
@@ -478,6 +520,10 @@ games, low training temperature, 60-turn training games, weight averaging.
 | `efcd30a` | Raider training opponent (`cpp/test/opponents.cpp`), `--raider-frac`, `--eval-opponent`; `w2aidiag` captures/losses by garrison. |
 | `7c7d995` | Departure credit (`--departure-weight`) and six empty-city/scale context inputs (v6, 9,700 params; v5/v4/v3 load function-preserving). |
 
+| `56be37b` | Frozen Modern training opponents (`--frozen-opponent`, `--frozen-frac`, `--eval-opponent frozen`). |
+| `6870c09` | `w2search` lookahead experiment: +11.2 % ± 5.6 % paired with search on the installed weights. |
+| `96038bc` | Search-as-teacher training mode (`--search-k/-r/-h`). |
+
 **Review items deliberately left open** (they do not affect training):
 - `Side::classicAi` doubles as the diplomacy rule-variant flag, and it is set on
   human sides too. With Modern AI + the classic UI, a human pays hidden trust
@@ -497,7 +543,8 @@ games, low training temperature, 60-turn training games, weight averaging.
 | `cpp/src/warlords/scn.{hpp,cpp}`, `game.{hpp,cpp}` | Thread-safe in-memory random maps (`loadFromFiles`) & curriculum map scaling (`activeSides`, `cropMargin`) |
 | `cpp/test/arena.cpp` | `w2arena`: PPO self-play & `--solo-learner` curriculum trainer and Classic benchmark |
 | `cpp/test/aidiag.cpp` | `w2aidiag`: behaviour diagnostic for a checkpoint (economy, captures/losses by garrison, missions) |
-| `cpp/test/opponents.{hpp,cpp}` | Training-only opponent personalities on top of the Classic AI (Raider) |
+| `cpp/test/opponents.{hpp,cpp}` | Training-only opponents: Raider (on the Classic AI) and Frozen (a fixed Modern checkpoint) |
+| `cpp/test/search.cpp` | `w2search`: lookahead over candidate turns (probe / play) |
 | `cpp/test/train.sh` | Headless build and training launcher |
 | `cpp/test/run.cpp` (`testModernAi`) | Unit tests: fog pathing, diplomacy, sampling, multiplicity prior, `StackValueNet`, cropped maps, engine switching |
 | `cpp/ai_weights.json` | Installed checkpoint (v4 file, `8,066` parameters; loads as v5 with zero critic columns) |
