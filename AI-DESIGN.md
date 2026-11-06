@@ -300,6 +300,7 @@ iterations × 432 games, paired vs installed at T = 0.02):
 | E4 | training temperature 0.25 → 0.15 | −1.3 % ± 2.5 % |
 | E5 | 60-turn games (judged at turn 60) | −0.8 % ± 3.0 % |
 | E6 | 50 % of Classic seats are Raiders, 64 iterations | −0.8 % ± 2.9 % |
+| E9 | departure credit (weight 2) + all games 4 vs 4 (shared live policy) | **−3.2 % ± 2.7 %** (significantly worse) |
 | soups | weight average of E1–E3 checkpoints | −0.6 % / +1.0 % |
 
 KL per iteration stays ~0.001–0.002 whatever the learning rate: the recipe sits
@@ -332,7 +333,7 @@ cities per game than plain Classic sides; the installed AI scores 41.1 % against
 them. Training with 50 % Raider seats alone (E6) did not help (table above):
 the punishment is still a turn-level signal shared by every move.
 
-**Departure credit and empty-city inputs** (`7c7d995`, experiments pending):
+**Departure credit and empty-city inputs** (`7c7d995`):
 - `--departure-weight W`: a move that leaves an own city empty (still empty at
   turn end) is charged that city's weight in the empire score if the city falls
   before our next turn, centred over all city-emptying moves (so it learns *when*
@@ -341,6 +342,21 @@ the punishment is still a turn-level signal shared by every move.
 - Six fair context inputs (v6): non-saturating gold, turn and army strength,
   share of own cities empty, share empty *and* reachable by a visible enemy,
   budget balance.
+
+What happened:
+- In 1 vs 7 training only ~10 % of emptied cities fall before the next turn
+  (E7, stopped early): too little signal. In 4 vs 4 games it is ~18 %, because
+  Modern sides walk into each other's empty cities.
+- E9 (departure credit in 4 vs 4 games) *did* move the training metric: moves
+  that empty a city 15.1 % → 13.8 %, emptied cities that fall 18 % → 14 %. Yet it
+  was significantly worse against Classic (−3.2 % greedy, −2.5 % at T = 0.5) and,
+  under greedy play, lost **more** empty cities (≈ 441 vs 388 per game).
+- **Lesson — co-adaptation in shared-policy self-play.** All Modern seats in E9's
+  games were the same live policy, so "fewer emptied cities fall" can be the
+  *attacking* copies taking fewer of each other's cities as much as the
+  defenders defending. A metric measured inside self-play can improve without
+  the behaviour transferring. Opponents that exploit a weakness must not learn
+  alongside the learner: use frozen opponents.
 
 **Throughput.** On 72 Xeon threads (`cpp/build-train`, `-DW2_NATIVE=ON`), a
 `432`-game full-map iteration (`~12,200` learner turns) takes **20–24 s**; a
