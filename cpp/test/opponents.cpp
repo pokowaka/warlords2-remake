@@ -5,6 +5,7 @@
 
 #include "warlords/ai.hpp"
 #include "warlords/ai/core.hpp"
+#include "warlords/ai/modern_ai.hpp"
 #include "warlords/diplomacy.hpp"
 #include "warlords/move.hpp"
 
@@ -94,7 +95,11 @@ int raidEmptyCities(Game& g, Side& side) {
   return taken;
 }
 
-void playTurn(Game& g, Side& side, Kind kind) {
+void playTurn(Game& g, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen) {
+  if (kind == Kind::Frozen && frozen) {
+    ai::modern::playTurn(g, side, nullptr, frozen, nullptr);
+    return;
+  }
   if (kind == Kind::Raider) raidEmptyCities(g, side);
   ai::playTurn(g, side, nullptr);
 }

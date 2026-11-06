@@ -132,6 +132,8 @@ struct Config {
   int saveEvery = 0;         // --save-every: also write <out>.iterN.json snapshots
   float raiderFrac = 0.0f;   // --raider-frac: share of Classic training seats played by the Raider
   float departureWeight = 0.0f;  // --departure-weight: credit a city loss to the move that emptied it
+  std::string frozenPath;    // --frozen-opponent: fixed Modern checkpoint some opponent seats play
+  float frozenFrac = 0.0f;   // --frozen-frac: share of non-learner training seats played by it
   opponents::Kind evalOpponent = opponents::Kind::Classic;  // --eval-opponent classic|raider
 };
 
@@ -195,6 +197,10 @@ struct RolloutSummary {
 
 enum class Opponent { Mirror, League, Classic };
 
+// The fixed Modern checkpoint Frozen opponents play (--frozen-opponent); set
+// once in main before any game starts.
+const ml::PolicyNetwork* g_frozen = nullptr;
+
 // Departure credit: for each move of `turn` that left an own city empty (and
 // still empty when the turn ended), record that city's weight in the empire
 // score if `side` no longer holds it now, i.e. it fell before this side's next
@@ -249,7 +255,12 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
     classic[s] = (solo || mixedVsClassic) ? !learnerSide : ((mode == Opponent::Classic) && !learnerSide);
     side.classicAi = classic[s];
     float raidRoll = (float)(((seed * 747796405u) ^ (uint32_t)((s + 1) * 2891336453u)) >> 8) / (float)(1u << 24);
+    float frozenRoll = (float)(((seed * 2654435769u) ^ (uint32_t)((s + 1) * 3266489917u)) >> 8) / (float)(1u << 24);
     classicKind[s] = raidRoll < cfg.raiderFrac ? opponents::Kind::Raider : opponents::Kind::Classic;
+    if (classic[s] && g_frozen && frozenRoll < cfg.frozenFrac) {
+      classicKind[s] = opponents::Kind::Frozen;
+      side.classicAi = false;   // a Modern AI seat, just not a learning one
+    }
     eps[s].sideIndex = s;
     samplers[s].rngState = (seed * 2654435761u) ^ (uint32_t)((s + 1) * 2246822519u);
     samplers[s].temperature = temperature;
@@ -268,7 +279,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
         ai::modern::playTurn(g, *cur, nullptr, &learner, &samplers[s]);
         samplers[s].currentTurn = nullptr;
       } else if (classic[s]) {
-        opponents::playTurn(g, *cur, classicKind[s]);
+        opponents::playTurn(g, *cur, classicKind[s], g_frozen);
       } else {
         ml::RolloutSampler opp;
         opp.rngState = samplers[s].rngState ^ (uint32_t)(g.turn * 374761393u);
@@ -605,7 +616,8 @@ void playEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
   for (int s = 0; s < 8; s++) {
     if (!g.map->sides[s].inUse) continue;
     modern[s] = solo ? (idx == soloSeat) : ((idx + c.swap) % 2 == 0);
-    g.map->sides[s].classicAi = !modern[s];
+    // Opponent seats are Classic AI sides unless the Frozen Modern checkpoint plays them
+    g.map->sides[s].classicAi = !modern[s] && cfg.evalOpponent != opponents::Kind::Frozen;
     if (modern[s]) c.modernSides++;
     c.sides++;
     idx++;
@@ -616,7 +628,7 @@ void playEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     safety++;
     if (cur->computer && cur->alive) {
       if (modern[cur->index]) ai::modern::playTurn(g, *cur, nullptr, &policy, nullptr);
-      else opponents::playTurn(g, *cur, cfg.evalOpponent);
+      else opponents::playTurn(g, *cur, cfg.evalOpponent, g_frozen);
     }
     cur = game::endTurn(g);
   }
@@ -788,12 +800,15 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
     else if (a == "--save-every") cfg.saveEvery = std::max(0, std::stoi(next()));
     else if (a == "--raider-frac") cfg.raiderFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
     else if (a == "--departure-weight") cfg.departureWeight = std::max(0.0f, std::stof(next()));
+    else if (a == "--frozen-opponent") cfg.frozenPath = next();
+    else if (a == "--frozen-frac") cfg.frozenFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
     else if (a == "--eval-opponent") {
       std::string o = next();
       if (o == "raider") cfg.evalOpponent = opponents::Kind::Raider;
+      else if (o == "frozen") cfg.evalOpponent = opponents::Kind::Frozen;
       else if (o == "classic") cfg.evalOpponent = opponents::Kind::Classic;
       else {
-        std::fprintf(stderr, "Unknown --eval-opponent '%s'; expected 'classic' or 'raider'.\n", o.c_str());
+        std::fprintf(stderr, "Unknown --eval-opponent '%s'; expected 'classic', 'raider' or 'frozen'.\n", o.c_str());
         return false;
       }
     }
@@ -818,6 +833,19 @@ int main(int argc, char** argv) {
   }
   unsigned int threads = std::max(2u, std::thread::hardware_concurrency());
   ml::setDeployTemperature(cfg.evalTemp);
+  ml::PolicyNetwork frozen;
+  if (!cfg.frozenPath.empty()) {
+    if (!frozen.loadJson(cfg.frozenPath)) {
+      std::fprintf(stderr, "Cannot load --frozen-opponent '%s'; check the path and JSON format.\n",
+                   cfg.frozenPath.c_str());
+      return 1;
+    }
+    g_frozen = &frozen;
+  }
+  if (cfg.evalOpponent == opponents::Kind::Frozen && !g_frozen) {
+    std::fprintf(stderr, "--eval-opponent frozen needs --frozen-opponent PATH.\n");
+    return 2;
+  }
 
   ml::PolicyNetwork learner;
   bool loaded = false;

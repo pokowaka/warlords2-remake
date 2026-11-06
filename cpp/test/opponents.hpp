@@ -8,16 +8,23 @@
 //   to walk into every enemy city left without a single defender that they can
 //   reach this turn (omniscient, like the Classic AI itself), the learner's
 //   cities first.
+//
+//   Frozen: a fixed Modern AI checkpoint (e.g. the installed weights) playing
+//   near-greedily. It does not learn, so the learner cannot co-adapt with it;
+//   it exploits empty cities the way the real Modern AI does. Its side must
+//   have classicAi == false.
 #pragma once
 
+#include "warlords/ai/ml_policy.hpp"
 #include "warlords/game.hpp"
 
 namespace w2::opponents {
 
-enum class Kind { Classic, Raider };
+enum class Kind { Classic, Raider, Frozen };
 
-/** Plays one turn for a training opponent of the given kind. */
-void playTurn(Game& g, Side& side, Kind kind);
+/** Plays one turn for a training opponent of the given kind (`frozen` is the
+ *  network a Frozen opponent plays; required for that kind). */
+void playTurn(Game& g, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen = nullptr);
 
 /** The Raider's pre-phase alone: capture reachable undefended enemy cities.
  *  Returns how many cities it took. */
