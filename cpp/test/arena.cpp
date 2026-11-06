@@ -47,6 +47,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "opponents.hpp"
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
@@ -129,6 +130,8 @@ struct Config {
   int criticWarmup = 0;      // --critic-warmup: iterations where only the critics learn
   float mixedFrac = 0.0f;    // --mixed-frac: solo-learner games played 4 vs 4 instead (all learner seats recorded)
   int saveEvery = 0;         // --save-every: also write <out>.iterN.json snapshots
+  float raiderFrac = 0.0f;   // --raider-frac: share of Classic training seats played by the Raider
+  opponents::Kind evalOpponent = opponents::Kind::Classic;  // --eval-opponent classic|raider
 };
 
 game::NewGameOptions gameOptions(const Config& cfg, const TrainingPreset& preset, uint32_t seed) {
@@ -199,6 +202,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
 
   std::array<bool, 8> recorded{};
   std::array<bool, 8> classic{};
+  std::array<opponents::Kind, 8> classicKind{};
   std::array<SideEpisode, 8> eps{};
   std::array<ml::RolloutSampler, 8> samplers{};
   int activeCount = 0;
@@ -222,6 +226,8 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
     recorded[s] = learnerSide;
     classic[s] = (solo || mixedVsClassic) ? !learnerSide : ((mode == Opponent::Classic) && !learnerSide);
     side.classicAi = classic[s];
+    float raidRoll = (float)(((seed * 747796405u) ^ (uint32_t)((s + 1) * 2891336453u)) >> 8) / (float)(1u << 24);
+    classicKind[s] = raidRoll < cfg.raiderFrac ? opponents::Kind::Raider : opponents::Kind::Classic;
     eps[s].sideIndex = s;
     samplers[s].rngState = (seed * 2654435761u) ^ (uint32_t)((s + 1) * 2246822519u);
     samplers[s].temperature = temperature;
@@ -239,7 +245,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
         ai::modern::playTurn(g, *cur, nullptr, &learner, &samplers[s]);
         samplers[s].currentTurn = nullptr;
       } else if (classic[s]) {
-        ai::playTurn(g, *cur, nullptr);
+        opponents::playTurn(g, *cur, classicKind[s]);
       } else {
         ml::RolloutSampler opp;
         opp.rngState = samplers[s].rngState ^ (uint32_t)(g.turn * 374761393u);
@@ -569,7 +575,7 @@ void playEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     safety++;
     if (cur->computer && cur->alive) {
       if (modern[cur->index]) ai::modern::playTurn(g, *cur, nullptr, &policy, nullptr);
-      else ai::playTurn(g, *cur, nullptr);
+      else opponents::playTurn(g, *cur, cfg.evalOpponent);
     }
     cur = game::endTurn(g);
   }
@@ -739,6 +745,16 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
     else if (a == "--critic-warmup") cfg.criticWarmup = std::max(0, std::stoi(next()));
     else if (a == "--mixed-frac") cfg.mixedFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
     else if (a == "--save-every") cfg.saveEvery = std::max(0, std::stoi(next()));
+    else if (a == "--raider-frac") cfg.raiderFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+    else if (a == "--eval-opponent") {
+      std::string o = next();
+      if (o == "raider") cfg.evalOpponent = opponents::Kind::Raider;
+      else if (o == "classic") cfg.evalOpponent = opponents::Kind::Classic;
+      else {
+        std::fprintf(stderr, "Unknown --eval-opponent '%s'; expected 'classic' or 'raider'.\n", o.c_str());
+        return false;
+      }
+    }
 
     else {
       std::fprintf(stderr, "Unknown argument '%s'; see the usage at the top of cpp/test/arena.cpp.\n", a.c_str());
