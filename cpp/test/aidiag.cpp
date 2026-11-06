@@ -19,6 +19,7 @@
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/ai/modern_ai.hpp"
 #include "warlords/game.hpp"
+#include "warlords/randommap.hpp"
 
 using namespace w2;
 
@@ -43,7 +44,9 @@ static void printSides(Game& g, const bool* modern) {
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: w2aidiag WEIGHTS [SCENARIO] [SEED] [TURNS] [HIDDEN_MAP 0|1]\n");
+    std::fprintf(stderr,
+                 "usage: w2aidiag WEIGHTS [SCENARIO] [SEED] [TURNS] [HIDDEN_MAP 0|1] [ACTIVE_SIDES] [CROP_MARGIN] "
+                 "[SOLO_SEAT -1|0..7] [DIPLOMACY 0|1]\n");
     return 2;
   }
   std::string weights = argv[1];
@@ -51,6 +54,10 @@ int main(int argc, char** argv) {
   int seed = argc > 3 ? std::atoi(argv[3]) : 800001;
   int turns = argc > 4 ? std::atoi(argv[4]) : 40;
   int hidden = argc > 5 ? std::atoi(argv[5]) : 0;
+  int activeSides = argc > 6 ? std::atoi(argv[6]) : 8;
+  int cropMargin = argc > 7 ? std::atoi(argv[7]) : 0;
+  int soloSeat = argc > 8 ? std::atoi(argv[8]) : -1;
+  int diplo = argc > 9 ? std::atoi(argv[9]) : 0;
   ai::ml::PolicyNetwork net;
   if (!net.loadJson(weights)) {
     std::fprintf(stderr, "w2aidiag: cannot load weights '%s' (missing, or trained for different input sizes)\n",
@@ -59,19 +66,34 @@ int main(int argc, char** argv) {
   }
   game::NewGameOptions o;
   o.seed = seed;
-  o.options = {{"hiddenMap", hidden}, {"viewEnemies", 0}, {"diplomacy", 0}, {"neutralCities", 1}, {"quests", 1}};
+  o.activeSides = activeSides;
+  o.cropMargin = cropMargin;
+  o.options = {{"hiddenMap", hidden}, {"viewEnemies", 0}, {"diplomacy", diplo}, {"neutralCities", 1}, {"quests", 1}};
   for (int i = 0; i < 8; i++) {
     o.sides[i].computer = true;
     o.sides[i].level = 2;
     o.sides[i].card = (seed + i * 5) % 9;
   }
+  randommap::Files rfiles;
+  if (scen == "RANDOM") {
+    Rng mapRng((double)(seed ^ 0x5bf03635u));
+    randommap::Options ro;
+    ro.dataDir = "original";
+    ro.rng = &mapRng;
+    ro.sliders = {3, 3, 2, 3};
+    rfiles = randommap::generateNow(ro);
+    o.memoryFiles = &rfiles;
+  }
   auto gp = game::newGame("original", scen, o);
   Game& g = *gp;
+  std::printf("=== %s seed=%d sides=%d crop=%d cities=%zu box=[%d..%d]x[%d..%d] ===\n", scen.c_str(), seed, activeSides,
+              cropMargin, g.map->cities.size(), g.map->activeX0, g.map->activeX1, g.map->activeY0, g.map->activeY1);
   bool modern[8] = {};
   int idx = 0;
   for (int s = 0; s < 8; s++) {
     if (!g.map->sides[s].inUse) continue;
-    modern[s] = (idx++ % 2 == 0);
+    modern[s] = (soloSeat >= 0) ? (idx == soloSeat) : (idx % 2 == 0);
+    idx++;
     g.map->sides[s].classicAi = !modern[s];
   }
 
@@ -79,7 +101,7 @@ int main(int argc, char** argv) {
   long armyTurns = 0, moved = 0;
   int lastPrinted = 0;
   Side* cur = game::begin(g);
-  while (cur && !g.over && g.turn <= turns) {
+  while (cur && !g.over && !g.won && g.turn <= turns) {
     if (cur->alive) {
       if (modern[cur->index]) {
         std::map<Army*, int> before;

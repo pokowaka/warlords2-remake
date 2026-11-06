@@ -36,6 +36,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <mutex>
@@ -43,6 +44,7 @@
 #include <random>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "util/util.hpp"
@@ -51,6 +53,7 @@
 #include "warlords/ai/modern_ai.hpp"
 #include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
+#include "warlords/randommap.hpp"
 
 using namespace w2;
 namespace ml = w2::ai::ml;
@@ -104,15 +107,22 @@ struct Config {
   float targetKL = 0.03f;
   float maxGradNorm = 0.5f;
   float classicFrac = 0.0f;
+  float randomMapFrac = 0.0f;
+  int activeSides = 8;
+  int cropMargin = 0;
+  uint32_t seedOffset = 0;
   float winReward = 1.0f;
   float eliminationReward = -0.5f;
+  bool soloLearner = false;
   bool fromScratch = false;
   bool benchmarkOnly = false;
 };
 
-game::NewGameOptions gameOptions(const TrainingPreset& preset, uint32_t seed) {
+game::NewGameOptions gameOptions(const Config& cfg, const TrainingPreset& preset, uint32_t seed) {
   game::NewGameOptions opts;
   opts.seed = (double)seed;
+  opts.activeSides = cfg.activeSides;
+  opts.cropMargin = cfg.cropMargin;
   opts.options = {
       {"hiddenMap", preset.hiddenMap},
       {"viewEnemies", 0},
@@ -126,6 +136,25 @@ game::NewGameOptions gameOptions(const TrainingPreset& preset, uint32_t seed) {
     opts.sides[i].card = (int)((seed + i * 5) % 9);
   }
   return opts;
+}
+
+std::unique_ptr<Game> makeArenaGame(const Config& cfg, const std::string& scenario, const TrainingPreset& preset,
+                                    uint32_t seed, bool allowRandomMap) {
+  auto opts = gameOptions(cfg, preset, seed);
+  float mapRoll = (float)(((seed * 1597334677u) ^ 0x9e3779b9u) >> 8) / (float)(1u << 24);
+  if ((allowRandomMap && mapRoll < cfg.randomMapFrac) || scenario == "RANDOM") {
+    Rng mapRng((double)(seed ^ 0x5bf03635u));
+    randommap::Options ropts;
+    ropts.dataDir = cfg.dataDir;
+    ropts.rng = &mapRng;
+    ropts.sliders = {3, 3, 2, 3};
+    ropts.allies = preset.diplomacy != 0;
+    ropts.terrainSet = 0;
+    auto files = randommap::generateNow(ropts);
+    opts.memoryFiles = &files;
+    return game::newGame(cfg.dataDir, "RANDOM", opts);
+  }
+  return game::newGame(cfg.dataDir, scenario, opts);
 }
 
 // ---------------------------------------------------------------- rollouts
@@ -152,21 +181,27 @@ enum class Opponent { Mirror, League, Classic };
 RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const TrainingPreset& preset,
                           uint32_t seed, float temperature, const ml::PolicyNetwork& learner,
                           const ml::PolicyNetwork& snapshot, Opponent mode) {
-  auto gp = game::newGame(cfg.dataDir, scenario, gameOptions(preset, seed));
+  auto gp = makeArenaGame(cfg, scenario, preset, seed, true);
   Game& g = *gp;
 
   std::array<bool, 8> recorded{};
   std::array<bool, 8> classic{};
   std::array<SideEpisode, 8> eps{};
   std::array<ml::RolloutSampler, 8> samplers{};
+  int activeCount = 0;
+  for (int s = 0; s < 8; s++) {
+    if (g.map->sides[s].inUse) activeCount++;
+  }
+  int soloSeat = activeCount > 0 ? (int)(seed % (uint32_t)activeCount) : 0;
   int idx = 0;
   for (int s = 0; s < 8; s++) {
     Side& side = g.map->sides[s];
     if (!side.inUse) continue;
-    bool learnerSide = (mode == Opponent::Mirror) || ((idx + seed) % 2 == 0);
+    bool learnerSide = cfg.soloLearner ? (idx == soloSeat)
+                                       : ((mode == Opponent::Mirror) || ((idx + seed) % 2 == 0));
     idx++;
     recorded[s] = learnerSide;
-    classic[s] = (mode == Opponent::Classic) && !learnerSide;
+    classic[s] = cfg.soloLearner ? !learnerSide : ((mode == Opponent::Classic) && !learnerSide);
     side.classicAi = classic[s];
     eps[s].sideIndex = s;
     samplers[s].rngState = (seed * 2654435761u) ^ (uint32_t)((s + 1) * 2246822519u);
@@ -175,7 +210,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
 
   Side* cur = game::begin(g);
   int safety = 0;
-  while (cur && !g.over && g.turn <= cfg.maxTurns && safety < cfg.maxTurns * 12) {
+  while (cur && !g.over && !g.won && g.turn <= cfg.maxTurns && safety < cfg.maxTurns * 12) {
     safety++;
     int s = cur->index;
     if (cur->computer && cur->alive) {
@@ -212,9 +247,10 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
     if (!side.alive) {
       ep.terminal = true;
       ep.terminalReward = cfg.eliminationReward;
-    } else if (g.over) {
+    } else if (g.over || g.won) {
       ep.terminal = true;
-      ep.terminalReward = (g.won == s) ? cfg.winReward : 0.0f;
+      bool wonGame = (g.ending.winner && g.ending.winner->index == s);
+      ep.terminalReward = wonGame ? cfg.winReward : 0.0f;
     } else {
       ai::belief::update(g, side);
       ep.bootstrapValue = learner.evaluateValue(ml::buildContext(g, side));
@@ -226,15 +262,14 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario, const 
   return out;
 }
 
-// GAE over each side's own turns. A mission decision gets the turn's advantage
-// plus `localWeight` times its own score change while it acted (a capture, a
-// lost battle), centred on the turn's mean when `localWeight` <= 1 and taken
-// as-is above that. The per-turn reward in an 8-side game is dominated by the
-// rivals' turns; what a stack achieved itself is the cleanest signal there is.
+// GAE over each side's own turns, plus optional per-stack multi-turn local
+// credit tracked over non-recycled Game::pool Army* identities.
 void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda, float localWeight) {
+  constexpr float stackGamma = 0.90f;
   for (auto& ep : episodes) {
     const int T = (int)ep.turns.size();
     float gae = 0.0f;
+    std::unordered_map<std::uintptr_t, float> unitFutureLocal;
     for (int t = T - 1; t >= 0; t--) {
       auto& cur = ep.turns[t];
       bool last = (t == T - 1);
@@ -246,12 +281,24 @@ void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
       cur.advantage = gae;
       cur.returnTarget = gae + cur.valuePred;
 
-      float meanLocal = 0.0f;
-      for (const auto& ms : cur.missionSteps) meanLocal += ms.immediateDeltaScore;
-      if (!cur.missionSteps.empty()) meanLocal /= (float)cur.missionSteps.size();
-      if (localWeight > 1.0f) meanLocal = 0.0f;
-      for (auto& ms : cur.missionSteps) {
-        ms.advantage = cur.advantage + localWeight * (ms.immediateDeltaScore - meanLocal);
+      for (auto& [uid, val] : unitFutureLocal) val *= stackGamma;
+      for (int mi = (int)cur.missionSteps.size() - 1; mi >= 0; mi--) {
+        auto& ms = cur.missionSteps[mi];
+        if (!ms.unitIds.empty()) {
+          float perUnit = ms.immediateDeltaScore / (float)ms.unitIds.size();
+          for (std::uintptr_t uid : ms.unitIds) {
+            unitFutureLocal[uid] += perUnit;
+          }
+        }
+        const auto& evalIds = ms.poolUnitIds.empty() ? ms.unitIds : ms.poolUnitIds;
+        float groupReturn = 0.0f;
+        for (std::uintptr_t uid : evalIds) {
+          auto it = unitFutureLocal.find(uid);
+          if (it != unitFutureLocal.end()) groupReturn += it->second;
+        }
+        ms.stackReturnTarget = groupReturn;
+        float localAdv = ms.stackReturnTarget - ms.stackValuePred;
+        ms.advantage = cur.advantage + localWeight * localAdv;
       }
     }
   }
@@ -275,11 +322,11 @@ struct Normalizer {
 // ---------------------------------------------------------------- PPO maths
 
 struct HeadStats {
-  int mission = 0, econ = 0, diplo = 0, turns = 0;
+  int mission = 0, econ = 0, diplo = 0, turns = 0, stackValues = 0;
   double policyLoss = 0.0, valueLoss = 0.0, entropy = 0.0, kl = 0.0;
   int klSamples = 0, entSamples = 0;
   void add(const HeadStats& o) {
-    mission += o.mission; econ += o.econ; diplo += o.diplo; turns += o.turns;
+    mission += o.mission; econ += o.econ; diplo += o.diplo; turns += o.turns; stackValues += o.stackValues;
     policyLoss += o.policyLoss; valueLoss += o.valueLoss; entropy += o.entropy; kl += o.kl;
     klSamples += o.klSamples; entSamples += o.entSamples;
   }
@@ -369,6 +416,12 @@ void accumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& tr, 
   net.valueNet.backward(tr.startCtx, {dv}, grad.valueNet);
 
   for (const auto& ms : tr.missionSteps) {
+    float sv = net.evaluateStackValue(ms.stackValueIn);
+    float dsv = sv - ms.stackReturnTarget;
+    st.valueLoss += 0.25 * dsv * dsv;
+    st.stackValues++;
+    net.stackValueNet.backward(ms.stackValueIn, {dsv}, grad.stackValueNet);
+
     float adv = nz.mission(ms.advantage);
     const size_t K = ms.candidates.size();
     if (K > 1) {
@@ -454,19 +507,26 @@ EvalResult evaluateVsClassic(const Config& cfg, const ml::PolicyNetwork& policy,
     pool.emplace_back([&]() {
       for (size_t ci; (ci = next.fetch_add(1)) < cases.size();) {
         const Case& c = cases[ci];
-        auto gp = game::newGame(cfg.dataDir, c.scenario, gameOptions(c.preset, c.seed));
+        bool isSelection = (seedBase == SELECT_SEED_BASE);
+        auto gp = makeArenaGame(cfg, c.scenario, c.preset, c.seed, isSelection);
         Game& g = *gp;
+        int activeCount = 0;
+        for (int s = 0; s < 8; s++) {
+          if (g.map->sides[s].inUse) activeCount++;
+        }
+        int soloSeat = activeCount > 0 ? (int)((ci + c.seed) % (size_t)activeCount) : 0;
+        bool useSoloEval = cfg.soloLearner && isSelection && (cfg.activeSides < 8 || cfg.cropMargin > 0);
         std::array<bool, 8> modern{};
         int idx = 0;
         for (int s = 0; s < 8; s++) {
           if (!g.map->sides[s].inUse) continue;
-          modern[s] = ((idx + c.swap) % 2 == 0);
+          modern[s] = useSoloEval ? (idx == soloSeat) : ((idx + c.swap) % 2 == 0);
           g.map->sides[s].classicAi = !modern[s];
           idx++;
         }
         Side* cur = game::begin(g);
         int safety = 0;
-        while (cur && !g.over && g.turn <= turns && safety < turns * 12) {
+        while (cur && !g.over && !g.won && g.turn <= turns && safety < turns * 12) {
           safety++;
           if (cur->computer && cur->alive) {
             if (modern[cur->index]) ai::modern::playTurn(g, *cur, nullptr, &policy, nullptr);
@@ -528,16 +588,22 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
     else if (a == "--eval-every") cfg.evalEvery = std::max(1, std::stoi(next()));
     else if (a == "--eval-turns") cfg.evalTurns = std::max(6, std::stoi(next()));
     else if (a == "--select-seeds") cfg.selectSeeds = std::max(1, std::stoi(next()));
-    else if (a == "--report-seeds") cfg.reportSeeds = std::max(1, std::stoi(next()));
+    else if (a == "--report-seeds") cfg.reportSeeds = std::max(0, std::stoi(next()));
     else if (a == "--epochs") cfg.epochs = std::max(1, std::stoi(next()));
     else if (a == "--minibatches") cfg.minibatches = std::max(1, std::stoi(next()));
     else if (a == "--lr") cfg.lrStart = std::stof(next());
+    else if (a == "--temp-start") cfg.tempStart = std::max(0.1f, std::stof(next()));
+    else if (a == "--seed-offset") cfg.seedOffset = std::min<uint32_t>(500000u, (uint32_t)std::stoul(next()));
     else if (a == "--classic-frac") cfg.classicFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+    else if (a == "--random-map-frac") cfg.randomMapFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+    else if (a == "--active-sides") cfg.activeSides = std::clamp(std::stoi(next()), 2, 8);
+    else if (a == "--crop-margin") cfg.cropMargin = std::max(0, std::stoi(next()));
     else if (a == "--lambda") cfg.gaeLambda = std::clamp(std::stof(next()), 0.0f, 1.0f);
     else if (a == "--local-weight") cfg.localWeight = std::max(0.0f, std::stof(next()));
     else if (a == "--out") cfg.outPath = next();
     else if (a == "--log") cfg.logPath = next();
     else if (a == "--data") cfg.dataDir = next();
+    else if (a == "--solo-learner") cfg.soloLearner = true;
     else if (a == "--from-scratch") cfg.fromScratch = true;
     else if (a == "--benchmark-only") cfg.benchmarkOnly = true;
     else {
@@ -568,11 +634,19 @@ int main(int argc, char** argv) {
               threads, loaded ? ("loaded " + cfg.outPath).c_str() : "random init");
 
   if (cfg.benchmarkOnly || cfg.iterations == 0) {
-    printEval("report", evaluateVsClassic(cfg, learner, REPORT_SEED_BASE, cfg.reportSeeds, cfg.evalTurns));
+    if (cfg.reportSeeds > 0) {
+      printEval("report", evaluateVsClassic(cfg, learner, REPORT_SEED_BASE, cfg.reportSeeds, cfg.evalTurns));
+    } else {
+      printEval("select", evaluateVsClassic(cfg, learner, SELECT_SEED_BASE, cfg.selectSeeds, cfg.evalTurns));
+    }
     return 0;
   }
-  std::printf("iters %d | games/iter %d | turns %d | epochs %d x %d minibatches | classic-frac %.2f\n",
-              cfg.iterations, cfg.gamesPerIter, cfg.maxTurns, cfg.epochs, cfg.minibatches, cfg.classicFrac);
+  std::string modeLabel =
+      cfg.soloLearner ? "solo-learner (1 vs K-1 Classic)" : fmt("classic-frac %.2f", cfg.classicFrac);
+  std::printf("iters %d | games/iter %d | turns %d | sides %d (crop %d, rand %.2f) | epochs %d x %d minibatches | "
+              "%s\n",
+              cfg.iterations, cfg.gamesPerIter, cfg.maxTurns, cfg.activeSides, cfg.cropMargin, cfg.randomMapFrac,
+              cfg.epochs, cfg.minibatches, modeLabel.c_str());
 
   FILE* logf = cfg.logPath.empty() ? nullptr : std::fopen(cfg.logPath.c_str(), "w");
   if (logf) {
@@ -590,6 +664,7 @@ int main(int argc, char** argv) {
   const size_t offMission = offDiplo + ml::PolicyNetwork::DiploNet::PARAM_COUNT;
   const size_t offEcon = offMission + ml::PolicyNetwork::MissionNet::PARAM_COUNT;
   const size_t offValue = offEcon + ml::PolicyNetwork::EconNet::PARAM_COUNT;
+  const size_t offStackValue = offValue + ml::PolicyNetwork::ValueNet::PARAM_COUNT;
   std::vector<float> params = learner.flatten(), adamM(D, 0.0f), adamV(D, 0.0f);
   int adamStep = 0;
   std::mt19937 shuffleRng(12345);
@@ -608,7 +683,7 @@ int main(int argc, char** argv) {
     for (unsigned int w = 0; w < std::min<unsigned int>(threads, cfg.gamesPerIter); w++) {
       pool.emplace_back([&]() {
         for (int gi; (gi = nextGame.fetch_add(1)) < cfg.gamesPerIter;) {
-          uint32_t seed = (uint32_t)(iter * 1009 + gi * 97 + 17);
+          uint32_t seed = cfg.seedOffset + (uint32_t)(iter * 1009 + gi * 97 + 17);
           const std::string& scen = SCENARIOS[(iter * 7 + gi) % SCENARIOS.size()];
           const TrainingPreset& preset = PRESETS[(iter + gi) % 4];
           float roll = (float)((seed * 2654435761u) >> 8) / (float)(1u << 24);
@@ -681,7 +756,8 @@ int main(int argc, char** argv) {
         scale(offDiplo, offMission, 1.0f / std::max(1, mbStats.diplo));
         scale(offMission, offEcon, 1.0f / std::max(1, mbStats.mission));
         scale(offEcon, offValue, 1.0f / std::max(1, mbStats.econ));
-        scale(offValue, D, cfg.valueCoef / std::max(1, mbStats.turns));
+        scale(offValue, offStackValue, cfg.valueCoef / std::max(1, mbStats.turns));
+        scale(offStackValue, D, cfg.valueCoef / std::max(1, mbStats.stackValues));
         double norm = 0.0;
         for (float x : g) norm += (double)x * x;
         float clip = std::sqrt(norm) > cfg.maxGradNorm ? cfg.maxGradNorm / (float)std::sqrt(norm) : 1.0f;
@@ -741,8 +817,13 @@ int main(int argc, char** argv) {
   if (logf) std::fclose(logf);
 
   best.saveJson(cfg.outPath, bestIter, bestShare);
-  std::printf("Kept iteration %d (selection share %.1f%%) in %s. Held-out report:\n", bestIter, bestShare * 100.0f,
-              cfg.outPath.c_str());
-  printEval("report", evaluateVsClassic(cfg, best, REPORT_SEED_BASE, cfg.reportSeeds, cfg.evalTurns));
+  if (cfg.reportSeeds > 0) {
+    std::printf("Kept iteration %d (selection share %.1f%%) in %s. Held-out report:\n", bestIter, bestShare * 100.0f,
+                cfg.outPath.c_str());
+    printEval("report", evaluateVsClassic(cfg, best, REPORT_SEED_BASE, cfg.reportSeeds, cfg.evalTurns));
+  } else {
+    std::printf("Kept iteration %d (selection share %.1f%%) in %s (report skipped: --report-seeds 0).\n", bestIter,
+                bestShare * 100.0f, cfg.outPath.c_str());
+  }
   return 0;
 }
