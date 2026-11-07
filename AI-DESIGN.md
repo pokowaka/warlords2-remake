@@ -421,7 +421,10 @@ T = 0.1, 6 rollouts × 2 rounds each, fresh dice, unseen enemy field armies
 removed, switch away from the greedy turn only when an alternative is > 2
 standard errors better): **+2.3 % ± 3.3 %** paired on 128 dev games (46.6 % vs
 44.3 %; better in 53, worse in 39), ~1 h of 72 threads per 128 games. Right
-direction, not significant; a larger confirmation is running.
+direction, not significant. **Confirmation on 256 new dev games: −0.1 % ± 2.1 %**;
+pooled over 382 games +0.7 % ± 1.8 %. Honest, fair lookahead at this budget
+does not make the AI stronger; it would need a far larger budget or a better
+evaluation than the score after 2 rounds.
 
 **Imitating the Classic AI** (`w2imitate`, `modern::snapshotMissions`): all-
 Classic games; before a recorded side's turn the Modern AI lists the options it
