@@ -5,21 +5,16 @@ what it is, how it is trained and measured, what has been learned so far, and
 exactly how to continue training on a larger machine.
 
 > [!IMPORTANT]
-> **Status (2026-11-06, afternoon).** The installed checkpoint
-> (`cpp/ai_weights.json`, `pure_s6_1v7_unlocked`) now plays real games
-> near-greedily (`DEPLOY_TEMPERATURE` = 0.02 instead of 0.5), which alone lifts it
-> from **32.1 % to 40.9 % ± 4.0 % city share on 256 held-out report games**
-> (Modern largest side in 80 / 256 instead of 55 / 256; 50 % = parity with the
-> Warlord Classic AI). It is at parity at turn 20 (51 %) but fades to ~43 % at turn
-> 40 and ~39 % at turn 80, because it leaves captured cities empty: in total-war
-> games it loses ~300 cities per game, ~88 % of them undefended. Six warm-started
-> PPO recipe variants (better critic, higher learning rate, 4v4 games, low
-> training temperature, 60-turn games, 50 % Raider opponents) did not measurably
-> beat it. A first lookahead search looked like +11 %, but it peeked at its own
-> dice; the honest version is −6 % (§6.3). Search remains open (near-greedy
-> candidates, more rollouts, switch only when clearly better). Earlier work: train the AI to discover defence itself through
-> **departure credit** and **empty-city inputs** (§6.3, §8). The original
-> curriculum results are in §6.2.
+> **Status (2026-11-07).** The installed checkpoint (`cpp/ai_weights.json`, v6,
+> 9,700 parameters) comes from an overnight re-run of the pure-discovery
+> curriculum from scratch with v6 inputs and the privileged critic. Played
+> near-greedily (`DEPLOY_TEMPERATURE` = 0.02), it scores **44.3 % city share on
+> 256 held-out report games** against the Warlord Classic AI (50 % = parity),
+> up from **32.1 %** for yesterday's checkpoint at T = 0.5 and 40.9 % for it at
+> T = 0.02. The remaining weakness is total war and the late game: it leaves
+> captured cities empty. Recipe tweaks, Raider/frozen opponents, departure
+> credit, lookahead search and imitation of the Classic AI were tried and did
+> not help (§6.3, each with numbers).
 
 ---
 
@@ -439,6 +434,25 @@ from multi-turn plans (gather, then strike, with remembered orders) and from
 seeing through fog; a per-decision imitator on fair information learns the
 majority ("hold") and stops expanding.
 
+**Overnight curriculum from scratch — the new installed checkpoint.** The
+pure-discovery curriculum re-run from random weights with v6 inputs and the
+privileged critic (stages 1v1 cropped 100 it → 1v3 80 → 1v5 48 → 1v7 full maps
+80 → polish 96; ~3 h on 72 threads; `scratch/curriculum.sh` in the session
+notes, flags as in §7). Selection (greedy, 64 games): 1v7 stage peaked at
+50.5 % (iteration 60). Paired vs the previous installed weights:
+
+| Checkpoint | dev, turn 40 (512 games) | report, turn 40 (256 games) | dev, turn 60 (256 games) |
+|---|---|---|---|
+| 1v7 stage, iteration 60 (installed) | **+3.5 % ± 3.2 %** | +3.5 % ± 4.2 % (44.3 % vs 40.9 %; better 134, worse 81) | +3.4 % ± 5.0 % |
+| 1v7 stage, final | +1.0 % ± 3.0 % | — | — |
+| polish stage, best / final | +0.9 % / −1.5 % | — | — |
+
+The report check is independent of every choice made; combined with the dev
+result the gain is about +3.5 % ± 2.5 %. Per preset on the report set:
+Adv-Hidden 35.1 → 45.2 %, Interm-Diplo 58.3 → 63.5 %, Fog-TotalWar 32.8 →
+35.4 %, Beginner-Open 37.3 → 33.2 %. The polish stage (T 0.65 → 0.5) did not
+improve on the 1v7 stage.
+
 **Throughput.** On 72 Xeon threads (`cpp/build-train`, `-DW2_NATIVE=ON`), a
 `432`-game full-map iteration (`~12,200` learner turns) takes **20–24 s**; a
 `288`-game cropped `1v1` iteration takes **2–8 s**.
@@ -568,6 +582,8 @@ games, low training temperature, 60-turn training games, weight averaging.
 | `de8afd3`, `fc868d6` | `w2search` honest / fair judges, candidate temperature and conservative switching. |
 | `09d3aa8` | Classic imitation experiment (`w2imitate`, `modern::snapshotMissions`). |
 
+| (2026-11-07) | Installed the overnight from-scratch curriculum checkpoint (report 40.9 % → 44.3 % at T = 0.02). |
+
 **Review items deliberately left open** (they do not affect training):
 - `Side::classicAi` doubles as the diplomacy rule-variant flag, and it is set on
   human sides too. With Modern AI + the classic UI, a human pays hidden trust
@@ -591,7 +607,7 @@ games, low training temperature, 60-turn training games, weight averaging.
 | `cpp/test/search.cpp` | `w2search`: lookahead over candidate turns (probe / play) |
 | `cpp/test/train.sh` | Headless build and training launcher |
 | `cpp/test/run.cpp` (`testModernAi`) | Unit tests: fog pathing, diplomacy, sampling, multiplicity prior, `StackValueNet`, cropped maps, engine switching |
-| `cpp/ai_weights.json` | Installed checkpoint (v4 file, `8,066` parameters; loads as v5 with zero critic columns) |
+| `cpp/ai_weights.json` | Installed checkpoint (v6, `9,700` parameters; overnight curriculum, 1v7 stage iteration 60) |
 
 ## 11. Playing against it
 ```bash
