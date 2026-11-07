@@ -69,6 +69,7 @@ struct Settings {
   int rollouts = 4;        // R copies per candidate
   int horizon = 2;         // H rounds played on after the candidate turn
   float candTemp = 0.5f;   // temperature the sampled candidates are drawn at
+  float switchZ = 0.0f;    // only leave the greedy turn when a candidate beats it by switchZ standard errors
 };
 
 std::unique_ptr<Game> copyGame(const Game& g) { return save::decode(save::encode(g), kData); }
@@ -208,7 +209,7 @@ double modernShare(const Game& g, const std::array<bool, 8>& modern) {
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair]\n");
+    std::fprintf(stderr, "usage: w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair] [CAND_TEMP] [SWITCH_Z]\n");
     return 2;
   }
   ml::PolicyNetwork policy;
@@ -226,6 +227,8 @@ int main(int argc, char** argv) {
   int turns = argc > 7 ? std::atoi(argv[7]) : 40;
   std::string judge = argc > 8 ? argv[8] : "honest";
   st.judge = judge == "peek" ? Judge::Peek : judge == "fair" ? Judge::Fair : Judge::Honest;
+  st.candTemp = argc > 9 ? (float)std::atof(argv[9]) : 0.5f;
+  st.switchZ = argc > 10 ? (float)std::atof(argv[10]) : 0.0f;
   const bool play = (mode == "play");
 
   const int cases = seeds * 2;
@@ -257,6 +260,12 @@ int main(int argc, char** argv) {
             size_t best = 0;
             for (size_t k = 1; k < cands.size(); k++)
               if (cands[k].mean > cands[best].mean) best = k;
+            if (best != 0 && st.switchZ > 0.0f) {
+              // Conservative switching: noise alone must not pull us off the greedy turn
+              double se = std::sqrt((cands[best].sd * cands[best].sd + cands[0].sd * cands[0].sd) /
+                                    std::max(1, st.rollouts));
+              if (cands[best].mean - cands[0].mean <= st.switchZ * se) best = 0;
+            }
             if (!play) {
               std::lock_guard<std::mutex> lock(mu);
               probes++;
@@ -296,8 +305,8 @@ int main(int argc, char** argv) {
   double var = 0.0;
   for (double x : shares) var += (x - mean) * (x - mean);
   var /= std::max(1, cases - 1);
-  std::printf("=== %s | %s | %d games | K=%d R=%d H=%d | %.0f s ===\n", mode.c_str(), judge.c_str(), cases,
-              st.candidates, st.rollouts, st.horizon, sec);
+  std::printf("=== %s | %s | %d games | K=%d R=%d H=%d T=%.2f z=%.1f | %.0f s ===\n", mode.c_str(), judge.c_str(),
+              cases, st.candidates, st.rollouts, st.horizon, st.candTemp, st.switchZ, sec);
   std::printf("Modern city share %.1f%% +/- %.1f%% (95%%)\n", 100.0 * mean, 196.0 * std::sqrt(var / std::max(1, cases)));
   if (!play && probes > 0) {
     std::printf("probes %ld | a sampled turn scored best in %.0f%% | clearly best (> 2 SE) in %.0f%% | "
