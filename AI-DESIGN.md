@@ -15,9 +15,9 @@ exactly how to continue training on a larger machine.
 > games it loses ~300 cities per game, ~88 % of them undefended. Six warm-started
 > PPO recipe variants (better critic, higher learning rate, 4v4 games, low
 > training temperature, 60-turn games, 50 % Raider opponents) did not measurably
-> beat it. **Lookahead search** over candidate turns adds **+11.2 % ± 5.6 %**
-> (paired, 128 dev games) on the same weights — above parity — and is now used
-> as a teacher for training (§6.3). Earlier work: train the AI to discover defence itself through
+> beat it. A first lookahead search looked like +11 %, but it peeked at its own
+> dice; the honest version is −6 % (§6.3). Search remains open (near-greedy
+> candidates, more rollouts, switch only when clearly better). Earlier work: train the AI to discover defence itself through
 > **departure credit** and **empty-city inputs** (§6.3, §8). The original
 > curriculum results are in §6.2.
 
@@ -381,9 +381,22 @@ average empire score. Same installed weights, 128 dev games, paired:
 | Adv-Hidden | 40.8 % | 52.2 % | +11.4 % |
 | Fog-TotalWar | 35.0 % | 52.4 % | +17.5 % |
 
-Caveats: (1) the copies simulate the *true* game, so this search sees through
-fog and through stacks it has not fought; fog presets gain more, but the no-fog
-preset still gains +8.9 %. (2) Playing through a copy changes play slightly
+> [!WARNING]
+> **This +11.2 % is not real planning — it is peeking.** In this first version
+> each candidate turn was played once on a copy *with the real game's dice*, and
+> that very result was kept, so the search saw its own battles' outcomes before
+> committing. The honest version (`w2search … honest`: a candidate is a policy
+> sampling seed, every rollout replays the turn with fresh dice, and the chosen
+> one is then played with the real dice) is **worse than no search: −6.0 % ± 5.7 %**
+> on the same 128 games (Beginner-Open −12 %, Interm-Diplo −15 %, Adv-Hidden 0 %,
+> Fog-TotalWar +3 %). Two reasons: alternatives sampled at T = 0.5 are much weaker
+> than the greedy turn, and with 2 rollouts × 2 rounds the "best" candidate is
+> mostly the luckiest one (winner's curse). Any search must re-roll everything it
+> cannot know, and only switch away from the greedy turn when an alternative is
+> clearly better than the evaluation noise.
+
+Further caveats of the peek version: (1) the copies simulate the *true* game,
+so it also sees through fog and through stacks it has not fought. (2) Playing through a copy changes play slightly
 (no-search through the copy path: 45.7 % vs 45.2 % direct on 64 games), so the
 baseline is measured through the same path. (3) Cost ≈ 25 min of 72 threads per
 128 games (~1–2 s per searched turn).
@@ -521,7 +534,7 @@ games, low training temperature, 60-turn training games, weight averaging.
 | `7c7d995` | Departure credit (`--departure-weight`) and six empty-city/scale context inputs (v6, 9,700 params; v5/v4/v3 load function-preserving). |
 
 | `56be37b` | Frozen Modern training opponents (`--frozen-opponent`, `--frozen-frac`, `--eval-opponent frozen`). |
-| `6870c09` | `w2search` lookahead experiment: +11.2 % ± 5.6 % paired with search on the installed weights. |
+| `6870c09` | `w2search` lookahead experiment (first version peeked at its own dice: +11.2 %; honest version −6.0 %). |
 | `96038bc` | Search-as-teacher training mode (`--search-k/-r/-h`). |
 
 **Review items deliberately left open** (they do not affect training):

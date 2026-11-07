@@ -13,7 +13,7 @@
 //   play:  every Modern turn is searched; reports the benchmark city share, to
 //          be compared with the same seeds played without search.
 //
-//   cpp/build-train/w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS]
+//   cpp/build-train/w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair]
 //
 // Copies are made with save::encode/decode, so only shipped scenarios are used
 // (random maps live in memory only).
@@ -51,8 +51,20 @@ const Preset kPresets[4] = {
     {"Beginner-Open", 0, 0, 0}, {"Interm-Diplo", 0, 1, 1}, {"Adv-Hidden", 1, 1, 2}, {"Fog-TotalWar", 1, 0, 1}};
 constexpr uint32_t kSeedBase = 750000;   // the development seed set
 
+// How candidates are judged:
+//   peek:   each candidate turn is played once on a copy with the real game's
+//           dice and that very result is kept -- it sees its own battles'
+//           outcome before committing (an upper bound, not a fair player);
+//   honest: a candidate is a way of deciding (the policy with one sampling
+//           seed); every rollout replays its turn with fresh dice, and the
+//           chosen candidate is then played in the real game with its dice;
+//   fair:   honest, and every rollout copy first loses the enemy armies the
+//           side cannot see (field armies on unseen tiles and in transit).
+enum class Judge { Peek, Honest, Fair };
+
 struct Settings {
   const ml::PolicyNetwork* policy = nullptr;
+  Judge judge = Judge::Honest;
   int candidates = 4;      // K sampled turns besides the greedy one
   int rollouts = 4;        // R copies per candidate
   int horizon = 2;         // H rounds played on after the candidate turn
@@ -60,6 +72,35 @@ struct Settings {
 };
 
 std::unique_ptr<Game> copyGame(const Game& g) { return save::decode(save::encode(g), kData); }
+
+// The side's view of the board: enemy field armies it cannot see are removed
+// (garrisons of cities stay -- a known approximation), and armies in transit.
+void restrictToView(Game& g, int me) {
+  std::array<std::vector<Army*>, 8> unseen;
+  for (Army* a : g.armies) {
+    if (a->owner < 0 || a->owner >= 8 || a->owner == me || a->disbanded) continue;
+    bool hidden = a->transit || a->x == NONE;
+    if (!hidden && !game::cityAt(g, a->x, a->y)) hidden = !ai::belief::isTileVisible(g, me, a->x, a->y);
+    if (hidden) unseen[a->owner].push_back(a);
+  }
+  for (int s = 0; s < 8; s++) {
+    if (!unseen[s].empty()) game::disband(g, g.map->sides[s], unseen[s]);
+  }
+}
+
+// Plays `side`'s turn as candidate k: k == 0 is the greedy turn, k > 0 the
+// policy sampled at the candidate temperature with seed k.
+void playCandidate(Game& g, int sideIndex, int k, uint32_t baseSeed, const Settings& st) {
+  Side& side = *g.map->side(sideIndex);
+  if (k == 0) {
+    ai::modern::playTurn(g, side, nullptr, st.policy, nullptr);
+    return;
+  }
+  ml::RolloutSampler sampler;
+  sampler.temperature = st.candTemp;
+  sampler.rngState = baseSeed ^ (uint32_t)(k * 2246822519u);
+  ai::modern::playTurn(g, side, nullptr, st.policy, &sampler);
+}
 
 // Plays the current side's turn with its own kind of AI (Modern: greedy).
 void playOwnTurn(Game& g, Side& side, const ml::PolicyNetwork& policy) {
@@ -82,36 +123,42 @@ float rollout(Game& g, int sideIndex, int rounds, const ml::PolicyNetwork& polic
 }
 
 struct CandidateResult {
-  std::unique_ptr<Game> after;   // the game right after the candidate turn
+  std::unique_ptr<Game> after;   // peek only: the game right after the candidate turn
   double mean = 0.0, sd = 0.0;
+  int k = 0;
+  uint32_t baseSeed = 0;
 };
 
-// Builds and scores the K+1 candidate turns for `side` in `g` (its turn is next).
+// Builds and scores the K+1 candidates for `side` in `g` (its turn is next).
 std::vector<CandidateResult> scoreCandidates(const Game& g, int sideIndex, const Settings& st) {
   std::vector<CandidateResult> out;
+  const uint32_t baseSeed = (uint32_t)(g.rng.state * 2654435761u) ^ (uint32_t)(g.turn * 40503u);
   for (int k = 0; k <= st.candidates; k++) {
     CandidateResult c;
-    c.after = copyGame(g);
-    Side& side = *c.after->map->side(sideIndex);
-    if (k == 0) {
-      ai::modern::playTurn(*c.after, side, nullptr, st.policy, nullptr);   // greedy: the instinct
-    } else {
-      ml::RolloutSampler sampler;
-      sampler.temperature = st.candTemp;
-      sampler.rngState = (uint32_t)(g.rng.state * 2654435761u) ^ (uint32_t)(k * 2246822519u) ^
-                         (uint32_t)(g.turn * 40503u);
-      ai::modern::playTurn(*c.after, side, nullptr, st.policy, &sampler);
-    }
     std::vector<double> v;
-    for (int r = 0; r < st.rollouts; r++) {
-      auto copy = copyGame(*c.after);
-      copy->rng.state ^= (uint32_t)((r + 1) * 0x9e3779b9u);   // different dice per copy
-      v.push_back(rollout(*copy, sideIndex, st.horizon, *st.policy));
+    if (st.judge == Judge::Peek) {
+      c.after = copyGame(g);
+      playCandidate(*c.after, sideIndex, k, baseSeed, st);
+      for (int r = 0; r < st.rollouts; r++) {
+        auto copy = copyGame(*c.after);
+        copy->rng.state ^= (uint32_t)((r + 1) * 0x9e3779b9u);
+        v.push_back(rollout(*copy, sideIndex, st.horizon, *st.policy));
+      }
+    } else {
+      for (int r = 0; r < st.rollouts; r++) {
+        auto copy = copyGame(g);
+        copy->rng.state ^= (uint32_t)((r + 1) * 0x9e3779b9u);   // fresh dice, also for the candidate turn
+        if (st.judge == Judge::Fair) restrictToView(*copy, sideIndex);
+        playCandidate(*copy, sideIndex, k, baseSeed, st);
+        v.push_back(rollout(*copy, sideIndex, st.horizon, *st.policy));
+      }
     }
     for (double x : v) c.mean += x;
     c.mean /= std::max<size_t>(1, v.size());
     for (double x : v) c.sd += (x - c.mean) * (x - c.mean);
     c.sd = std::sqrt(c.sd / std::max<size_t>(1, v.size() - 1));
+    c.k = k;
+    c.baseSeed = baseSeed;
     out.push_back(std::move(c));
   }
   return out;
@@ -161,7 +208,7 @@ double modernShare(const Game& g, const std::array<bool, 8>& modern) {
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS]\n");
+    std::fprintf(stderr, "usage: w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair]\n");
     return 2;
   }
   ml::PolicyNetwork policy;
@@ -177,6 +224,8 @@ int main(int argc, char** argv) {
   st.rollouts = argc > 5 ? std::atoi(argv[5]) : 4;
   st.horizon = argc > 6 ? std::atoi(argv[6]) : 2;
   int turns = argc > 7 ? std::atoi(argv[7]) : 40;
+  std::string judge = argc > 8 ? argv[8] : "honest";
+  st.judge = judge == "peek" ? Judge::Peek : judge == "fair" ? Judge::Fair : Judge::Honest;
   const bool play = (mode == "play");
 
   const int cases = seeds * 2;
@@ -219,9 +268,11 @@ int main(int argc, char** argv) {
               if (best != 0 && gain > 2.0 * se) beatenClearly++;
               rolloutSdSum += cands[0].sd;
               playOwnTurn(*gp, *cur, policy);   // probe only: the game itself goes on unsearched
-            } else {
+            } else if (st.judge == Judge::Peek) {
               gp = std::move(cands[best].after);
               cur = gp->map->side(s);
+            } else {
+              playCandidate(*gp, s, cands[best].k, cands[best].baseSeed, st);   // real dice
             }
           } else if (cur->computer && cur->alive) {
             playOwnTurn(*gp, *cur, policy);
@@ -245,8 +296,8 @@ int main(int argc, char** argv) {
   double var = 0.0;
   for (double x : shares) var += (x - mean) * (x - mean);
   var /= std::max(1, cases - 1);
-  std::printf("=== %s | %d games | K=%d R=%d H=%d | %.0f s ===\n", mode.c_str(), cases, st.candidates, st.rollouts,
-              st.horizon, sec);
+  std::printf("=== %s | %s | %d games | K=%d R=%d H=%d | %.0f s ===\n", mode.c_str(), judge.c_str(), cases,
+              st.candidates, st.rollouts, st.horizon, sec);
   std::printf("Modern city share %.1f%% +/- %.1f%% (95%%)\n", 100.0 * mean, 196.0 * std::sqrt(var / std::max(1, cases)));
   if (!play && probes > 0) {
     std::printf("probes %ld | a sampled turn scored best in %.0f%% | clearly best (> 2 SE) in %.0f%% | "
