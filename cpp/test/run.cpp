@@ -970,6 +970,7 @@ static void testCombat(const std::string& scenario) {
       eq((int)lCity.defenders.size(), (int)l.defenders.size(), "defenders are gathered across all 4 tiles");
     }
   }
+  eq(g.map->options.militaryAdvisor, 1, "the military advisor is enabled by default");
 }
 
 static void testCapture(const std::string& scenario) {

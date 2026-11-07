@@ -162,7 +162,11 @@ std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& na
   auto m = std::make_unique<Map>();
   m->name = name;
 
-  for (auto& [k, off] : OPTIONS) *m->options.field(k) = u16(s, off);
+  for (auto& [k, off] : OPTIONS) {
+    uint16_t val = u16(s, off);
+    if (std::string(k) == "militaryAdvisor" && val == 0) val = 1;
+    *m->options.field(k) = val;
+  }
 
   for (int i = 0; i < 8; i++) {
     int o = SIDE_RECS + SIDE_REC_STRIDE * i;

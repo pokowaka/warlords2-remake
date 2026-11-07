@@ -103,7 +103,11 @@ export function load(dir, name) {
   if (s.length !== 12001) throw new Error("unexpected .SCN size: " + s.length);
 
   const options = {};
-  for (const k in OPTIONS) options[k] = u16(s, OPTIONS[k]);
+  for (const k in OPTIONS) {
+    let val = u16(s, OPTIONS[k]);
+    if (k === "militaryAdvisor" && val === 0) val = 1;
+    options[k] = val;
+  }
 
   const sides = [];
   for (let i = 0; i < 8; i++) {

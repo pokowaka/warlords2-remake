@@ -132,7 +132,7 @@ struct Sign {
 
 struct Options {
   int neutralCities = 0, diplomacy = 0, quests = 0, randomTurns = 0, hiddenMap = 0;
-  int intenseCombat = 0, quickStart = 0, viewEnemies = 0, militaryAdvisor = 0;
+  int intenseCombat = 0, quickStart = 0, viewEnemies = 0, militaryAdvisor = 1;
   int tutorial = 0, viewProduction = 0;
   /** By the Lua's name for it; unknown names are ignored. */
   int* field(const std::string& name);

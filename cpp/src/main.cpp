@@ -134,6 +134,7 @@ static bool held(std::initializer_list<const char*> k) {
   return false;
 }
 static int ownerOr8(int o) { return o == NONE ? 8 : o; }
+static int optMilitaryAdvisor = -1;
 
 // ------------------------------------------------------------------ loading
 
@@ -1310,10 +1311,16 @@ void front::openQuest() { questui::open(); }
 
 void front::takeLoaded(std::unique_ptr<w2::Game> loaded) {
   G.g = std::move(loaded);
+  if (optMilitaryAdvisor >= 0) {
+    G.g->map->options.militaryAdvisor = optMilitaryAdvisor;
+  } else if (G.g->map->options.militaryAdvisor == 0) {
+    G.g->map->options.militaryAdvisor = 1;
+  }
   G.selection.reset();
   G.route.reset();
   G.walk.reset();
   G.over = false;
+  G.starting = false;
   G.mapAfterBanner = false;
   front::stratDirty();
   G.player = G.g->sides[G.g->current];
@@ -3404,21 +3411,29 @@ static void beginGame() {
   }
 }
 
+struct Script {
+  std::vector<std::string> lines;
+  size_t at = 0;
+  int wait = 0;
+};
+static std::optional<Script> script;
+
 void front::openStart() {
   G.starting = true;
   G.haveLayout = false;
   sound::music(w2::cues::TITLE);
   start::open(
       [](const std::string& dir, const w2::game::NewGameOptions& opts) {
-        // 7bab:0cfe: the war begins to its own music, and the advisor says so
-        sound::music(w2::cues::BEGIN);
-        advisor::say(w2::cues::BEGIN_WAR, [dir, opts]() {
+        auto startGame = [dir, opts]() {
           G.starting = false;
           G.haveLayout = false;
           G.scenario = dir;
           w2::game::NewGameOptions o = opts;
           o.seed = (double)(time(nullptr) % 1000000007);
           G.seed = o.seed;
+          if (optMilitaryAdvisor >= 0) {
+            for (auto& [k, v] : o.options) if (k == "militaryAdvisor") v = optMilitaryAdvisor;
+          }
           G.g = game::newGame(G.dataDir, dir, o);
           G.selection.reset();
           G.over = false;
@@ -3432,7 +3447,13 @@ void front::openStart() {
             if (human) playComputers(G.g->side);
             else search::message(kit::text(0xe, 0), kit::text(0xe, 1), []() { playComputers(G.g->side); });
           }
-        });
+        };
+        if (!script && sound::speechOn()) {
+          sound::music(w2::cues::BEGIN);
+          advisor::say(w2::cues::BEGIN_WAR, startGame);
+        } else {
+          startGame();
+        }
       },
       [](std::unique_ptr<w2::Game> g) {
         G.starting = false;
@@ -3464,13 +3485,6 @@ void front::openStart() {
 //   attack TX TY    send the selection at a tile, fighting if it must
 //   near            list the cities nearest the selection not the player's
 //   quit
-struct Script {
-  std::vector<std::string> lines;
-  size_t at = 0;
-  int wait = 0;
-};
-static std::optional<Script> script;
-
 static void stepScript() {
   if (!script) return;
   if (script->wait > 0) { script->wait--; return; }
@@ -3550,11 +3564,41 @@ static void stepScript() {
       if (G.g && G.g->map) {
         if (int* f = G.g->map->options.field(o)) *f = v;
       }
+    } else if (cmd == "load") {
+      std::string s;
+      in >> s;
+      while (kit::top()) kit::pop(kit::top());
+      if (auto loaded = savegame::readSlot(s)) {
+        front::takeLoaded(std::move(loaded));
+        syncLayout();
+      }
+    } else if (cmd == "centre") {
+      int tx, ty;
+      in >> tx >> ty;
+      centreOn(tx, ty);
     } else if (cmd == "pointer") {
       int x, y;
       in >> x >> y;
       printf("pointer(%d,%d)=%d\n", x, y, pointerKind(x, y));
       fflush(stdout);
+    } else if (cmd == "tileptr") {
+      int tx, ty;
+      in >> tx >> ty;
+      int px = G.mapRect.x + (int)((tx + 0.5 - G.cx) * TILE * G.zoom / display::d.scale);
+      int py = G.mapRect.y + (int)((ty + 0.5 - G.cy) * TILE * G.zoom / display::d.scale);
+      printf("tileptr(%d,%d)=%d\n", tx, ty, pointerKind(px, py));
+      fflush(stdout);
+    } else if (cmd == "spawn" && G.g) {
+      int tx, ty, owner, type;
+      in >> tx >> ty >> owner >> type;
+      auto a = std::make_unique<Army>();
+      a->x = tx;
+      a->y = ty;
+      a->owner = owner;
+      a->type = type;
+      a->moves = 10;
+      G.g->armies.push_back(a.get());
+      G.g->pool.push_back(std::move(a));
     } else if (cmd == "advise") {
       int x, y;
       in >> x >> y;
@@ -3604,7 +3648,6 @@ int main(int argc, char** argv) {
   bool forceDiplomacy = false;
   bool forceHiddenMap = false;
   bool spectateAllAi = false;
-  int optMilitaryAdvisor = -1;
   G.modernUi = false;
   G.dataDir = "original";
   for (int i = 1; i < argc; i++) {
@@ -3691,7 +3734,7 @@ int main(int argc, char** argv) {
     if (scenario.empty()) {
       front::openStart();
       // 7f77:0000 greets the player the first time round
-      advisor::say(w2::cues::GREET);
+      if (scriptFile.empty()) advisor::say(w2::cues::GREET);
     } else {
       G.starting = false;
       G.scenario = scenario;
