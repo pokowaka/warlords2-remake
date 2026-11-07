@@ -437,8 +437,7 @@ majority ("hold") and stops expanding.
 **Overnight curriculum from scratch — the new installed checkpoint.** The
 pure-discovery curriculum re-run from random weights with v6 inputs and the
 privileged critic (stages 1v1 cropped 100 it → 1v3 80 → 1v5 48 → 1v7 full maps
-80 → polish 96; ~3 h on 72 threads; `scratch/curriculum.sh` in the session
-notes, flags as in §7). Selection (greedy, 64 games): 1v7 stage peaked at
+80 → polish 96; ~3 h on 72 threads; reproducible with `cpp/test/curriculum.sh`). Selection (greedy, 64 games): 1v7 stage peaked at
 50.5 % (iteration 60). Paired vs the previous installed weights:
 
 | Checkpoint | dev, turn 40 (512 games) | report, turn 40 (256 games) | dev, turn 60 (256 games) |
@@ -486,6 +485,10 @@ cpp/build-train/w2arena --solo-learner --from-scratch \
 # Stage 2 -> Stage 3: copy weights forward, widen --active-sides (4 -> 8, crop 0),
 # and switch full-map 1v7 polishing to --local-weight 0.0 --temp-start 0.70.
 ```
+
+The whole curriculum, as run for the installed weights, is one script:
+`cpp/test/curriculum.sh [OUT_DIR]` (all five stages, then paired compares of
+the candidates against `cpp/ai_weights.json`; ~3 h on 72 threads).
 
 ### Evaluate, inspect, install
 ```bash
@@ -606,6 +609,7 @@ games, low training temperature, 60-turn training games, weight averaging.
 | `cpp/test/opponents.{hpp,cpp}` | Training-only opponents: Raider (on the Classic AI) and Frozen (a fixed Modern checkpoint) |
 | `cpp/test/search.cpp` | `w2search`: lookahead over candidate turns (probe / play) |
 | `cpp/test/train.sh` | Headless build and training launcher |
+| `cpp/test/curriculum.sh` | The from-scratch curriculum that produced the installed weights |
 | `cpp/test/run.cpp` (`testModernAi`) | Unit tests: fog pathing, diplomacy, sampling, multiplicity prior, `StackValueNet`, cropped maps, engine switching |
 | `cpp/ai_weights.json` | Installed checkpoint (v6, `9,700` parameters; overnight curriculum, 1v7 stage iteration 60) |
 
