@@ -621,3 +621,4 @@ cpp/build/warlords2 --window --classic-ai --scenario ERYTHEA                    
 cpp/build/warlords2 --window --modern-ui --scenario ERYTHEA --spectate                 # watch 8 AIs, full map
 cpp/build/warlords2 --weights runs/X/weights.json ...                                  # try a checkpoint
 ```
+The Military Advisor (`--military-advisor`, active by default; `--no-military-advisor` to disable) speculates on combat odds via Shift-hover/click over adjacent enemy armies and cities.

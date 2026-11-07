@@ -961,6 +961,15 @@ static void testCombat(const std::string& scenario) {
   ok(!verdict.empty(), "the advisor has a verdict");
   ok(wins >= 0 && wins <= 19, "the advisor's win count is in range");
   eq(verdict, std::string(combat::ADVICE[wins / 2]), "the verdict is wins/2 into the table");
+
+  // The Military Advisor evaluates any of the 4 tiles of a 2x2 city consistently
+  for (int dy = 0; dy <= 1; dy++) {
+    for (int dx = 0; dx <= 1; dx++) {
+      auto lCity = combat::lines(g, {a1}, enemy->x + dx, enemy->y + dy);
+      eq(lCity.city, enemy, "combat lines identify the 2x2 city from any tile");
+      eq((int)lCity.defenders.size(), (int)l.defenders.size(), "defenders are gathered across all 4 tiles");
+    }
+  }
 }
 
 static void testCapture(const std::string& scenario) {

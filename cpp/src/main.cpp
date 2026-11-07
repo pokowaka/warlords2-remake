@@ -50,6 +50,7 @@
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/armytype.hpp"
+#include "warlords/bytes.hpp"
 #include "warlords/cues.hpp"
 #include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
@@ -120,7 +121,18 @@ static gfx::Quad tileQuad(int t) {
 }
 static gfx::Quad roadQuad(int i) { return gfx::newQuad((i % 13) * 48, (i / 13) * TILE, TILE, TILE); }
 static void palColour(int i) { kit::setPal(i); }
-static bool held(std::initializer_list<const char*> k) { return keys::isDown(k); }
+static bool held(std::initializer_list<const char*> k) {
+  if (keys::isDown(k)) return true;
+  SDL_Keymod mod = SDL_GetModState();
+  for (auto name : k) {
+    std::string s(name);
+    if ((s == "lshift" || s == "rshift") && (mod & KMOD_SHIFT)) return true;
+    if ((s == "lctrl" || s == "rctrl") && (mod & KMOD_CTRL)) return true;
+    if ((s == "lalt" || s == "ralt") && (mod & KMOD_ALT)) return true;
+    if ((s == "lgui" || s == "rgui") && (mod & KMOD_GUI)) return true;
+  }
+  return false;
+}
 static int ownerOr8(int o) { return o == NONE ? 8 : o; }
 
 // ------------------------------------------------------------------ loading
@@ -831,9 +843,16 @@ static int pointerKind(int x, int y) {
   int dist = 0, mode = NONE, under = move::PLAIN;
   bool atSea = false;
   if (sel) {
-    dist = std::max(std::abs(tx - (*sel)[0]->x), std::abs(ty - (*sel)[0]->y));
+    int sx = (*sel)[0]->x, sy = (*sel)[0]->y;
+    if (city && !city->razed) {
+      int dx = std::max(0, std::max(city->x - sx, sx - (city->x + 1)));
+      int dy = std::max(0, std::max(city->y - sy, sy - (city->y + 1)));
+      dist = std::max(dx, dy);
+    } else {
+      dist = std::max(std::abs(tx - sx), std::abs(ty - sy));
+    }
     mode = move::modeOf(g, *sel);
-    under = w2::scn::terrainAt(*g.map, (*sel)[0]->x, (*sel)[0]->y);
+    under = w2::scn::terrainAt(*g.map, sx, sy);
     atSea = (*sel)[0]->atSea;
   }
   // any tile with a road on it costs 1, a mountain pass too (18a9:0896)
@@ -3516,10 +3535,30 @@ static void stepScript() {
       printf("turn=%d player=%s modals=%d banner=%d offer=%d ai=%d over=%d walk=%d assault=%d status=%s\n",
              G.g ? G.g->turn : 0, G.player ? G.player->name.c_str() : "-", (int)G.modals.size(), (bool)G.banner,
              (bool)G.offer, (bool)G.aiRun, G.over, (bool)G.walk, (bool)G.assault, G.aiStatus ? G.aiStatus->text.c_str() : "");
+      if (G.g && G.g->map)
+        printf("  options: milAdv=%d diplo=%d hidden=%d viewEn=%d\n",
+               G.g->map->options.militaryAdvisor, G.g->map->options.diplomacy,
+               G.g->map->options.hiddenMap, G.g->map->options.viewEnemies);
       if (G.g && G.player && G.player->capital)
         printf("  cam=%.2f,%.2f zoom=%d map=%d,%d,%d,%d capital=%d,%d pointer=%d,%d\n", G.cx, G.cy, G.zoom, G.mapRect.x,
                G.mapRect.y, G.mapRect.w, G.mapRect.h, G.player->capital->x, G.player->capital->y, G.mouseX, G.mouseY);
       fflush(stdout);
+    } else if (cmd == "opt") {
+      std::string o;
+      int v;
+      in >> o >> v;
+      if (G.g && G.g->map) {
+        if (int* f = G.g->map->options.field(o)) *f = v;
+      }
+    } else if (cmd == "pointer") {
+      int x, y;
+      in >> x >> y;
+      printf("pointer(%d,%d)=%d\n", x, y, pointerKind(x, y));
+      fflush(stdout);
+    } else if (cmd == "advise") {
+      int x, y;
+      in >> x >> y;
+      miladvisor::open(G.selection ? &G.selection->stack : nullptr, x, y);
     } else if (cmd == "select") {
       int x, y;
       in >> x >> y;
@@ -3565,6 +3604,7 @@ int main(int argc, char** argv) {
   bool forceDiplomacy = false;
   bool forceHiddenMap = false;
   bool spectateAllAi = false;
+  int optMilitaryAdvisor = -1;
   G.modernUi = false;
   G.dataDir = "original";
   for (int i = 1; i < argc; i++) {
@@ -3584,6 +3624,8 @@ int main(int argc, char** argv) {
     else if (a == "--weights") weightsFile = next();
     else if (a == "--diplomacy") forceDiplomacy = true;
     else if (a == "--hidden-map") forceHiddenMap = true;
+    else if (a == "--military-advisor") optMilitaryAdvisor = 1;
+    else if (a == "--no-military-advisor") optMilitaryAdvisor = 0;
     else if (a == "--spectate" || a == "--all-ai") spectateAllAi = true;
   }
   // Modern AI by default; its trained weights come from --weights or ai_weights.json
@@ -3655,10 +3697,30 @@ int main(int argc, char** argv) {
       G.scenario = scenario;
       game::NewGameOptions o;
       o.seed = seed != 0 ? seed : (double)(time(nullptr) % 1000000007);
-      if (forceDiplomacy) o.options.push_back({"diplomacy", 1});
+      static const char* const OPTION_KEYS[10] = {
+          "neutralCities", "diplomacy", "quests", "hiddenMap", "viewEnemies",
+          "viewProduction", "intenseCombat", "quickStart", "militaryAdvisor", "randomTurns"
+      };
+      int defaultOptions[10] = {0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
+      if (auto optBytes = w2::readFile(G.dataDir + "/DATA/OPTIONS.DAT")) {
+        for (size_t i = 0; i <= 9 && 2 * i + 2 <= optBytes->size(); i++) {
+          defaultOptions[i] = w2::u16(*optBytes, 2 * i);
+        }
+      }
+      for (int i = 0; i < 10; i++) {
+        o.options.emplace_back(OPTION_KEYS[i], defaultOptions[i]);
+      }
+      if (forceDiplomacy) {
+        for (auto& [k, v] : o.options) if (k == "diplomacy") v = 1;
+      }
       if (forceHiddenMap) {
-        o.options.push_back({"hiddenMap", 1});
-        o.options.push_back({"viewEnemies", 0});
+        for (auto& [k, v] : o.options) {
+          if (k == "hiddenMap") v = 1;
+          if (k == "viewEnemies") v = 0;
+        }
+      }
+      if (optMilitaryAdvisor >= 0) {
+        for (auto& [k, v] : o.options) if (k == "militaryAdvisor") v = optMilitaryAdvisor;
       }
       if (scenario == w2::randommap::DIR) {
         // RANDOM: a random world with the start menu's first settings, made
@@ -3671,9 +3733,17 @@ int main(int argc, char** argv) {
       }
       G.g = game::newGame(G.dataDir, scenario, o);
       for (size_t i = 0; i < G.g->sides.size(); i++) G.g->sides[i]->computer = spectateAllAi || (i > 0);
-      syncLayout();
-      beginGame();
-      if (G.g->side && G.g->side->computer) playComputers(G.g->side);
+      auto startWar = [=]() {
+        syncLayout();
+        beginGame();
+        if (G.g->side && G.g->side->computer) playComputers(G.g->side);
+      };
+      if (scriptFile.empty() && !spectateAllAi && sound::speechOn()) {
+        sound::music(w2::cues::BEGIN);
+        advisor::say(w2::cues::BEGIN_WAR, startWar);
+      } else {
+        startWar();
+      }
     }
   } catch (const std::exception& e) {
     fprintf(stderr, "could not start: %s\n", e.what());
