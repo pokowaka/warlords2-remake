@@ -416,6 +416,26 @@ judged without search: final −4.6 % ± 3.0 % (significantly worse), best
 selection checkpoint −1.0 % ± 2.9 %. The fair search scored the same as the
 honest one (38.3 % vs 44.3 % without search on 128 games).
 
+**Proper fair search** (`w2search … fair 0.1 2.0`: 3 alternatives drawn at
+T = 0.1, 6 rollouts × 2 rounds each, fresh dice, unseen enemy field armies
+removed, switch away from the greedy turn only when an alternative is > 2
+standard errors better): **+2.3 % ± 3.3 %** paired on 128 dev games (46.6 % vs
+44.3 %; better in 53, worse in 39), ~1 h of 72 threads per 128 games. Right
+direction, not significant; a larger confirmation is running.
+
+**Imitating the Classic AI** (`w2imitate`, `modern::snapshotMissions`): all-
+Classic games; before a recorded side's turn the Modern AI lists the options it
+would weigh for each army group (dry run), and after the Classic turn each
+group's decision is labelled with what its moving part did (hold when nobody
+left). On those decisions **the Classic AI holds its city in ~60 % of cases, the
+Modern AI's greedy choice in 0.4 %**. Behaviour cloning on MissionNet reaches
+67 % agreement (from 3.7 %) but plays far worse: **11.0 % vs 45.1 %** (256 dev
+games); weight blends with the installed network get monotonically worse
+(10 %: −1.7 %, 25 %: −2.9 %, 50 %: −14.0 %). The Classic AI's rare attacks come
+from multi-turn plans (gather, then strike, with remembered orders) and from
+seeing through fog; a per-decision imitator on fair information learns the
+majority ("hold") and stops expanding.
+
 **Throughput.** On 72 Xeon threads (`cpp/build-train`, `-DW2_NATIVE=ON`), a
 `432`-game full-map iteration (`~12,200` learner turns) takes **20–24 s**; a
 `288`-game cropped `1v1` iteration takes **2–8 s**.
@@ -542,6 +562,8 @@ games, low training temperature, 60-turn training games, weight averaging.
 | `56be37b` | Frozen Modern training opponents (`--frozen-opponent`, `--frozen-frac`, `--eval-opponent frozen`). |
 | `6870c09` | `w2search` lookahead experiment (first version peeked at its own dice: +11.2 %; honest version −6.0 %). |
 | `96038bc` | Search-as-teacher training mode (`--search-k/-r/-h`). |
+| `de8afd3`, `fc868d6` | `w2search` honest / fair judges, candidate temperature and conservative switching. |
+| `09d3aa8` | Classic imitation experiment (`w2imitate`, `modern::snapshotMissions`). |
 
 **Review items deliberately left open** (they do not affect training):
 - `Side::classicAi` doubles as the diplomacy rule-variant flag, and it is set on
