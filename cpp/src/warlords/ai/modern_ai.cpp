@@ -773,7 +773,7 @@ std::vector<size_t> buildCoalitionSizes(const Game& g, Army* seed,
 
 void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
                                     const ml::ContextVec& ctx, const PauseCallback& pause,
-                                    ml::RolloutSampler* sampler) {
+                                    ml::RolloutSampler* sampler, std::vector<MissionSnapshot>* snapshots = nullptr) {
   int me = side.index;
   SideBelief& b = belief::ensure(side);
   float caution = 0.0f;
@@ -1229,6 +1229,28 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         int kc = std::max(1, kindCounts[(int)targets[options[i].targetIdx].kind]);
         logMult[i] = std::log((float)kc);
       }
+      if (snapshots) {
+        // Dry run: record this group's first decision and move on, touching nothing
+        MissionSnapshot snap;
+        snap.candidates.reserve(options.size());
+        for (const auto& op : options) {
+          const CandidateTarget& t = targets[op.targetIdx];
+          snap.candidates.push_back(op.inVec);
+          snap.kind.push_back((int)t.kind);
+          snap.cityIndex.push_back(t.city ? t.city->index : NONE);
+          snap.tx.push_back(t.x);
+          snap.ty.push_back(t.y);
+          snap.stackSize.push_back((int)preStacks[op.stackOptIdx].units.size());
+        }
+        snap.logMult = logMult;
+        snap.seed = reinterpret_cast<std::uintptr_t>(seed);
+        for (Army* a : lg.units) snap.group.push_back(reinterpret_cast<std::uintptr_t>(a));
+        snap.startX = lg.x;
+        snap.startY = lg.y;
+        snap.startCity = (lg.city && lg.city->ownerIndex == me) ? lg.city->index : NONE;
+        snapshots->push_back(std::move(snap));
+        break;
+      }
       float chosenLogProb = 0.0f;
       int chosenOptIdx = ml::selectFromLogits(logits, sampler, &chosenLogProb, &logMult);
       const JointOption& chosenOpt = options[chosenOptIdx];
@@ -1391,6 +1413,7 @@ void runMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
     }
   }
 
+  if (snapshots) return;
   diplomacy::setAlliedTargetCity(g, me, bestEnemyCityTarget);
   if (pause) pause("missions");
 }
@@ -1766,6 +1789,20 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
 
   runEconomyPhase(g, side, policy, ctx, sampler);
   if (pause) pause("economy");
+}
+
+std::vector<MissionSnapshot> snapshotMissions(Game& g, Side& side, const ml::PolicyNetwork& policy) {
+  std::vector<MissionSnapshot> out;
+  std::vector<bool> movedBefore;
+  for (Army* a : g.armies) movedBefore.push_back(a->aiMoved);
+  for (Army* a : g.armies) {
+    if (a->owner == side.index) a->aiMoved = false;
+  }
+  belief::update(g, side);
+  ml::ContextVec ctx = ml::buildContext(g, side);
+  runMilitaryAndExplorationPhase(g, side, policy, ctx, nullptr, nullptr, &out);
+  for (size_t i = 0; i < g.armies.size() && i < movedBefore.size(); i++) g.armies[i]->aiMoved = movedBefore[i];
+  return out;
 }
 
 City* selectHeroCity(Game& g, Side& side, City* dflt, const ml::PolicyNetwork* customPolicy) {

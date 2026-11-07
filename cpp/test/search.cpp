@@ -209,7 +209,8 @@ double modernShare(const Game& g, const std::array<bool, 8>& modern) {
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair] [CAND_TEMP] [SWITCH_Z]\n");
+    std::fprintf(stderr, "usage: w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair] [CAND_TEMP] [SWITCH_Z] "
+                 "[SEED_OFFSET]\n");
     return 2;
   }
   ml::PolicyNetwork policy;
@@ -229,6 +230,7 @@ int main(int argc, char** argv) {
   st.judge = judge == "peek" ? Judge::Peek : judge == "fair" ? Judge::Fair : Judge::Honest;
   st.candTemp = argc > 9 ? (float)std::atof(argv[9]) : 0.5f;
   st.switchZ = argc > 10 ? (float)std::atof(argv[10]) : 0.0f;
+  const uint32_t seedOffset = argc > 11 ? (uint32_t)std::atoi(argv[11]) : 0u;
   const bool play = (mode == "play");
 
   const int cases = seeds * 2;
@@ -246,8 +248,8 @@ int main(int argc, char** argv) {
       for (int ci; (ci = next.fetch_add(1)) < cases;) {
         int preset = 0;
         std::string scen;
-        uint32_t seed = kSeedBase + (uint32_t)(ci / 2);
-        auto gp = newBenchmarkGame(ci, seed, preset, scen);
+        uint32_t seed = kSeedBase + seedOffset + (uint32_t)(ci / 2);
+        auto gp = newBenchmarkGame(ci + 2 * (int)seedOffset, seed, preset, scen);
         auto modern = assignSeats(*gp, ci % 2);
         Side* cur = game::begin(*gp);
         int safety = 0;
