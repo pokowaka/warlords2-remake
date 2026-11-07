@@ -303,6 +303,8 @@ iterations × 432 games, paired vs installed at T = 0.02):
 | E5 | 60-turn games (judged at turn 60) | −0.8 % ± 3.0 % |
 | E6 | 50 % of Classic seats are Raiders, 64 iterations | −0.8 % ± 2.9 % |
 | E9 | departure credit (weight 2) + all games 4 vs 4 (shared live policy) | **−3.2 % ± 2.7 %** (significantly worse) |
+| E10 | 1 vs 7, half the opponents the frozen installed AI, departure credit | −2.0 % ± 2.9 % |
+| E11 | search as teacher (K=4, R=2, H=2, peeking teacher) | **−4.6 % ± 3.0 %** final; −1.0 % best |
 | soups | weight average of E1–E3 checkpoints | −0.6 % / +1.0 % |
 
 KL per iteration stays ~0.001–0.002 whatever the learning rate: the recipe sits
@@ -408,7 +410,11 @@ the game continues from the best one. This replaces the turn-level GAE signal
 (one noisy score shared by ~70 moves and many turns) with a comparison of
 alternatives from the same position. The privileged copies are used only to
 train; the trained policy plays on fair information. First update: KL 0.007,
-3–4× the per-iteration movement of PPO. Experiment E11 in progress.
+3–4× the per-iteration movement of PPO. **E11** (24 iterations × 36 games,
+K=4, R=2, H=2, its teacher still peeking at each candidate's own dice) was
+judged without search: final −4.6 % ± 3.0 % (significantly worse), best
+selection checkpoint −1.0 % ± 2.9 %. The fair search scored the same as the
+honest one (38.3 % vs 44.3 % without search on 128 games).
 
 **Throughput.** On 72 Xeon threads (`cpp/build-train`, `-DW2_NATIVE=ON`), a
 `432`-game full-map iteration (`~12,200` learner turns) takes **20–24 s**; a
