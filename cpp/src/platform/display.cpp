@@ -45,7 +45,12 @@ SDL_Window* open(const char* title, bool windowed, int sizeW, int sizeH) {
     h = sizeH;
   }
   if (!windowed) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+  // a click on the window both activates it and counts as a click
+  SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
   win = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h, flags);
+  // and take the focus: on macOS a window that is not the key window gets
+  // the mouse's moves only while a button is held
+  if (win) SDL_RaiseWindow(win);
   if (win && sized) {
     // the size is in device pixels: on a high-density display, fewer points
     int ww, wh, pw, ph;

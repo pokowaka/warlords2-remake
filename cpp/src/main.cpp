@@ -3834,6 +3834,8 @@ int main(int argc, char** argv) {
             } else if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
               keys::clear();
               padLetGo();
+            } else if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+              SDL_ShowCursor(SDL_DISABLE);   // the game draws its own pointer
             }
             break;
           case SDL_KEYDOWN: {
@@ -3855,6 +3857,11 @@ int main(int argc, char** argv) {
             break;
           case SDL_MOUSEBUTTONDOWN:
           case SDL_MOUSEBUTTONUP: {
+            // a click on a window that has not got the focus takes it (see
+            // display::open): else the pointer moves only while dragging
+            if (e.type == SDL_MOUSEBUTTONDOWN && !(SDL_GetWindowFlags(win) & SDL_WINDOW_INPUT_FOCUS)) {
+              SDL_RaiseWindow(win);
+            }
             auto [x, y] = display::toUI(e.button.x, e.button.y);
             G.mouseX = x;
             G.mouseY = y;
@@ -3897,6 +3904,30 @@ int main(int argc, char** argv) {
         }
       } catch (const std::exception& ex) {
         fprintf(stderr, "error: %s\n", ex.what());
+      }
+    }
+    // Where the mouse is, asked rather than waited for. On some Macs (SDL 3
+    // under sdl2-compat) the window holds both focuses and still SDL sends
+    // the mouse's moves only while a button is held -- a bare SDL program
+    // shows it too -- so the pointer would follow only a drag. So while the
+    // window has the focus, the pointer follows wherever the mouse is; a
+    // move SDL did send has already brought lastX/lastY up to date.
+    if (!script && SDL_GetKeyboardFocus() == win) {
+      int gx, gy, wx, wy, ww, wh;
+      SDL_GetGlobalMouseState(&gx, &gy);
+      SDL_GetWindowPosition(win, &wx, &wy);
+      SDL_GetWindowSize(win, &ww, &wh);
+      int mx = gx - wx, my = gy - wy;
+      if (mx >= 0 && my >= 0 && mx < ww && my < wh && (mx != (int)lastX || my != (int)lastY)) {
+        auto [x, y] = display::toUI(mx, my);
+        G.mouseX = x;
+        G.mouseY = y;
+        display::d.mouseInside = true;
+        display::d.off = display::offFrame(mx, my);
+        double k = display::d.dpi / display::d.scale;
+        mousemoved((mx - lastX) * k, (my - lastY) * k);
+        lastX = mx;
+        lastY = my;
       }
     }
     try {
