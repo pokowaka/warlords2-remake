@@ -6,9 +6,13 @@ namespace w2::ai::personality {
 
 namespace {
 
-// Trait order:
-// [0] AGGRESSION, [1] HONOUR, [2] AVARICE, [3] SCORCHED_EARTH, [4] HERO_FOCUS,
-// [5] COALITION_DRIVE, [6] CAVALRY_AFFINITY, [7] FLIER_AFFINITY, [8] SIEGE_AFFINITY, [9] CAUTION
+/**
+ * @brief The 27 character profiles, by level (Knight, Lord, Warlord) and card.
+ *
+ * Traits are in TraitIndex order: aggression, honour, avarice, scorched
+ * earth, hero focus, coalition drive, cavalry, flier and siege affinity,
+ * caution.
+ */
 const Profile kProfiles[3][9] = {
     // Knights (Level 0)
     {
@@ -186,9 +190,9 @@ const Profile kProfiles[3][9] = {
 }  // namespace
 
 const Profile& ProfileFor(int level, int card) {
-    int lv = std::clamp(level, 0, 2);
-    int cd = std::clamp(card, 0, 8);
-    return kProfiles[lv][cd];
+    int clamped_level = std::clamp(level, 0, 2);
+    int clamped_card = std::clamp(card, 0, 8);
+    return kProfiles[clamped_level][clamped_card];
 }
 
 const Profile& ForSide(const Side& side) {

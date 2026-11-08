@@ -17,41 +17,43 @@ SideBelief& Ensure(Side& side) {
     return *side.belief;
 }
 
-bool IsTileVisible(const Game& g, int side_index, int x, int y) {
-    return game::Seen(g, side_index, x, y);
+bool IsTileVisible(const Game& game, int side_index, int x, int y) {
+    return game::Seen(game, side_index, x, y);
 }
 
-bool IsCityVisible(const Game& g, int side_index, const City& city) {
+bool IsCityVisible(const Game& game, int side_index, const City& city) {
     if (city.razed) return false;
-    if (g.map->options.hidden_map == 0) return true;
+    if (game.map->options.hidden_map == 0) return true;
     for (int dy = 0; dy <= 1; dy++) {
         for (int dx = 0; dx <= 1; dx++) {
-            if (game::Seen(g, side_index, city.x + dx, city.y + dy)) return true;
+            if (game::Seen(game, side_index, city.x + dx, city.y + dy)) return true;
         }
     }
-    const Side* s = g.map->Side(side_index);
-    if (s && s->quest && s->quest->city == &city) return true;
+    const Side* viewer = game.map->Side(side_index);
+    if (viewer && viewer->quest && viewer->quest->city == &city) return true;
     return false;
 }
 
-bool IsSiteVisible(const Game& g, int side_index, const Site& site) {
-    if (game::Seen(g, side_index, site.x, site.y)) return true;
-    const Side* s = g.map->Side(side_index);
-    return s && site::ShownTo(site, *s);
+bool IsSiteVisible(const Game& game, int side_index, const Site& site) {
+    if (game::Seen(game, side_index, site.x, site.y)) return true;
+    const Side* viewer = game.map->Side(side_index);
+    return viewer && site::ShownTo(site, *viewer);
 }
 
 namespace {
+/// The innermost open ScopedTileIndex on this thread, or null.
 thread_local const ScopedTileIndex* active_index = nullptr;
-}
+}  // namespace
 
-ScopedTileIndex::ScopedTileIndex(const Game& g) : g_(g), prev_(active_index) {
-    by_tile_.resize(static_cast<size_t>(g.map->width) * g.map->height);
-    // newest army first, as game::armiesAt lists them
-    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
-        Army* a = g.armies[i];
-        if (a->transit || a->x < 0 || a->y < 0 || a->x >= g.map->width || a->y >= g.map->height)
+ScopedTileIndex::ScopedTileIndex(const Game& game) : game_(game), prev_(active_index) {
+    by_tile_.resize(static_cast<size_t>(game.map->width) * game.map->height);
+    // newest army first, as game::ArmiesAt lists them
+    for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
+        Army* army = game.armies[i];
+        if (army->transit || army->x < 0 || army->y < 0 || army->x >= game.map->width ||
+            army->y >= game.map->height)
             continue;
-        by_tile_[static_cast<size_t>(a->y) * g.map->width + a->x].push_back(a);
+        by_tile_[static_cast<size_t>(army->y) * game.map->width + army->x].push_back(army);
     }
     active_index = this;
 }
@@ -61,186 +63,192 @@ ScopedTileIndex::~ScopedTileIndex() {
 }
 
 const std::vector<Army*>& ScopedTileIndex::At(int x, int y) const {
-    static const std::vector<Army*> kNone;
-    if (x < 0 || y < 0 || x >= g_.map->width || y >= g_.map->height) return kNone;
-    return by_tile_[static_cast<size_t>(y) * g_.map->width + x];
+    static const std::vector<Army*> kNoArmies;
+    if (x < 0 || y < 0 || x >= game_.map->width || y >= game_.map->height) return kNoArmies;
+    return by_tile_[static_cast<size_t>(y) * game_.map->width + x];
 }
 
-std::vector<Army*> ArmiesAt(const Game& g, int x, int y) {
-    if (active_index && &active_index->GetGame() == &g) return active_index->At(x, y);
-    return game::ArmiesAt(g, x, y);
+std::vector<Army*> ArmiesAt(const Game& game, int x, int y) {
+    if (active_index && &active_index->GetGame() == &game) return active_index->At(x, y);
+    return game::ArmiesAt(game, x, y);
 }
 
-void RecordBattleObservation(Game& g, int observer_side, int x, int y) {
+void RecordBattleObservation(Game& game, int observer_side, int x, int y) {
     if (observer_side < 0 || observer_side >= 8) return;
-    Side* side = g.map->Side(observer_side);
+    Side* side = game.map->Side(observer_side);
     if (!side) return;
-    SideBelief& b = Ensure(*side);
+    SideBelief& belief = Ensure(*side);
 
     std::vector<std::pair<int, int>> tiles;
-    if (City* c = game::CityAt(g, x, y)) {
+    if (City* city = game::CityAt(game, x, y)) {
         for (int dy = 0; dy <= 1; dy++)
-            for (int dx = 0; dx <= 1; dx++) tiles.emplace_back(c->x + dx, c->y + dy);
+            for (int dx = 0; dx <= 1; dx++) tiles.emplace_back(city->x + dx, city->y + dy);
     } else {
         tiles.emplace_back(x, y);
     }
 
-    for (auto [tx, ty] : tiles) {
-        int key = ty * g.map->width + tx;
-        auto armies = game::ArmiesAt(g, tx, ty);
+    for (auto [tile_x, tile_y] : tiles) {
+        int key = tile_y * game.map->width + tile_x;
+        auto armies = game::ArmiesAt(game, tile_x, tile_y);
         if (armies.empty() || armies[0]->owner == observer_side) {
-            b.stacks_by_tile.erase(key);
+            belief.stacks_by_tile.erase(key);
             continue;
         }
-        ObservedStack obs;
-        obs.x = tx;
-        obs.y = ty;
-        obs.owner = armies[0]->owner;
-        obs.visible_count = static_cast<int>(armies.size());
-        obs.top_type = armies[0]->type;
-        obs.last_inspected_turn = g.turn;
-        float sum_str = 0.0F;
-        for (Army* a : armies) {
-            obs.known_types.push_back(a->type);
-            obs.known_strengths.push_back(a->strength);
-            sum_str += static_cast<float>(a->strength);
+        ObservedStack observed;
+        observed.x = tile_x;
+        observed.y = tile_y;
+        observed.owner = armies[0]->owner;
+        observed.visible_count = static_cast<int>(armies.size());
+        observed.top_type = armies[0]->type;
+        observed.last_inspected_turn = game.turn;
+        float strength_sum = 0.0F;
+        for (Army* army : armies) {
+            observed.known_types.push_back(army->type);
+            observed.known_strengths.push_back(army->strength);
+            strength_sum += static_cast<float>(army->strength);
         }
-        if (obs.owner >= 0 && obs.owner < 8 && !armies.empty()) {
-            float avg = sum_str / static_cast<float>(armies.size());
-            b.seen_enemy_avg_strength[obs.owner] =
-                    0.7F * b.seen_enemy_avg_strength[obs.owner] + 0.3F * avg;
+        if (observed.owner >= 0 && observed.owner < 8 && !armies.empty()) {
+            float average = strength_sum / static_cast<float>(armies.size());
+            belief.seen_enemy_avg_strength[observed.owner] =
+                    0.7F * belief.seen_enemy_avg_strength[observed.owner] + 0.3F * average;
         }
-        b.stacks_by_tile[key] = std::move(obs);
+        belief.stacks_by_tile[key] = std::move(observed);
     }
 }
 
-void Update(Game& g, Side& side) {
-    SideBelief& b = Ensure(side);
-    ScopedTileIndex tile_index(g);  // nothing moves while the belief is rebuilt
-    b.updated_turn = g.turn;
-    int me = side.index;
-    int w = g.map->width, h = g.map->height;
+void Update(Game& game, Side& side) {
+    SideBelief& belief = Ensure(side);
+    ScopedTileIndex tile_index(game);  // nothing moves while the belief is rebuilt
+    belief.updated_turn = game.turn;
+    int side_index = side.index;
+    int width = game.map->width, height = game.map->height;
 
-    b.visible_cities.clear();
-    b.visible_sites.clear();
-    b.visible_ground_items.clear();
-    b.fog_frontiers.clear();
-    b.visible_cities_by_side.fill(0);
-    b.my_border_strength.fill(0.0F);
-    b.their_border_strength.fill(0.0F);
+    belief.visible_cities.clear();
+    belief.visible_sites.clear();
+    belief.visible_ground_items.clear();
+    belief.fog_frontiers.clear();
+    belief.visible_cities_by_side.fill(0);
+    belief.my_border_strength.fill(0.0F);
+    belief.their_border_strength.fill(0.0F);
 
     // Clean stale tile observations and scan visible enemy stacks
     std::map<int, ObservedStack> refreshed;
     int unseen_total = 0;
     std::vector<FrontierCluster> raw_frontiers;
 
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            if (!IsTileVisible(g, me, x, y)) {
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            if (!IsTileVisible(game, side_index, x, y)) {
                 unseen_total++;
                 continue;
             }
-            int key = y * w + x;
-            auto armies = ArmiesAt(g, x, y);
-            if (!armies.empty() && armies[0]->owner != me && armies[0]->owner != kNone) {
+            int key = y * width + x;
+            auto armies = ArmiesAt(game, x, y);
+            if (!armies.empty() && armies[0]->owner != side_index && armies[0]->owner != kNone) {
                 int owner = armies[0]->owner;
-                bool tower = game::TowerAt(g, x, y);
-                bool full_view = g.map->options.view_enemies != 0;
-                ObservedStack obs;
-                obs.x = x;
-                obs.y = y;
-                obs.owner = owner;
-                obs.top_type = armies[0]->type;
-                obs.visible_count = (tower && !full_view) ? 4 : static_cast<int>(armies.size());
+                bool tower = game::TowerAt(game, x, y);
+                bool full_view = game.map->options.view_enemies != 0;
+                ObservedStack observed;
+                observed.x = x;
+                observed.y = y;
+                observed.owner = owner;
+                observed.top_type = armies[0]->type;
+                observed.visible_count =
+                        (tower && !full_view) ? 4 : static_cast<int>(armies.size());
 
-                const ArmyType* top_at = g.types.ById(obs.top_type);
-                if (top_at && owner >= 0 && owner < 8) {
-                    b.seen_enemy_avg_strength[owner] =
-                            0.9F * b.seen_enemy_avg_strength[owner] +
-                            0.1F * static_cast<float>(std::max(2, top_at->strength));
+                const ArmyType* top_army_type = game.types.ById(observed.top_type);
+                if (top_army_type && owner >= 0 && owner < 8) {
+                    belief.seen_enemy_avg_strength[owner] =
+                            0.9F * belief.seen_enemy_avg_strength[owner] +
+                            0.1F * static_cast<float>(std::max(2, top_army_type->strength));
                 }
 
-                auto prev_it = b.stacks_by_tile.find(key);
+                auto previous = belief.stacks_by_tile.find(key);
                 if (full_view) {
-                    obs.last_inspected_turn = g.turn;
-                    for (Army* a : armies) {
-                        obs.known_types.push_back(a->type);
-                        obs.known_strengths.push_back(a->strength);
+                    observed.last_inspected_turn = game.turn;
+                    for (Army* army : armies) {
+                        observed.known_types.push_back(army->type);
+                        observed.known_strengths.push_back(army->strength);
                     }
-                } else if (prev_it != b.stacks_by_tile.end() && prev_it->second.owner == owner &&
-                           prev_it->second.visible_count == static_cast<int>(armies.size()) &&
-                           g.turn - prev_it->second.last_inspected_turn <= 2) {
-                    obs.last_inspected_turn = prev_it->second.last_inspected_turn;
-                    obs.known_types = prev_it->second.known_types;
-                    obs.known_strengths = prev_it->second.known_strengths;
+                } else if (previous != belief.stacks_by_tile.end() &&
+                           previous->second.owner == owner &&
+                           previous->second.visible_count == static_cast<int>(armies.size()) &&
+                           game.turn - previous->second.last_inspected_turn <= 2) {
+                    observed.last_inspected_turn = previous->second.last_inspected_turn;
+                    observed.known_types = previous->second.known_types;
+                    observed.known_strengths = previous->second.known_strengths;
                 }
-                refreshed[key] = std::move(obs);
+                refreshed[key] = std::move(observed);
             }
 
             // Record visible land and coastal/sea tiles bordering unseen fog
-            if (g.map->options.hidden_map != 0) {
-                int terr = g.map->terrain_type[g.map->tiles[key] & 0xff];
-                if (terr != move::kMountains) {
-                    bool is_water = (terr == move::kWater || terr == move::kShore);
-                    bool is_road = !is_water && (scn::RoadAt(*g.map, x, y) % 0x20 != 0);
-                    int adj_unseen = 0;
+            if (game.map->options.hidden_map != 0) {
+                int terrain = game.map->terrain_type[game.map->tiles[key] & 0xff];
+                if (terrain != move::kMountains) {
+                    bool is_water = (terrain == move::kWater || terrain == move::kShore);
+                    bool is_road = !is_water && (scn::RoadAt(*game.map, x, y) % 0x20 != 0);
+                    int unseen_neighbours = 0;
                     for (int dy = -1; dy <= 1; dy++) {
                         for (int dx = -1; dx <= 1; dx++) {
-                            int nx = x + dx, ny = y + dy;
-                            if (nx >= 0 && ny >= 0 && nx < w && ny < h &&
-                                !IsTileVisible(g, me, nx, ny)) {
-                                adj_unseen++;
+                            int neighbour_x = x + dx, neighbour_y = y + dy;
+                            if (neighbour_x >= 0 && neighbour_y >= 0 && neighbour_x < width &&
+                                neighbour_y < height &&
+                                !IsTileVisible(game, side_index, neighbour_x, neighbour_y)) {
+                                unseen_neighbours++;
                             }
                         }
                     }
-                    if (adj_unseen >= 1) {
-                        raw_frontiers.push_back(
-                                FrontierCluster{x, y, adj_unseen, adj_unseen, is_water, is_road});
+                    if (unseen_neighbours >= 1) {
+                        raw_frontiers.push_back(FrontierCluster{
+                            x, y, unseen_neighbours, unseen_neighbours, is_water, is_road});
                     }
                 }
             }
         }
     }
-    b.stacks_by_tile = std::move(refreshed);
-    int active_area = std::max(1, (g.map->active_x1 - g.map->active_x0 + 1) *
-                                          (g.map->active_y1 - g.map->active_y0 + 1));
-    b.frontier_ratio =
+    belief.stacks_by_tile = std::move(refreshed);
+    int active_area = std::max(1, (game.map->active_x1 - game.map->active_x0 + 1) *
+                                          (game.map->active_y1 - game.map->active_y0 + 1));
+    belief.frontier_ratio =
             std::min(1.0F, static_cast<float>(unseen_total) / static_cast<float>(active_area));
 
-    // Sort rawFrontiers by proximity to our own cities/armies (preferring road tiles
-    // that connect cities) so local expansion frontiers are represented in top clusters.
+    // Sort the raw frontiers by proximity to our own cities and armies (preferring road
+    // tiles that connect cities) so local expansion frontiers are among the top clusters.
     std::vector<std::pair<int, int>> my_anchors;
-    for (const auto& c : g.map->cities) {
-        if (!c.razed && c.owner_index == me) my_anchors.emplace_back(c.x, c.y);
+    for (const auto& city : game.map->cities) {
+        if (!city.razed && city.owner_index == side_index) my_anchors.emplace_back(city.x, city.y);
     }
-    for (const Army* a : g.armies) {
-        if (a->owner == me && a->x != kNone && !a->transit) my_anchors.emplace_back(a->x, a->y);
+    for (const Army* army : game.armies) {
+        if (army->owner == side_index && army->x != kNone && !army->transit)
+            my_anchors.emplace_back(army->x, army->y);
     }
     std::sort(raw_frontiers.begin(), raw_frontiers.end(),
-              [&](const FrontierCluster& fa, const FrontierCluster& fb) {
-                  int da = 999, db = 999;
-                  for (const auto& [ax, ay] : my_anchors) {
-                      da = std::min(da, move::Distance(fa.x, fa.y, ax, ay));
-                      db = std::min(db, move::Distance(fb.x, fb.y, ax, ay));
+              [&](const FrontierCluster& lhs, const FrontierCluster& rhs) {
+                  int lhs_distance = 999, rhs_distance = 999;
+                  for (const auto& [anchor_x, anchor_y] : my_anchors) {
+                      lhs_distance = std::min(lhs_distance,
+                                              move::Distance(lhs.x, lhs.y, anchor_x, anchor_y));
+                      rhs_distance = std::min(rhs_distance,
+                                              move::Distance(rhs.x, rhs.y, anchor_x, anchor_y));
                   }
-                  int sa = da - (fa.on_road ? 4 : 0);
-                  int sb = db - (fb.on_road ? 4 : 0);
-                  if (sa != sb) return sa < sb;
-                  return fa.on_road > fb.on_road;
+                  int lhs_score = lhs_distance - (lhs.on_road ? 4 : 0);
+                  int rhs_score = rhs_distance - (rhs.on_road ? 4 : 0);
+                  if (lhs_score != rhs_score) return lhs_score < rhs_score;
+                  return lhs.on_road > rhs.on_road;
               });
 
     // Cluster land frontiers separately from water frontiers so coastal land does not suppress
     // amphibious sea lanes (and vice versa); snap cluster anchor onto road tiles when merged.
     int land_count = 0, water_count = 0;
-    for (const auto& fc : raw_frontiers) {
+    for (const auto& frontier : raw_frontiers) {
         bool merged = false;
-        for (auto& existing : b.fog_frontiers) {
-            if (existing.is_water == fc.is_water &&
-                move::Distance(fc.x, fc.y, existing.x, existing.y) < 3) {
-                existing.region_unseen_count += fc.unseen_neighbours;
-                if (fc.on_road && !existing.on_road) {
-                    existing.x = fc.x;
-                    existing.y = fc.y;
+        for (auto& existing : belief.fog_frontiers) {
+            if (existing.is_water == frontier.is_water &&
+                move::Distance(frontier.x, frontier.y, existing.x, existing.y) < 3) {
+                existing.region_unseen_count += frontier.unseen_neighbours;
+                if (frontier.on_road && !existing.on_road) {
+                    existing.x = frontier.x;
+                    existing.y = frontier.y;
                     existing.on_road = true;
                 }
                 merged = true;
@@ -248,280 +256,303 @@ void Update(Game& g, Side& side) {
             }
         }
         if (!merged) {
-            if (!fc.is_water && land_count < 48) {
-                b.fog_frontiers.push_back(fc);
+            if (!frontier.is_water && land_count < 48) {
+                belief.fog_frontiers.push_back(frontier);
                 land_count++;
-            } else if (fc.is_water && water_count < 24) {
-                b.fog_frontiers.push_back(fc);
+            } else if (frontier.is_water && water_count < 24) {
+                belief.fog_frontiers.push_back(frontier);
                 water_count++;
             }
         }
     }
 
-    for (auto& c : g.map->cities) {
-        if (IsCityVisible(g, me, c)) {
-            b.visible_cities.push_back(&c);
-            if (c.owner_index >= 0 && c.owner_index < 8) {
-                b.visible_cities_by_side[c.owner_index]++;
+    for (auto& city : game.map->cities) {
+        if (IsCityVisible(game, side_index, city)) {
+            belief.visible_cities.push_back(&city);
+            if (city.owner_index >= 0 && city.owner_index < 8) {
+                belief.visible_cities_by_side[city.owner_index]++;
             }
         }
     }
 
-    for (auto& s : g.map->sites) {
-        if (IsSiteVisible(g, me, s)) b.visible_sites.push_back(&s);
+    for (auto& site : game.map->sites) {
+        if (IsSiteVisible(game, side_index, site)) belief.visible_sites.push_back(&site);
     }
 
-    for (auto& it : g.map->items) {
-        if (it.status == 1 && it.x != kNone && !it.planted && IsTileVisible(g, me, it.x, it.y)) {
-            b.visible_ground_items.push_back(&it);
+    for (auto& item : game.map->items) {
+        if (item.status == 1 && item.x != kNone && !item.planted &&
+            IsTileVisible(game, side_index, item.x, item.y)) {
+            belief.visible_ground_items.push_back(&item);
         }
     }
 
     // Compute per-city threat and nearest visible rival distance using fair-information state only
-    size_t n_cities = g.map->cities.size();
-    b.city_threat1_turn.assign(n_cities, 0.0F);
-    b.city_threat2_turn.assign(n_cities, 0.0F);
-    b.city_nearest_enemy_dist.assign(n_cities, 200.0F);
+    size_t city_count = game.map->cities.size();
+    belief.city_threat1_turn.assign(city_count, 0.0F);
+    belief.city_threat2_turn.assign(city_count, 0.0F);
+    belief.city_nearest_enemy_dist.assign(city_count, 200.0F);
 
-    for (City* c : b.visible_cities) {
+    for (City* city : belief.visible_cities) {
         float min_dist = 200.0F;
-        for (City* other : b.visible_cities) {
-            if (other->owner_index >= 0 && other->owner_index != me && !other->razed &&
-                !diplomacy::IsAllied(g, me, other->owner_index)) {
-                float d = static_cast<float>(move::Distance(c->x, c->y, other->x, other->y));
-                if (d < min_dist) min_dist = d;
+        for (City* other : belief.visible_cities) {
+            if (other->owner_index >= 0 && other->owner_index != side_index && !other->razed &&
+                !diplomacy::IsAllied(game, side_index, other->owner_index)) {
+                float distance =
+                        static_cast<float>(move::Distance(city->x, city->y, other->x, other->y));
+                if (distance < min_dist) min_dist = distance;
             }
         }
-        for (const auto& [tile_key, obs] : b.stacks_by_tile) {
-            if (obs.owner >= 0 && obs.owner != me && !diplomacy::IsAllied(g, me, obs.owner)) {
-                float d = static_cast<float>(move::Distance(c->x, c->y, obs.x, obs.y));
-                if (d < min_dist) min_dist = d;
+        for (const auto& [tile_key, observed] : belief.stacks_by_tile) {
+            if (observed.owner >= 0 && observed.owner != side_index &&
+                !diplomacy::IsAllied(game, side_index, observed.owner)) {
+                float distance = static_cast<float>(
+                        move::Distance(city->x, city->y, observed.x, observed.y));
+                if (distance < min_dist) min_dist = distance;
             }
         }
-        b.city_nearest_enemy_dist[c->index] = min_dist;
+        belief.city_nearest_enemy_dist[city->index] = min_dist;
 
-        float t1 = 0.0F, t2 = 0.0F;
-        for (const auto& [tile_key, obs] : b.stacks_by_tile) {
-            if (obs.owner == me || obs.owner == kNone || diplomacy::IsAllied(g, me, obs.owner))
+        float threat1 = 0.0F, threat2 = 0.0F;
+        for (const auto& [tile_key, observed] : belief.stacks_by_tile) {
+            if (observed.owner == side_index || observed.owner == kNone ||
+                diplomacy::IsAllied(game, side_index, observed.owner))
                 continue;
-            int d = move::Distance(c->x, c->y, obs.x, obs.y);
-            const ArmyType* top_at = g.types.ById(obs.top_type);
-            int est_move = top_at ? std::max(10, top_at->move) : 12;
-            int reach1 = std::max(8, (est_move * 3) / 4);
+            int distance = move::Distance(city->x, city->y, observed.x, observed.y);
+            const ArmyType* top_army_type = game.types.ById(observed.top_type);
+            int estimated_move = top_army_type ? std::max(10, top_army_type->move) : 12;
+            int reach1 = std::max(8, (estimated_move * 3) / 4);
             int reach2 = reach1 * 2;
-            float est_str = 0.0F;
-            if (!obs.known_strengths.empty()) {
-                for (int s : obs.known_strengths) est_str += static_cast<float>(s);
+            float estimated_strength = 0.0F;
+            if (!observed.known_strengths.empty()) {
+                for (int strength : observed.known_strengths)
+                    estimated_strength += static_cast<float>(strength);
             } else {
-                float top_str = top_at ? static_cast<float>(top_at->strength) : 4.0F;
-                float rest_str = (obs.owner >= 0 && obs.owner < 8)
-                                         ? b.seen_enemy_avg_strength[obs.owner]
-                                         : 4.0F;
-                est_str =
-                        top_str + static_cast<float>(std::max(0, obs.visible_count - 1)) * rest_str;
+                float top_strength =
+                        top_army_type ? static_cast<float>(top_army_type->strength) : 4.0F;
+                float rest_strength = (observed.owner >= 0 && observed.owner < 8)
+                                              ? belief.seen_enemy_avg_strength[observed.owner]
+                                              : 4.0F;
+                estimated_strength =
+                        top_strength +
+                        static_cast<float>(std::max(0, observed.visible_count - 1)) * rest_strength;
             }
-            if (d <= reach1) t1 += est_str;
-            if (d <= reach2) t2 += est_str;
+            if (distance <= reach1) threat1 += estimated_strength;
+            if (distance <= reach2) threat2 += estimated_strength;
 
-            if (c->owner_index == me && d <= 18 && obs.owner >= 0 && obs.owner < 8) {
-                b.their_border_strength[obs.owner] += est_str;
+            if (city->owner_index == side_index && distance <= 18 && observed.owner >= 0 &&
+                observed.owner < 8) {
+                belief.their_border_strength[observed.owner] += estimated_strength;
             }
         }
-        b.city_threat1_turn[c->index] = t1;
-        b.city_threat2_turn[c->index] = t2;
+        belief.city_threat1_turn[city->index] = threat1;
+        belief.city_threat2_turn[city->index] = threat2;
     }
 
     // Compute our own border strength near each rival's visible cities
-    for (Army* a : g.armies) {
-        if (a->owner != me || a->x == kNone || a->transit) continue;
-        for (City* c : b.visible_cities) {
-            if (c->owner_index >= 0 && c->owner_index < 8 && c->owner_index != me) {
-                if (move::Distance(a->x, a->y, c->x, c->y) <= 18) {
-                    b.my_border_strength[c->owner_index] += static_cast<float>(a->strength);
+    for (Army* army : game.armies) {
+        if (army->owner != side_index || army->x == kNone || army->transit) continue;
+        for (City* city : belief.visible_cities) {
+            if (city->owner_index >= 0 && city->owner_index < 8 &&
+                city->owner_index != side_index) {
+                if (move::Distance(army->x, army->y, city->x, city->y) <= 18) {
+                    belief.my_border_strength[city->owner_index] +=
+                            static_cast<float>(army->strength);
                 }
             }
         }
     }
 }
 
-CombatEstimate EstimateCombat(Game& g, const Side& side, const std::vector<Army*>& attackers,
-                              int tx, int ty, float caution_bias) {
-    CombatEstimate est;
+CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Army*>& attackers,
+                              int target_x, int target_y, float caution_bias) {
+    CombatEstimate estimate;
     if (attackers.empty()) {
-        est.win_prob = 0.0F;
-        return est;
+        estimate.win_prob = 0.0F;
+        return estimate;
     }
-    int me = side.index;
-    City* city = game::CityAt(g, tx, ty);
-    bool target_visible = city ? IsCityVisible(g, me, *city) : IsTileVisible(g, me, tx, ty);
+    int side_index = side.index;
+    City* city = game::CityAt(game, target_x, target_y);
+    bool target_visible = city ? IsCityVisible(game, side_index, *city)
+                               : IsTileVisible(game, side_index, target_x, target_y);
     if (!target_visible) {
-        est.win_prob = 0.85F;
-        est.expected_survivors = static_cast<float>(attackers.size()) * 0.85F;
-        return est;
+        estimate.win_prob = 0.85F;
+        estimate.expected_survivors = static_cast<float>(attackers.size()) * 0.85F;
+        return estimate;
     }
 
-    const SideBelief& b = side.belief ? *side.belief : Ensure(const_cast<Side&>(side));
+    const SideBelief& belief = side.belief ? *side.belief : Ensure(const_cast<Side&>(side));
 
     // Gather visible defender tiles (4 tiles if city, 1 tile otherwise)
-    std::vector<std::pair<int, int>> def_tiles;
+    std::vector<std::pair<int, int>> defender_tiles;
     if (city) {
         for (int dy = 0; dy <= 1; dy++)
-            for (int dx = 0; dx <= 1; dx++) def_tiles.emplace_back(city->x + dx, city->y + dy);
+            for (int dx = 0; dx <= 1; dx++) defender_tiles.emplace_back(city->x + dx, city->y + dy);
     } else {
-        def_tiles.emplace_back(tx, ty);
+        defender_tiles.emplace_back(target_x, target_y);
     }
 
-    bool full_view = g.map->options.view_enemies != 0;
-    std::vector<Army> synth_pool;
-    synth_pool.reserve(32);
+    bool full_view = game.map->options.view_enemies != 0;
+    std::vector<Army> synthetic_pool;
+    synthetic_pool.reserve(32);
     std::vector<Army*> defenders;
 
     int seen_tiles = 0;
-    for (auto [dx, dy] : def_tiles) {
-        if (!IsTileVisible(g, me, dx, dy)) continue;
+    for (auto [tile_x, tile_y] : defender_tiles) {
+        if (!IsTileVisible(game, side_index, tile_x, tile_y)) continue;
         seen_tiles++;
-        int key = dy * g.map->width + dx;
-        auto actual = ArmiesAt(g, dx, dy);
-        if (actual.empty() || actual[0]->owner == me) continue;
+        int key = tile_y * game.map->width + tile_x;
+        auto actual = ArmiesAt(game, tile_x, tile_y);
+        if (actual.empty() || actual[0]->owner == side_index) continue;
 
         if (full_view) {
-            for (Army* a : actual) {
-                defenders.push_back(a);
-                est.estimated_defender_strength += static_cast<float>(a->strength);
+            for (Army* army : actual) {
+                defenders.push_back(army);
+                estimate.estimated_defender_strength += static_cast<float>(army->strength);
             }
-            est.estimated_defender_count += static_cast<int>(actual.size());
+            estimate.estimated_defender_count += static_cast<int>(actual.size());
             continue;
         }
 
-        auto it = b.stacks_by_tile.find(key);
+        auto observed = belief.stacks_by_tile.find(key);
         int owner = actual[0]->owner;
         int top_type = actual[0]->type;
-        bool tower = game::TowerAt(g, dx, dy);
+        bool tower = game::TowerAt(game, tile_x, tile_y);
         int count = tower ? 4 : static_cast<int>(actual.size());
-        if (it != b.stacks_by_tile.end() && !it->second.known_types.empty()) {
-            for (size_t i = 0; i < it->second.known_types.size(); i++) {
-                Army syn;
-                syn.owner = owner;
-                syn.x = dx;
-                syn.y = dy;
-                syn.type = it->second.known_types[i];
-                syn.strength = it->second.known_strengths[i];
-                synth_pool.push_back(syn);
-                defenders.push_back(&synth_pool.back());
-                est.estimated_defender_strength += static_cast<float>(syn.strength);
+        if (observed != belief.stacks_by_tile.end() && !observed->second.known_types.empty()) {
+            for (size_t i = 0; i < observed->second.known_types.size(); i++) {
+                Army synthetic;
+                synthetic.owner = owner;
+                synthetic.x = tile_x;
+                synthetic.y = tile_y;
+                synthetic.type = observed->second.known_types[i];
+                synthetic.strength = observed->second.known_strengths[i];
+                synthetic_pool.push_back(synthetic);
+                defenders.push_back(&synthetic_pool.back());
+                estimate.estimated_defender_strength += static_cast<float>(synthetic.strength);
             }
-            est.estimated_defender_count += static_cast<int>(it->second.known_types.size());
+            estimate.estimated_defender_count +=
+                    static_cast<int>(observed->second.known_types.size());
         } else {
-            float avg_str = (owner >= 0 && owner < 8) ? b.seen_enemy_avg_strength[owner] : 3.5F;
-            int est_under_str =
-                    std::clamp(static_cast<int>(std::round(avg_str + caution_bias)), 2, 8);
+            float average_strength =
+                    (owner >= 0 && owner < 8) ? belief.seen_enemy_avg_strength[owner] : 3.5F;
+            int under_strength =
+                    std::clamp(static_cast<int>(std::round(average_strength + caution_bias)), 2, 8);
             for (int i = 0; i < count; i++) {
-                Army syn;
-                syn.owner = owner;
-                syn.x = dx;
-                syn.y = dy;
+                Army synthetic;
+                synthetic.owner = owner;
+                synthetic.x = tile_x;
+                synthetic.y = tile_y;
                 if (i == 0) {
-                    syn.type = top_type;
-                    const ArmyType* at = g.types.ById(top_type);
-                    syn.strength = at ? at->strength : est_under_str;
+                    synthetic.type = top_type;
+                    const ArmyType* army_type = game.types.ById(top_type);
+                    synthetic.strength = army_type ? army_type->strength : under_strength;
                 } else {
-                    syn.type = 2;
-                    syn.strength = est_under_str;
+                    synthetic.type = 2;
+                    synthetic.strength = under_strength;
                 }
-                synth_pool.push_back(syn);
-                defenders.push_back(&synth_pool.back());
-                est.estimated_defender_strength += static_cast<float>(syn.strength);
+                synthetic_pool.push_back(synthetic);
+                defenders.push_back(&synthetic_pool.back());
+                estimate.estimated_defender_strength += static_cast<float>(synthetic.strength);
             }
-            est.estimated_defender_count += count;
+            estimate.estimated_defender_count += count;
         }
     }
 
-    est.seen_tile_fraction = def_tiles.empty() ? 1.0F
-                                               : static_cast<float>(seen_tiles) /
-                                                         static_cast<float>(def_tiles.size());
+    estimate.seen_tile_fraction =
+            defender_tiles.empty()
+                    ? 1.0F
+                    : static_cast<float>(seen_tiles) / static_cast<float>(defender_tiles.size());
 
     // Calibrated partial-visibility belief when some tiles of a 2x2 city remain in fog
     // and no defenders were observed on the visible tiles:
     int unseen_enemy_tiles = 0;
     std::vector<Army*> unseen_fallback_defenders;
-    if (defenders.empty() && city && city->owner_index != me && !city->razed && seen_tiles < 4) {
+    if (defenders.empty() && city && city->owner_index != side_index && !city->razed &&
+        seen_tiles < 4) {
         if (city->owner_index == kNone) {
-            // Neutral garrisons strictly occupy (city->x, city->y). Only when (city->x, city->y)
-            // itself is unseen can a neutral garrison be hidden there.
-            if (!IsTileVisible(g, me, city->x, city->y)) {
-                Army syn;
-                syn.owner = kNone;
-                syn.x = city->x;
-                syn.y = city->y;
-                syn.type = (g.map->options.neutral_cities <= 0) ? 0 : 2;
-                syn.strength = (g.map->options.neutral_cities <= 0) ? 1 : 4;
-                synth_pool.push_back(syn);
-                defenders.push_back(&synth_pool.back());
-                est.estimated_defender_count = 1;
-                est.estimated_defender_strength = static_cast<float>(syn.strength);
+            // Neutral garrisons stand only on the city's top-left tile, so a neutral
+            // garrison can only be hidden when that tile itself is unseen.
+            if (!IsTileVisible(game, side_index, city->x, city->y)) {
+                Army synthetic;
+                synthetic.owner = kNone;
+                synthetic.x = city->x;
+                synthetic.y = city->y;
+                synthetic.type = (game.map->options.neutral_cities <= 0) ? 0 : 2;
+                synthetic.strength = (game.map->options.neutral_cities <= 0) ? 1 : 4;
+                synthetic_pool.push_back(synthetic);
+                defenders.push_back(&synthetic_pool.back());
+                estimate.estimated_defender_count = 1;
+                estimate.estimated_defender_strength = static_cast<float>(synthetic.strength);
             }
         } else {
-            // Enemy city with unseen corner(s): sample unseen garrison occupancy proportionally
-            // to (4 - seenTiles) / 4 across the Monte Carlo rollouts rather than assuming a
-            // guaranteed 3-stack
+            // Enemy city with unseen corner(s): sample unseen garrison occupancy in
+            // proportion to (4 - seen tiles) / 4 across the simulated battles rather
+            // than assuming a guaranteed 3-stack
             unseen_enemy_tiles = 4 - seen_tiles;
             int owner = city->owner_index;
-            float avg_str = (owner >= 0 && owner < 8) ? b.seen_enemy_avg_strength[owner] : 4.0F;
-            int est_str = std::clamp(static_cast<int>(std::round(avg_str + caution_bias)), 2, 7);
+            float average_strength =
+                    (owner >= 0 && owner < 8) ? belief.seen_enemy_avg_strength[owner] : 4.0F;
+            int estimated_strength =
+                    std::clamp(static_cast<int>(std::round(average_strength + caution_bias)), 2, 7);
             for (int i = 0; i < 2; i++) {
-                Army syn;
-                syn.owner = owner;
-                syn.x = city->x;
-                syn.y = city->y;
-                syn.type = 2;
-                syn.strength = est_str;
-                synth_pool.push_back(syn);
-                unseen_fallback_defenders.push_back(&synth_pool.back());
+                Army synthetic;
+                synthetic.owner = owner;
+                synthetic.x = city->x;
+                synthetic.y = city->y;
+                synthetic.type = 2;
+                synthetic.strength = estimated_strength;
+                synthetic_pool.push_back(synthetic);
+                unseen_fallback_defenders.push_back(&synthetic_pool.back());
             }
-            float unseen_frac = static_cast<float>(unseen_enemy_tiles) / 4.0F;
-            est.estimated_defender_count = static_cast<int>(std::round(2.0F * unseen_frac));
-            est.estimated_defender_strength = 2.0F * static_cast<float>(est_str) * unseen_frac;
+            float unseen_fraction = static_cast<float>(unseen_enemy_tiles) / 4.0F;
+            estimate.estimated_defender_count =
+                    static_cast<int>(std::round(2.0F * unseen_fraction));
+            estimate.estimated_defender_strength =
+                    2.0F * static_cast<float>(estimated_strength) * unseen_fraction;
         }
     }
 
     if (defenders.empty() && unseen_fallback_defenders.empty()) {
-        est.win_prob = 1.0F;
-        est.expected_survivors = static_cast<float>(attackers.size());
-        return est;
+        estimate.win_prob = 1.0F;
+        estimate.expected_survivors = static_cast<float>(attackers.size());
+        return estimate;
     }
 
     // Save RNG state so combat estimation is 100% side-effect free
-    uint32_t saved_rng = g.rng.state;
-    g.rng.state = saved_rng ^ static_cast<uint32_t>(tx * 73856093 ^ ty * 19349663 ^
-                                                    static_cast<int>(attackers.size()) * 83492791);
-    if (g.rng.state == 0) g.rng.state = 1;
+    uint32_t saved_rng = game.rng.state;
+    game.rng.state =
+            saved_rng ^ static_cast<uint32_t>(target_x * 73856093 ^ target_y * 19349663 ^
+                                              static_cast<int>(attackers.size()) * 83492791);
+    if (game.rng.state == 0) game.rng.state = 1;
 
-    constexpr int kSims = 8;
+    constexpr int kSimulations = 8;
     int wins = 0;
-    int total_surv = 0;
+    int total_survivors = 0;
     int total_enemy_dead = 0;
-    for (int i = 0; i < kSims; i++) {
-        const std::vector<Army*>& sim_defs =
+    for (int i = 0; i < kSimulations; i++) {
+        const std::vector<Army*>& simulated_defenders =
                 !defenders.empty()
                         ? defenders
-                        : ((i * 4 < unseen_enemy_tiles * kSims) ? unseen_fallback_defenders
-                                                                : defenders);
-        if (sim_defs.empty()) {
+                        : ((i * 4 < unseen_enemy_tiles * kSimulations) ? unseen_fallback_defenders
+                                                                       : defenders);
+        if (simulated_defenders.empty()) {
             wins++;
-            total_surv += static_cast<int>(attackers.size());
+            total_survivors += static_cast<int>(attackers.size());
             continue;
         }
-        Battle res = combat::Resolve(g, attackers, sim_defs, tx, ty);
-        if (res.won) wins++;
-        total_surv += static_cast<int>(res.attackers.size());
-        total_enemy_dead += static_cast<int>(res.dead_defenders.size());
+        Battle battle = combat::Resolve(game, attackers, simulated_defenders, target_x, target_y);
+        if (battle.won) wins++;
+        total_survivors += static_cast<int>(battle.attackers.size());
+        total_enemy_dead += static_cast<int>(battle.dead_defenders.size());
     }
 
-    g.rng.state = saved_rng;
-    est.win_prob = static_cast<float>(wins) / static_cast<float>(kSims);
-    est.expected_survivors = static_cast<float>(total_surv) / static_cast<float>(kSims);
-    est.expected_enemy_losses = static_cast<float>(total_enemy_dead) / static_cast<float>(kSims);
-    return est;
+    game.rng.state = saved_rng;
+    estimate.win_prob = static_cast<float>(wins) / static_cast<float>(kSimulations);
+    estimate.expected_survivors =
+            static_cast<float>(total_survivors) / static_cast<float>(kSimulations);
+    estimate.expected_enemy_losses =
+            static_cast<float>(total_enemy_dead) / static_cast<float>(kSimulations);
+    return estimate;
 }
 
 }  // namespace w2::ai::belief

@@ -1,8 +1,12 @@
-// Character personality vectors and archetypes for the 27 Warlords II computer cards.
-//
-// Architectural Role: Maps each (level, card) pair from CARDS/*.DSC (K000-K008,
-// L000-L008, W000-W008) to a 10-dimensional normalized PersonalityVector in [-1, 1]^10
-// that conditions the 4-head neural policy and shapes multi-objective self-play rewards.
+/**
+ * @file
+ * @brief Personality vectors and archetypes for the 27 computer character cards.
+ *
+ * Maps each (level, card) pair of CARDS/*.DSC (K000-K008, L000-L008,
+ * W000-W008) to a 10-dimensional PersonalityVector in [-1, 1]^10 that
+ * conditions the neural policy's four heads and shapes the self-play
+ * rewards.
+ */
 #pragma once
 
 #include <array>
@@ -12,47 +16,49 @@
 
 namespace w2::ai::personality {
 
-constexpr int kTraitDim = 10;
+constexpr int kTraitDim = 10;  ///< Number of traits in a PersonalityVector.
 
+/** @brief The position of each trait in a PersonalityVector. */
 enum TraitIndex : int {
-    kAggression = 0,
-    kHonour = 1,
-    kAvarice = 2,
-    kScorchedEarth = 3,
-    kHeroFocus = 4,
-    kCoalitionDrive = 5,
-    kCavalryAffinity = 6,
-    kFlierAffinity = 7,
-    kSiegeAffinity = 8,
-    kCaution = 9,
+    kAggression = 0,       ///< Eagerness to attack.
+    kHonour = 1,           ///< Keeping treaties.
+    kAvarice = 2,          ///< Love of gold: sacking and pillaging.
+    kScorchedEarth = 3,    ///< Readiness to raze.
+    kHeroFocus = 4,        ///< Weight given to heroes, ruins and items.
+    kCoalitionDrive = 5,   ///< Readiness to gang up on a leader.
+    kCavalryAffinity = 6,  ///< Preference for fast land armies.
+    kFlierAffinity = 7,    ///< Preference for flying armies.
+    kSiegeAffinity = 8,    ///< Preference for siege and heavy armies.
+    kCaution = 9,          ///< Care for its own cities and armies.
 };
 
+/** @brief One value in [-1, 1] per trait, indexed by TraitIndex. */
 using PersonalityVector = std::array<float, kTraitDim>;
 
+/** @brief A computer character: who it is and how it plays. */
 struct Profile {
-    int level = 0;
-    int card = 0;
-    std::string name;
-    std::string archetype;
-    std::string motto;
-    PersonalityVector traits{};
+    int level = 0;               ///< 0 Knight, 1 Lord, 2 Warlord.
+    int card = 0;                ///< Card number within the level's deck, 0..8.
+    std::string name;            ///< The character's name, as on its card.
+    std::string archetype;       ///< A short label for its play style.
+    std::string motto;           ///< A line in the character's voice.
+    PersonalityVector traits{};  ///< Its personality, by TraitIndex.
 };
 
 /**
- * Returns the personality profile for a given difficulty level (0=Knight, 1=Lord, 2=Warlord)
- * and character card index (0..8).
+ * @brief The personality profile of a level and character card.
  *
- * @param level Difficulty tier in [0, 2].
- * @param card Character card index in [0, 8].
- * @return Reference to the static Profile descriptor.
+ * Out-of-range values are clamped.
+ * @param level Difficulty tier: 0 Knight, 1 Lord, 2 Warlord.
+ * @param card Character card number, 0..8.
+ * @return A reference to the static profile.
  */
 const Profile& ProfileFor(int level, int card);
 
 /**
- * Returns the personality profile for a specific side in the game.
- *
- * @param side The side whose level and card determine the profile.
- * @return Reference to the static Profile descriptor.
+ * @brief The personality profile of a side in the game.
+ * @param side The side whose level and card pick the profile.
+ * @return A reference to the static profile.
  */
 const Profile& ForSide(const Side& side);
 
