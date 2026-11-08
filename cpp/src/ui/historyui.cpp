@@ -58,18 +58,19 @@ void Vline(int x, int y, int length) {
 void SmallShield(int side, int x, int y) {
     if (side < 0 || side > 7) return;
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.atrans_shields, gfx::NewQuad(112 + 16 * (side / 4), 94 + 14 * (side % 4), 16, 14),
-              x, y);
+    gfx::Draw(g_app.atrans_shields,
+              gfx::NewQuad(112 + 16 * (side / 4), 94 + 14 * (side % 4), 16, 14), x, y);
 }
 
 /** @brief A deed in words: a line of STRING.DAT group 94 filled in. */
 std::string EventText(const w2::Deed& deed) {
     auto line = [](int line_index) { return kit::Text(0x5e, line_index); };
     auto side_name = [](int side_index) {
-        return side_index >= 0 && side_index < 8 ? G.g->map->sides[side_index].name : std::string();
+        return side_index >= 0 && side_index < 8 ? g_app.g->map->sides[side_index].name
+                                                 : std::string();
     };
     auto city_name = [](int city_index) {
-        w2::City* city = G.g->map->City(city_index);
+        w2::City* city = g_app.g->map->City(city_index);
         return city ? city->name : std::string();
     };
     // What a deed's two values mean depends on its type.
@@ -100,7 +101,7 @@ std::string EventText(const w2::Deed& deed) {
         else if (subject == history::kFoundGold)
             what = line(15);
         else
-            for (auto& item : G.g->map->items)
+            for (auto& item : g_app.g->map->items)
                 if (item.index == subject) what = item.name;
         return Format(line(9), deed.name, what);
     }
@@ -124,7 +125,7 @@ struct History : kit::Modal {
     int turns = 1;             ///< The turns on record, the last one shown.
 
     /** @brief The record of turn `turn_number`, counted from 1. */
-    const w2::HistoryRecord& Rec(int turn_number) { return G.g->history[turn_number - 1]; }
+    const w2::HistoryRecord& Rec(int turn_number) { return g_app.g->history[turn_number - 1]; }
 
     /** @brief Marks the tab shown and enables the arrows that have a turn to go to. */
     void Refresh() {
@@ -183,7 +184,7 @@ struct History : kit::Modal {
                 int y = kGraphY + kGraphH - 1 -
                         static_cast<int>(
                                 std::floor(static_cast<double>(values[side]) / top * kGraphH));
-                kit::Line(G.g->map->sides[side].colour, last_x[side], last_y[side], x, y);
+                kit::Line(g_app.g->map->sides[side].colour, last_x[side], last_y[side], x, y);
                 last_x[side] = x;
                 last_y[side] = y;
             }
@@ -199,9 +200,9 @@ struct History : kit::Modal {
                     best = record.score[side];
                     lead = side;
                 }
-            text = Format(kit::Text(0x5c, 3), turn, G.g->map->sides[lead].name);
+            text = Format(kit::Text(0x5c, 3), turn, g_app.g->map->sides[lead].name);
         } else {
-            text = Format(kit::Text(0x5c, mode), turn, Values(record, mode)[G.player->index]);
+            text = Format(kit::Text(0x5c, mode), turn, Values(record, mode)[g_app.player->index]);
         }
         gfx::SetColor(1, 1, 1);
         kit::Centred(font, text, 432, 318);
@@ -233,10 +234,10 @@ struct History : kit::Modal {
         kit::SetPal(0);
         kit::Outline(274, 321, 316, 13);
         int filled = std::min(kTimeline.w, turn * kTimeline.w / turns);
-        kit::SetPal(G.player->colour);
+        kit::SetPal(g_app.player->colour);
         gfx::Rectangle(gfx::kFill, kTimeline.x, kTimeline.y, filled, kTimeline.h);
         if (filled < kTimeline.w - 8) {
-            kit::SetPal(G.player->edge);
+            kit::SetPal(g_app.player->edge);
             gfx::Rectangle(gfx::kFill, kTimeline.x + filled, kTimeline.y, kTimeline.w - filled,
                            kTimeline.h);
         }
@@ -322,12 +323,12 @@ struct TriumphsDialog : kit::Modal {
 
     /** @brief Draws the side tabs with their shields, and the five kinds with their counts. */
     void Draw() override {
-        int own_side = G.player->index;
+        int own_side = g_app.player->index;
         kit::Popup(kTriumphsRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(0x50, 0), 320, 64);
-        auto button = G.screen->ArtFor(4);
-        auto big_shields = G.screen->ArtFor(38);
+        auto button = g_app.screen->ArtFor(4);
+        auto big_shields = g_app.screen->ArtFor(38);
         for (int i = 0; i < 8; i++) {
             int x = 128 + 48 * i;
             gfx::SetColor(1, 1, 1);
@@ -341,8 +342,8 @@ struct TriumphsDialog : kit::Modal {
         for (int kind = 0; kind <= 4; kind++) {
             int y = 168 + 35 * kind;
             kit::Army(kKinds[kind], opponent, 104, y, 1);
-            int count =
-                    history::Triumph(*G.g, own_side, opponent, static_cast<history::Loss>(kind));
+            int count = history::Triumph(*g_app.g, own_side, opponent,
+                                         static_cast<history::Loss>(kind));
             if (count > 0) {
                 gfx::SetColor(1, 1, 1);
                 font.Draw(Format(kit::Text(base + kind, count == 1 ? 0 : 1), count), 144, y + 9);
@@ -381,7 +382,7 @@ struct TriumphsDialog : kit::Modal {
  * With nothing on record yet, a message says so instead.
  */
 void Open(int which) {
-    int turns = std::min(static_cast<int>(G.g->history.size()), history::kLastRecordedTurn);
+    int turns = std::min(static_cast<int>(g_app.g->history.size()), history::kLastRecordedTurn);
     if (turns < 1) {
         search::ShowMessage(kit::Text(0x5d, 0), kit::Text(0x5d, 1));
         return;
@@ -402,7 +403,7 @@ void Triumphs() {
     auto dialog = std::make_shared<TriumphsDialog>();
     dialog->dialog_view = kit::View(kTriDialog);
     dialog->view = &dialog->dialog_view;
-    dialog->opponent = G.player->index;
+    dialog->opponent = g_app.player->index;
     dialog->Refresh();
     kit::Push(dialog);
 }

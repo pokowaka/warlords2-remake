@@ -25,4 +25,7 @@ sh cpp/test/compare.sh
 step "the same worlds in all three ports (scengen_compare.sh)"
 sh cpp/test/scengen_compare.sh 1 4
 
+step "clang-tidy (tools/tidy.sh)"
+sh tools/tidy.sh
+
 step "all gates passed"

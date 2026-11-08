@@ -11,7 +11,7 @@
 
 namespace display {
 
-State d;  // NOLINT(readability-identifier-length)
+State state;
 
 namespace {
 SDL_Window* win = nullptr;
@@ -21,18 +21,18 @@ bool no_canvas = false;  // True when the renderer does not support target textu
 
 /** @brief True when the CRT shader is active and supported. */
 bool Tube() {
-    return d.crt && !no_canvas;
+    return state.crt && !no_canvas;
 }
 /** @brief True when rendering should target the offscreen `canvas` texture. */
 bool OnCanvas() {
-    return d.shrink < 1 || Tube();
+    return state.shrink < 1 || Tube();
 }
 
 /** @brief Captures a post-present window screenshot if requested by a test script (`glass`). */
 void Shoot() {
-    if (d.glass_shot.empty()) return;
-    gfx::SaveShot(d.glass_shot);
-    d.glass_shot.clear();
+    if (state.glass_shot.empty()) return;
+    gfx::SaveShot(state.glass_shot);
+    state.glass_shot.clear();
 }
 }  // namespace
 
@@ -41,8 +41,8 @@ SDL_Window* Open(const char* title, bool windowed, int size_w, int size_h) {
     SDL_DisplayMode mode;
     int width = 1280, height = 960;
     if (SDL_GetDesktopDisplayMode(0, &mode) == 0) {
-        width = std::max(kW, mode.w * 4 / 5);
-        height = std::max(kH, mode.h * 4 / 5);
+        width = std::max(kScreenW, mode.w * 4 / 5);
+        height = std::max(kScreenH, mode.h * 4 / 5);
     }
     bool sized = size_w > 0 && size_h > 0;
     if (sized) {
@@ -64,13 +64,13 @@ SDL_Window* Open(const char* title, bool windowed, int size_w, int size_h) {
         double dpi_ratio = win_w > 0 ? static_cast<double>(pix_w) / win_w : 1;
         width = static_cast<int>(std::lround(size_w / dpi_ratio));
         height = static_cast<int>(std::lround(size_h / dpi_ratio));
-        SDL_SetWindowMinimumSize(win, std::min(kW, width), std::min(kH, height));
+        SDL_SetWindowMinimumSize(win, std::min(kScreenW, width), std::min(kScreenH, height));
         SDL_SetWindowSize(win, width, height);
         SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
     } else if (win) {
-        SDL_SetWindowMinimumSize(win, kW, kH);
+        SDL_SetWindowMinimumSize(win, kScreenW, kScreenH);
     }
-    d.windowed = windowed;
+    state.windowed = windowed;
     return win;
 }
 
@@ -79,32 +79,36 @@ SDL_Window* Window() {
 }
 
 void Measure() {
-    int win_w = kW, win_h = kH;
+    int win_w = kScreenW, win_h = kScreenH;
     if (win) SDL_GetWindowSize(win, &win_w, &win_h);
     int real_w = win_w, real_h = win_h;
     // Query the window's physical pixel dimensions directly (since renderer
     // output size reflects the bound offscreen canvas when one is active).
     if (win) SDL_GetWindowSizeInPixels(win, &real_w, &real_h);
-    double fit = std::min(static_cast<double>(real_w) / kW, static_cast<double>(real_h) / kH);
-    d.max_scale = std::max(1, static_cast<int>(fit));
+    double fit = std::min(static_cast<double>(real_w) / kScreenW,
+                          static_cast<double>(real_h) / kScreenH);
+    state.max_scale = std::max(1, static_cast<int>(fit));
     // Offer smooth scaling when the largest integer scale leaves > 25% unused.
-    d.smooth_scale = !no_canvas && fit > 1 && d.max_scale / fit < 0.75 ? fit : 0;
+    state.smooth_scale = !no_canvas && fit > 1 && state.max_scale / fit < 0.75 ? fit : 0;
     // On the main screen, allow a larger integer scale if it fits `kShortH` rows.
-    d.max_short = std::max(d.max_scale,
-                           static_cast<int>(std::min(static_cast<double>(real_w) / kW,
-                                                     static_cast<double>(real_h) / kShortH)));
-    int fits = std::max(d.max_scale,
-                        static_cast<int>(std::min(static_cast<double>(real_w) / kW,
-                                                  static_cast<double>(real_h) / d.min_h)));
-    int pick = d.chosen > d.max_scale && d.chosen > fits ? 0 : d.chosen;
-    d.smooth = d.smooth_scale > 0 && (pick == kSmooth || pick == 0);
-    d.scale = d.smooth ? d.max_scale + 1 : std::min(pick > 0 ? pick : d.max_scale, fits);
-    d.shrink = d.smooth ? fit / d.scale : 1;
-    d.pw = d.shrink < 1 ? std::max(kW * d.scale, static_cast<int>(std::lround(real_w / d.shrink)))
-                        : real_w;
-    d.ph = d.shrink < 1 ? std::max(kH * d.scale, static_cast<int>(std::lround(real_h / d.shrink)))
-                        : real_h;
-    d.dpi = win_w > 0 ? static_cast<double>(d.pw) / win_w : 1;
+    state.max_short = std::max(state.max_scale,
+                               static_cast<int>(std::min(static_cast<double>(real_w) / kScreenW,
+                                                         static_cast<double>(real_h) / kShortH)));
+    int fits = std::max(state.max_scale,
+                        static_cast<int>(std::min(static_cast<double>(real_w) / kScreenW,
+                                                  static_cast<double>(real_h) / state.min_h)));
+    int pick = state.chosen > state.max_scale && state.chosen > fits ? 0 : state.chosen;
+    state.smooth = state.smooth_scale > 0 && (pick == kSmooth || pick == 0);
+    state.scale =
+            state.smooth ? state.max_scale + 1 : std::min(pick > 0 ? pick : state.max_scale, fits);
+    state.shrink = state.smooth ? fit / state.scale : 1;
+    state.pw = state.shrink < 1 ? std::max(kScreenW * state.scale,
+                                           static_cast<int>(std::lround(real_w / state.shrink)))
+                                : real_w;
+    state.ph = state.shrink < 1 ? std::max(kScreenH * state.scale,
+                                           static_cast<int>(std::lround(real_h / state.shrink)))
+                                : real_h;
+    state.dpi = win_w > 0 ? static_cast<double>(state.pw) / win_w : 1;
 }
 
 void BeginFrame() {
@@ -112,15 +116,15 @@ void BeginFrame() {
     if (!ren) return;
     int canvas_w = 0, canvas_h = 0;
     if (canvas) SDL_QueryTexture(canvas, nullptr, nullptr, &canvas_w, &canvas_h);
-    if (canvas && (!OnCanvas() || canvas_w != d.pw || canvas_h != d.ph)) {
+    if (canvas && (!OnCanvas() || canvas_w != state.pw || canvas_h != state.ph)) {
         SDL_SetRenderTarget(ren, nullptr);
         SDL_DestroyTexture(canvas);
         canvas = nullptr;
     }
     if (!OnCanvas()) return;
     if (!canvas) {
-        canvas = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, d.pw,
-                                   d.ph);
+        canvas = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET,
+                                   state.pw, state.ph);
         if (canvas) SDL_SetTextureScaleMode(canvas, SDL_ScaleModeLinear);
     }
     if (!canvas || SDL_SetRenderTarget(ren, canvas) != 0) {
@@ -155,50 +159,50 @@ void Present() {
 }
 
 void Choose(int n) {
-    d.chosen = n == kSmooth ? kSmooth : std::max(1, n);
+    state.chosen = n == kSmooth ? kSmooth : std::max(1, n);
     Measure();
 }
 
 std::pair<int, int> UiSize() {
-    int width = d.pw / d.scale, height = d.ph / d.scale;
-    if (d.wanted) {
-        width = std::min(width, d.wanted->first);
-        height = std::min(height, d.wanted->second);
+    int width = state.pw / state.scale, height = state.ph / state.scale;
+    if (state.wanted) {
+        width = std::min(width, state.wanted->first);
+        height = std::min(height, state.wanted->second);
     }
     return {width, height};
 }
 
 void SetFrame(int width, int height) {
-    d.w = width;
-    d.h = height;
-    d.ox = (d.pw - width * d.scale) / 2;
-    d.oy = (d.ph - height * d.scale) / 2;
+    state.w = width;
+    state.h = height;
+    state.ox = (state.pw - width * state.scale) / 2;
+    state.oy = (state.ph - height * state.scale) / 2;
 }
 
 void PushUi() {
     gfx::Push();
     gfx::Origin();
-    gfx::Translate(d.ox, d.oy);
-    gfx::Scale(d.scale);
+    gfx::Translate(state.ox, state.oy);
+    gfx::Scale(state.scale);
 }
 
 void PushMap(int x, int y, int cam_x, int cam_y, int zoom) {
     gfx::Push();
     gfx::Origin();
-    gfx::Translate(d.ox + x * d.scale - cam_x, d.oy + y * d.scale - cam_y);
+    gfx::Translate(state.ox + x * state.scale - cam_x, state.oy + y * state.scale - cam_y);
     gfx::Scale(zoom);
 }
 
 std::pair<int, int> ToUi(double x, double y) {
-    double pix_x = x * d.dpi, pix_y = y * d.dpi;
+    double pix_x = x * state.dpi, pix_y = y * state.dpi;
     if (Tube()) std::tie(pix_x, pix_y) = crt::Unwarp(pix_x, pix_y);
-    int ui_x = static_cast<int>(std::floor((pix_x - d.ox) / d.scale));
-    int ui_y = static_cast<int>(std::floor((pix_y - d.oy) / d.scale));
-    return {std::clamp(ui_x, 0, d.w - 1), std::clamp(ui_y, 0, d.h - 1)};
+    int ui_x = static_cast<int>(std::floor((pix_x - state.ox) / state.scale));
+    int ui_y = static_cast<int>(std::floor((pix_y - state.oy) / state.scale));
+    return {std::clamp(ui_x, 0, state.w - 1), std::clamp(ui_y, 0, state.h - 1)};
 }
 
 std::pair<double, double> FromUi(double x, double y) {
-    double pix_x = d.ox + x * d.scale, pix_y = d.oy + y * d.scale;
+    double pix_x = state.ox + x * state.scale, pix_y = state.oy + y * state.scale;
     if (Tube()) {
         // Fixed-point iteration inverting the CRT barrel distortion.
         double win_x = pix_x, win_y = pix_y;
@@ -210,30 +214,30 @@ std::pair<double, double> FromUi(double x, double y) {
         pix_x = win_x;
         pix_y = win_y;
     }
-    return {pix_x / d.dpi, pix_y / d.dpi};
+    return {pix_x / state.dpi, pix_y / state.dpi};
 }
 
 std::optional<std::pair<int, int>> OffFrame(double x, double y) {
-    double pix_x = x * d.dpi, pix_y = y * d.dpi;
-    if (pix_x >= d.ox && pix_y >= d.oy && pix_x < d.ox + d.w * d.scale &&
-        pix_y < d.oy + d.h * d.scale)
+    double pix_x = x * state.dpi, pix_y = y * state.dpi;
+    if (pix_x >= state.ox && pix_y >= state.oy && pix_x < state.ox + state.w * state.scale &&
+        pix_y < state.oy + state.h * state.scale)
         return std::nullopt;
-    return std::make_pair(static_cast<int>(std::floor((pix_x - d.ox) / d.scale)),
-                          static_cast<int>(std::floor((pix_y - d.oy) / d.scale)));
+    return std::make_pair(static_cast<int>(std::floor((pix_x - state.ox) / state.scale)),
+                          static_cast<int>(std::floor((pix_y - state.oy) / state.scale)));
 }
 
 void SetWindowed(bool enabled) {
     if (!win) {
-        d.windowed = enabled;
+        state.windowed = enabled;
         return;
     }
     SDL_SetWindowFullscreen(win, enabled ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
-    d.windowed = enabled;
+    state.windowed = enabled;
     Measure();
 }
 
 bool PointerAway() {
-    return d.windowed && !d.mouse_inside;
+    return state.windowed && !state.mouse_inside;
 }
 
 }  // namespace display

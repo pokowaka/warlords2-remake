@@ -56,10 +56,10 @@ struct Spoils : kit::Modal {
         for (int i = 0; i <= 2; i++) {
             int y = 250 + 30 * i;
             bool have = i < static_cast<int>(lost.size());
-            kit::Army(have ? lost[i].first : w2::kNone, G.player->index, 208, y, 1);
+            kit::Army(have ? lost[i].first : w2::kNone, g_app.player->index, 208, y, 1);
             if (have) {
                 gfx::SetColor(1, 1, 1);
-                const w2::ArmyType* type = G.g->types.ById(lost[i].first);
+                const w2::ArmyType* type = g_app.g->types.ById(lost[i].first);
                 font.Draw(type ? type->name : "", 248, y + 6);
                 font.Draw(w2::Fmt("%d gp", lost[i].second), 368, y + 6);
             }

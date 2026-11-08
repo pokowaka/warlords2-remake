@@ -72,7 +72,7 @@
 
 // The front end's shared state; its name is shared with ui/ and goes away
 // when the front end is restructured.
-App G;  // NOLINT(readability-identifier-length)
+App g_app;
 
 using w2::Army;
 using w2::City;
@@ -99,7 +99,7 @@ int Roll(int n) {
 }
 /** @brief Puts a line in the status bar. */
 void Say(const std::string& message) {
-    G.status = message;
+    g_app.status = message;
 }
 }  // namespace front
 
@@ -162,94 +162,97 @@ static int opt_military_advisor = -1;
 
 /** @brief Loads every picture, font and the main screen's layout from the data directory. */
 static void LoadArt() {
-    G.palette = w2::pal::Load(G.data_dir + "/TERRAIN0/WAR2.PAL");
-    const auto& palette = G.palette;
+    g_app.palette = w2::pal::Load(g_app.data_dir + "/TERRAIN0/WAR2.PAL");
+    const auto& palette = g_app.palette;
     auto img = [&](const std::string& path, int key = pckimage::kNokey) {
-        return pckimage::Load(G.data_dir + path, palette, key);
+        return pckimage::Load(g_app.data_dir + path, palette, key);
     };
-    for (int i = 0; i < 2; i++) G.sheets[i] = img("/TERRAIN0/SCENERY" + std::to_string(i) + ".PCK");
+    for (int i = 0; i < 2; i++)
+        g_app.sheets[i] = img("/TERRAIN0/SCENERY" + std::to_string(i) + ".PCK");
     // The army sheets stand on 10, bright green -- all but the fifth side's,
     // keyed on its own ground, the colour of its corner.
-    G.road_img = img("/TERRAIN0/ROAD.PCK", 1);
+    g_app.road_img = img("/TERRAIN0/ROAD.PCK", 1);
     for (int i = 0; i <= 8; i++)
-        G.army_img[i] = img("/TERRAIN0/A" + std::to_string(i) + ".PCK", pckimage::kCorner);
+        g_app.army_img[i] = img("/TERRAIN0/A" + std::to_string(i) + ".PCK", pckimage::kCorner);
     // the shadow sheet keys on white: it is two colours of ghost on white
-    G.shadow_img = img("/TERRAIN0/ASHADOW.PCK", 15);
-    G.marble = img("/PICS/MARBLE.PCK");
-    G.big_army = img("/PICS/BIGARMY.PCK");
-    G.city_pic = img("/PICS/CITY.PCK");
-    G.war_pic = img("/PICS/WAR.PCK", 1);
-    G.shield_img = img("/TERRAIN0/BSHIELD.PCK", 12);
-    G.victory_pic = img("/PICS/VICTORY.PCK");
-    G.hero_pic_m = img("/PICS/MHERO.PCK");
-    G.hero_pic_f = img("/PICS/FHERO.PCK");
+    g_app.shadow_img = img("/TERRAIN0/ASHADOW.PCK", 15);
+    g_app.marble = img("/PICS/MARBLE.PCK");
+    g_app.big_army = img("/PICS/BIGARMY.PCK");
+    g_app.city_pic = img("/PICS/CITY.PCK");
+    g_app.war_pic = img("/PICS/WAR.PCK", 1);
+    g_app.shield_img = img("/TERRAIN0/BSHIELD.PCK", 12);
+    g_app.victory_pic = img("/PICS/VICTORY.PCK");
+    g_app.hero_pic_m = img("/PICS/MHERO.PCK");
+    g_app.hero_pic_f = img("/PICS/FHERO.PCK");
     // ATRANS2.PCK: map markers on a mask colour, 1
-    G.atrans_shields = img("/TERRAIN0/ATRANS2.PCK", 1);
+    g_app.atrans_shields = img("/TERRAIN0/ATRANS2.PCK", 1);
     // HIDDEN.PCK: the hidden map's edges; colour 1 is where the map shows through
-    G.fog_img = img("/PICS/HIDDEN.PCK", 1);
+    g_app.fog_img = img("/PICS/HIDDEN.PCK", 1);
     // CURS.PCK: the marching box round the selected stack; keyed on 0, its 1
     // shows white and its 4 black
-    G.curs_img = pckimage::FromPixels(*w2::pck::Decode(G.data_dir + "/PICS/CURS.PCK"), palette,
-                                      {{1, 15}, {4, 0}}, {0});
+    g_app.curs_img = pckimage::FromPixels(*w2::pck::Decode(g_app.data_dir + "/PICS/CURS.PCK"),
+                                          palette, {{1, 15}, {4, 0}}, {0});
     // the rings, drawn opaque, as the original blits every bitmap it is given
-    G.abits = img("/PICS/ABITS.PCK");
+    g_app.abits = img("/PICS/ABITS.PCK");
     // STAND.PCK: the twelve mouse pointers, drawn by the game itself
-    G.pointer_img = img("/STAND.PCK", 10);
-    G.screen = screen::Load(G.data_dir, palette, w2::uidata::kMainScreen, 0);
+    g_app.pointer_img = img("/STAND.PCK", 10);
+    g_app.screen = screen::Load(g_app.data_dir, palette, w2::uidata::kMainScreen, 0);
     // the player's own button shortcuts (ui/shortcuts)
     try {
         std::string shortcuts_json = prefs::Get("shortcuts");
         if (!shortcuts_json.empty()) {
             auto shortcut_list = w2::Json::Parse(shortcuts_json);
             for (size_t i = 0; i < shortcut_list.size(); i++)
-                G.screen->ui.shortcuts[static_cast<int>(i)] =
+                g_app.screen->ui.shortcuts[static_cast<int>(i)] =
                         static_cast<int>(shortcut_list[i].Integer());
         }
     } catch (...) {
     }
-    G.font = Font::Load(G.data_dir, "TEXT", palette, 3);
-    G.big_font = Font::Load(G.data_dir, "CHANCE17", palette, 3);
-    G.title_font = Font::Load(G.data_dir, "CHANCE36", palette, 3);
-    G.shields_img = img("/TERRAIN0/SHIELDS.PCK");
-    G.city_back = img("/TERRAIN0/CITYBACK.PCK");
-    G.search_pic = img("/PICS/SEARCH.PCK");
-    G.temple_pic = img("/PICS/TEMPLE.PCK");
+    g_app.font = Font::Load(g_app.data_dir, "TEXT", palette, 3);
+    g_app.big_font = Font::Load(g_app.data_dir, "CHANCE17", palette, 3);
+    g_app.title_font = Font::Load(g_app.data_dir, "CHANCE36", palette, 3);
+    g_app.shields_img = img("/TERRAIN0/SHIELDS.PCK");
+    g_app.city_back = img("/TERRAIN0/CITYBACK.PCK");
+    g_app.search_pic = img("/PICS/SEARCH.PCK");
+    g_app.temple_pic = img("/PICS/TEMPLE.PCK");
     // a promotion's (popups 16-18) and a medal's (popups 24-27) pictures
-    for (int i = 2; i <= 4; i++) G.level_pic[i] = img("/PICS/LEVEL" + std::to_string(i) + ".PCK");
-    for (int i = 0; i < 4; i++) G.medal_pic[i] = img("/PICS/MEDAL" + std::to_string(i) + ".PCK");
-    G.scroll_pic = img("/PICS/SCROLL.PCK", 10);
+    for (int i = 2; i <= 4; i++)
+        g_app.level_pic[i] = img("/PICS/LEVEL" + std::to_string(i) + ".PCK");
+    for (int i = 0; i < 4; i++)
+        g_app.medal_pic[i] = img("/PICS/MEDAL" + std::to_string(i) + ".PCK");
+    g_app.scroll_pic = img("/PICS/SCROLL.PCK", 10);
 }
 
 // ------------------------------------------------------------------ camera
 
 // The view is as many tiles as the map's rect holds at the map's zoom, and
-// slides smoothly: G.cx, G.cy is the tile at its top-left corner.
+// slides smoothly: g_app.cx, g_app.cy is the tile at its top-left corner.
 
 /** @brief The view's width and height in tiles (fractional). */
 static std::pair<double, double> ViewSize() {
-    double tiles_per_ui = static_cast<double>(display::d.scale) / (kTile * G.zoom);
-    return {G.map_rect.w * tiles_per_ui, G.map_rect.h * tiles_per_ui};
+    double tiles_per_ui = static_cast<double>(display::state.scale) / (kTile * g_app.zoom);
+    return {g_app.map_rect.w * tiles_per_ui, g_app.map_rect.h * tiles_per_ui};
 }
 
 /** @brief The camera in device pixels, rounded to one. */
 static std::pair<int, int> CamDev() {
-    double tile_size = kTile * G.zoom;
-    return {static_cast<int>(std::floor(G.cx * tile_size + 0.5)),
-            static_cast<int>(std::floor(G.cy * tile_size + 0.5))};
+    double tile_size = kTile * g_app.zoom;
+    return {static_cast<int>(std::floor(g_app.cx * tile_size + 0.5)),
+            static_cast<int>(std::floor(g_app.cy * tile_size + 0.5))};
 }
 
 /** @brief A UI point to the map position under it, in fractional tiles. */
 static std::pair<double, double> UiToMap(double x, double y) {
-    const auto& rect = G.map_rect;
-    double scale = display::d.scale, tile_size = kTile * G.zoom;
+    const auto& rect = g_app.map_rect;
+    double scale = display::state.scale, tile_size = kTile * g_app.zoom;
     auto [cam_x, cam_y] = CamDev();
     return {(cam_x + (x - rect.x) * scale) / tile_size, (cam_y + (y - rect.y) * scale) / tile_size};
 }
 
 /** @brief A map position in fractional tiles to the UI point it is drawn at. */
 std::pair<double, double> front::MapToUi(double tile_x, double tile_y) {
-    const auto& rect = G.map_rect;
-    double scale = display::d.scale, tile_size = kTile * G.zoom;
+    const auto& rect = g_app.map_rect;
+    double scale = display::state.scale, tile_size = kTile * g_app.zoom;
     auto [cam_x, cam_y] = CamDev();
     return {rect.x + (tile_x * tile_size - cam_x) / scale,
             rect.y + (tile_y * tile_size - cam_y) / scale};
@@ -258,52 +261,55 @@ std::pair<double, double> front::MapToUi(double tile_x, double tile_y) {
 /** @brief The tile at the middle of the view. */
 std::pair<int, int> front::ViewCentre() {
     auto [view_w, view_h] = ViewSize();
-    return {static_cast<int>(std::floor(G.cx + view_w / 2)),
-            static_cast<int>(std::floor(G.cy + view_h / 2))};
+    return {static_cast<int>(std::floor(g_app.cx + view_w / 2)),
+            static_cast<int>(std::floor(g_app.cy + view_h / 2))};
 }
 
 /** @brief The tiles the view touches, clipped to the map: x0, y0, x1, y1. */
 static std::array<int, 4> ViewTiles() {
     auto [view_w, view_h] = ViewSize();
-    int map_w = G.g->map->width, map_h = G.g->map->height;
-    return {std::max(0, static_cast<int>(std::floor(G.cx))),
-            std::max(0, static_cast<int>(std::floor(G.cy))),
-            std::min(map_w - 1, static_cast<int>(std::ceil(G.cx + view_w)) - 1),
-            std::min(map_h - 1, static_cast<int>(std::ceil(G.cy + view_h)) - 1)};
+    int map_w = g_app.g->map->width, map_h = g_app.g->map->height;
+    return {std::max(0, static_cast<int>(std::floor(g_app.cx))),
+            std::max(0, static_cast<int>(std::floor(g_app.cy))),
+            std::min(map_w - 1, static_cast<int>(std::ceil(g_app.cx + view_w)) - 1),
+            std::min(map_h - 1, static_cast<int>(std::ceil(g_app.cy + view_h)) - 1)};
 }
 
-/** @brief Whether the tile is among those drawn this frame (G.view). */
+/** @brief Whether the tile is among those drawn this frame (g_app.view). */
 static bool Shown(int x, int y) {
-    return x >= G.view[0] && y >= G.view[1] && x <= G.view[2] && y <= G.view[3];
+    return x >= g_app.view[0] && y >= g_app.view[1] && x <= g_app.view[2] && y <= g_app.view[3];
 }
 
 /** @brief Whether the tile's centre lies inside the view. */
 static bool InView(int x, int y) {
     auto [view_w, view_h] = ViewSize();
-    return x + 0.5 > G.cx && x + 0.5 < G.cx + view_w && y + 0.5 > G.cy && y + 0.5 < G.cy + view_h;
+    return x + 0.5 > g_app.cx && x + 0.5 < g_app.cx + view_w && y + 0.5 > g_app.cy &&
+           y + 0.5 < g_app.cy + view_h;
 }
 
 /** @brief Keeps the view on the map; a map smaller than the view sits in its middle. */
 static void ClampCamera() {
-    if (!G.g) return;
+    if (!g_app.g) return;
     auto [view_w, view_h] = ViewSize();
-    int map_w = G.g->map->width, map_h = G.g->map->height;
-    G.cx = view_w >= map_w ? (map_w - view_w) / 2 : std::max(0.0, std::min(G.cx, map_w - view_w));
-    G.cy = view_h >= map_h ? (map_h - view_h) / 2 : std::max(0.0, std::min(G.cy, map_h - view_h));
+    int map_w = g_app.g->map->width, map_h = g_app.g->map->height;
+    g_app.cx = view_w >= map_w ? (map_w - view_w) / 2
+                               : std::max(0.0, std::min(g_app.cx, map_w - view_w));
+    g_app.cy = view_h >= map_h ? (map_h - view_h) / 2
+                               : std::max(0.0, std::min(g_app.cy, map_h - view_h));
 }
 
 /** @brief Centres the view on the tile, as far as the map's edges allow. */
 void front::CentreOn(int x, int y) {
     auto [view_w, view_h] = ViewSize();
-    G.cx = x + 0.5 - view_w / 2;
-    G.cy = y + 0.5 - view_h / 2;
+    g_app.cx = x + 0.5 - view_w / 2;
+    g_app.cy = y + 0.5 - view_h / 2;
     ClampCamera();
 }
 using front::CentreOn;
 
 /** @brief The zoom the map may go to: up to two steps past the UI's biggest. */
 static int MaxZoom() {
-    return std::max(display::d.max_scale, display::d.scale) + 2;
+    return std::max(display::state.max_scale, display::state.scale) + 2;
 }
 
 /**
@@ -312,18 +318,18 @@ static int MaxZoom() {
  */
 static void SetZoomAt(int zoom, double x, double y, bool centre) {
     zoom = std::max(1, std::min(MaxZoom(), zoom));
-    if (zoom == G.zoom) return;
+    if (zoom == g_app.zoom) return;
     prefs::Set("zoom", zoom);
-    const auto& rect = G.map_rect;
+    const auto& rect = g_app.map_rect;
     if (centre) {
         x = rect.x + rect.w / 2.0;
         y = rect.y + rect.h / 2.0;
     }
     auto [tile_x, tile_y] = UiToMap(x, y);
-    G.zoom = zoom;
-    double tiles_per_ui = static_cast<double>(display::d.scale) / (kTile * zoom);
-    G.cx = tile_x - (x - rect.x) * tiles_per_ui;
-    G.cy = tile_y - (y - rect.y) * tiles_per_ui;
+    g_app.zoom = zoom;
+    double tiles_per_ui = static_cast<double>(display::state.scale) / (kTile * zoom);
+    g_app.cx = tile_x - (x - rect.x) * tiles_per_ui;
+    g_app.cy = tile_y - (y - rect.y) * tiles_per_ui;
     ClampCamera();
 }
 /** @brief Zooms the map about the middle of the view. */
@@ -337,31 +343,32 @@ void front::SetZoom(int zoom) {
  */
 static void ApplyLayout(const layout::Layout& new_layout) {
     std::optional<std::pair<double, double>> mid;
-    if (G.g && G.have_layout) {
+    if (g_app.g && g_app.have_layout) {
         auto [view_w, view_h] = ViewSize();
-        mid = std::make_pair(G.cx + view_w / 2, G.cy + view_h / 2);
+        mid = std::make_pair(g_app.cx + view_w / 2, g_app.cy + view_h / 2);
     }
-    G.layout = new_layout;
-    G.have_layout = true;
-    screen::Relayout(*G.screen, new_layout);
+    g_app.layout = new_layout;
+    g_app.have_layout = true;
+    screen::Relayout(*g_app.screen, new_layout);
     auto reg = [](int region_id) {
-        const auto* region = screen::FindRegion(*G.screen, region_id);
+        const auto* region = screen::FindRegion(*g_app.screen, region_id);
         return region ? layout::Rect{region->x, region->y, region->w, region->h, region->id}
                       : layout::Rect{};
     };
-    G.map_rect = reg(screen::kMap);
-    G.strat_rect = reg(screen::kStrategic);
-    G.bar_rect = reg(screen::kBottombar);
-    G.menu_rect = reg(screen::kMenubar);
-    G.panel_rect = reg(screen::kMappanel);
-    G.menu_layout = menu::MakeLayout(*G.font, new_layout.w,
-                                     menu::WithZooms(display::d.max_short, MaxZoom(),
-                                                     display::d.smooth_scale, display::d.shrink));
-    G.zoom = std::max(1, std::min(MaxZoom(), G.zoom ? G.zoom : display::d.scale));
+    g_app.map_rect = reg(screen::kMap);
+    g_app.strat_rect = reg(screen::kStrategic);
+    g_app.bar_rect = reg(screen::kBottombar);
+    g_app.menu_rect = reg(screen::kMenubar);
+    g_app.panel_rect = reg(screen::kMappanel);
+    g_app.menu_layout =
+            menu::MakeLayout(*g_app.font, new_layout.w,
+                             menu::WithZooms(display::state.max_short, MaxZoom(),
+                                             display::state.smooth_scale, display::state.shrink));
+    g_app.zoom = std::max(1, std::min(MaxZoom(), g_app.zoom ? g_app.zoom : display::state.scale));
     if (mid) {
         auto [view_w, view_h] = ViewSize();
-        G.cx = mid->first - view_w / 2;
-        G.cy = mid->second - view_h / 2;
+        g_app.cx = mid->first - view_w / 2;
+        g_app.cy = mid->second - view_h / 2;
         ClampCamera();
     }
 }
@@ -373,12 +380,13 @@ static void ApplyLayout(const layout::Layout& new_layout) {
  * whole screen, down to SHORT_H rows. Run each frame, and each input.
  */
 void front::SyncLayout() {
-    int width = layout::kW, height = layout::kH;
-    if (!G.starting) std::tie(width, height) = display::UiSize();
-    display::SetFrame(std::max(width, layout::kW),
-                      std::max(height, G.starting ? layout::kH : layout::kShortH));
-    if (!G.have_layout || G.layout.w != display::d.w || G.layout.h != display::d.h) {
-        ApplyLayout(layout::Compute(display::d.w, display::d.h));
+    int width = layout::kScreenW, height = layout::kScreenH;
+    if (!g_app.starting) std::tie(width, height) = display::UiSize();
+    display::SetFrame(std::max(width, layout::kScreenW),
+                      std::max(height, g_app.starting ? layout::kScreenH : layout::kShortH));
+    if (!g_app.have_layout || g_app.layout.w != display::state.w ||
+        g_app.layout.h != display::state.h) {
+        ApplyLayout(layout::Compute(display::state.w, display::state.h));
     }
 }
 using front::SyncLayout;
@@ -386,17 +394,17 @@ using front::SyncLayout;
 /** @brief Changes how the screen is used, keeping the view centred where it was. */
 static void Relayout(const std::function<void()>& change) {
     std::optional<std::pair<double, double>> mid;
-    if (G.g && !G.starting && G.have_layout) {
+    if (g_app.g && !g_app.starting && g_app.have_layout) {
         auto [view_w, view_h] = ViewSize();
-        mid = std::make_pair(G.cx + view_w / 2, G.cy + view_h / 2);
+        mid = std::make_pair(g_app.cx + view_w / 2, g_app.cy + view_h / 2);
     }
     change();
-    G.have_layout = false;
+    g_app.have_layout = false;
     SyncLayout();
     if (mid) {
         auto [view_w, view_h] = ViewSize();
-        G.cx = mid->first - view_w / 2;
-        G.cy = mid->second - view_h / 2;
+        g_app.cx = mid->first - view_w / 2;
+        g_app.cy = mid->second - view_h / 2;
         ClampCamera();
     }
 }
@@ -404,19 +412,19 @@ static void Relayout(const std::function<void()>& change) {
 /** @brief Chooses the interface's scale (display::Choose) and remembers it. */
 static void SetUiScale(int scale) {
     Relayout([scale]() { display::Choose(scale); });
-    if (display::d.chosen == display::kSmooth)
+    if (display::state.chosen == display::kSmooth)
         prefs::Set("scale", "smooth");
     else
-        prefs::Set("scale", display::d.chosen);
+        prefs::Set("scale", display::state.chosen);
 }
 
 /** @brief Keeps the original's 640x480 (4:3) frame, or fits the screen, and remembers it. */
 static void SetOriginalSize(bool enabled) {
     Relayout([enabled]() {
         if (enabled)
-            display::d.wanted = std::make_pair(layout::kW, layout::kH);
+            display::state.wanted = std::make_pair(layout::kScreenW, layout::kScreenH);
         else
-            display::d.wanted.reset();
+            display::state.wanted.reset();
     });
     prefs::Set("4:3", enabled ? "on" : "off");
 }
@@ -429,8 +437,8 @@ static void SetScreen(bool window) {
 
 /** @brief Turns the CRT look on or off, and remembers it. */
 static void ToggleCrt() {
-    display::d.crt = !display::d.crt;
-    prefs::Set("crt", display::d.crt ? "on" : "off");
+    display::state.crt = !display::state.crt;
+    prefs::Set("crt", display::state.crt ? "on" : "off");
 }
 
 /**
@@ -438,11 +446,11 @@ static void ToggleCrt() {
  *        side's setting in the game under way, else the default.
  */
 static bool ActiveClassicAi() {
-    if (G.g && G.g->map && !G.starting) {
-        for (const auto& side : G.g->map->sides) {
+    if (g_app.g && g_app.g->map && !g_app.starting) {
+        for (const auto& side : g_app.g->map->sides) {
             if (side.in_use && side.computer) return side.classic_ai;
         }
-        for (const auto& side : G.g->map->sides) {
+        for (const auto& side : g_app.g->map->sides) {
             if (side.in_use) return side.classic_ai;
         }
     }
@@ -456,8 +464,8 @@ static bool ActiveClassicAi() {
 static void SetAiMode(bool classic) {
     w2::ai::SetDefaultClassicAi(classic);
     prefs::Set("ai", classic ? "classic" : "modern");
-    if (G.g && G.g->map) {
-        for (auto& side : G.g->map->sides) {
+    if (g_app.g && g_app.g->map) {
+        for (auto& side : g_app.g->map->sides) {
             side.classic_ai = classic;
             if (!side.ai) side.ai = std::make_shared<w2::AIData>(w2::ai::core::NewData());
             if (!classic) w2::ai::belief::Ensure(side);
@@ -472,7 +480,7 @@ static void SetAiMode(bool classic) {
  * none chosen.
  */
 static std::string UiScaleKey() {
-    const auto& state = display::d;
+    const auto& state = display::state;
     if (state.chosen > state.max_scale && state.chosen <= state.max_short)
         return "ui scale " + std::to_string(state.chosen);
     return state.smooth ? "ui scale smooth" : "ui scale " + std::to_string(state.scale);
@@ -480,11 +488,11 @@ static std::string UiScaleKey() {
 
 /** @brief Whether the menu item `key` shows a tick: the settings now in force. */
 static bool MenuTicked(const std::string& key) {
-    return key == "map zoom " + std::to_string(G.zoom) || key == UiScaleKey() ||
-           key == std::string("screen ") + (display::d.windowed ? "window" : "full") ||
-           (key == "screen 4:3" && display::d.wanted) ||
-           (key == "screen fit" && !display::d.wanted) || (key == "screen crt" && display::d.crt) ||
-           key == "music " + sound::Synth() ||
+    return key == "map zoom " + std::to_string(g_app.zoom) || key == UiScaleKey() ||
+           key == std::string("screen ") + (display::state.windowed ? "window" : "full") ||
+           (key == "screen 4:3" && display::state.wanted) ||
+           (key == "screen fit" && !display::state.wanted) ||
+           (key == "screen crt" && display::state.crt) || key == "music " + sound::Synth() ||
            key == (ActiveClassicAi() ? "ai classic" : "ai modern");
 }
 
@@ -509,16 +517,16 @@ static const double kWalkStep = 0.1;  ///< Seconds the walk spends on one tile.
  * A stack already standing on its destination forgets it.
  */
 static void RefreshRoute() {
-    G.route.reset();
-    if (!G.selection || G.selection->stack.empty()) return;
-    auto& sel = *G.selection;
+    g_app.route.reset();
+    if (!g_app.selection || g_app.selection->stack.empty()) return;
+    auto& sel = *g_app.selection;
     auto target = sel.stack[0]->target;
     if (!target) return;
     if (sel.stack[0]->x == target->first && sel.stack[0]->y == target->second) {
         for (Army* army : sel.stack) army->target.reset();
         return;
     }
-    G.route = move::PreviewRoute(*G.g, sel.stack, target->first, target->second);
+    g_app.route = move::PreviewRoute(*g_app.g, sel.stack, target->first, target->second);
 }
 
 /** @brief Gives every army in the stack the destination (x, y); kNone clears it. */
@@ -537,17 +545,17 @@ static void OrderTo(const std::vector<Army*>& stack, int x, int y) {
  * A click on the stack's own tile clears its destination.
  */
 static void PlanRoute(int x, int y) {
-    if (!G.selection || G.selection->stack.empty()) return;
-    auto& sel = *G.selection;
-    if (!game::Seen(*G.g, G.player->index, x, y)) return;
+    if (!g_app.selection || g_app.selection->stack.empty()) return;
+    auto& sel = *g_app.selection;
+    if (!game::Seen(*g_app.g, g_app.player->index, x, y)) return;
     if (sel.stack[0]->x == x && sel.stack[0]->y == y) {
         OrderTo(sel.stack, kNone, kNone);
-        G.route.reset();
+        g_app.route.reset();
         return;
     }
     OrderTo(sel.stack, x, y);
     RefreshRoute();
-    if (!G.route) sound::Effect("chord");
+    if (!g_app.route) sound::Effect("chord");
 }
 
 /**
@@ -566,7 +574,7 @@ static void StartWalk(const std::vector<Army*>& armies,
     walk.i = 0;
     walk.at = w2::Now();
     walk.top = armies.empty() ? nullptr : armies[0];
-    G.walk = walk;
+    g_app.walk = walk;
     CentreOn(tiles[0].first, tiles[0].second);
 }
 
@@ -587,8 +595,8 @@ static void PutDown(const std::vector<Army*>& stack) {
         army->done = true;
         if (arrived) army->target.reset();
     }
-    G.selection.reset();
-    G.route.reset();
+    g_app.selection.reset();
+    g_app.route.reset();
 }
 
 /**
@@ -599,8 +607,8 @@ static void PutDown(const std::vector<Army*>& stack) {
  * waits for it: the computer's turn, Move All, or the keys typed meanwhile.
  */
 static void AdvanceWalk() {
-    if (!G.walk) return;
-    Walk& walk = *G.walk;
+    if (!g_app.walk) return;
+    Walk& walk = *g_app.walk;
     double now = w2::Now();
     while (walk.i < walk.tiles.size() - 1 && now - walk.at >= kWalkStep) {
         walk.i++;
@@ -610,27 +618,28 @@ static void AdvanceWalk() {
     if (walk.i >= walk.tiles.size() - 1 && now - walk.at >= kWalkStep) {
         bool computer = walk.computer;
         auto down = walk.put_down;
-        G.walk.reset();
+        g_app.walk.reset();
         if (!down.empty()) PutDown(down);
         RefreshRoute();
-        if (computer && G.ai_run) ResumeComputer();
-        if (G.move_all) MoveAllStep();
-        if (!G.walk && !G.move_all) FlushKeys();
+        if (computer && g_app.ai_run) ResumeComputer();
+        if (g_app.move_all) MoveAllStep();
+        if (!g_app.walk && !g_app.move_all) FlushKeys();
     }
 }
 
 /** @brief The tile the walk has got to, or nullptr with no walk. */
 static const std::pair<int, int>* WalkingAt() {
-    return G.walk ? &G.walk->tiles[G.walk->i] : nullptr;
+    return g_app.walk ? &g_app.walk->tiles[g_app.walk->i] : nullptr;
 }
 
 /** @brief Draws the selection's route: rings to the last tile, the lead's ghost on it. */
 static void DrawRoute() {
-    if (!G.route) return;
-    const auto& route = *G.route;
-    Army* ghost = G.selection && !G.selection->stack.empty() ? G.selection->stack[0] : nullptr;
+    if (!g_app.route) return;
+    const auto& route = *g_app.route;
+    Army* ghost = g_app.selection && !g_app.selection->stack.empty() ? g_app.selection->stack[0]
+                                                                     : nullptr;
     // while the walk plays out the route is drawn from where it has got to
-    size_t first = G.walk ? G.walk->i + 1 : 1;
+    size_t first = g_app.walk ? g_app.walk->i + 1 : 1;
     for (size_t i = first; i <= route.path.size(); i++) {
         const auto& step = route.path[i - 1];
         if (!Shown(step.x, step.y)) continue;
@@ -638,11 +647,11 @@ static void DrawRoute() {
         gfx::SetColor(1, 1, 1);
         if (i == route.path.size()) {
             if (ghost)
-                gfx::Draw(G.shadow_img, kit::ArmyQuad(ghost->type), pixel_x + kWalkGhostAt[0],
+                gfx::Draw(g_app.shadow_img, kit::ArmyQuad(ghost->type), pixel_x + kWalkGhostAt[0],
                           pixel_y + kWalkGhostAt[1]);
         } else {
             const int* src = static_cast<int>(i) <= route.reach ? kWalkRing : kWalkCrossed;
-            gfx::Draw(G.shadow_img, gfx::NewQuad(src[0], src[1], kWalkRingW, kWalkRingH),
+            gfx::Draw(g_app.shadow_img, gfx::NewQuad(src[0], src[1], kWalkRingW, kWalkRingH),
                       pixel_x + kWalkRingAt[0], pixel_y + kWalkRingAt[1]);
         }
     }
@@ -650,7 +659,7 @@ static void DrawRoute() {
 
 /** @brief A UI point to the map tile under it, or none outside the viewport. */
 static std::optional<std::pair<int, int>> TileAtPoint(int point_x, int point_y) {
-    const auto& rect = G.map_rect;
+    const auto& rect = g_app.map_rect;
     if (point_x < rect.x || point_y < rect.y || point_x >= rect.x + rect.w ||
         point_y >= rect.y + rect.h)
         return std::nullopt;
@@ -664,17 +673,18 @@ static std::optional<std::pair<int, int>> TileAtPoint(int point_x, int point_y) 
 /** @brief The player's armies on the tile, as many as a stack may hold. */
 static std::vector<Army*> SelectableAt(int x, int y) {
     std::vector<Army*> out;
-    for (Army* army : game::ArmiesAt(*G.g, x, y))
-        if (army->owner == G.player->index && static_cast<int>(out.size()) < w2::rules::kMaxStack)
+    for (Army* army : game::ArmiesAt(*g_app.g, x, y))
+        if (army->owner == g_app.player->index &&
+            static_cast<int>(out.size()) < w2::rules::kMaxStack)
             out.push_back(army);
     return out;
 }
 
 /** @brief Picks up whatever the slots now say moves, and remembers the grouping. */
 static void SyncSelection() {
-    if (!G.selection) return;
-    auto& sel = *G.selection;
-    slots_mod::Commit(sel.slots, *G.g);
+    if (!g_app.selection) return;
+    auto& sel = *g_app.selection;
+    slots_mod::Commit(sel.slots, *g_app.g);
     sel.stack = slots_mod::Selected(sel.slots);
     // being in the group that moves puts an army back in the cycle and marks
     // it offered for this pass
@@ -690,15 +700,16 @@ static void SyncSelection() {
  * With none of them left the selection goes.
  */
 static void Reslot(const std::vector<Army*>& armies) {
-    if (!G.selection) return;
-    auto kept = armies.empty() ? std::nullopt : slots_mod::Keep(G.selection->slots, *G.g, armies);
+    if (!g_app.selection) return;
+    auto kept = armies.empty() ? std::nullopt
+                               : slots_mod::Keep(g_app.selection->slots, *g_app.g, armies);
     if (!kept) {
-        G.selection.reset();
+        g_app.selection.reset();
         return;
     }
-    G.selection->slots = *kept;
-    G.selection->x = kept->army[0]->x;
-    G.selection->y = kept->army[0]->y;
+    g_app.selection->slots = *kept;
+    g_app.selection->x = kept->army[0]->x;
+    g_app.selection->y = kept->army[0]->y;
     SyncSelection();
 }
 
@@ -715,14 +726,14 @@ static const int kSunkGroup = 0xa8;
  * @return Whether any did; if not, `after` runs at once.
  */
 static bool DrownStranded(int x, int y, kit::Done after = nullptr) {
-    int sunk = game::SinkStranded(*G.g, *G.player, x, y);
+    int sunk = game::SinkStranded(*g_app.g, *g_app.player, x, y);
     if (sunk == 0) {
         if (after) after();
         return false;
     }
     sound::Effect("splash");
-    G.selection.reset();
-    G.route.reset();
+    g_app.selection.reset();
+    g_app.route.reset();
     front::StratDirty();
     if (x != kNone) CentreOn(x, y);
     std::string line =
@@ -741,32 +752,32 @@ static void Select(int x, int y, Army* pick) {
     if (DrownStranded(x, y)) return;
     auto stack = SelectableAt(x, y);
     if (stack.empty()) {
-        G.selection.reset();
-        if (City* city = game::CityAt(*G.g, x, y)) front::OpenCity(city);
+        g_app.selection.reset();
+        if (City* city = game::CityAt(*g_app.g, x, y)) front::OpenCity(city);
         return;
     }
     // a click selects one army, not the stack (docs/re/ui.md > The army slots)
-    auto chosen = slots_mod::Clicked(*G.g, stack, G.player->index, pick);
+    auto chosen = slots_mod::Clicked(*g_app.g, stack, g_app.player->index, pick);
     Selection sel;
     sel.x = x;
     sel.y = y;
-    sel.slots = slots_mod::Build(*G.g, stack, G.player->index, &chosen);
-    G.selection = sel;
+    sel.slots = slots_mod::Build(*g_app.g, stack, g_app.player->index, &chosen);
+    g_app.selection = sel;
     SyncSelection();
     RefreshRoute();
     // the tutorial on picking a stack up
     std::vector<std::string> moments = {"move"};
     for (int dx = -1; dx <= 1; dx++) {
         for (int dy = -1; dy <= 1; dy++) {
-            City* neighbour = game::CityAt(*G.g, x + dx, y + dy);
-            if (neighbour && neighbour->owner_index != G.player->index && !neighbour->razed &&
+            City* neighbour = game::CityAt(*g_app.g, x + dx, y + dy);
+            if (neighbour && neighbour->owner_index != g_app.player->index && !neighbour->razed &&
                 moments.size() == 1)
                 moments.push_back("fight");
         }
     }
-    Army* lead = G.selection->stack.empty() ? nullptr : G.selection->stack[0];
-    if (lead && lead->Hero() && !G.g->map->site_at.empty() &&
-        G.g->map->site_at[y * G.g->map->width + x])
+    Army* lead = g_app.selection->stack.empty() ? nullptr : g_app.selection->stack[0];
+    if (lead && lead->Hero() && !g_app.g->map->site_at.empty() &&
+        g_app.g->map->site_at[y * g_app.g->map->width + x])
         moments.push_back("search");
     tutorial::Chain(moments);
 }
@@ -793,7 +804,7 @@ static std::pair<int, int> CapOf(const Side* side) {
 
 /** @brief Starts the army cycle over from the player's capital. */
 static void CycleReset() {
-    G.cursor = CapOf(G.player);
+    g_app.cursor = CapOf(g_app.player);
 }
 
 /**
@@ -801,7 +812,8 @@ static void CycleReset() {
  *        first); one standing exactly there counts as far away.
  */
 static int CycleRank(const Army* army) {
-    int distance = std::abs(army->x - G.cursor->first) + std::abs(army->y - G.cursor->second);
+    int distance =
+            std::abs(army->x - g_app.cursor->first) + std::abs(army->y - g_app.cursor->second);
     return distance == 0 ? 9000 : distance;
 }
 
@@ -812,11 +824,12 @@ static int CycleRank(const Army* army) {
  * starts over. nullptr when every army has moved, is fortified or is done.
  */
 static Army* NextArmy() {
-    if (!G.cursor) CycleReset();
+    if (!g_app.cursor) CycleReset();
     Army* fresh = nullptr;
     Army* used = nullptr;
-    for (Army* army : G.g->armies) {
-        if (army->owner == G.player->index && !army->transit && !army->fortified && !army->done) {
+    for (Army* army : g_app.g->armies) {
+        if (army->owner == g_app.player->index && !army->transit && !army->fortified &&
+            !army->done) {
             if (army->offered) {
                 if (!used || CycleRank(army) < CycleRank(used)) used = army;
             } else if (!fresh || CycleRank(army) < CycleRank(fresh)) {
@@ -826,11 +839,11 @@ static Army* NextArmy() {
     }
     if (!fresh) {
         if (!used) return nullptr;
-        for (Army* army : G.g->armies)
-            if (army->owner == G.player->index) army->offered = false;
+        for (Army* army : g_app.g->armies)
+            if (army->owner == g_app.player->index) army->offered = false;
         fresh = used;
     }
-    G.cursor = std::make_pair(fresh->x, fresh->y);
+    g_app.cursor = std::make_pair(fresh->x, fresh->y);
     return fresh;
 }
 
@@ -838,8 +851,8 @@ static Army* NextArmy() {
 static void SelectNext() {
     Army* army = NextArmy();
     if (!army) {
-        G.selection.reset();
-        G.route.reset();
+        g_app.selection.reset();
+        g_app.route.reset();
         Say("Every army has moved.");
         sound::Effect("chord");  // nothing left
         return;
@@ -851,26 +864,26 @@ static void SelectNext() {
 
 /** @brief Takes the selection out of the cycle for the rest of this turn (control 175). */
 static void QuitArmy() {
-    if (!G.selection) {
+    if (!g_app.selection) {
         SelectNext();
         return;
     }
-    for (Army* army : G.selection->stack) army->done = true;
-    G.route.reset();
+    for (Army* army : g_app.selection->stack) army->done = true;
+    g_app.route.reset();
     SelectNext();
 }
 
 /** @brief Digs the selection in: out of the cycle until picked up again (control 176). */
 static void Fortify() {
-    if (!G.selection) {
+    if (!g_app.selection) {
         SelectNext();
         return;
     }
-    for (Army* army : G.selection->stack) {
+    for (Army* army : g_app.selection->stack) {
         army->fortified = true;
         army->target.reset();
     }
-    G.route.reset();
+    g_app.route.reset();
     SelectNext();
 }
 
@@ -884,11 +897,11 @@ static const double kDoubleClick = 40 / 18.2;
  * groups the whole stack as Space does; otherwise it selects what is there.
  */
 static void SelectClick(int tile_x, int tile_y) {
-    double now = w2::Now(), last = G.last_select_click;
-    G.last_select_click = now;
-    if (G.selection && G.selection->x == tile_x && G.selection->y == tile_y && last >= 0 &&
-        now - last < kDoubleClick) {
-        slots_mod::All(G.selection->slots, *G.g);
+    double now = w2::Now(), last = g_app.last_select_click;
+    g_app.last_select_click = now;
+    if (g_app.selection && g_app.selection->x == tile_x && g_app.selection->y == tile_y &&
+        last >= 0 && now - last < kDoubleClick) {
+        slots_mod::All(g_app.selection->slots, *g_app.g);
         front::AfterSlotChange();
         RefreshControls();
         return;
@@ -898,9 +911,9 @@ static void SelectClick(int tile_x, int tile_y) {
 
 /** @brief Puts the selection down (control 178). */
 static void Deselect() {
-    G.selection.reset();
-    G.route.reset();
-    G.walk.reset();
+    g_app.selection.reset();
+    g_app.route.reset();
+    g_app.walk.reset();
 }
 
 // ------------------------------------------------------------------ the turn
@@ -911,10 +924,10 @@ static void Deselect() {
  */
 static void AfterBattle(const w2::Battle& result) {
     tutorial::Show("fresult");
-    if (G.selection) {
+    if (g_app.selection) {
         std::vector<Army*> alive;
-        for (int i = 0; i < G.selection->slots.n; i++) {
-            Army* army = G.selection->slots.army[i];
+        for (int i = 0; i < g_app.selection->slots.n; i++) {
+            Army* army = g_app.selection->slots.army[i];
             if (!result.dead_by_army.count(army)) alive.push_back(army);
         }
         Reslot(alive);
@@ -933,10 +946,10 @@ static const int kWarGroup = 0x8c;
  * on first. The battle is decided first, shown, and only then takes effect.
  */
 static void AttackTile(int x, int y) {
-    if (!G.selection || G.selection->stack.empty()) return;
-    auto& sel = *G.selection;
-    w2::Game& game_state = *G.g;
-    int player_index = G.player->index;
+    if (!g_app.selection || g_app.selection->stack.empty()) return;
+    auto& sel = *g_app.selection;
+    w2::Game& game_state = *g_app.g;
+    int player_index = g_app.player->index;
     auto here = game::ArmiesAt(game_state, x, y);
     City* city = game::CityAt(game_state, x, y);
     if (city && city->razed) city = nullptr;
@@ -947,7 +960,7 @@ static void AttackTile(int x, int y) {
         for (int i = 1; i <= 4; i++) options.lines.push_back(kit::Text(kWarGroup, i));
         options.confirm = true;
         options.ok = [x, y, player_index, owner](const std::string&) {
-            w2::diplomacy::AttackAnyway(*G.g, player_index, owner);
+            w2::diplomacy::AttackAnyway(*g_app.g, player_index, owner);
             AttackTile(x, y);
         };
         input::Open(options);
@@ -959,12 +972,12 @@ static void AttackTile(int x, int y) {
     }
     if (owner == player_index || (!city && here.empty())) return;
     OrderTo(sel.stack, kNone, kNone);
-    G.route.reset();
+    g_app.route.reset();
     game::ChargeAttack(game_state, sel.stack, x, y);
     // decided first, shown, and only then taken effect
     w2::Battle result = game::DecideAttack(game_state, sel.stack, x, y);
     StartAssault(x, y, result);
-    G.assault->after = [result]() { AfterBattle(result); };
+    g_app.assault->after = [result]() { AfterBattle(result); };
 }
 
 /**
@@ -974,11 +987,11 @@ static void AttackTile(int x, int y) {
  * (AttackTile).
  */
 static void MoveSelection(int x, int y) {
-    if (!G.selection) return;
-    auto& sel = *G.selection;
+    if (!g_app.selection) return;
+    auto& sel = *g_app.selection;
     OrderTo(sel.stack, x, y);
-    G.route = move::PreviewRoute(*G.g, sel.stack, x, y);
-    auto walk_result = move::MoveTo(*G.g, sel.stack, x, y);
+    g_app.route = move::PreviewRoute(*g_app.g, sel.stack, x, y);
+    auto walk_result = move::MoveTo(*g_app.g, sel.stack, x, y);
     if (walk_result.stopped == "attack") walk_result.stopped = "blocked";
     if (walk_result.stopped == "no route") {
         Say("There is no way there.");
@@ -996,18 +1009,18 @@ static void MoveSelection(int x, int y) {
     // a walk that leaves the stack out of moves ends its turn: done for the
     // turn and put down -- once the walk has played out, as the original
     // draws every step first
-    if (walk_result.out_of_moves && G.selection) {
-        if (G.walk)
-            G.walk->put_down = G.selection->stack;
+    if (walk_result.out_of_moves && g_app.selection) {
+        if (g_app.walk)
+            g_app.walk->put_down = g_app.selection->stack;
         else
-            PutDown(G.selection->stack);
+            PutDown(g_app.selection->stack);
     }
-    if (G.selection && !G.selection->stack.empty()) {
-        G.selection->x = G.selection->stack[0]->x;
-        G.selection->y = G.selection->stack[0]->y;
-        if (!G.walk) CentreOn(G.selection->x, G.selection->y);
+    if (g_app.selection && !g_app.selection->stack.empty()) {
+        g_app.selection->x = g_app.selection->stack[0]->x;
+        g_app.selection->y = g_app.selection->stack[0]->y;
+        if (!g_app.walk) CentreOn(g_app.selection->x, g_app.selection->y);
     }
-    if (!G.walk) RefreshRoute();
+    if (!g_app.walk) RefreshRoute();
 }
 
 // ------------------------------------------------------------------ the pointer
@@ -1039,18 +1052,19 @@ static const int kPtrHot[12] = {0, 6, 8, 6, 8, 8, 8, 8, 0, 8, 8, 0};
  * @brief The pointer (Ptr) for the UI point (x, y): what a click there would do.
  */
 static int PointerKind(int x, int y) {
-    if (G.starting || G.over || G.banner || G.offer || G.assault || G.victory || G.ai_run ||
-        G.open_menu >= 0 || kit::Top() || !G.player || G.player->computer) {
+    if (g_app.starting || g_app.over || g_app.banner || g_app.offer || g_app.assault ||
+        g_app.victory || g_app.ai_run || g_app.open_menu >= 0 || kit::Top() || !g_app.player ||
+        g_app.player->computer) {
         return kArrow;
     }
-    if (G.drag) return kHand;  // while it drags
+    if (g_app.drag) return kHand;  // while it drags
     bool alt = Held({"lalt", "ralt"}), ctrl = Held({"lctrl", "rctrl"});
-    if (G.strat_rect.Contains(x, y)) return alt ? kAlt : kView;
+    if (g_app.strat_rect.Contains(x, y)) return alt ? kAlt : kView;
     auto tile = TileAtPoint(x, y);
-    if (!tile) return G.panel_rect.Contains(x, y) ? kHand : kArrow;
+    if (!tile) return g_app.panel_rect.Contains(x, y) ? kHand : kArrow;
     auto [tile_x, tile_y] = *tile;
-    w2::Game& game_state = *G.g;
-    int player_index = G.player->index;
+    w2::Game& game_state = *g_app.g;
+    int player_index = g_app.player->index;
     if (tile_x < 0 || tile_y < 0 || tile_x >= game_state.map->width ||
         tile_y >= game_state.map->height)
         return kHand;
@@ -1064,7 +1078,7 @@ static int PointerKind(int x, int y) {
     int terrain = city ? (city->razed ? move::kSite : move::kCity)
                        : w2::scn::TerrainAt(*game_state.map, tile_x, tile_y);
     const std::vector<Army*>* sel =
-            G.selection && !G.selection->stack.empty() ? &G.selection->stack : nullptr;
+            g_app.selection && !g_app.selection->stack.empty() ? &g_app.selection->stack : nullptr;
     int dist = 0, mode = kNone, under = move::kPlain;
     bool at_sea = false;
     if (sel) {
@@ -1132,10 +1146,11 @@ static int PointerKind(int x, int y) {
  */
 static void DrawPointer() {
     if (display::PointerAway()) return;
-    int kind = display::d.off ? kArrow : PointerKind(G.mouse_x, G.mouse_y);
-    auto [x, y] = display::d.off ? *display::d.off : std::make_pair(G.mouse_x, G.mouse_y);
+    int kind = display::state.off ? kArrow : PointerKind(g_app.mouse_x, g_app.mouse_y);
+    auto [x, y] =
+            display::state.off ? *display::state.off : std::make_pair(g_app.mouse_x, g_app.mouse_y);
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.pointer_img, gfx::NewQuad(kind * 16, 0, 16, 16), x - kPtrHot[kind],
+    gfx::Draw(g_app.pointer_img, gfx::NewQuad(kind * 16, 0, 16, 16), x - kPtrHot[kind],
               y - kPtrHot[kind]);
 }
 
@@ -1147,7 +1162,7 @@ static const int kBannerNameY = 85, kBannerTurnY = 130;
 
 /** @brief Raises the start-of-turn banner for the side, with its fanfare. */
 static void ShowBanner(Side* side) {
-    G.banner = Banner{side->name, G.g->turn, side->colour, side->edge};
+    g_app.banner = Banner{side->name, g_app.g->turn, side->colour, side->edge};
     sound::Effect("turn");  // the fanfare, TURN.8SN
 }
 
@@ -1183,18 +1198,18 @@ static bool offer_typing = false;
  * among its humans and only holds back the re-centring.
  */
 static bool HotseatHidden() {
-    if (G.g->map->options.hidden_map == 0) return false;
+    if (g_app.g->map->options.hidden_map == 0) return false;
     int humans = 0;
-    for (auto& side : G.g->map->sides)
+    for (auto& side : g_app.g->map->sides)
         if (side.in_use && side.alive && !side.computer) humans++;
     return humans > 1;
 }
 
 /** @brief Closes the banner, and only then lets the turn's first dialog through. */
 static void DismissBanner() {
-    G.banner.reset();
-    if (G.map_after_banner) CentreOn(CapOf(G.player).first, CapOf(G.player).second);
-    G.map_after_banner = false;
+    g_app.banner.reset();
+    if (g_app.map_after_banner) CentreOn(CapOf(g_app.player).first, CapOf(g_app.player).second);
+    g_app.map_after_banner = false;
     // whoever is left on the water without a boat drowns, and only then does
     // the advisor have his say; the turn's opening then puts on the hero's
     // music or the turn's
@@ -1206,19 +1221,20 @@ static void DismissBanner() {
  *        promotions, the music, the tutorial, then the hero offer.
  */
 static void AfterBanner() {
-    int says = sound::SpeechOn() ? w2::cues::AdvisorCue(*G.g, *G.player, front::Roll) : kNone;
+    int says =
+            sound::SpeechOn() ? w2::cues::AdvisorCue(*g_app.g, *g_app.player, front::Roll) : kNone;
     // then the heroes promoted, each in its own popup, and the hero offer
     // with its music, or the turn's
     advisor::Say(says, []() {
-        auto promoted = G.player->promoted;
-        G.player->promoted.clear();
+        auto promoted = g_app.player->promoted;
+        g_app.player->promoted.clear();
         honours::Promotions(promoted, []() {
-            sound::Music(G.player->hero_offer ? w2::cues::kHero : w2::cues::kPlay);
+            sound::Music(g_app.player->hero_offer ? w2::cues::kHero : w2::cues::kPlay);
             std::vector<std::string> moments;
-            if (G.g->turn == 2) moments.push_back("turn2");
-            if (G.player->hero_offer) moments.push_back("hero");
+            if (g_app.g->turn == 2) moments.push_back("turn2");
+            if (g_app.player->hero_offer) moments.push_back("hero");
             tutorial::Chain(moments, []() {
-                if (!PresentOffer(G.player)) AfterOffer();
+                if (!PresentOffer(g_app.player)) AfterOffer();
             });
         });
     });
@@ -1235,7 +1251,7 @@ static std::vector<std::string> HeroLines(const w2::HeroOffer& offer, bool femal
     auto line = [first](int idx) { return kit::Text(kHeroLineGroup, first + idx); };
     if (offer.first) return {line(0), line(1), line(2), Format(line(3), offer.city->name)};
     return {Format(line(4), offer.city->name), Format(line(5), offer.price),
-            Format(line(6), G.player->gold), line(7)};
+            Format(line(6), g_app.player->gold), line(7)};
 }
 
 /**
@@ -1244,26 +1260,26 @@ static std::vector<std::string> HeroLines(const w2::HeroOffer& offer, bool femal
  */
 static bool PresentOffer(Side* side) {
     if (!side->hero_offer) return false;
-    if (!G.hero_view) G.hero_view = screen::MakeView(*G.screen, kHeroDialog);
-    G.offer = side->hero_offer;
+    if (!g_app.hero_view) g_app.hero_view = screen::MakeView(*g_app.screen, kHeroDialog);
+    g_app.offer = side->hero_offer;
     // the name and sex were rolled with the offer; the checkboxes only change
     // the wording and the picture
-    G.offer_female = G.offer->female;
-    G.offer_name = G.offer->name.empty() ? "Hero" : G.offer->name;
-    G.hero_view->state[kHeroCancel] = G.offer->first ? kDisabled : kNormal;
-    G.hero_view->state[kHeroOk] = kNormal;
+    g_app.offer_female = g_app.offer->female;
+    g_app.offer_name = g_app.offer->name.empty() ? "Hero" : g_app.offer->name;
+    g_app.hero_view->state[kHeroCancel] = g_app.offer->first ? kDisabled : kNormal;
+    g_app.hero_view->state[kHeroOk] = kNormal;
     return true;
 }
 
 /** @brief Takes the offer: the hero joins under the name and sex now in the dialog. */
 static void AcceptOffer() {
-    auto offer = G.offer;
-    offer->name = G.offer_name;
-    offer->female = G.offer_female;
-    auto hired = w2::hero::Recruit(*G.g, *G.player, *offer);
+    auto offer = g_app.offer;
+    offer->name = g_app.offer_name;
+    offer->female = g_app.offer_female;
+    auto hired = w2::hero::Recruit(*g_app.g, *g_app.player, *offer);
     Army* hero = hired.hero;
-    G.offer.reset();
-    G.player->hero_offer.reset();
+    g_app.offer.reset();
+    g_app.player->hero_offer.reset();
     CentreOn(hero->x, hero->y);
     if (hired.count > 0) {
         // "And the hero brings 1 ally!" / "... %d allies!": the number rolled,
@@ -1281,26 +1297,26 @@ static void AcceptOffer() {
  *        build -- or on turn 1 the capital's dialog opens in Production.
  */
 static void AfterOffer() {
-    if (G.player->computer) return;
-    game::HumanProduction(*G.g, *G.player);
+    if (g_app.player->computer) return;
+    game::HumanProduction(*g_app.g, *g_app.player);
     front::StratDirty();
-    auto cap = CapOf(G.player);
-    City* city = game::CityAt(*G.g, cap.first, cap.second);
-    if (G.g->turn == 1 && city) {
+    auto cap = CapOf(g_app.player);
+    City* city = game::CityAt(*g_app.g, cap.first, cap.second);
+    if (g_app.g->turn == 1 && city) {
         city::Open(city, city::kProduction);
         return;
     }
-    if (G.modern_ui && !G.player->missives.empty()) {
+    if (g_app.modern_ui && !g_app.player->missives.empty()) {
         diplomacyui::PollMissives();
     } else {
-        G.player->missives.clear();
+        g_app.player->missives.clear();
     }
 }
 
 /** @brief Turns the hero offer down. */
 static void RefuseOffer() {
-    G.offer.reset();
-    G.player->hero_offer.reset();
+    g_app.offer.reset();
+    g_app.player->hero_offer.reset();
     AfterOffer();
 }
 
@@ -1318,7 +1334,7 @@ static Side* ai_result = nullptr;   ///< Where the round ended.
 
 /** @brief Whether any human is still in the game. */
 static bool HumansLeft() {
-    return G.g && game::HasActiveHuman(*G.g);
+    return g_app.g && game::HasActiveHuman(*g_app.g);
 }
 
 /** @brief Whether the side's turn is shown: it is observed, or no human is left. */
@@ -1332,8 +1348,8 @@ static bool ShownSide(const Side* side) {
  * @param ticks How long to wait, in BIOS ticks; none when running through.
  */
 static void Status(const std::string& text, int ticks) {
-    if (G.ai_status) G.ai_status->text = text;
-    if (ticks > 0 && !G.ai_skip && ai_co) {
+    if (g_app.ai_status) g_app.ai_status->text = text;
+    if (ticks > 0 && !g_app.ai_skip && ai_co) {
         Yield pause;
         pause.what = "pause";
         pause.ticks = ticks;
@@ -1350,7 +1366,8 @@ static int ProgressOf(const std::string& phase) {
         {"assault XX", 70}, {"specials", 75},  {"rebuilding", 80},  {"last rescue", 85},
         {"production", 90}, {"economy", 92},   {"vectoring", 95}};
     auto found = kProgress.find(phase);
-    return found == kProgress.end() ? (G.ai_status ? G.ai_status->progress : 0) : found->second;
+    return found == kProgress.end() ? (g_app.ai_status ? g_app.ai_status->progress : 0)
+                                    : found->second;
 }
 
 /**
@@ -1360,11 +1377,11 @@ static int ProgressOf(const std::string& phase) {
 static void InstallHooks() {
     w2::ai::hooks.on_walk = [](w2::Game& game_state, const std::vector<Army*>& stack,
                                const move::WalkResult& walk_result) {
-        if (!ai_co || G.ai_skip || !ShownSide(G.ai_side)) return;
+        if (!ai_co || g_app.ai_skip || !ShownSide(g_app.ai_side)) return;
         bool seen = !HumansLeft();
         for (auto& tile : walk_result.walked) {
             if (seen) break;
-            if (game::Seen(game_state, G.player->index, tile.first, tile.second)) seen = true;
+            if (game::Seen(game_state, g_app.player->index, tile.first, tile.second)) seen = true;
         }
         if (seen) {
             Yield walk_step;
@@ -1380,7 +1397,7 @@ static void InstallHooks() {
     // watched or the defender is a human.
     w2::ai::hooks.on_fight = [](w2::Game& game_state, const std::vector<Army*>&, int x, int y,
                                 w2::Battle& result) {
-        if (!ai_co || !G.ai_status) return;
+        if (!ai_co || !g_app.ai_status) return;
         int defender = kNone;
         if (result.lines.city)
             defender = result.lines.city->owner_index;
@@ -1389,7 +1406,7 @@ static void InstallHooks() {
         Side* def_side =
                 defender != kNone && defender < 8 ? &game_state.map->sides[defender] : nullptr;
         bool human = def_side && !def_side->computer;
-        if (!(ShownSide(G.ai_side) || human)) return;
+        if (!(ShownSide(g_app.ai_side) || human)) return;
         std::vector<Side*> humans;
         for (Side* side : game_state.sides)
             if (side->alive && !side->computer) humans.push_back(side);
@@ -1403,7 +1420,7 @@ static void InstallHooks() {
                 attacking_hero = army;
                 break;
             }
-        std::string attacker_name = G.ai_side->name;
+        std::string attacker_name = g_app.ai_side->name;
         std::string outcome;
         if (!result.won)
             outcome = Format(text_of(0x98), attacker_name);
@@ -1412,7 +1429,7 @@ static void InstallHooks() {
         else
             outcome = Format(text_of(0x96), attacker_name);
         bool hidden_many = game_state.map->options.hidden_map != 0 && humans.size() > 1;
-        bool window = !hidden_many && ((ShownSide(G.ai_side) && def_side) || human);
+        bool window = !hidden_many && ((ShownSide(g_app.ai_side) && def_side) || human);
         bool cloud = !hidden_many;
         // the original slides the view box to the battle and centres the map
         // on it, Observe or not -- a human attacked gets to see where
@@ -1421,12 +1438,12 @@ static void InstallHooks() {
             front::StratDirty();
         }
         Status(def_side ? Format(text_of(0x94), def_side->name) : text_of(0x95), 5);
-        if (cloud && !G.ai_skip) {
+        if (cloud && !g_app.ai_skip) {
             StartAssault(x, y, result);
-            G.assault->computer = true;
-            G.assault->window = window;
-            G.assault->outcome = outcome;
-            G.assault->message = {outcome};
+            g_app.assault->computer = true;
+            g_app.assault->window = window;
+            g_app.assault->outcome = outcome;
+            g_app.assault->message = {outcome};
             Yield assault_step;
             assault_step.what = "assault";
             ai_co->YieldValue(assault_step);
@@ -1456,7 +1473,7 @@ static void ComputerTurns(Coroutine& coroutine, Side* side) {
     // playing -- in the status bar for 100 ticks, then the last human's fall
     // in two boxes. The rest waits for the turn that follows (ui/ending.cpp).
     auto announce = [&coroutine, &yield_what]() {
-        w2::Ending& round_end = G.g->ending;
+        w2::Ending& round_end = g_app.g->ending;
         if (round_end.told) return;
         round_end.told = true;
         auto fallen = round_end.fallen;
@@ -1476,23 +1493,23 @@ static void ComputerTurns(Coroutine& coroutine, Side* side) {
     };
     announce();  // a human's turn may have ended the round
     while (side && side->computer) {
-        G.ai_side = side;
+        g_app.ai_side = side;
         // each computer turn opens with a song that plays once
-        sound::Music(w2::cues::kComputer, G.g->sides);
-        G.ai_status = AiStatus{side, side->name, 5};
+        sound::Music(w2::cues::kComputer, g_app.g->sides);
+        g_app.ai_status = AiStatus{side, side->name, 5};
         yield_what("progress");
         if (ShownSide(side)) {
             auto news = side->diplo_news;
             for (auto& news_line : news) Status(news_line, 20);
         }
         side->diplo_news.clear();
-        w2::ai::PlayTurn(*G.g, *side, [&](const char* phase) {
-            G.ai_status->progress = ProgressOf(phase);
+        w2::ai::PlayTurn(*g_app.g, *side, [&](const char* phase) {
+            g_app.ai_status->progress = ProgressOf(phase);
             yield_what("progress");
         });
-        G.ai_status->progress = 100;
+        g_app.ai_status->progress = 100;
         yield_what("progress");
-        side = game::EndTurn(*G.g);
+        side = game::EndTurn(*g_app.g);
         announce();
         yield_what("turn");
     }
@@ -1504,56 +1521,58 @@ static void ComputerTurns(Coroutine& coroutine, Side* side) {
  *        what it yielded: a pause, a walk, a message, or the round's end.
  */
 static void ResumeComputer() {
-    if (!G.ai_run) return;
-    G.ai_wait = false;
-    bool more = G.ai_run->Resume();
+    if (!g_app.ai_run) return;
+    g_app.ai_wait = false;
+    bool more = g_app.ai_run->Resume();
     if (!more) {
-        G.ai_run.reset();
+        g_app.ai_run.reset();
         ai_co = nullptr;
-        G.ai_skip = false;
-        G.ai_side = nullptr;
+        g_app.ai_skip = false;
+        g_app.ai_side = nullptr;
         FinishRound(ai_result);
         return;
     }
     front::StratDirty();
-    const Yield& step = G.ai_run->Value();
+    const Yield& step = g_app.ai_run->Value();
     if (step.what == "pause") {
-        G.ai_resume_at = w2::Now() + step.ticks / 18.2;
-        G.ai_wait = true;
+        g_app.ai_resume_at = w2::Now() + step.ticks / 18.2;
+        g_app.ai_wait = true;
     } else if (step.what == "walk") {
         StartWalk(step.armies, step.tiles, step.sea_before);
-        if (G.walk)
-            G.walk->computer = true;
+        if (g_app.walk)
+            g_app.walk->computer = true;
         else
-            G.ai_wait = true;
+            g_app.ai_wait = true;
     } else if (step.what == "nohumans") {
         // the last human is gone, and the war goes on
         auto text_of = [](int line) { return kit::Text(0xd, line); };
         search::ShowMessage(text_of(0), text_of(1), [text_of]() {
-            search::ShowMessage(text_of(2), text_of(3), []() { G.ai_wait = true; });
+            search::ShowMessage(text_of(2), text_of(3), []() { g_app.ai_wait = true; });
         });
     } else if (step.what == "fallen") {
-        search::Say(step.text, []() { G.ai_wait = true; });
+        search::Say(step.text, []() { g_app.ai_wait = true; });
     } else {
         // a turn done, or a battle up: go on at the next frame free of it
-        G.ai_wait = true;
+        g_app.ai_wait = true;
     }
 }
 
 /** @brief Called every frame: carries the computer on once nothing is in its way. */
 static void StepComputer() {
-    if (!G.ai_run || !G.ai_wait || G.walk || G.assault || kit::Top() || G.open_menu >= 0) return;
-    if (G.ai_resume_at > 0) {
-        if (w2::Now() < G.ai_resume_at && !G.ai_skip) return;
-        G.ai_resume_at = 0;
+    if (!g_app.ai_run || !g_app.ai_wait || g_app.walk || g_app.assault || kit::Top() ||
+        g_app.open_menu >= 0)
+        return;
+    if (g_app.ai_resume_at > 0) {
+        if (w2::Now() < g_app.ai_resume_at && !g_app.ai_skip) return;
+        g_app.ai_resume_at = 0;
     }
     // only a Shift or Alt pressed since the round began: the Alt of Alt-E
     // is still down as the computer starts
     bool mods = Held({"lshift", "rshift"}) || Held({"lalt", "ralt"});
-    if (!mods) G.ai_mods_held = false;
-    if (mods && !G.ai_mods_held) {
-        G.ai_mods_held = true;
-        G.ai_skip = false;
+    if (!mods) g_app.ai_mods_held = false;
+    if (mods && !g_app.ai_mods_held) {
+        g_app.ai_mods_held = true;
+        g_app.ai_skip = false;
         settings::Open();
         return;
     }
@@ -1561,33 +1580,33 @@ static void StepComputer() {
     double until = w2::Now() + 0.03;
     do {
         ResumeComputer();
-    } while (G.ai_skip && G.ai_run && G.ai_wait && !G.walk && !G.assault && !kit::Top() &&
-             G.ai_resume_at == 0 && w2::Now() < until);
+    } while (g_app.ai_skip && g_app.ai_run && g_app.ai_wait && !g_app.walk && !g_app.assault &&
+             !kit::Top() && g_app.ai_resume_at == 0 && w2::Now() < until);
 }
 
 /** @brief Plays computer sides from `side` on, until a human's turn or the end. */
 static void PlayComputers(Side* side) {
-    G.ai_mods_held = Held({"lshift", "rshift"}) || Held({"lalt", "ralt"});
+    g_app.ai_mods_held = Held({"lshift", "rshift"}) || Held({"lalt", "ralt"});
     ai_result = nullptr;
-    G.ai_run = std::make_unique<Coroutine>(
+    g_app.ai_run = std::make_unique<Coroutine>(
             [side](Coroutine& coroutine) { ComputerTurns(coroutine, side); });
     ResumeComputer();
 }
 /** @brief Plays the computer sides from the side whose turn it is. */
 void front::PlayComputer() {
-    PlayComputers(G.g->side);
+    PlayComputers(g_app.g->side);
 }
 
 /** @brief End Turn: hands over to the next side, computer or human. */
 static void EndTurn() {
     // End Turn does nothing once the game is won: the winner stays on the
     // turn, to look the kingdom over
-    if (G.g->won) return;
+    if (g_app.g->won) return;
     // It puts the stack down, and its route with it: the next player sees no
     // other side's plans
-    G.selection.reset();
-    G.route.reset();
-    Side* side = game::EndTurn(*G.g);
+    g_app.selection.reset();
+    g_app.route.reset();
+    Side* side = game::EndTurn(*g_app.g);
     if (side && side->computer) return PlayComputers(side);
     FinishRound(side);
 }
@@ -1598,21 +1617,21 @@ static void EndTurn() {
  */
 static void FinishRound(Side* side) {
     if (!side) {
-        G.ai_status.reset();
-        G.over = true;
-        ending::Over(G.g->ending);
+        g_app.ai_status.reset();
+        g_app.over = true;
+        ending::Over(g_app.g->ending);
         return;
     }
-    G.player = side;
-    G.ai_status.reset();  // the bar is the player's again
+    g_app.player = side;
+    g_app.ai_status.reset();  // the bar is the player's again
     front::StratDirty();
     CycleReset();
     // the original centres on the side's capital -- but where the map is
     // hidden and more than one human plays, only once the banner is gone,
     // and until then neither map is shown
-    G.map_after_banner = HotseatHidden();
-    if (!G.map_after_banner) CentreOn(CapOf(side).first, CapOf(side).second);
-    ending::Show(G.g->ending, [side]() { ShowBanner(side); });
+    g_app.map_after_banner = HotseatHidden();
+    if (!g_app.map_after_banner) CentreOn(CapOf(side).first, CapOf(side).second);
+    ending::Show(g_app.g->ending, [side]() { ShowBanner(side); });
 }
 
 /** @brief Opens the city's dialog. */
@@ -1629,21 +1648,21 @@ void front::OpenQuest() {
  *        screen, and the view on its current side's capital.
  */
 void front::TakeLoaded(std::unique_ptr<w2::Game> loaded) {
-    G.g = std::move(loaded);
+    g_app.g = std::move(loaded);
     if (opt_military_advisor >= 0) {
-        G.g->map->options.military_advisor = opt_military_advisor;
-    } else if (G.g->map->options.military_advisor == 0) {
-        G.g->map->options.military_advisor = 1;
+        g_app.g->map->options.military_advisor = opt_military_advisor;
+    } else if (g_app.g->map->options.military_advisor == 0) {
+        g_app.g->map->options.military_advisor = 1;
     }
-    G.selection.reset();
-    G.route.reset();
-    G.walk.reset();
-    G.over = false;
-    G.starting = false;
-    G.map_after_banner = false;
+    g_app.selection.reset();
+    g_app.route.reset();
+    g_app.walk.reset();
+    g_app.over = false;
+    g_app.starting = false;
+    g_app.map_after_banner = false;
     front::StratDirty();
-    G.player = G.g->sides[G.g->current];
-    CentreOn(CapOf(G.player).first, CapOf(G.player).second);
+    g_app.player = g_app.g->sides[g_app.g->current];
+    CentreOn(CapOf(g_app.player).first, CapOf(g_app.player).second);
     sound::Music(w2::cues::kPlay);
 }
 
@@ -1654,7 +1673,7 @@ static Army* TopArmy(const std::vector<Army*>& stack) {
     Army* best = nullptr;
     int best_rank = kNone;
     for (Army* army : stack) {
-        int rank = G.g->map->fight_order[OwnerOr8(army->owner)][army->type];
+        int rank = g_app.g->map->fight_order[OwnerOr8(army->owner)][army->type];
         if (best_rank == kNone || rank > best_rank) {
             best = army;
             best_rank = rank;
@@ -1681,11 +1700,11 @@ static int StackFigure(const std::vector<Army*>& stack) {
  *        HIDDEN.PCK cell; cell 14, a tile with nothing seen round it, is black.
  */
 static void DrawFog() {
-    int viewer = game::ViewerSide(*G.g, G.player);
-    if (G.g->map->options.hidden_map == 0 || viewer == kNone) return;
-    for (int tile_y = G.view[1]; tile_y <= G.view[3]; tile_y++) {
-        for (int tile_x = G.view[0]; tile_x <= G.view[2]; tile_x++) {
-            int cell = game::FogCell(*G.g, viewer, tile_x, tile_y);
+    int viewer = game::ViewerSide(*g_app.g, g_app.player);
+    if (g_app.g->map->options.hidden_map == 0 || viewer == kNone) return;
+    for (int tile_y = g_app.view[1]; tile_y <= g_app.view[3]; tile_y++) {
+        for (int tile_x = g_app.view[0]; tile_x <= g_app.view[2]; tile_x++) {
+            int cell = game::FogCell(*g_app.g, viewer, tile_x, tile_y);
             if (cell == kNone) continue;
             int pixel_x = tile_x * kTile, pixel_y = tile_y * kTile;
             if (cell == game::kFogBlack) {
@@ -1693,7 +1712,7 @@ static void DrawFog() {
                 gfx::Rectangle(gfx::kFill, pixel_x, pixel_y, kTile, kTile);
             } else {
                 gfx::SetColor(1, 1, 1);
-                gfx::Draw(G.fog_img, gfx::NewQuad((cell % 7) * 48, (cell / 7) * 41, 40, 40),
+                gfx::Draw(g_app.fog_img, gfx::NewQuad((cell % 7) * 48, (cell / 7) * 41, 40, 40),
                           pixel_x, pixel_y);
             }
         }
@@ -1715,7 +1734,7 @@ static const int kFlagY[4] = {29, 38, 47, 56};
 static void DrawStack(int owner, int army_type, int count, int pixel_x, int pixel_y) {
     if (owner < 0 || owner > 8) owner = 8;
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.army_img[owner], kit::ArmyQuad(army_type), pixel_x + 8, pixel_y + 7);
+    gfx::Draw(g_app.army_img[owner], kit::ArmyQuad(army_type), pixel_x + 8, pixel_y + 7);
     PalColour(14);
     gfx::Rectangle(gfx::kFill, pixel_x + 2, pixel_y, 1, kTile);
     gfx::Rectangle(gfx::kFill, pixel_x + 4, pixel_y, 1, kTile);
@@ -1723,7 +1742,8 @@ static void DrawStack(int owner, int army_type, int count, int pixel_x, int pixe
     gfx::Rectangle(gfx::kFill, pixel_x + 3, pixel_y, 1, kTile);
     gfx::SetColor(1, 1, 1);
     auto flag = [&](int flag_size, int y) {
-        gfx::Draw(G.army_img[owner], gfx::NewQuad(464, kFlagY[flag_size - 1], 48, 8), pixel_x, y);
+        gfx::Draw(g_app.army_img[owner], gfx::NewQuad(464, kFlagY[flag_size - 1], 48, 8), pixel_x,
+                  y);
     };
     if (count > 4) {
         flag(1, pixel_y + 8);
@@ -1740,10 +1760,10 @@ static void DrawStack(int owner, int army_type, int count, int pixel_x, int pixe
  * stacks, the hidden map, the route, the walking stack and the selection box.
  */
 static void DrawMap() {
-    G.view = ViewTiles();
-    const auto& view = G.view;
+    g_app.view = ViewTiles();
+    const auto& view = g_app.view;
     std::map<int, std::vector<Army*>> armies_on;
-    for (Army* army : G.g->armies) {
+    for (Army* army : g_app.g->armies) {
         if (!army->transit && army->x != kNone && army->x >= view[0] && army->x <= view[2] &&
             army->y >= view[1] && army->y <= view[3])
             armies_on[army->x + army->y * 1000].push_back(army);
@@ -1751,8 +1771,8 @@ static void DrawMap() {
     // one item a tile: the last in item order (the original walks them from
     // the end)
     std::map<int, w2::Item*> items_on_tile;
-    for (int i = static_cast<int>(G.g->map->items.size()) - 1; i >= 0; i--) {
-        w2::Item& item = G.g->map->items[i];
+    for (int i = static_cast<int>(g_app.g->map->items.size()) - 1; i >= 0; i--) {
+        w2::Item& item = g_app.g->map->items[i];
         if (item.status == 1 && item.x != kNone && !items_on_tile.count(item.x + item.y * 1000))
             items_on_tile[item.x + item.y * 1000] = &item;
     }
@@ -1766,31 +1786,32 @@ static void DrawMap() {
     for (int tile_y = view[1]; tile_y <= view[3]; tile_y++) {
         for (int tile_x = view[0]; tile_x <= view[2]; tile_x++) {
             int pixel_x = tile_x * kTile, pixel_y = tile_y * kTile;
-            int tile = w2::scn::TileAt(*G.g->map, tile_x, tile_y);
+            int tile = w2::scn::TileAt(*g_app.g->map, tile_x, tile_y);
             int sheet = std::min(1, tile / 96);
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.sheets[sheet], TileQuad(tile), pixel_x, pixel_y);
-            int road = w2::scn::RoadAt(*G.g->map, tile_x, tile_y);
-            if (road != 0) gfx::Draw(G.road_img, RoadQuad(road - 1), pixel_x, pixel_y);
+            gfx::Draw(g_app.sheets[sheet], TileQuad(tile), pixel_x, pixel_y);
+            int road = w2::scn::RoadAt(*g_app.g->map, tile_x, tile_y);
+            if (road != 0) gfx::Draw(g_app.road_img, RoadQuad(road - 1), pixel_x, pixel_y);
             // a port -- a crossing, map word bit 15 -- takes the anchor, at the
             // tile's corner after the roads
-            if (w2::scn::IsCrossing(*G.g->map, tile_x, tile_y))
-                gfx::Draw(G.atrans_shields, gfx::NewQuad(0, 0, 32, 29), pixel_x, pixel_y);
+            if (w2::scn::IsCrossing(*g_app.g->map, tile_x, tile_y))
+                gfx::Draw(g_app.atrans_shields, gfx::NewQuad(0, 0, 32, 29), pixel_x, pixel_y);
             // items on the ground: a planted standard as its side's flag, army
             // cell 29; anything else as the bag
             auto here = items_on_tile.find(tile_x + tile_y * 1000);
             if (here != items_on_tile.end()) {
                 w2::Item* item = here->second;
                 if (item->planted && item->standard_of != kNone)
-                    gfx::Draw(G.army_img[item->standard_of], kit::ArmyQuad(29), pixel_x, pixel_y);
+                    gfx::Draw(g_app.army_img[item->standard_of], kit::ArmyQuad(29), pixel_x,
+                              pixel_y);
                 else
-                    gfx::Draw(G.atrans_shields, gfx::NewQuad(64, 0, 32, 29), pixel_x, pixel_y);
+                    gfx::Draw(g_app.atrans_shields, gfx::NewQuad(64, 0, 32, 29), pixel_x, pixel_y);
             }
             auto armies_here = armies_on.find(tile_x + tile_y * 1000);
             if (armies_here != armies_on.end()) {
                 std::vector<Army*> stack;
                 for (Army* army : armies_here->second)
-                    if (!(G.walk && G.walk->armies.count(army))) stack.push_back(army);
+                    if (!(g_app.walk && g_app.walk->armies.count(army))) stack.push_back(army);
                 if (!stack.empty())
                     standing.push_back(Standing{stack, tile_x, tile_y, pixel_x, pixel_y});
             }
@@ -1798,24 +1819,26 @@ static void DrawMap() {
     }
     // the ground first, then the encampments, then the stacks
     for (auto& stack_here : standing) {
-        if (game::TowerAt(*G.g, stack_here.x, stack_here.y)) {
+        if (game::TowerAt(*g_app.g, stack_here.x, stack_here.y)) {
             int owner = OwnerOr8(stack_here.stack[0]->owner);
             if (owner == 15) owner = 8;
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.road_img, gfx::NewQuad(owner * 48 + 192, 40, 48, 40), stack_here.sx,
+            gfx::Draw(g_app.road_img, gfx::NewQuad(owner * 48 + 192, 40, 48, 40), stack_here.sx,
                       stack_here.sy);
-            stack_here.hidden = !(G.selection && G.selection->x == stack_here.x &&
-                                  G.selection->y == stack_here.y);
+            stack_here.hidden = !(g_app.selection && g_app.selection->x == stack_here.x &&
+                                  g_app.selection->y == stack_here.y);
         }
     }
     // the selected stack's tile shows the lead of the group that moves
-    Army* lead = G.selection && !G.selection->stack.empty() ? TopArmy(G.selection->stack) : nullptr;
-    if (lead && G.walk && G.walk->armies.count(lead)) lead = nullptr;
+    Army* lead = g_app.selection && !g_app.selection->stack.empty()
+                         ? TopArmy(g_app.selection->stack)
+                         : nullptr;
+    if (lead && g_app.walk && g_app.walk->armies.count(lead)) lead = nullptr;
     for (auto& stack_here : standing) {
         if (stack_here.hidden) continue;
         Army* top = TopArmy(stack_here.stack);
         int figure = StackFigure(stack_here.stack);
-        if (lead && G.selection->x == stack_here.x && G.selection->y == stack_here.y) {
+        if (lead && g_app.selection->x == stack_here.x && g_app.selection->y == stack_here.y) {
             top = lead;
             figure = lead->at_sea ? kNavy : lead->type;
         }
@@ -1827,24 +1850,24 @@ static void DrawMap() {
     // the stack itself, wherever the walk has got to
     const auto* walk_pos = WalkingAt();
     if (walk_pos) {
-        Army* walker = G.walk->top;
+        Army* walker = g_app.walk->top;
         if (walker && Shown(walk_pos->first, walk_pos->second)) {
-            std::vector<Army*> walking(G.walk->armies.begin(), G.walk->armies.end());
+            std::vector<Army*> walking(g_app.walk->armies.begin(), g_app.walk->armies.end());
             Army* top = TopArmy(walking);
-            int figure = G.walk->sea_before ? kNavy : (top ? top->type : kNone);
+            int figure = g_app.walk->sea_before ? kNavy : (top ? top->type : kNone);
             DrawStack(OwnerOr8(walker->owner), figure, static_cast<int>(walking.size()),
                       walk_pos->first * kTile, walk_pos->second * kTile);
         }
     }
     // the selection box, which follows the walk
-    if (G.selection) {
-        int x = walk_pos ? walk_pos->first : G.selection->x;
-        int y = walk_pos ? walk_pos->second : G.selection->y;
+    if (g_app.selection) {
+        int x = walk_pos ? walk_pos->first : g_app.selection->x;
+        int y = walk_pos ? walk_pos->second : g_app.selection->y;
         if (Shown(x, y)) {
             gfx::SetColor(1, 1, 1);
-            int base = G.selection->stack.size() > 1 ? 4 : 0;
+            int base = g_app.selection->stack.size() > 1 ? 4 : 0;
             int frame = base + static_cast<int>(std::floor(w2::Now() * kCursRate)) % 4;
-            gfx::Draw(G.curs_img, gfx::NewQuad((frame % 4) * 64, (frame / 4) * 40, 40, 40),
+            gfx::Draw(g_app.curs_img, gfx::NewQuad((frame % 4) * 64, (frame / 4) * 40, 40, 40),
                       x * kTile, y * kTile);
         }
     }
@@ -1863,25 +1886,25 @@ static int strat_viewer = -99;
  */
 void front::DrawStrategicMap(int x, int y, const City* mark, bool no_cities,
                              const std::vector<int>* owners, int scroll, int rows) {
-    int viewer = game::ViewerSide(*G.g, G.player);
-    if (!G.strat_image || strat_viewer != viewer) {
-        G.strat_image = screen::StrategicImage(*G.screen, *G.g, viewer);
+    int viewer = game::ViewerSide(*g_app.g, g_app.player);
+    if (!g_app.strat_image || strat_viewer != viewer) {
+        g_app.strat_image = screen::StrategicImage(*g_app.screen, *g_app.g, viewer);
         strat_viewer = viewer;
     }
     gfx::SetScissor(x, y, 224, rows);
     y -= scroll;
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.strat_image, x, y);
+    gfx::Draw(g_app.strat_image, x, y);
     if (!no_cities) {
-        auto& cities = G.g->map->cities;
+        auto& cities = g_app.g->map->cities;
         for (size_t i = 0; i < cities.size(); i++) {
             const City& city = cities[i];
             int owner = owners && i < owners->size() ? (*owners)[i] : kNone;
             bool gone = owners ? owner == 0xff : city.razed;
-            if (!gone && game::Seen(*G.g, viewer, city.x, city.y)) {
+            if (!gone && game::Seen(*g_app.g, viewer, city.x, city.y)) {
                 int side = owners ? owner : OwnerOr8(city.owner_index);
-                gfx::Draw(G.atrans_shields, gfx::NewQuad(side * 16, 30, 8, 8), x + city.x * 2 - 1,
-                          y + city.y * 2 - 1);
+                gfx::Draw(g_app.atrans_shields, gfx::NewQuad(side * 16, 30, 8, 8),
+                          x + city.x * 2 - 1, y + city.y * 2 - 1);
             }
         }
     }
@@ -1894,12 +1917,13 @@ void front::DrawStrategicMap(int x, int y, const City* mark, bool no_cities,
         gfx::Rectangle(gfx::kFill, mark_x + 9, mark_y - 1, 1, 10);
     }
     // Highlight any Allied partner's broadcasted war target city on the strategic map
-    if (G.modern_ui && !no_cities && G.player && viewer != kNone) {
+    if (g_app.modern_ui && !no_cities && g_app.player && viewer != kNone) {
         for (int ally = 0; ally < 8; ally++) {
-            if (ally != G.player->index && w2::diplomacy::IsAllied(*G.g, G.player->index, ally)) {
-                int target_index = w2::diplomacy::AlliedTargetCity(*G.g, ally);
-                if (const City* target = G.g->map->City(target_index)) {
-                    if (!target->razed && game::Seen(*G.g, viewer, target->x, target->y)) {
+            if (ally != g_app.player->index &&
+                w2::diplomacy::IsAllied(*g_app.g, g_app.player->index, ally)) {
+                int target_index = w2::diplomacy::AlliedTargetCity(*g_app.g, ally);
+                if (const City* target = g_app.g->map->City(target_index)) {
+                    if (!target->razed && game::Seen(*g_app.g, viewer, target->x, target->y)) {
                         int target_x = x + target->x * 2 - 1, target_y = y + target->y * 2 - 1;
                         PalColour(11);
                         gfx::Rectangle(gfx::kFill, target_x - 2, target_y - 2, 12, 1);
@@ -1921,11 +1945,11 @@ void front::DrawStrategicMap(int x, int y, const City* mark, bool no_cities,
  * marker; `highlight` gets a white outline.
  */
 void front::DrawSiteMarkers(int x, int y, const w2::Site* highlight) {
-    int viewer = game::ViewerSide(*G.g, G.player);
+    int viewer = game::ViewerSide(*g_app.g, g_app.player);
     gfx::SetScissor(x, y, 224, 312);
-    for (auto& site : G.g->map->sites) {
-        if (!(viewer == kNone ||
-              (w2::site::ShownTo(site, *G.player) && game::Seen(*G.g, viewer, site.x, site.y))))
+    for (auto& site : g_app.g->map->sites) {
+        if (!(viewer == kNone || (w2::site::ShownTo(site, *g_app.player) &&
+                                  game::Seen(*g_app.g, viewer, site.x, site.y))))
             continue;
         int src_x, src_y;
         if (site.content == w2::site::kTemple) {
@@ -1944,7 +1968,8 @@ void front::DrawSiteMarkers(int x, int y, const w2::Site* highlight) {
         int marker_x = (site.x * 2 - 1 + 4) / 8 * 8;
         int marker_y = site.y * 2 - 1;
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.atrans_shields, gfx::NewQuad(src_x, src_y, 16, 10), x + marker_x, y + marker_y);
+        gfx::Draw(g_app.atrans_shields, gfx::NewQuad(src_x, src_y, 16, 10), x + marker_x,
+                  y + marker_y);
         if (&site == highlight) {
             kit::SetPal(15);
             kit::Outline(x + marker_x, y + marker_y, 12, 10);
@@ -1965,11 +1990,11 @@ static int strat_scroll = 0;
  * from that side.
  */
 static void FollowView() {
-    const auto& rect = G.strat_rect;
-    int full = G.g->map->height * 2;
+    const auto& rect = g_app.strat_rect;
+    int full = g_app.g->map->height * 2;
     auto [view_w, view_h] = ViewSize();
     // a whole tile at a time
-    int scroll = static_cast<int>(std::lround(G.cy + view_h / 2 - rect.h / 4.0)) * 2;
+    int scroll = static_cast<int>(std::lround(g_app.cy + view_h / 2 - rect.h / 4.0)) * 2;
     strat_scroll = std::clamp(scroll, 0, std::max(0, full - rect.h));
 }
 
@@ -1978,16 +2003,16 @@ static void FollowView() {
  *        whatever the view covers, to the device pixel.
  */
 static void DrawStrategic() {
-    const auto& rect = G.strat_rect;
+    const auto& rect = g_app.strat_rect;
     FollowView();
     front::DrawStrategicMap(rect.x, rect.y, nullptr, false, nullptr, strat_scroll, rect.h);
     gfx::SetScissor(rect.x, rect.y, rect.w, rect.h);
     // the view box: whatever the view covers, to the device pixel
     PalColour(15);
-    double scale = display::d.scale;
+    double scale = display::state.scale;
     auto snap = [scale](double value) { return std::floor(value * scale + 0.5) / scale; };
     auto [view_w, view_h] = ViewSize();
-    double box_x = rect.x + snap(G.cx * 2), box_y = rect.y - strat_scroll + snap(G.cy * 2);
+    double box_x = rect.x + snap(g_app.cx * 2), box_y = rect.y - strat_scroll + snap(g_app.cy * 2);
     double box_w = snap(view_w * 2), box_h = snap(view_h * 2);
     gfx::Rectangle(gfx::kFill, box_x, box_y, box_w, 2);
     gfx::Rectangle(gfx::kFill, box_x, box_y + box_h - 2, box_w, 2);
@@ -1998,7 +2023,7 @@ static void DrawStrategic() {
 
 /** @brief Has the strategic map's image made anew before it is next drawn. */
 void front::StratDirty() {
-    G.strat_image.reset();
+    g_app.strat_image.reset();
     strat_viewer = -99;
 }
 
@@ -2010,25 +2035,26 @@ void front::StratDirty() {
  * no art, the item's name cut to six letters.
  */
 static void DrawShortcutIcons() {
-    auto& main_ui = G.screen->ui;
-    auto art = G.screen->ArtFor(w2::uidata::kShortcutBitmap);
+    auto& main_ui = g_app.screen->ui;
+    auto art = g_app.screen->ArtFor(w2::uidata::kShortcutBitmap);
     for (int i = 0; i < w2::uidata::kShortcutCount; i++) {
-        auto control = screen::FindControl(*G.screen, w2::uidata::kShortcutFirst + i);
+        auto control = screen::FindControl(*g_app.screen, w2::uidata::kShortcutFirst + i);
         auto shortcut = main_ui.shortcuts.find(i);
         if (!control || shortcut == main_ui.shortcuts.end()) continue;
         auto item = main_ui.shortcut_items.find(shortcut->second);
         if (item == main_ui.shortcut_items.end()) continue;
         if (art) {
-            auto src = item->second.src[G.screen->StateOf(control->id)];
+            auto src = item->second.src[g_app.screen->StateOf(control->id)];
             gfx::SetColor(1, 1, 1);
             gfx::Draw(art->image, gfx::NewQuad(src.x, src.y, item->second.w, item->second.h),
                       control->x, control->y);
         } else {
             std::string short_name = item->second.name.substr(0, 6);
             gfx::SetColor(1, 1, 1);
-            G.font->Draw(short_name,
-                         control->x + std::max(1, (control->w - G.font->Width(short_name)) / 2),
-                         control->y + (control->h - G.font->line_height) / 2);
+            g_app.font->Draw(
+                    short_name,
+                    control->x + std::max(1, (control->w - g_app.font->Width(short_name)) / 2),
+                    control->y + (control->h - g_app.font->line_height) / 2);
         }
     }
 }
@@ -2041,13 +2067,13 @@ static void DrawTurnStrip() {
     PalColour(15);
     gfx::Rectangle(gfx::kFill, 437, 0, 202, 17);
     std::vector<Side*> alive;
-    for (Side* side : G.g->sides)
+    for (Side* side : g_app.g->sides)
         if (side->alive) alive.push_back(side);
     int count = static_cast<int>(alive.size());
-    std::string turn = w2::Fmt("Turn %d", G.g->turn);
-    const Font& font = G.big_font->Colours(0, 15);
+    std::string turn = w2::Fmt("Turn %d", g_app.g->turn);
+    const Font& font = g_app.big_font->Colours(0, 15);
     font.Draw(turn, (8 - count) * 16 + 508 - font.Width(turn), 0);
-    const Side* active_side = (G.ai_side && !HumansLeft()) ? G.ai_side : G.player;
+    const Side* active_side = (g_app.ai_side && !HumansLeft()) ? g_app.ai_side : g_app.player;
     for (int i = 0; i < count; i++) {
         int x = (8 - count + i) * 16 + 512;
         if (alive[i] == active_side) {
@@ -2056,7 +2082,7 @@ static void DrawTurnStrip() {
         }
         int side_index = alive[i]->index;
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.atrans_shields,
+        gfx::Draw(g_app.atrans_shields,
                   gfx::NewQuad(112 + (side_index / 4) * 16, 94 + (side_index % 4) * 14, 16, 14), x,
                   2);
     }
@@ -2071,26 +2097,27 @@ static void DrawTurnStrip() {
  */
 static void DrawMenuBar() {
     PalColour(15);
-    gfx::Rectangle(gfx::kFill, 0, 0, G.layout.w, menu::kBarH);
-    for (size_t i = 0; i < G.menu_layout.size(); i++) {
-        const auto& menu_entry = G.menu_layout[i];
-        bool lit = static_cast<int>(i) == G.open_menu;
+    gfx::Rectangle(gfx::kFill, 0, 0, g_app.layout.w, menu::kBarH);
+    for (size_t i = 0; i < g_app.menu_layout.size(); i++) {
+        const auto& menu_entry = g_app.menu_layout[i];
+        bool lit = static_cast<int>(i) == g_app.open_menu;
         if (lit) {
             PalColour(8);
             gfx::Rectangle(gfx::kFill, menu_entry.x, 0, menu_entry.w, menu::kBarH);
         }
         gfx::SetColor(1, 1, 1);
-        G.font->Colours(lit ? 7 : 0, lit ? 8 : 15)
+        g_app.font->Colours(lit ? 7 : 0, lit ? 8 : 15)
                 .Draw(menu_entry.title, menu_entry.x + 2, menu::kBarY);
     }
-    if (!G.starting && G.g) {
+    if (!g_app.starting && g_app.g) {
         gfx::Push();
-        gfx::Translate(G.layout.ex, 0);
+        gfx::Translate(g_app.layout.ex, 0);
         DrawTurnStrip();
         gfx::Pop();
     }
-    if (G.open_menu < 0 || G.open_menu >= static_cast<int>(G.menu_layout.size())) return;
-    const auto& drop = G.menu_layout[G.open_menu].drop;
+    if (g_app.open_menu < 0 || g_app.open_menu >= static_cast<int>(g_app.menu_layout.size()))
+        return;
+    const auto& drop = g_app.menu_layout[g_app.open_menu].drop;
     PalColour(15);
     gfx::Rectangle(gfx::kFill, drop.x, drop.y, drop.w - 1, drop.h - 1);
     PalColour(0);
@@ -2099,7 +2126,8 @@ static void DrawMenuBar() {
     gfx::Rectangle(gfx::kFill, drop.x, drop.y, 1, drop.h - 2);
     gfx::Rectangle(gfx::kFill, drop.x + drop.w - 2, drop.y, 1, drop.h - 1);
     gfx::Rectangle(gfx::kFill, drop.x + drop.w - 1, drop.y + 1, 1, drop.h - 1);
-    const menu::Row* hover = menu::RowAt(G.menu_layout, G.open_menu, G.mouse_x, G.mouse_y);
+    const menu::Row* hover =
+            menu::RowAt(g_app.menu_layout, g_app.open_menu, g_app.mouse_x, g_app.mouse_y);
     for (const auto& row : drop.rows) {
         if (row.label == "-") {
             PalColour(0);
@@ -2114,7 +2142,7 @@ static void DrawMenuBar() {
             gfx::Rectangle(gfx::kFill, row.x + 1, row.y, drop.w - 3, row.h);
         }
         int glyph = grey ? 3 : (lit ? 7 : 0);
-        const Font& font = G.font->Colours(glyph, lit ? 8 : 15);
+        const Font& font = g_app.font->Colours(glyph, lit ? 8 : 15);
         gfx::SetColor(1, 1, 1);
         font.Draw(row.label, row.x + 3, row.y);
         if (!row.key.empty()) font.Draw(row.key, row.x + drop.key_col, row.y);
@@ -2143,7 +2171,7 @@ static const int kMarkY = 449, kMarkW = 32, kMarkH = 16;
 /** @brief Draws the ABITS.PCK cell at (src_x, src_y), width x height, at (x, y). */
 static void DrawAbits(int src_x, int src_y, int width, int height, int x, int y) {
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.abits, gfx::NewQuad(src_x, src_y, width, height), x, y);
+    gfx::Draw(g_app.abits, gfx::NewQuad(src_x, src_y, width, height), x, y);
 }
 
 /** @brief Draws a number in ABITS's own 8x8 digits, always two of them ("%02d"). */
@@ -2158,7 +2186,7 @@ static void DrawDigits(int number, int x, int y) {
  *        counted round from the current player's.
  */
 static int GroupRing(int group) {
-    return (G.player->index + group) % 8 + 1;
+    return (g_app.player->index + group) % 8 + 1;
 }
 
 /**
@@ -2166,16 +2194,16 @@ static int GroupRing(int group) {
  *        group's movement, the Grp button and the way the group travels.
  */
 static void DrawArmySlots() {
-    const slots_mod::Slots* slots = G.selection ? &G.selection->slots : nullptr;
+    const slots_mod::Slots* slots = g_app.selection ? &g_app.selection->slots : nullptr;
     for (int i = 0; i < kSlotCount; i++) {
         int x = kSlotX + i * kSlotStep;
         Army* army = slots && i < slots->n ? slots->army[i] : nullptr;
         gfx::SetColor(1, 1, 1);
         int ring = army ? GroupRing(slots->group[i]) : 0;
-        gfx::Draw(G.abits, gfx::NewQuad(ring * 32, 0, 32, 30), x, kSlotY);
+        gfx::Draw(g_app.abits, gfx::NewQuad(ring * 32, 0, 32, 30), x, kSlotY);
         if (army) {
             // the armies not moving with the group are drawn as ghosts
-            gfx::Draw(slots->in_group[i] ? G.army_img[G.player->index] : G.shadow_img,
+            gfx::Draw(slots->in_group[i] ? g_app.army_img[g_app.player->index] : g_app.shadow_img,
                       kit::ArmyQuad(army->type), x, kSlotY);
             DrawDigits(army->moves, x + kSlotMovesX, kSlotY + kSlotMovesY);
             if (slots->mark[i] != slots_mod::kNomark)
@@ -2198,12 +2226,12 @@ static void DrawArmySlots() {
     if (!moving.empty()) {
         bool sea = true, woods = false, hills = false;
         for (Army* army : moving) {
-            const w2::ArmyType* army_type = G.g->types.ById(army->type);
+            const w2::ArmyType* army_type = g_app.g->types.ById(army->type);
             if (army_type->woods_move) woods = true;
             if (army_type->hills_move) hills = true;
             if (!army->at_sea) sea = false;
         }
-        if (move::ModeOf(*G.g, moving) == move::kFlying)
+        if (move::ModeOf(*g_app.g, moving) == move::kFlying)
             icon = 184;
         else if (sea)
             icon = 424;
@@ -2243,13 +2271,13 @@ static const int kStatusY = 425;
 static int StatusValue(int cell) {
     switch (cell) {
     case 0:
-        return static_cast<int>(game::SideCities(*G.g, *G.player).size());
+        return static_cast<int>(game::SideCities(*g_app.g, *g_app.player).size());
     case 1:
-        return G.player->gold;
+        return g_app.player->gold;
     case 2:
-        return game::Income(*G.g, *G.player);
+        return game::Income(*g_app.g, *g_app.player);
     default:
-        return game::Upkeep(*G.g, *G.player);
+        return game::Upkeep(*g_app.g, *g_app.player);
     }
 }
 
@@ -2258,7 +2286,8 @@ static void DrawStatus() {
     for (int cell = 0; cell < 4; cell++) {
         const auto& status_cell = kStatusCells[cell];
         DrawAbits(status_cell.sx, status_cell.sy, 40, 20, status_cell.x, kStatusY);
-        G.big_font->Draw(w2::Format(status_cell.fmt, StatusValue(cell)), status_cell.tx, kStatusY);
+        g_app.big_font->Draw(w2::Format(status_cell.fmt, StatusValue(cell)), status_cell.tx,
+                             kStatusY);
     }
 }
 
@@ -2270,28 +2299,28 @@ static void DrawStatus() {
  * MOVEBAR<n>.PCK at (32, 444).
  */
 static void DrawComputerStatus() {
-    const AiStatus& status = *G.ai_status;
+    const AiStatus& status = *g_app.ai_status;
     Side* side = status.side;
     gfx::SetColor(1, 1, 1);
-    kit::Centred(G.big_font->Colours(side->colour, side->edge), status.text, 196, 415);
+    kit::Centred(g_app.big_font->Colours(side->colour, side->edge), status.text, 196, 415);
     PalColour(0);
     kit::Outline(36, 442, 320, 22);
     int bar_width = status.progress / 5 * 16;
     if (bar_width > 0) {
         int side_index = side->index;
-        if (!G.move_bars.count(side_index)) {
+        if (!g_app.move_bars.count(side_index)) {
             try {
-                G.move_bars[side_index] = pckimage::Load(
-                        G.data_dir + "/TERRAIN0/MOVEBAR" + std::to_string(side_index) + ".PCK",
-                        G.palette, pckimage::kCorner);
+                g_app.move_bars[side_index] = pckimage::Load(
+                        g_app.data_dir + "/TERRAIN0/MOVEBAR" + std::to_string(side_index) + ".PCK",
+                        g_app.palette, pckimage::kCorner);
             } catch (...) {
-                G.move_bars[side_index] = nullptr;
+                g_app.move_bars[side_index] = nullptr;
             }
         }
         gfx::SetColor(1, 1, 1);
-        if (G.move_bars[side_index])
-            gfx::Draw(G.move_bars[side_index], gfx::NewQuad(0, 0, std::min(bar_width, 320), 18), 32,
-                      444);
+        if (g_app.move_bars[side_index])
+            gfx::Draw(g_app.move_bars[side_index], gfx::NewQuad(0, 0, std::min(bar_width, 320), 18),
+                      32, 444);
     }
 }
 
@@ -2300,13 +2329,13 @@ static void DrawComputerStatus() {
  *        slot or the standing cell under the pointer.
  */
 static void BarInfo(int x, int y) {
-    int bar_x = x - G.layout.bar.x;
-    if (G.ai_status) return;
-    if (G.selection) {
+    int bar_x = x - g_app.layout.bar.x;
+    if (g_app.ai_status) return;
+    if (g_app.selection) {
         if (bar_x < 336) {
             int slot = (bar_x - 16) / 40;
-            if (bar_x >= 16 && slot < G.selection->slots.n)
-                infobox::Army(x, y, G.selection->slots.army[slot]);
+            if (bar_x >= 16 && slot < g_app.selection->slots.n)
+                infobox::Army(x, y, g_app.selection->slots.army[slot]);
             else
                 infobox::ShowLines(x, y, "Select Army", "Select armies when present");
         } else {
@@ -2327,10 +2356,10 @@ static void BarInfo(int x, int y) {
 static void DrawBottomBar() {
     // The original blits MARBLE.PCK over the bar, (16, 403) 360x66 from (0, 60).
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.marble, gfx::NewQuad(0, 60, 360, 66), 16, 403);
-    if (G.ai_status)
+    gfx::Draw(g_app.marble, gfx::NewQuad(0, 60, 360, 66), 16, 403);
+    if (g_app.ai_status)
         DrawComputerStatus();
-    else if (G.selection)
+    else if (g_app.selection)
         DrawArmySlots();
     else
         DrawStatus();
@@ -2363,13 +2392,14 @@ static void LinePixels(int start_x, int start_y, int end_x, int end_y) {
 }
 
 void front::DrawVectorMap(int x, int y, City* city, int filter, bool see_all) {
-    if (!G.strat_image) G.strat_image = screen::StrategicImage(*G.screen, *G.g, G.player->index);
+    if (!g_app.strat_image)
+        g_app.strat_image = screen::StrategicImage(*g_app.screen, *g_app.g, g_app.player->index);
     gfx::SetScissor(x, y, 224, 312);
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.strat_image, x, y);
+    gfx::Draw(g_app.strat_image, x, y);
     auto marker = [&](const City* target_city, int mark_idx) {
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.atrans_shields, gfx::NewQuad(kVmarkX[mark_idx], 94, 16, 10),
+        gfx::Draw(g_app.atrans_shields, gfx::NewQuad(kVmarkX[mark_idx], 94, 16, 10),
                   x + target_city->x * 2 - 2, y + target_city->y * 2 - 1);
     };
     auto line = [&](const City* from_city, const City* to_city, int colour) {
@@ -2377,9 +2407,9 @@ void front::DrawVectorMap(int x, int y, City* city, int filter, bool see_all) {
         LinePixels(x + from_city->x * 2 + 2, y + from_city->y * 2 + 2, x + to_city->x * 2 + 2,
                    y + to_city->y * 2 + 2);
     };
-    auto mine = game::SideCities(*G.g, *G.player);
+    auto mine = game::SideCities(*g_app.g, *g_app.player);
     auto building = [](const City* target_city) { return game::Producing(*target_city) ? 0 : 3; };
-    auto [std_x, std_y] = game::StandardAt(*G.g, *G.player);
+    auto [std_x, std_y] = game::StandardAt(*g_app.g, *g_app.player);
     auto to_standard = [&, flag_x = std_x, flag_y = std_y](const City* src_city, int colour) {
         PalColour(colour);
         LinePixels(x + src_city->x * 2 + 2, y + src_city->y * 2 + 2, x + flag_x * 2,
@@ -2390,13 +2420,13 @@ void front::DrawVectorMap(int x, int y, City* city, int filter, bool see_all) {
         for (City* owned_city : mine) {
             if (done.count(owned_city)) continue;
             done.insert(owned_city);
-            auto incoming = game::VectoredTo(*G.g, owned_city);
+            auto incoming = game::VectoredTo(*g_app.g, owned_city);
             int mark_idx = building(owned_city);
             if (owned_city->vector_to != kNone) mark_idx = 2;
             if (!incoming.empty()) mark_idx = game::Producing(*owned_city) ? 1 : 5;
             marker(owned_city, mark_idx);
-            City* dest =
-                    owned_city->vector_to >= 0 ? G.g->map->City(owned_city->vector_to) : nullptr;
+            City* dest = owned_city->vector_to >= 0 ? g_app.g->map->City(owned_city->vector_to)
+                                                    : nullptr;
             if (dest) {
                 done.insert(dest);
                 marker(dest, game::Producing(*dest) ? 1 : 5);
@@ -2419,7 +2449,7 @@ void front::DrawVectorMap(int x, int y, City* city, int filter, bool see_all) {
         gfx::Rectangle(gfx::kFill, box_x + 11, box_y, 1, 11);
     } else if (city) {
         for (City* owned_city : mine) {
-            int vec_count = static_cast<int>(game::VectoredTo(*G.g, owned_city).size());
+            int vec_count = static_cast<int>(game::VectoredTo(*g_app.g, owned_city).size());
             bool full =
                     (filter == -1 && vec_count + 1 > game::kMaxVectoredTo) ||
                     (filter >= 0 && filter != kNone && vec_count + filter > game::kMaxVectoredTo);
@@ -2429,21 +2459,21 @@ void front::DrawVectorMap(int x, int y, City* city, int filter, bool see_all) {
                 marker(owned_city, mark_idx);
             }
         }
-        City* dest = city->vector_to >= 0 ? G.g->map->City(city->vector_to) : nullptr;
+        City* dest = city->vector_to >= 0 ? g_app.g->map->City(city->vector_to) : nullptr;
         if (dest) {
             marker(dest, game::Producing(*dest) ? 1 : 5);
             line(city, dest, 7);
         } else if (city->vector_to == game::kStandard && std_x != kNone) {
             to_standard(city, 7);
         }
-        for (City* src : game::VectoredTo(*G.g, city)) {
+        for (City* src : game::VectoredTo(*g_app.g, city)) {
             marker(src, 2);
             line(src, city, 8);
         }
     }
     if (std_x != kNone) {
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.atrans_shields, gfx::NewQuad(96, 15, 16, 15),
+        gfx::Draw(g_app.atrans_shields, gfx::NewQuad(96, 15, 16, 15),
                   x + std::max(0, (std_x * 2 - 2) / 8 * 8), y + std::max(0, std_y * 2 - 6));
     }
     gfx::SetScissor();
@@ -2454,7 +2484,7 @@ void front::DrawVectorMap(int x, int y, City* city, int filter, bool see_all) {
 void front::DrawHeroFigure(int x, int y, int tile_x, int tile_y, bool dark) {
     gfx::SetScissor(x, y, 224, 312);
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.atrans_shields, gfx::NewQuad(96, dark ? 15 : 0, 16, 15),
+    gfx::Draw(g_app.atrans_shields, gfx::NewQuad(96, dark ? 15 : 0, 16, 15),
               x + std::max(0, (tile_x * 2 - 2) / 8 * 8), y + std::max(0, tile_y * 2 - 6));
     gfx::SetScissor();
 }
@@ -2465,14 +2495,14 @@ void front::DrawStrategicPanel(int x, int y, const City* city) {
 
 /** @brief Draws the start-of-turn banner with CITY.PCK framed in the side's colours. */
 static void DrawBanner() {
-    const Banner& banner = *G.banner;
+    const Banner& banner = *g_app.banner;
     const auto& popup_rect = kBanner;
     auto fill = [](int x, int y, int width, int height) {
         gfx::Rectangle(gfx::kFill, x, y, width, height);
     };
     kit::PopupFrame(popup_rect);
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.city_pic, popup_rect.x, popup_rect.y);
+    gfx::Draw(g_app.city_pic, popup_rect.x, popup_rect.y);
     auto outline = [&](int x, int y, int width, int height) {
         fill(popup_rect.x + x, popup_rect.y + y, width, 1);
         fill(popup_rect.x + x, popup_rect.y + y + height - 1, width, 1);
@@ -2489,26 +2519,27 @@ static void DrawBanner() {
     PalColour(banner.edge);
     outline(10, 10, popup_rect.w - 20, popup_rect.h - 20);
     gfx::SetColor(1, 1, 1);
-    kit::Centred(*G.title_font, banner.name, 320, kBannerNameY);
-    kit::Centred(*G.title_font, w2::Fmt("Turn %d", banner.turn), 320, kBannerTurnY);
+    kit::Centred(*g_app.title_font, banner.name, 320, kBannerNameY);
+    kit::Centred(*g_app.title_font, w2::Fmt("Turn %d", banner.turn), 320, kBannerTurnY);
 }
 
 /** @brief Draws the hero-offer popup: map, portrait, text lines, name field and sex checkboxes. */
 static void DrawHeroOffer() {
     const auto& popup_rect = kHeroPopup;
-    const w2::HeroOffer& offer = *G.offer;
+    const w2::HeroOffer& offer = *g_app.offer;
     kit::PopupFrame(popup_rect);
     gfx::SetColor(1, 1, 1);
     gfx::SetScissor(popup_rect.x, popup_rect.y, popup_rect.w, popup_rect.h);
-    gfx::Draw(G.marble, popup_rect.x, popup_rect.y);
+    gfx::Draw(g_app.marble, popup_rect.x, popup_rect.y);
     gfx::SetScissor();
     front::DrawStrategicMap(kHeroMapX, kHeroMapY);
     gfx::SetScissor(popup_rect.x, popup_rect.y, popup_rect.w, popup_rect.h);
     gfx::SetColor(1, 1, 1);
     int fig_x = std::max(0, (offer.city->x * 2 - 2) / 8 * 8);
     int fig_y = std::max(0, offer.city->y * 2 - 6);
-    gfx::Draw(G.atrans_shields, gfx::NewQuad(96, 0, 16, 15), kHeroMapX + fig_x, kHeroMapY + fig_y);
-    gfx::Draw(G.offer_female ? G.hero_pic_f : G.hero_pic_m, kHeroPicX, kHeroPicY);
+    gfx::Draw(g_app.atrans_shields, gfx::NewQuad(96, 0, 16, 15), kHeroMapX + fig_x,
+              kHeroMapY + fig_y);
+    gfx::Draw(g_app.offer_female ? g_app.hero_pic_f : g_app.hero_pic_m, kHeroPicX, kHeroPicY);
     gfx::SetColor(0, 0, 0);
     gfx::Rectangle(gfx::kLine, kHeroPicX - 0.5, kHeroPicY - 0.5, kHeroPicW + 1, kHeroPicH + 1);
     gfx::SetScissor();
@@ -2516,32 +2547,32 @@ static void DrawHeroOffer() {
         gfx::SetColor(1, 1, 1);
         font.Draw(str, kHeroCentre - font.Width(str) / 2, y);
     };
-    centred(*G.title_font, kit::Text(kHeroTitleGroup, 0), kHeroTitleY);
-    auto lines = HeroLines(offer, G.offer_female);
+    centred(*g_app.title_font, kit::Text(kHeroTitleGroup, 0), kHeroTitleY);
+    auto lines = HeroLines(offer, g_app.offer_female);
     for (int i = 0; i < 4; i++) {
         // Font 2 in colour 15 with a colour-14 outline.
-        if (!lines[i].empty()) centred(G.big_font->Colours(15, 14), lines[i], kHeroLineY[i]);
+        if (!lines[i].empty()) centred(g_app.big_font->Colours(15, 14), lines[i], kHeroLineY[i]);
     }
-    if (auto field = screen::DialogControl(*G.hero_view, kHeroField)) {
+    if (auto field = screen::DialogControl(*g_app.hero_view, kHeroField)) {
         gfx::SetColor(0, 0, 0);
         kit::Outline(field->x - 2, field->y - 2, field->w + 4, field->h + 4);
-        kit::Field(field->x, field->y, field->w, field->h, G.offer_name, G.big_font.get());
+        kit::Field(field->x, field->y, field->w, field->h, g_app.offer_name, g_app.big_font.get());
     }
     auto label = [](const int* pos, const std::string& str) {
         gfx::SetColor(1, 1, 1);
-        G.big_font->Draw(str, pos[0] - G.big_font->Width(str), pos[1]);
+        g_app.big_font->Draw(str, pos[0] - g_app.big_font->Width(str), pos[1]);
     };
     label(kMaleLabel, kit::Text(kHeroSexGroup, 0));
     label(kFemaleLabel, kit::Text(kHeroSexGroup, 1));
     auto box = [](int control_id, bool checked) {
-        auto ctrl = screen::DialogControl(*G.hero_view, control_id);
+        auto ctrl = screen::DialogControl(*g_app.hero_view, control_id);
         if (!ctrl) return;
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.abits, gfx::NewQuad(320, checked ? 0 : 20, 24, 20), ctrl->x, ctrl->y);
+        gfx::Draw(g_app.abits, gfx::NewQuad(320, checked ? 0 : 20, 24, 20), ctrl->x, ctrl->y);
     };
-    box(kHeroMale, !G.offer_female);
-    box(kHeroFemale, G.offer_female);
-    screen::DrawDialogControls(*G.screen, *G.hero_view);
+    box(kHeroMale, !g_app.offer_female);
+    box(kHeroFemale, g_app.offer_female);
+    screen::DrawDialogControls(*g_app.screen, *g_app.hero_view);
 }
 
 // ------------------------------------------------------------------ the assault
@@ -2603,7 +2634,7 @@ static std::vector<std::pair<int, int>> LineSlots(int n, const std::vector<int>&
 static std::string VictorName(const std::vector<Army*>& line) {
     for (Army* army : line)
         if (army->Hero() && !army->name.empty()) return army->name;
-    const w2::ArmyType* rec = line.empty() ? nullptr : G.g->types.ById(line[0]->type);
+    const w2::ArmyType* rec = line.empty() ? nullptr : g_app.g->types.ById(line[0]->type);
     return rec ? rec->name : "Your armies";
 }
 
@@ -2622,7 +2653,7 @@ static std::vector<std::string> OutcomeLines(const w2::Battle& result, const Cit
             break;
         }
     if (city) {
-        if (fled) out.push_back(kit::Text(kAsFled, G.g->rng.Dice(1, 4, -1)));
+        if (fled) out.push_back(kit::Text(kAsFled, g_app.g->rng.Dice(1, 4, -1)));
         if (!hero_name.empty())
             out.push_back(Format(kit::Text(kAsWonCityHero, 0), hero_name));
         else
@@ -2654,23 +2685,23 @@ static void StartAssault(int x, int y, const w2::Battle& result) {
     assault.phase = "cloud";
     assault.at = w2::Now();
     // On a human's turn, hold the cloud while WAR.8SN plays.
-    assault.cloud_time = (G.g->side && !G.g->side->computer) ? sound::Effect("war") : 0;
+    assault.cloud_time = (g_app.g->side && !g_app.g->side->computer) ? sound::Effect("war") : 0;
     assault.victor = VictorName(lines.attackers);
     assault.message = OutcomeLines(result, lines.city, fled);
     assault.def_fell.resize(assault.def.size());
     assault.atk_fell.resize(assault.atk.size());
-    G.assault = assault;
+    g_app.assault = assault;
 }
 void front::StartAssault(int x, int y, const w2::Battle& result) {
     ::StartAssault(x, y, result);
 }
 
 void front::CloseAssault() {
-    if (!G.assault) return;
-    Assault assault = std::move(*G.assault);
-    G.assault.reset();
-    game::ApplyAttack(*G.g, assault.result);
-    G.medal = assault.result.medal;
+    if (!g_app.assault) return;
+    Assault assault = std::move(*g_app.assault);
+    g_app.assault.reset();
+    game::ApplyAttack(*g_app.g, assault.result);
+    g_app.medal = assault.result.medal;
     front::StratDirty();
     if (assault.after) assault.after();
     // a computer's assault is the coroutine's: it carries on
@@ -2678,7 +2709,7 @@ void front::CloseAssault() {
 
 /** @brief Advances the assault animation state machine by wall-clock time. */
 static void AdvanceAssault() {
-    Assault& assault = *G.assault;
+    Assault& assault = *g_app.assault;
     double now = w2::Now();
     if (assault.phase == "cloud") {
         if (now - assault.at >= std::max(kAsCloudTime, assault.cloud_time)) {
@@ -2697,7 +2728,7 @@ static void AdvanceAssault() {
     if (assault.phase == "over" && assault.computer) {
         if (assault.close_at == 0) {
             assault.close_at = now + 15 / 18.2;
-            if (G.ai_status) G.ai_status->text = assault.outcome;
+            if (g_app.ai_status) g_app.ai_status->text = assault.outcome;
         } else if (now >= assault.close_at) {
             front::CloseAssault();
         }
@@ -2728,8 +2759,8 @@ static void AdvanceAssault() {
 /** @brief Handles a key or click during an assault: hurries playback or closes a finished battle.
  */
 static void PressAssault() {
-    if (!G.assault) return;
-    Assault& assault = *G.assault;
+    if (!g_app.assault) return;
+    Assault& assault = *g_app.assault;
     if (assault.phase != "over") {
         assault.fast = true;
         assault.at = std::min(assault.at, w2::Now() + kAsFellFast);
@@ -2741,21 +2772,21 @@ static void PressAssault() {
     std::string victor = assault.victor;
     // captured is set once applied: apply, then ask
     front::CloseAssault();
-    Army* medal = G.medal;
-    G.medal = nullptr;
+    Army* medal = g_app.medal;
+    g_app.medal = nullptr;
     if (!computer) {
         // the fight took effect in CloseAssault; see whether a city fell
-        if (G.selection && !G.selection->stack.empty()) {
-            City* captured_city =
-                    game::CityAt(*G.g, G.selection->stack[0]->x, G.selection->stack[0]->y);
-            if (captured_city && captured_city->owner_index == G.player->index)
+        if (g_app.selection && !g_app.selection->stack.empty()) {
+            City* captured_city = game::CityAt(*g_app.g, g_app.selection->stack[0]->x,
+                                               g_app.selection->stack[0]->y);
+            if (captured_city && captured_city->owner_index == g_app.player->index)
                 city = captured_city;
         }
         // A medal is told before the city's fate is asked.
         auto then = [city, victor]() {
             if (city) PresentVictory(city, victor);
         };
-        if (medal && G.g->Alive(medal))
+        if (medal && g_app.g->Alive(medal))
             honours::Medal(medal, then);
         else
             then();
@@ -2764,11 +2795,11 @@ static void PressAssault() {
 
 /** @brief Draws the war cloud from WAR.PCK over the assaulted tile, in map pixels. */
 static void DrawCloud() {
-    const Assault& assault = *G.assault;
+    const Assault& assault = *g_app.assault;
     int screen_x = assault.x * kTile + (kTile - kAsCloudW) / 2;
     int screen_y = assault.y * kTile + (kTile - kAsCloudH) / 2;
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.war_pic, gfx::NewQuad(0, 0, kAsCloudW, kAsCloudH), screen_x, screen_y);
+    gfx::Draw(g_app.war_pic, gfx::NewQuad(0, 0, kAsCloudW, kAsCloudH), screen_x, screen_y);
 }
 
 /** @brief Draws one side's line of armies in the battle window, hiding casualties once their blast
@@ -2785,17 +2816,17 @@ static void DrawBattleLine(const std::vector<Army*>& armies,
         auto pos = slots[i];
         gfx::SetColor(1, 1, 1);
         if (armies[i]->at_sea)
-            gfx::Draw(G.war_pic, gfx::NewQuad(kAsSea[0], kAsSea[1], kAsSea[2], kAsSea[3]),
+            gfx::Draw(g_app.war_pic, gfx::NewQuad(kAsSea[0], kAsSea[1], kAsSea[2], kAsSea[3]),
                       pos.first, pos.second + kAsSeaDrop);
-        gfx::Draw(G.army_img[side], kit::ArmyQuad(armies[i]->type), pos.first, pos.second);
+        gfx::Draw(g_app.army_img[side], kit::ArmyQuad(armies[i]->type), pos.first, pos.second);
         if (static_cast<int>(i) < down)
-            gfx::Draw(G.atrans_shields, gfx::NewQuad(32, 0, 32, 29), pos.first, pos.second);
+            gfx::Draw(g_app.atrans_shields, gfx::NewQuad(32, 0, 32, 29), pos.first, pos.second);
     }
 }
 
 /** @brief Draws the battle window, both armies' lines, shields, and outcome text. */
 static void DrawBattle() {
-    const Assault& assault = *G.assault;
+    const Assault& assault = *g_app.assault;
     const auto& popup_rect = kAsWindow;
     gfx::SetColor(0, 0, 0);
     gfx::Rectangle(gfx::kLine, popup_rect.x - 0.5, popup_rect.y - 0.5, popup_rect.w + 1,
@@ -2805,11 +2836,12 @@ static void DrawBattle() {
     gfx::Rectangle(gfx::kFill, popup_rect.x + popup_rect.w + 1, popup_rect.y + 1, 2,
                    popup_rect.h + 2);
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.marble, gfx::NewQuad(0, 0, popup_rect.w, popup_rect.h), popup_rect.x, popup_rect.y);
+    gfx::Draw(g_app.marble, gfx::NewQuad(0, 0, popup_rect.w, popup_rect.h), popup_rect.x,
+              popup_rect.y);
     auto shield = [](int side, const int* pos) {
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.shield_img, gfx::NewQuad(side * kAsShieldW, 0, kAsShieldW, kAsShieldH), pos[0],
-                  pos[1]);
+        gfx::Draw(g_app.shield_img, gfx::NewQuad(side * kAsShieldW, 0, kAsShieldW, kAsShieldH),
+                  pos[0], pos[1]);
     };
     shield(assault.def_side, kAsShieldDef);
     shield(assault.atk_side, kAsShieldAtk);
@@ -2821,7 +2853,7 @@ static void DrawBattle() {
         int y = kAsTextY;
         gfx::SetColor(1, 1, 1);
         for (auto& line : assault.message) {
-            kit::Centred(*G.big_font, line, 320, y);  // on x = 320
+            kit::Centred(*g_app.big_font, line, 320, y);  // on x = 320
             y += kAsTextStep;
         }
     }
@@ -2830,8 +2862,8 @@ static void DrawBattle() {
 /** @brief Advances and draws the active assault window when past the cloud phase. */
 static void DrawAssault() {
     AdvanceAssault();
-    if (!G.assault) return;
-    if (G.assault->phase != "cloud") DrawBattle();
+    if (!g_app.assault) return;
+    if (g_app.assault->phase != "cloud") DrawBattle();
 }
 
 /**
@@ -2841,41 +2873,42 @@ static void DrawAssault() {
  * least one production type to strip, and Sack requires at least two.
  */
 static void PresentVictory(City* city, const std::string& victor) {
-    if (!G.victory_view) G.victory_view = screen::MakeView(*G.screen, kAsVDialog);
+    if (!g_app.victory_view) g_app.victory_view = screen::MakeView(*g_app.screen, kAsVDialog);
     Victory vic;
     vic.city = city;
-    vic.who = Format(kit::Text(kAsVWho, G.g->rng.Dice(1, 4, -1)), victor);
-    vic.where = Format(kit::Text(kAsVWhere, G.g->rng.Dice(1, 3, -1)), city->name);
-    G.victory = vic;
-    auto& states = G.victory_view->state;
+    vic.who = Format(kit::Text(kAsVWho, g_app.g->rng.Dice(1, 4, -1)), victor);
+    vic.where = Format(kit::Text(kAsVWhere, g_app.g->rng.Dice(1, 3, -1)), city->name);
+    g_app.victory = vic;
+    auto& states = g_app.victory_view->state;
     states[kAsOccupy] = kNormal;
     states[kAsRaze] = kNormal;
     // Enable Pillage and Sack when they would yield gold.
-    int pillage_gold =
-            city->slots.empty() ? 0 : std::abs(G.g->types.ById(city->slots.back().type)->price) / 2;
-    int sack_gold = w2::ai::groups::SackValue(*G.g, *city);
+    int pillage_gold = city->slots.empty()
+                               ? 0
+                               : std::abs(g_app.g->types.ById(city->slots.back().type)->price) / 2;
+    int sack_gold = w2::ai::groups::SackValue(*g_app.g, *city);
     states[kAsPillage] = pillage_gold != 0 ? kNormal : kDisabled;
     states[kAsSack] = sack_gold != 0 ? kNormal : kDisabled;
     // Enter chooses Occupy unless the stack's hero is on a quest this answers:
     // Raze for a raze quest on this city, Sack (or Pillage) for gold.
-    G.victory->enter = kAsOccupy;
-    auto quest = G.player->quest;
+    g_app.victory->enter = kAsOccupy;
+    auto quest = g_app.player->quest;
     Army* hero = nullptr;
-    if (G.selection) {
-        for (Army* army : G.selection->stack)
+    if (g_app.selection) {
+        for (Army* army : g_app.selection->stack)
             if (army->type == w2::armytype::kHero) {
                 hero = army;
                 break;
             }
     }
-    if (G.g->map->options.quests != 0 && quest && hero && hero == quest->hero) {
+    if (g_app.g->map->options.quests != 0 && quest && hero && hero == quest->hero) {
         if (quest->type == w2::quest::kRaze && quest->city == city)
-            G.victory->enter = kAsRaze;
+            g_app.victory->enter = kAsRaze;
         else if (quest->type == w2::quest::kPillageGold) {
             if (sack_gold != 0)
-                G.victory->enter = kAsSack;
+                g_app.victory->enter = kAsSack;
             else if (pillage_gold != 0)
-                G.victory->enter = kAsPillage;
+                g_app.victory->enter = kAsPillage;
         }
     }
 }
@@ -2894,47 +2927,47 @@ static void DrawVictory(const Victory& vic) {
     gfx::Rectangle(gfx::kFill, popup_rect.x + popup_rect.w + 1, popup_rect.y + 1, 2,
                    popup_rect.h + 2);
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.victory_pic, popup_rect.x, popup_rect.y);
-    kit::Centred(*G.title_font, kit::Text(kAsVText, 0), 320, kAsVTitleY);
-    kit::Centred(*G.big_font, vic.who, 320, kAsVLineY[0]);
-    kit::Centred(*G.big_font, vic.where, 320, kAsVLineY[1]);
-    kit::Centred(*G.big_font, kit::Text(kAsVText, 1), 320, kAsVLineY[2]);
-    kit::Centred(*G.big_font, kit::Text(kAsVText, 2), 320, kAsVLineY[3]);
-    screen::DrawDialogControls(*G.screen, *G.victory_view);
+    gfx::Draw(g_app.victory_pic, popup_rect.x, popup_rect.y);
+    kit::Centred(*g_app.title_font, kit::Text(kAsVText, 0), 320, kAsVTitleY);
+    kit::Centred(*g_app.big_font, vic.who, 320, kAsVLineY[0]);
+    kit::Centred(*g_app.big_font, vic.where, 320, kAsVLineY[1]);
+    kit::Centred(*g_app.big_font, kit::Text(kAsVText, 1), 320, kAsVLineY[2]);
+    kit::Centred(*g_app.big_font, kit::Text(kAsVText, 2), 320, kAsVLineY[3]);
+    screen::DrawDialogControls(*g_app.screen, *g_app.victory_view);
 }
 
 /** @brief Executes the player's chosen action (Occupy, Pillage, Sack, or Raze) on a captured city.
  */
 static void TakeCity(int what) {
-    if (!G.victory) return;
-    Victory vic = *G.victory;
+    if (!g_app.victory) return;
+    Victory vic = *g_app.victory;
     City* city = vic.city;
-    std::vector<Army*> stack = G.selection ? G.selection->stack : std::vector<Army*>{};
-    G.victory.reset();
+    std::vector<Army*> stack = g_app.selection ? g_app.selection->stack : std::vector<Army*>{};
+    g_app.victory.reset();
     auto done = []() {
-        G.victory_under.reset();
+        g_app.victory_under.reset();
         front::StratDirty();
         RefreshControls();
     };
     if (what == kAsPillage || what == kAsSack) {
         bool sacked = what == kAsSack;
-        auto spoils = sacked ? game::Sack(*G.g, *G.player, *city, stack)
-                             : game::Pillage(*G.g, *G.player, *city, stack);
-        G.victory_under = vic;
+        auto spoils = sacked ? game::Sack(*g_app.g, *g_app.player, *city, stack)
+                             : game::Pillage(*g_app.g, *g_app.player, *city, stack);
+        g_app.victory_under = vic;
         spoils::Open(sacked, city, spoils.gold, spoils.lost, static_cast<int>(city->slots.size()),
                      done);
     } else if (what == kAsRaze) {
-        G.victory_under = vic;
+        g_app.victory_under = vic;
         search::Say(city->name + " is in ruins!", [city, stack, done]() {
-            game::Raze(*G.g, *G.player, *city, stack);
+            game::Raze(*g_app.g, *g_app.player, *city, stack);
             done();
         });
     } else {
         // quest_check(4): a quest done is its reward instead of the city
-        auto news = game::Occupy(*G.g, *G.player, *city, stack);
+        auto news = game::Occupy(*g_app.g, *g_app.player, *city, stack);
         auto production = [city]() { city::Open(city, city::kProduction); };
         if (news) {
-            G.player->quest_news.reset();
+            g_app.player->quest_news.reset();
             if (!news->failed.empty())
                 questnews::Show(news, production);
             else
@@ -2948,7 +2981,7 @@ static void TakeCity(int what) {
 /** @brief Runs `draw` translated into the popups' 640x480 frame centred on the screen. */
 static void InDialogFrame(const std::function<void()>& draw) {
     gfx::Push();
-    gfx::Translate(G.layout.dialog.x, G.layout.dialog.y);
+    gfx::Translate(g_app.layout.dialog.x, g_app.layout.dialog.y);
     draw();
     gfx::Pop();
 }
@@ -2964,7 +2997,7 @@ static void InGroup(const layout::Offset& offset, const std::function<void()>& d
 /** @brief Draws all open modal dialogs in stack order. */
 static void DrawModals() {
     // a dialog may push another while drawing is under way: a copy is drawn
-    auto modals = G.modals;
+    auto modals = g_app.modals;
     for (auto& modal : modals) modal->Draw();
 }
 
@@ -2983,7 +3016,7 @@ static void Draw() {
     SyncLayout();
     StepComputer();
     display::PushUi();
-    if (G.starting || !G.g) {
+    if (g_app.starting || !g_app.g) {
         DrawModals();
         DrawMenuBar();
         DrawPointer();
@@ -2992,17 +3025,18 @@ static void Draw() {
     }
     AdvanceWalk();
     // a quest that ended is told once the screen is the player's again
-    if (G.player && G.player->quest_news &&
-        !(G.over || G.banner || G.offer || G.assault || G.victory || G.victory_under || G.walk ||
-          G.move_all || G.ai_run || G.open_menu >= 0 || kit::Top())) {
+    if (g_app.player && g_app.player->quest_news &&
+        !(g_app.over || g_app.banner || g_app.offer || g_app.assault || g_app.victory ||
+          g_app.victory_under || g_app.walk || g_app.move_all || g_app.ai_run ||
+          g_app.open_menu >= 0 || kit::Top())) {
         questnews::Poll();
     }
     RefreshControls();
-    screen::DrawBackground(*G.screen, G.layout);
-    const auto& map_r = G.map_rect;
-    if (G.map_after_banner) {
+    screen::DrawBackground(*g_app.screen, g_app.layout);
+    const auto& map_r = g_app.map_rect;
+    if (g_app.map_after_banner) {
         // a hotseat turn not yet taken up: both maps blank (hotseatHidden)
-        const auto& strat_r = G.strat_rect;
+        const auto& strat_r = g_app.strat_rect;
         gfx::SetColor(0, 0, 0);
         gfx::Rectangle(gfx::kFill, map_r.x, map_r.y, map_r.w, map_r.h);
         gfx::Rectangle(gfx::kFill, strat_r.x, strat_r.y, strat_r.w, strat_r.h);
@@ -3010,32 +3044,32 @@ static void Draw() {
     } else {
         gfx::SetScissor(map_r.x, map_r.y, map_r.w, map_r.h);
         auto [cam_x, cam_y] = CamDev();
-        display::PushMap(map_r.x, map_r.y, cam_x, cam_y, G.zoom);
+        display::PushMap(map_r.x, map_r.y, cam_x, cam_y, g_app.zoom);
         DrawMap();
-        if (G.assault && G.assault->phase == "cloud") DrawCloud();
+        if (g_app.assault && g_app.assault->phase == "cloud") DrawCloud();
         gfx::Pop();
         gfx::SetScissor();
         DrawStrategic();
     }
     // Refill the control panel with marble before the controls go on.
-    InGroup(G.layout.panel, []() {
+    InGroup(g_app.layout.panel, []() {
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.marble, gfx::NewQuad(0, 0, 224, 114), 400, 355);
+        gfx::Draw(g_app.marble, gfx::NewQuad(0, 0, 224, 114), 400, 355);
     });
-    screen::DrawControls(*G.screen);
+    screen::DrawControls(*g_app.screen);
     DrawShortcutIcons();
-    InGroup(G.layout.bar, DrawBottomBar);
+    InGroup(g_app.layout.bar, DrawBottomBar);
     InDialogFrame([]() {
-        if (G.victory_under) DrawVictory(*G.victory_under);
+        if (g_app.victory_under) DrawVictory(*g_app.victory_under);
         DrawModals();
     });
     DrawMenuBar();
     // the turn opens with the banner over the offer, and is dismissed first
     InDialogFrame([]() {
-        if (G.offer) DrawHeroOffer();
-        if (G.assault) DrawAssault();
-        if (G.victory) DrawVictory(*G.victory);
-        if (G.banner) DrawBanner();
+        if (g_app.offer) DrawHeroOffer();
+        if (g_app.assault) DrawAssault();
+        if (g_app.victory) DrawVictory(*g_app.victory);
+        if (g_app.banner) DrawBanner();
     });
     DrawPointer();
     gfx::Pop();
@@ -3050,13 +3084,13 @@ static void Draw() {
  * buffer (up to 15) and are replayed once the walk finishes.
  */
 static bool BusyWalking() {
-    return ((G.walk && !G.walk->computer) || G.move_all) && !kit::Top();
+    return ((g_app.walk && !g_app.walk->computer) || g_app.move_all) && !kit::Top();
 }
 
 /** @brief Replays any keys buffered while a stack walk was in progress. */
 static void FlushKeys() {
-    auto buffered = G.key_buffer;
-    G.key_buffer.clear();
+    auto buffered = g_app.key_buffer;
+    g_app.key_buffer.clear();
     for (auto& key : buffered) Keypressed(key);
 }
 
@@ -3067,42 +3101,42 @@ static void FlushKeys() {
  * @return True when it consumed the input.
  */
 static bool ComputerInput(const std::string& key) {
-    if (!(G.ai_run && !kit::Top() && G.open_menu < 0)) return false;
-    if (G.assault && G.assault->computer) {
+    if (!(g_app.ai_run && !kit::Top() && g_app.open_menu < 0)) return false;
+    if (g_app.assault && g_app.assault->computer) {
         PressAssault();
         return true;
     }
     // Allow opening the F10 AI Brain Inspector (under --modern-ui), panning, or adjusting zoom
     // while spectating AI turns
-    if (G.modern_ui && key == "f10") {
-        diplomacyui::OpenBrainInspector(G.ai_side ? G.ai_side->index : kNone);
+    if (g_app.modern_ui && key == "f10") {
+        diplomacyui::OpenBrainInspector(g_app.ai_side ? g_app.ai_side->index : kNone);
         return true;
     }
     if (key == "kp+" || key == "pageup" || key == "=") {
-        front::SetZoom(G.zoom + 1);
+        front::SetZoom(g_app.zoom + 1);
         return true;
     }
     if (key == "kp-" || key == "pagedown" || key == "-") {
-        front::SetZoom(G.zoom - 1);
+        front::SetZoom(g_app.zoom - 1);
         return true;
     }
     if (key == "up") {
-        G.cy -= 1;
+        g_app.cy -= 1;
         ClampCamera();
         return true;
     }
     if (key == "down") {
-        G.cy += 1;
+        g_app.cy += 1;
         ClampCamera();
         return true;
     }
     if (key == "left") {
-        G.cx -= 1;
+        g_app.cx -= 1;
         ClampCamera();
         return true;
     }
     if (key == "right") {
-        G.cx += 1;
+        g_app.cx += 1;
         ClampCamera();
         return true;
     }
@@ -3115,9 +3149,9 @@ static bool ComputerInput(const std::string& key) {
         // In AI-vs-AI spectator mode, let Space toggle fast-forward and allow read-only spectator
         // dialogs/quit
         if (key == "space") {
-            G.ai_skip = !G.ai_skip;
-            if (G.ai_skip && G.walk && G.walk->computer) {
-                G.walk.reset();
+            g_app.ai_skip = !g_app.ai_skip;
+            if (g_app.ai_skip && g_app.walk && g_app.walk->computer) {
+                g_app.walk.reset();
                 ResumeComputer();
             }
             return true;
@@ -3134,9 +3168,9 @@ static bool ComputerInput(const std::string& key) {
         }
         return true;
     }
-    G.ai_skip = true;
-    if (G.walk && G.walk->computer) {
-        G.walk.reset();
+    g_app.ai_skip = true;
+    if (g_app.walk && g_app.walk->computer) {
+        g_app.walk.reset();
         ResumeComputer();
     }
     return true;
@@ -3149,29 +3183,29 @@ static std::map<int, std::function<void()>>& Actions();
 static void Mousepressed(int x, int y, int button) {
     if (BusyWalking()) return;
     SyncLayout();
-    int frame_x = x - G.layout.dialog.x, frame_y = y - G.layout.dialog.y;
-    if (G.ai_run && !kit::Top()) {
-        if (G.assault && G.assault->computer) {
+    int frame_x = x - g_app.layout.dialog.x, frame_y = y - g_app.layout.dialog.y;
+    if (g_app.ai_run && !kit::Top()) {
+        if (g_app.assault && g_app.assault->computer) {
             PressAssault();
             return;
         }
         if (!HumansLeft()) {
             // AI-vs-AI spectator mouse controls: menu bar, right-click tile/stack inspect, minimap
             // jump, and map drag
-            int hit = menu::TitleAt(G.menu_layout, x, y);
+            int hit = menu::TitleAt(g_app.menu_layout, x, y);
             if (hit >= 0) {
-                G.open_menu = G.open_menu == hit ? -1 : hit;
+                g_app.open_menu = g_app.open_menu == hit ? -1 : hit;
                 return;
             }
-            if (G.open_menu >= 0) {
-                const menu::Row* row = menu::RowAt(G.menu_layout, G.open_menu, x, y);
-                G.open_menu = -1;
+            if (g_app.open_menu >= 0) {
+                const menu::Row* row = menu::RowAt(g_app.menu_layout, g_app.open_menu, x, y);
+                g_app.open_menu = -1;
                 std::string row_key = row ? (row->key.empty() ? row->act : row->key) : "";
                 if (!row_key.empty() && MenuEnabled(row_key)) MenuPick(row_key);
                 return;
             }
-            if (G.g && G.screen) {
-                if (auto reg = screen::RegionAt(*G.screen, x, y)) {
+            if (g_app.g && g_app.screen) {
+                if (auto reg = screen::RegionAt(*g_app.screen, x, y)) {
                     if (reg->id == screen::kMap) {
                         if (button == 2) {
                             if (auto tile = TileAtPoint(x, y))
@@ -3179,7 +3213,7 @@ static void Mousepressed(int x, int y, int button) {
                             return;
                         }
                         if (button == 1) {
-                            G.drag = Drag{G.cx, G.cy, 0, 0};
+                            g_app.drag = Drag{g_app.cx, g_app.cy, 0, 0};
                             return;
                         }
                     } else if (reg->id == screen::kStrategic && button == 1) {
@@ -3194,39 +3228,40 @@ static void Mousepressed(int x, int y, int button) {
         if (ComputerInput("")) return;
     }
     // The banner eats the click that dismisses it.
-    if (G.banner) {
+    if (g_app.banner) {
         DismissBanner();
         return;
     }
-    if (G.assault) {
+    if (g_app.assault) {
         PressAssault();
         return;
     }
     // The right button is not a click on a dialog's button.
-    if ((G.victory || G.offer) && button == 2) return;
-    if (G.victory) {
-        auto ctrl = screen::DialogControlAt(*G.victory_view, frame_x, frame_y);
-        if (ctrl && G.victory_view->StateOf(ctrl->id) != kDisabled) TakeCity(ctrl->id);
+    if ((g_app.victory || g_app.offer) && button == 2) return;
+    if (g_app.victory) {
+        auto ctrl = screen::DialogControlAt(*g_app.victory_view, frame_x, frame_y);
+        if (ctrl && g_app.victory_view->StateOf(ctrl->id) != kDisabled) TakeCity(ctrl->id);
         return;
     }
-    if (G.offer) {
-        auto ctrl = screen::DialogControlAt(*G.hero_view, frame_x, frame_y);
+    if (g_app.offer) {
+        auto ctrl = screen::DialogControlAt(*g_app.hero_view, frame_x, frame_y);
         if (!ctrl) return;
         if (ctrl->id == kHeroField)
             offer_typing = true;
         else if (ctrl->id == kHeroMale)
-            G.offer_female = false;
+            g_app.offer_female = false;
         else if (ctrl->id == kHeroFemale)
-            G.offer_female = true;
+            g_app.offer_female = true;
         else if (ctrl->id == kHeroOk)
             AcceptOffer();
-        else if (ctrl->id == kHeroCancel && !G.offer->first)
+        else if (ctrl->id == kHeroCancel && !g_app.offer->first)
             RefuseOffer();
         return;
     }
     // On the start screens the menu bar stays live over them.
     auto top = kit::TopShared();
-    if (top && top->menu_bar && (G.open_menu >= 0 || menu::TitleAt(G.menu_layout, x, y) >= 0))
+    if (top && top->menu_bar &&
+        (g_app.open_menu >= 0 || menu::TitleAt(g_app.menu_layout, x, y) >= 0))
         top = nullptr;
     if (top) {
         // the right button on a dialog: a control's help, or the dialog's regions
@@ -3239,37 +3274,37 @@ static void Mousepressed(int x, int y, int button) {
         top->Mousepressed(frame_x, frame_y, button);
         return;
     }
-    if (G.over) return;
+    if (g_app.over) return;
     // the menu bar takes precedence over everything beneath it, the start
     // screens' too, with no game yet
-    int hit = menu::TitleAt(G.menu_layout, x, y);
+    int hit = menu::TitleAt(g_app.menu_layout, x, y);
     if (hit >= 0) {
-        G.open_menu = G.open_menu == hit ? -1 : hit;
+        g_app.open_menu = g_app.open_menu == hit ? -1 : hit;
         return;
     }
-    if (G.open_menu >= 0) {
-        const menu::Row* row = menu::RowAt(G.menu_layout, G.open_menu, x, y);
-        G.open_menu = -1;
+    if (g_app.open_menu >= 0) {
+        const menu::Row* row = menu::RowAt(g_app.menu_layout, g_app.open_menu, x, y);
+        g_app.open_menu = -1;
         std::string row_key = row ? (row->key.empty() ? row->act : row->key) : "";
         if (!row_key.empty() && MenuEnabled(row_key)) MenuPick(row_key);
         return;
     }
-    if (!G.g) return;
-    auto ctrl = screen::ControlAt(*G.screen, x, y);
+    if (!g_app.g) return;
+    auto ctrl = screen::ControlAt(*g_app.screen, x, y);
     if (ctrl && button == 2) {
         if (infobox::ExplainControl(x, y, ctrl->id)) return;
     } else if (ctrl) {
-        if (G.screen->StateOf(ctrl->id) == kDisabled) return;
-        G.pressed = ctrl->id;
-        G.screen->state[ctrl->id] = kActive;
+        if (g_app.screen->StateOf(ctrl->id) == kDisabled) return;
+        g_app.pressed = ctrl->id;
+        g_app.screen->state[ctrl->id] = kActive;
         return;
     }
     // The hand pointer drags the map.
     if (button == 1 && PointerKind(x, y) == kHand) {
-        G.drag = Drag{G.cx, G.cy, 0, 0};
+        g_app.drag = Drag{g_app.cx, g_app.cy, 0, 0};
         return;
     }
-    auto reg = screen::RegionAt(*G.screen, x, y);
+    auto reg = screen::RegionAt(*g_app.screen, x, y);
     if (!reg) return;
     if (reg->id == screen::kMap) {
         auto tile = TileAtPoint(x, y);
@@ -3286,9 +3321,9 @@ static void Mousepressed(int x, int y, int button) {
         else if (ptr_kind == kAttack || ptr_kind == kPeace)
             AttackTile(tile_x, tile_y);
         else if (ptr_kind == kCityP || ptr_kind == kSiteP) {
-            if (City* city = game::CityAt(*G.g, tile_x, tile_y)) front::OpenCity(city);
+            if (City* city = game::CityAt(*g_app.g, tile_x, tile_y)) front::OpenCity(city);
         } else if (ptr_kind == kAdvise) {
-            miladvisor::Open(G.selection ? &G.selection->stack : nullptr, tile_x, tile_y);
+            miladvisor::Open(g_app.selection ? &g_app.selection->stack : nullptr, tile_x, tile_y);
         } else if (ptr_kind == kSelect) {
             SelectClick(tile_x, tile_y);
         } else if (ptr_kind == kAlt) {
@@ -3322,32 +3357,32 @@ void front::AfterSlotChange() {
  * played out before the next.
  */
 static void MoveAllStep() {
-    while (G.move_all) {
-        if (G.walk) return;
+    while (g_app.move_all) {
+        if (g_app.walk) return;
         Army* lead = nullptr;
-        for (Army* army : G.g->armies) {
-            if (army->owner == G.player->index && army->target && !army->transit &&
-                !G.move_all->seen.count(army)) {
+        for (Army* army : g_app.g->armies) {
+            if (army->owner == g_app.player->index && army->target && !army->transit &&
+                !g_app.move_all->seen.count(army)) {
                 lead = army;
                 break;
             }
         }
         if (!lead) {
-            if (G.move_all->moved == 0) Say("Nothing is under orders.");
-            G.move_all.reset();
+            if (g_app.move_all->moved == 0) Say("Nothing is under orders.");
+            g_app.move_all.reset();
             RefreshControls();
             return;
         }
-        G.move_all->seen.insert(lead);
+        g_app.move_all->seen.insert(lead);
         Select(lead->x, lead->y, lead);
-        if (G.selection) {
-            for (Army* army : G.selection->stack) G.move_all->seen.insert(army);
+        if (g_app.selection) {
+            for (Army* army : g_app.selection->stack) g_app.move_all->seen.insert(army);
             // selecting a stack already where it was sent lifts the order
             // (refreshRoute), so there may be nothing left to walk to
             if (lead->target) {
                 auto target = *lead->target;
                 MoveSelection(target.first, target.second);
-                if (G.move_all) G.move_all->moved++;
+                if (g_app.move_all) g_app.move_all->moved++;
             }
         }
     }
@@ -3355,21 +3390,21 @@ static void MoveAllStep() {
 
 /** @brief Starts Order > Move All, walking the selected stack first if it has a destination. */
 static void MoveAll() {
-    G.move_all = App::MoveAll{};
-    if (G.selection && !G.selection->stack.empty() && G.selection->stack[0]->target) {
-        auto target = *G.selection->stack[0]->target;
-        for (Army* army : G.selection->stack) G.move_all->seen.insert(army);
+    g_app.move_all = App::MoveAll{};
+    if (g_app.selection && !g_app.selection->stack.empty() && g_app.selection->stack[0]->target) {
+        auto target = *g_app.selection->stack[0]->target;
+        for (Army* army : g_app.selection->stack) g_app.move_all->seen.insert(army);
         MoveSelection(target.first, target.second);
-        if (G.move_all) G.move_all->moved = 1;
+        if (g_app.move_all) g_app.move_all->moved = 1;
     }
     MoveAllStep();
 }
 
 /** @brief Runs Hero > Search with the selected stack. */
 static void DoSearch() {
-    if (!G.selection) return;
-    int x = G.selection->x, y = G.selection->y;
-    search::Open(G.selection->stack);
+    if (!g_app.selection) return;
+    int x = g_app.selection->x, y = g_app.selection->y;
+    search::Open(g_app.selection->stack);
     Reslot(SelectableAt(x, y));
     front::StratDirty();
 }
@@ -3380,8 +3415,8 @@ static std::string ShortcutKey(int n) {
         {507, "m"}, {508, "q"}, {510, "a"}, {511, "k"}, {512, "g"}, {513, "n"}, {514, "w"},
         {516, "="}, {517, ","}, {518, "f"}, {521, "z"}, {524, "b"}, {525, "c"}, {526, "p"},
         {527, "v"}, {528, "."}, {529, "s"}, {530, "h"}, {531, "e"}, {534, "l"}, {535, "alt E"}};
-    auto shortcut = G.screen->ui.shortcuts.find(n);
-    if (shortcut == G.screen->ui.shortcuts.end()) return "";
+    auto shortcut = g_app.screen->ui.shortcuts.find(n);
+    if (shortcut == g_app.screen->ui.shortcuts.end()) return "";
     auto key_it = kKey.find(shortcut->second);
     return key_it == kKey.end() ? "" : key_it->second;
 }
@@ -3392,31 +3427,31 @@ static std::map<int, std::function<void()>>& Actions() {
     if (!action_table.empty()) return action_table;
     for (int i = 0; i < kSlotCount; i++) {
         action_table[kSlotFirst + i] = [i]() {
-            if (!G.selection) return;
-            slots_mod::Toggle(G.selection->slots, *G.g, i);
+            if (!g_app.selection) return;
+            slots_mod::Toggle(g_app.selection->slots, *g_app.g, i);
             front::AfterSlotChange();
         };
         action_table[kBarFirst + i] = [i]() {
-            if (!G.selection) return;
-            slots_mod::PickGroup(G.selection->slots, *G.g, i);
+            if (!g_app.selection) return;
+            slots_mod::PickGroup(g_app.selection->slots, *g_app.g, i);
             front::AfterSlotChange();
         };
     }
     action_table[kGrpAll] = []() {
-        if (!G.selection) return;
-        auto& slots = G.selection->slots;
+        if (!g_app.selection) return;
+        auto& slots = g_app.selection->slots;
         if (slots_mod::Grouped(slots))
-            slots_mod::Single(slots, *G.g);
+            slots_mod::Single(slots, *g_app.g);
         else
-            slots_mod::All(slots, *G.g);
+            slots_mod::All(slots, *g_app.g);
         front::AfterSlotChange();
     };
     action_table[kGrpNone] = action_table[kGrpAll];
     // The five buttons above the pad, 173-178: walk on, next, done, defend,
     // deselect.
     action_table[173] = []() {
-        if (!G.selection || G.selection->stack.empty()) return;
-        auto target = G.selection->stack[0]->target;
+        if (!g_app.selection || g_app.selection->stack.empty()) return;
+        auto target = g_app.selection->stack[0]->target;
         if (!target) return;
         MoveSelection(target->first, target->second);
     };
@@ -3429,8 +3464,8 @@ static std::map<int, std::function<void()>>& Actions() {
                                    {0, 1},  {-1, 1}, {-1, 0}, {-1, -1}};
     for (int i = 0; i < 8; i++) {
         action_table[320 + i] = [i]() {
-            G.cx += kPad[i][0];
-            G.cy += kPad[i][1];
+            g_app.cx += kPad[i][0];
+            g_app.cy += kPad[i][1];
             ClampCamera();
         };
     }
@@ -3448,29 +3483,31 @@ static std::map<int, std::function<void()>>& Actions() {
     };
     // 186 looks at where the stack is going, and back.
     action_table[186] = []() {
-        if (!G.selection || G.selection->stack.empty()) return;
-        auto& sel = *G.selection;
+        if (!g_app.selection || g_app.selection->stack.empty()) return;
+        auto& sel = *g_app.selection;
         auto target = sel.stack[0]->target;
-        double cam_x = G.cx, cam_y = G.cy;
+        double cam_x = g_app.cx, cam_y = g_app.cy;
         if (target && InView(sel.x, sel.y)) {
             CentreOn(target->first, target->second);
-            if (G.cx == cam_x && G.cy == cam_y) CentreOn(sel.x, sel.y);
+            if (g_app.cx == cam_x && g_app.cy == cam_y) CentreOn(sel.x, sel.y);
         } else {
             CentreOn(sel.x, sel.y);
         }
     };
     // 187 forgets the destination.
     action_table[187] = []() {
-        if (!G.selection || G.selection->stack.empty() || !G.selection->stack[0]->target) return;
-        for (Army* army : G.selection->stack) army->target.reset();
-        G.route.reset();
+        if (!g_app.selection || g_app.selection->stack.empty() ||
+            !g_app.selection->stack[0]->target)
+            return;
+        for (Army* army : g_app.selection->stack) army->target.reset();
+        g_app.route.reset();
     };
     // 183-185 are one button in three faces: Diplomatic Action.
     for (int control_id = 183; control_id <= 185; control_id++)
         action_table[control_id] = diplomacyui::Action;
     // The pad's centre, 177, shares its handler with Home.
     action_table[177] = []() {
-        if (G.selection) CentreOn(G.selection->x, G.selection->y);
+        if (g_app.selection) CentreOn(g_app.selection->x, g_app.selection->y);
     };
     return action_table;
 }
@@ -3481,9 +3518,9 @@ static std::map<int, std::function<void()>>& Actions() {
  * A control with no handler in Actions() is greyed too.
  */
 static void RefreshControls() {
-    auto& states = G.screen->state;
+    auto& states = g_app.screen->state;
     // under the banner and the hero offer every control is still greyed
-    if (G.banner || G.offer) {
+    if (g_app.banner || g_app.offer) {
         for (auto& [control_id, state] : states) state = kDisabled;
         return;
     }
@@ -3492,19 +3529,20 @@ static void RefreshControls() {
         if (!states.count(control_id)) return;
         if (!(live && action_table.count(control_id)))
             states[control_id] = kDisabled;
-        else if (control_id == G.pressed)
+        else if (control_id == g_app.pressed)
             states[control_id] = kActive;
         else
             states[control_id] = kNormal;
     };
-    const Selection* sel = G.selection ? &*G.selection : nullptr;
-    bool walk_on =
-            sel && G.route &&
-            static_cast<int>(G.route->path.size()) > (G.walk ? static_cast<int>(G.walk->i) + 1 : 0);
+    const Selection* sel = g_app.selection ? &*g_app.selection : nullptr;
+    bool walk_on = sel && g_app.route &&
+                   static_cast<int>(g_app.route->path.size()) >
+                           (g_app.walk ? static_cast<int>(g_app.walk->i) + 1 : 0);
     set(173, walk_on);
     bool more = false;
-    for (Army* army : G.g->armies)
-        if (army->owner == G.player->index && !army->transit && !army->fortified && !army->done) {
+    for (Army* army : g_app.g->armies)
+        if (army->owner == g_app.player->index && !army->transit && !army->fortified &&
+            !army->done) {
             more = true;
             break;
         }
@@ -3529,64 +3567,65 @@ static void RefreshControls() {
         set(w2::uidata::kShortcutFirst + i, !key.empty() && MenuEnabled(key));
     }
     for (int i = 0; i < 8; i++) set(320 + i, true);
-    int face = diplomacyui::ButtonFor(*G.g, G.player->index);
+    int face = diplomacyui::ButtonFor(*g_app.g, g_app.player->index);
     for (int control_id = 183; control_id <= 185; control_id++) set(control_id, control_id == face);
 }
 
 /** @brief Pans the map camera during an active mouse drag by (`dx`, `dy`) UI pixels. */
 static void Mousemoved(double dx, double dy) {
-    if (!G.drag) return;
-    G.drag->dx += dx;
-    G.drag->dy += dy;
-    double scale = static_cast<double>(display::d.scale) / (kTile * G.zoom);
-    G.cx = G.drag->cx - G.drag->dx * scale;
-    G.cy = G.drag->cy - G.drag->dy * scale;
+    if (!g_app.drag) return;
+    g_app.drag->dx += dx;
+    g_app.drag->dy += dy;
+    double scale = static_cast<double>(display::state.scale) / (kTile * g_app.zoom);
+    g_app.cx = g_app.drag->cx - g_app.drag->dx * scale;
+    g_app.cy = g_app.drag->cy - g_app.drag->dy * scale;
     ClampCamera();
 }
 
 /** @brief Zooms the map around the tile under the pointer on mouse wheel scroll `wheel_y`. */
 static void Wheelmoved(int wheel_y) {
     SyncLayout();
-    if (G.starting || !G.g || G.over || kit::Top() || G.banner || G.offer || G.victory ||
-        wheel_y == 0)
+    if (g_app.starting || !g_app.g || g_app.over || kit::Top() || g_app.banner || g_app.offer ||
+        g_app.victory || wheel_y == 0)
         return;
-    if (G.map_rect.Contains(G.mouse_x, G.mouse_y))
-        SetZoomAt(G.zoom + (wheel_y > 0 ? 1 : -1), G.mouse_x, G.mouse_y, false);
+    if (g_app.map_rect.Contains(g_app.mouse_x, g_app.mouse_y))
+        SetZoomAt(g_app.zoom + (wheel_y > 0 ? 1 : -1), g_app.mouse_x, g_app.mouse_y, false);
     else
-        SetZoomAt(G.zoom + (wheel_y > 0 ? 1 : -1), 0, 0, true);
+        SetZoomAt(g_app.zoom + (wheel_y > 0 ? 1 : -1), 0, 0, true);
 }
 
 /** @brief Handles a mouse button release at UI coordinates (`x`, `y`). */
 static void Mousereleased(int x, int y, int button) {
     SyncLayout();
-    if (G.drag) {
-        G.drag.reset();
-        if (G.pressed == kNone) return;
+    if (g_app.drag) {
+        g_app.drag.reset();
+        if (g_app.pressed == kNone) return;
     }
     if (auto top = kit::TopShared()) {
-        if (top->Mousereleased(x - G.layout.dialog.x, y - G.layout.dialog.y, button)) return;
+        if (top->Mousereleased(x - g_app.layout.dialog.x, y - g_app.layout.dialog.y, button))
+            return;
     }
-    int control_id = G.pressed;
+    int control_id = g_app.pressed;
     if (control_id == kNone) return;
-    G.pressed = kNone;
-    G.screen->state[control_id] = kNormal;
-    auto ctrl = screen::ControlAt(*G.screen, x, y);
+    g_app.pressed = kNone;
+    g_app.screen->state[control_id] = kNormal;
+    auto ctrl = screen::ControlAt(*g_app.screen, x, y);
     if (!ctrl || ctrl->id != control_id) return;  // released off the button
     auto& action_table = Actions();
     auto act = action_table.find(control_id);
     if (act != action_table.end()) act->second();
-    if (G.g) RefreshControls();
+    if (g_app.g) RefreshControls();
 }
 
 /** @brief Finds the city nearest the view's centre and opens the city dialog in `mode`. */
 static void ViewCity(int mode) {
     auto [centre_x, centre_y] = front::ViewCentre();
-    int viewer = game::ViewerSide(*G.g, G.player);
+    int viewer = game::ViewerSide(*g_app.g, g_app.player);
     City* best = nullptr;
     int best_d = kNone;
-    for (auto& city : G.g->map->cities) {
-        bool allowed = game::Seen(*G.g, viewer, city.x, city.y) &&
-                       (mode == city::kInfo || city.owner_index == G.player->index);
+    for (auto& city : g_app.g->map->cities) {
+        bool allowed = game::Seen(*g_app.g, viewer, city.x, city.y) &&
+                       (mode == city::kInfo || city.owner_index == g_app.player->index);
         if (allowed) {
             int dist = std::max(std::abs(city.x - centre_x), std::abs(city.y - centre_y));
             if (best_d == kNone || dist < best_d) {
@@ -3599,18 +3638,18 @@ static void ViewCity(int mode) {
 }
 
 void front::Quit() {
-    G.modals.clear();
-    G.ai_run.reset();
+    g_app.modals.clear();
+    g_app.ai_run.reset();
     ai_co = nullptr;
-    G.ai_status.reset();
-    G.assault.reset();
-    G.walk.reset();
-    G.move_all.reset();
-    G.banner.reset();
-    G.offer.reset();
-    G.victory.reset();
-    G.victory_under.reset();
-    G.over = false;
+    g_app.ai_status.reset();
+    g_app.assault.reset();
+    g_app.walk.reset();
+    g_app.move_all.reset();
+    g_app.banner.reset();
+    g_app.offer.reset();
+    g_app.victory.reset();
+    g_app.victory_under.reset();
+    g_app.over = false;
     front::OpenStart();
 }
 
@@ -3628,7 +3667,7 @@ static std::map<std::string, std::function<void()>>& MenuDoes() {
         opts.confirm = true;
         opts.ok = [](const std::string&) {
             // "Farewell, Warlord!" -- and the game closes.
-            advisor::Say(w2::cues::kQuit, []() { G.quit_requested = true; });
+            advisor::Say(w2::cues::kQuit, []() { g_app.quit_requested = true; });
         };
         input::Open(opts);
     };
@@ -3638,9 +3677,9 @@ static std::map<std::string, std::function<void()>>& MenuDoes() {
         for (int i = 1; i <= 4; i++) opts.lines.push_back(kit::Text(0x2d, i));
         opts.confirm = true;
         opts.ok = [](const std::string&) {
-            G.selection.reset();
-            G.banner.reset();
-            G.offer.reset();
+            g_app.selection.reset();
+            g_app.banner.reset();
+            g_app.offer.reset();
             front::OpenStart();
         };
         input::Open(opts);
@@ -3648,9 +3687,9 @@ static std::map<std::string, std::function<void()>>& MenuDoes() {
     menu_actions["alt S"] = savegame::Save;
     menu_actions["alt L"] = []() {
         savegame::Load([](std::unique_ptr<w2::Game> loaded_game) {
-            if (G.starting) {
-                G.modals.clear();
-                G.starting = false;
+            if (g_app.starting) {
+                g_app.modals.clear();
+                g_app.starting = false;
             }
             front::TakeLoaded(std::move(loaded_game));
         });
@@ -3662,9 +3701,9 @@ static std::map<std::string, std::function<void()>>& MenuDoes() {
     menu_actions["v"] = []() { ViewCity(city::kVector); };
     // Hero > Plant Flag
     menu_actions["f"] = []() {
-        if (!G.selection) return;
-        for (Army* army : G.selection->stack) {
-            if (army->Hero() && game::PlantFlag(*G.g, *G.player, army)) {
+        if (!g_app.selection) return;
+        for (Army* army : g_app.selection->stack) {
+            if (army->Hero() && game::PlantFlag(*g_app.g, *g_app.player, army)) {
                 front::StratDirty();
                 return;
             }
@@ -3672,8 +3711,8 @@ static std::map<std::string, std::function<void()>>& MenuDoes() {
     };
     // Order > Disband
     menu_actions["q"] = []() {
-        if (!G.selection || G.selection->stack.empty()) return;
-        auto stack = G.selection->stack;
+        if (!g_app.selection || g_app.selection->stack.empty()) return;
+        auto stack = g_app.selection->stack;
         bool heroes = false;
         for (Army* army : stack)
             if (army->Hero()) heroes = true;
@@ -3683,8 +3722,8 @@ static std::map<std::string, std::function<void()>>& MenuDoes() {
         opts.lines = {"Are you sure you", "want to disband this", "group?",
                       heroes ? "It contains heroes" : ""};
         opts.ok = [stack](const std::string&) {
-            game::Disband(*G.g, *G.player, stack);
-            G.selection.reset();
+            game::Disband(*g_app.g, *g_app.player, stack);
+            g_app.selection.reset();
             front::StratDirty();
         };
         input::Open(opts);
@@ -3699,7 +3738,7 @@ static std::map<std::string, std::function<void()>>& MenuDoes() {
     menu_actions["o"] = armybonus::Open;
     menu_actions["t"] = items::Open;
     menu_actions["x"] = []() {
-        if (G.selection) signpost::Open(G.selection->stack);
+        if (g_app.selection) signpost::Open(g_app.selection->stack);
     };
     menu_actions["h"] = []() { historyui::Open(0); };
     menu_actions["e"] = []() { historyui::Open(1); };
@@ -3752,38 +3791,38 @@ static bool MenuEnabled(const std::string& menu_key) {
     bool ai_opt = w2::StartsWith(menu_key, "ai ");
     if (music && !sound::SynthAvailable(menu_key.substr(6))) return false;
     // On the start screens every menu is greyed except Quit, Load, and display/audio/AI settings.
-    if (G.starting || !G.g) {
+    if (g_app.starting || !g_app.g) {
         return menu_key == "^Q" || (menu_key == "alt L" && savegame::Used() > 0) ||
                w2::StartsWith(menu_key, "ui scale ") || w2::StartsWith(menu_key, "screen ") ||
                music || ai_opt;
     }
     // While AI-vs-AI spectating is running, only enable read-only spectator reports, display/audio
     // settings, and quit
-    if (G.ai_run && !HumansLeft()) {
+    if (g_app.ai_run && !HumansLeft()) {
         if (menu_key == "h" || menu_key == "e" || menu_key == "j" || menu_key == "y")
-            return G.g->turn != 1;
-        if (menu_key == "d") return G.g->map->options.diplomacy != 0;
+            return g_app.g->turn != 1;
+        if (menu_key == "d") return g_app.g->map->options.diplomacy != 0;
         return menu_key == "^Q" || menu_key == "alt X" || menu_key == "?" || menu_key == "c" ||
                menu_key == "." || menu_key == "a" || menu_key == "k" || menu_key == "g" ||
                menu_key == "n" || menu_key == "w" || menu_key == "l" ||
                w2::StartsWith(menu_key, "map zoom ") || w2::StartsWith(menu_key, "ui scale ") ||
                w2::StartsWith(menu_key, "screen ") || music || ai_opt;
     }
-    w2::Game& game_state = *G.g;
+    w2::Game& game_state = *g_app.g;
     auto side_has_hero = [&]() {
         for (Army* army : game_state.armies)
-            if (army->owner == G.player->index && army->Hero()) return true;
+            if (army->owner == g_app.player->index && army->Hero()) return true;
         return false;
     };
-    auto selected = []() { return G.selection && !G.selection->stack.empty(); };
+    auto selected = []() { return g_app.selection && !g_app.selection->stack.empty(); };
     auto side_has_cities = [&]() {
         for (auto& city : game_state.map->cities)
-            if (city.owner_index == G.player->index && !city.razed) return true;
+            if (city.owner_index == g_app.player->index && !city.razed) return true;
         return false;
     };
     auto can_search = [&]() {
         if (!selected()) return false;
-        Army* lead = G.selection->stack[0];
+        Army* lead = g_app.selection->stack[0];
         w2::Site* site =
                 game_state.map->site_at.empty()
                         ? nullptr
@@ -3793,10 +3832,10 @@ static bool MenuEnabled(const std::string& menu_key) {
     };
     auto can_plant_flag = [&]() {
         if (!selected()) return false;
-        Army* lead = G.selection->stack[0];
+        Army* lead = g_app.selection->stack[0];
         if (!lead->Hero()) return false;
-        if (G.player->index >= static_cast<int>(game_state.map->items.size())) return false;
-        w2::Item* std = &game_state.map->items[G.player->index];
+        if (g_app.player->index >= static_cast<int>(game_state.map->items.size())) return false;
+        w2::Item* std = &game_state.map->items[g_app.player->index];
         if (std::find(lead->items.begin(), lead->items.end(), std) == lead->items.end())
             return false;
         int terrain = w2::scn::TerrainAt(*game_state.map, lead->x, lead->y);
@@ -3810,8 +3849,8 @@ static bool MenuEnabled(const std::string& menu_key) {
     if (menu_key == "alt L") return savegame::Used() > 0;
     if (menu_key == "q" || menu_key == "s") return selected();
     if (menu_key == "x")
-        return selected() && w2::scn::TerrainAt(*game_state.map, G.selection->stack[0]->x,
-                                                G.selection->stack[0]->y) == move::kTower;
+        return selected() && w2::scn::TerrainAt(*game_state.map, g_app.selection->stack[0]->x,
+                                                g_app.selection->stack[0]->y) == move::kTower;
     if (menu_key == "r" || menu_key == "b" || menu_key == "p" || menu_key == "v")
         return side_has_cities();
     if (menu_key == "d") return game_state.map->options.diplomacy != 0;
@@ -3830,30 +3869,30 @@ bool front::MenuEnabled(const std::string& menu_key) {
 /** @brief Handles a key press identified by LÖVE key name `key`. */
 static void Keypressed(const std::string& key) {
     if (BusyWalking()) {
-        if (G.key_buffer.size() < 15) G.key_buffer.push_back(key);
+        if (g_app.key_buffer.size() < 15) g_app.key_buffer.push_back(key);
         return;
     }
     SyncLayout();
     if (ComputerInput(key)) return;
-    if (G.banner) {
+    if (g_app.banner) {
         DismissBanner();
         return;
     }
-    if (G.assault) {
+    if (g_app.assault) {
         PressAssault();
         return;
     }
-    if (G.victory) {
+    if (g_app.victory) {
         // Occupy heads both the default and the cancel lists
-        if (key == "return" || key == "kpenter" || key == "escape") TakeCity(G.victory->enter);
+        if (key == "return" || key == "kpenter" || key == "escape") TakeCity(g_app.victory->enter);
         return;
     }
-    if (G.offer) {
+    if (g_app.offer) {
         if (key == "return" || key == "kpenter")
             AcceptOffer();
-        else if (key == "backspace" && !G.offer_name.empty())
-            G.offer_name.pop_back();
-        else if (key == "escape" && !G.offer->first)
+        else if (key == "backspace" && !g_app.offer_name.empty())
+            g_app.offer_name.pop_back();
+        else if (key == "escape" && !g_app.offer->first)
             RefuseOffer();
         return;
     }
@@ -3868,27 +3907,27 @@ static void Keypressed(const std::string& key) {
             else if (alt && key.size() == 1)
                 accel = "alt " + w2::Upper(key);
             if (!accel.empty()) {
-                G.open_menu = -1;
+                g_app.open_menu = -1;
                 if (MenuEnabled(accel)) MenuDoes()[accel]();
                 return;
             }
         }
-        if (G.open_menu >= 0) {
-            G.open_menu = -1;
+        if (g_app.open_menu >= 0) {
+            g_app.open_menu = -1;
             return;
         }
         top->Keypressed(key);
         return;
     }
-    if (G.open_menu >= 0) {
-        G.open_menu = -1;
+    if (g_app.open_menu >= 0) {
+        g_app.open_menu = -1;
         return;
     }
-    if (G.over || !G.g) return;
+    if (g_app.over || !g_app.g) return;
     // The main screen's keys.
     auto press = [](int control_id) {
         auto& action_table = Actions();
-        if (G.screen->StateOf(control_id) != kDisabled && action_table.count(control_id))
+        if (g_app.screen->StateOf(control_id) != kDisabled && action_table.count(control_id))
             action_table[control_id]();
         RefreshControls();
     };
@@ -3900,9 +3939,9 @@ static void Keypressed(const std::string& key) {
     if (key == "return" || key == "kpenter")
         press(174);
     else if (key == "kp+" || key == "pageup" || key == "=")
-        front::SetZoom(G.zoom + 1);
+        front::SetZoom(g_app.zoom + 1);
     else if (key == "kp-" || key == "pagedown" || key == "-")
-        front::SetZoom(G.zoom - 1);
+        front::SetZoom(g_app.zoom - 1);
     else if (key == "escape")
         press(175);
     else if (key == "space")
@@ -3918,17 +3957,17 @@ static void Keypressed(const std::string& key) {
     else if (key == "delete")
         Deselect();  // as control 178 is
     else if (digit == "5") {
-        if (G.selection) CentreOn(G.selection->x, G.selection->y);
+        if (g_app.selection) CentreOn(g_app.selection->x, g_app.selection->y);
     } else if (!digit.empty()) {
         // 1-9 step the stack the way the numeric pad lies.
         static const std::map<char, std::pair<int, int>> kStep = {
             {'8', {0, -1}}, {'9', {1, -1}}, {'6', {1, 0}},  {'3', {1, 1}},
             {'2', {0, 1}},  {'1', {-1, 1}}, {'4', {-1, 0}}, {'7', {-1, -1}}};
         auto step_it = kStep.find(digit[0]);
-        if (step_it != kStep.end() && G.selection) {
-            for (Army* army : G.selection->stack) army->target.reset();
-            MoveSelection(G.selection->x + step_it->second.first,
-                          G.selection->y + step_it->second.second);
+        if (step_it != kStep.end() && g_app.selection) {
+            for (Army* army : g_app.selection->stack) army->target.reset();
+            MoveSelection(g_app.selection->x + step_it->second.first,
+                          g_app.selection->y + step_it->second.second);
         }
     } else if (key == "up")
         press(320);
@@ -3940,13 +3979,13 @@ static void Keypressed(const std::string& key) {
         press(326);
     else if (key == "f5") {
         // not the original's: quick save and load
-        if (savegame::WriteSlot("quick", *G.g))
+        if (savegame::WriteSlot("quick", *g_app.g))
             Say("Saved.");
         else
             Say("Could not save.");
     } else if (key == "f9") {
         if (auto loaded = savegame::ReadSlot("quick")) front::TakeLoaded(std::move(loaded));
-    } else if (G.modern_ui && key == "f10") {
+    } else if (g_app.modern_ui && key == "f10") {
         diplomacyui::OpenBrainInspector();
     } else {
         std::string accel;
@@ -3966,13 +4005,14 @@ static void Keypressed(const std::string& key) {
 /** @brief Appends typed text to the hero offer's name field or the top modal dialog. */
 static void Textinput(const std::string& text) {
     auto top = kit::TopShared();
-    if (top && !G.offer) {
+    if (top && !g_app.offer) {
         top->Textinput(text);
         return;
     }
-    if (!G.offer) return;
+    if (!g_app.offer) return;
     static const std::regex kOk("^[A-Za-z0-9\\s'\\-.]+$");
-    if (G.offer_name.size() < kHeroNameMax && std::regex_match(text, kOk)) G.offer_name += text;
+    if (g_app.offer_name.size() < kHeroNameMax && std::regex_match(text, kOk))
+        g_app.offer_name += text;
 }
 
 // ------------------------------------------------------------------ controller
@@ -4000,20 +4040,20 @@ static int typing_now = 0;  ///< Text input: 0 off, 1 on, 2 on with the Deck's k
  * Also warps the OS mouse cursor so a trackpad or mouse continues from there.
  */
 static void PointTo(double x, double y) {
-    x = std::clamp(x, 0.0, display::d.w - 0.001);
-    y = std::clamp(y, 0.0, display::d.h - 0.001);
+    x = std::clamp(x, 0.0, display::state.w - 0.001);
+    y = std::clamp(y, 0.0, display::state.h - 0.001);
     double dx = x - pad_x, dy = y - pad_y;
     pad_x = x;
     pad_y = y;
-    display::d.mouse_inside = true;
-    display::d.off.reset();
+    display::state.mouse_inside = true;
+    display::state.off.reset();
     Mousemoved(dx, dy);
-    if (static_cast<int>(x) == G.mouse_x && static_cast<int>(y) == G.mouse_y) return;
-    G.mouse_x = static_cast<int>(x);
-    G.mouse_y = static_cast<int>(y);
+    if (static_cast<int>(x) == g_app.mouse_x && static_cast<int>(y) == g_app.mouse_y) return;
+    g_app.mouse_x = static_cast<int>(x);
+    g_app.mouse_y = static_cast<int>(y);
     SDL_Window* win = display::Window();
     if (win && SDL_GetKeyboardFocus() == win) {
-        auto [win_x, win_y] = display::FromUi(G.mouse_x + 0.5, G.mouse_y + 0.5);
+        auto [win_x, win_y] = display::FromUi(g_app.mouse_x + 0.5, g_app.mouse_y + 0.5);
         last_x = std::round(win_x);
         last_y = std::round(win_y);
         if (warps.size() >= 16) warps.erase(warps.begin());
@@ -4025,9 +4065,9 @@ static void PointTo(double x, double y) {
 /** @brief Presses or releases mouse `button` while any gamepad control for it is held. */
 static void PadMouse(int& held, int button, bool down) {
     if (down && held++ == 0)
-        Mousepressed(G.mouse_x, G.mouse_y, button);
+        Mousepressed(g_app.mouse_x, g_app.mouse_y, button);
     else if (!down && held > 0 && --held == 0)
-        Mousereleased(G.mouse_x, G.mouse_y, button);
+        Mousereleased(g_app.mouse_x, g_app.mouse_y, button);
 }
 
 /** @brief Presses or releases virtual key `key` from a gamepad button event. */
@@ -4096,8 +4136,8 @@ static void PadButton(int button, bool down) {
 /** @brief Releases any held gamepad mouse buttons when the controller disconnects or focus is lost.
  */
 static void PadLetGo() {
-    if (pad_left) Mousereleased(G.mouse_x, G.mouse_y, 1);
-    if (pad_right) Mousereleased(G.mouse_x, G.mouse_y, 2);
+    if (pad_left) Mousereleased(g_app.mouse_x, g_app.mouse_y, 1);
+    if (pad_right) Mousereleased(g_app.mouse_x, g_app.mouse_y, 2);
     pad_left = pad_right = 0;
 }
 
@@ -4115,19 +4155,20 @@ static void PadUpdate() {
     auto sticks = pad::ReadSticks();
     if (sticks.rx != 0 || sticks.ry != 0) {
         // the mouse or a touch moved it since
-        if (static_cast<int>(pad_x) != G.mouse_x || static_cast<int>(pad_y) != G.mouse_y) {
-            pad_x = G.mouse_x + 0.5;
-            pad_y = G.mouse_y + 0.5;
+        if (static_cast<int>(pad_x) != g_app.mouse_x || static_cast<int>(pad_y) != g_app.mouse_y) {
+            pad_x = g_app.mouse_x + 0.5;
+            pad_y = g_app.mouse_y + 0.5;
         }
-        double step = kPointerSpeed * display::d.h * std::hypot(sticks.rx, sticks.ry) * delta_t;
+        double step = kPointerSpeed * display::state.h * std::hypot(sticks.rx, sticks.ry) * delta_t;
         PointTo(pad_x + sticks.rx * step, pad_y + sticks.ry * step);
     }
-    if ((sticks.lx != 0 || sticks.ly != 0) && !(G.starting || !G.g || G.over || kit::Top() ||
-                                                G.banner || G.offer || G.victory || G.drag)) {
-        double slide = kSlideSpeed * std::hypot(sticks.lx, sticks.ly) * delta_t * display::d.scale /
-                       (kTile * G.zoom);
-        G.cx += sticks.lx * slide;
-        G.cy += sticks.ly * slide;
+    if ((sticks.lx != 0 || sticks.ly != 0) &&
+        !(g_app.starting || !g_app.g || g_app.over || kit::Top() || g_app.banner || g_app.offer ||
+          g_app.victory || g_app.drag)) {
+        double slide = kSlideSpeed * std::hypot(sticks.lx, sticks.ly) * delta_t *
+                       display::state.scale / (kTile * g_app.zoom);
+        g_app.cx += sticks.lx * slide;
+        g_app.cy += sticks.ly * slide;
         ClampCamera();
     }
 }
@@ -4140,9 +4181,9 @@ static void PadUpdate() {
  * keyboard.
  */
 static void SyncTyping() {
-    if (!G.offer) offer_typing = false;
+    if (!g_app.offer) offer_typing = false;
     auto top = kit::Top();
-    int want = G.offer ? (offer_typing ? 2 : 1) : top && top->Typing() ? 2 : 0;
+    int want = g_app.offer ? (offer_typing ? 2 : 1) : top && top->Typing() ? 2 : 0;
     if (want == typing_now) return;
     if (want == 0 || typing_now == 2) SDL_StopTextInput();
     typing_now = want;
@@ -4158,19 +4199,19 @@ static void SyncTyping() {
 
 /** @brief Starts the first turn of a newly created game and centres the view on the capital. */
 static void BeginGame() {
-    Side* first = game::Begin(*G.g);
+    Side* first = game::Begin(*g_app.g);
     if (!first) return;
     // a computer that opens the game plays to the screen of the human who
     // follows it, on that human's hidden map
-    G.player = first->computer ? game::NextHuman(*G.g) : first;
-    if (!G.player) G.player = first;
-    G.cursor = CapOf(G.player);
-    G.selection.reset();
-    CentreOn(CapOf(G.player).first, CapOf(G.player).second);
+    g_app.player = first->computer ? game::NextHuman(*g_app.g) : first;
+    if (!g_app.player) g_app.player = first;
+    g_app.cursor = CapOf(g_app.player);
+    g_app.selection.reset();
+    CentreOn(CapOf(g_app.player).first, CapOf(g_app.player).second);
     // The banner is shown for a human side.
     if (!first->computer) {
-        G.map_after_banner = HotseatHidden();
-        ShowBanner(G.player);
+        g_app.map_after_banner = HotseatHidden();
+        ShowBanner(g_app.player);
     }
 }
 
@@ -4183,38 +4224,38 @@ struct Script {
 static std::optional<Script> script;
 
 void front::OpenStart() {
-    G.starting = true;
-    G.have_layout = false;
+    g_app.starting = true;
+    g_app.have_layout = false;
     sound::Music(w2::cues::kTitle);
     start::Open(
             [](const std::string& dir, const w2::game::NewGameOptions& opts) {
                 auto start_game = [dir, opts]() {
-                    G.starting = false;
-                    G.have_layout = false;
-                    G.scenario = dir;
+                    g_app.starting = false;
+                    g_app.have_layout = false;
+                    g_app.scenario = dir;
                     w2::game::NewGameOptions game_opts = opts;
                     game_opts.seed = static_cast<double>(time(nullptr) % 1000000007);
-                    G.seed = game_opts.seed;
+                    g_app.seed = game_opts.seed;
                     if (opt_military_advisor >= 0) {
                         for (auto& [opt_name, opt_val] : game_opts.options)
                             if (opt_name == "militaryAdvisor") opt_val = opt_military_advisor;
                     }
-                    G.g = game::NewGame(G.data_dir, dir, game_opts);
-                    G.selection.reset();
-                    G.over = false;
+                    g_app.g = game::NewGame(g_app.data_dir, dir, game_opts);
+                    g_app.selection.reset();
+                    g_app.over = false;
                     front::StratDirty();
                     SyncLayout();
                     BeginGame();
-                    if (G.g->side && G.g->side->computer) {
+                    if (g_app.g->side && g_app.g->side->computer) {
                         // A game with no human in it says so as it begins.
                         bool human = false;
-                        for (Side* side : G.g->sides)
+                        for (Side* side : g_app.g->sides)
                             if (!side->computer) human = true;
                         if (human)
-                            PlayComputers(G.g->side);
+                            PlayComputers(g_app.g->side);
                         else
                             search::ShowMessage(kit::Text(0xe, 0), kit::Text(0xe, 1),
-                                                []() { PlayComputers(G.g->side); });
+                                                []() { PlayComputers(g_app.g->side); });
                     }
                 };
                 if (!script && sound::SpeechOn()) {
@@ -4225,8 +4266,8 @@ void front::OpenStart() {
                 }
             },
             [](std::unique_ptr<w2::Game> loaded_game) {
-                G.starting = false;
-                G.have_layout = false;
+                g_app.starting = false;
+                g_app.have_layout = false;
                 SyncLayout();
                 front::TakeLoaded(std::move(loaded_game));
             });
@@ -4290,16 +4331,16 @@ static void StepScript() {
             int x, y, button = 1;
             stream >> x >> y;
             if (!(stream >> button)) button = 1;
-            G.mouse_x = x;
-            G.mouse_y = y;
-            display::d.mouse_inside = true;
-            display::d.off.reset();
+            g_app.mouse_x = x;
+            g_app.mouse_y = y;
+            display::state.mouse_inside = true;
+            display::state.off.reset();
             Mousepressed(x, y, button);
             Mousereleased(x, y, button);
         } else if (cmd == "move") {
-            stream >> G.mouse_x >> G.mouse_y;
-            display::d.mouse_inside = true;
-            display::d.off.reset();
+            stream >> g_app.mouse_x >> g_app.mouse_y;
+            display::state.mouse_inside = true;
+            display::state.off.reset();
         } else if (cmd == "pad" || cmd == "padhold" || cmd == "padrelease") {
             std::string key;
             stream >> key;
@@ -4320,30 +4361,31 @@ static void StepScript() {
             stream >> path;
             gfx::SaveShot(path);
         } else if (cmd == "glass") {
-            stream >> display::d.glass_shot;
+            stream >> display::state.glass_shot;
         } else if (cmd == "eval") {
             printf("turn=%d player=%s modals=%d banner=%d offer=%d ai=%d over=%d walk=%d "
                    "assault=%d status=%s\n",
-                   G.g ? G.g->turn : 0, G.player ? G.player->name.c_str() : "-",
-                   static_cast<int>(G.modals.size()), static_cast<bool>(G.banner),
-                   static_cast<bool>(G.offer), static_cast<bool>(G.ai_run), G.over,
-                   static_cast<bool>(G.walk), static_cast<bool>(G.assault),
-                   G.ai_status ? G.ai_status->text.c_str() : "");
-            if (G.g && G.g->map)
+                   g_app.g ? g_app.g->turn : 0, g_app.player ? g_app.player->name.c_str() : "-",
+                   static_cast<int>(g_app.modals.size()), static_cast<bool>(g_app.banner),
+                   static_cast<bool>(g_app.offer), static_cast<bool>(g_app.ai_run), g_app.over,
+                   static_cast<bool>(g_app.walk), static_cast<bool>(g_app.assault),
+                   g_app.ai_status ? g_app.ai_status->text.c_str() : "");
+            if (g_app.g && g_app.g->map)
                 printf("  options: milAdv=%d diplo=%d hidden=%d viewEn=%d\n",
-                       G.g->map->options.military_advisor, G.g->map->options.diplomacy,
-                       G.g->map->options.hidden_map, G.g->map->options.view_enemies);
-            if (G.g && G.player && G.player->capital)
+                       g_app.g->map->options.military_advisor, g_app.g->map->options.diplomacy,
+                       g_app.g->map->options.hidden_map, g_app.g->map->options.view_enemies);
+            if (g_app.g && g_app.player && g_app.player->capital)
                 printf("  cam=%.2f,%.2f zoom=%d map=%d,%d,%d,%d capital=%d,%d pointer=%d,%d\n",
-                       G.cx, G.cy, G.zoom, G.map_rect.x, G.map_rect.y, G.map_rect.w, G.map_rect.h,
-                       G.player->capital->x, G.player->capital->y, G.mouse_x, G.mouse_y);
+                       g_app.cx, g_app.cy, g_app.zoom, g_app.map_rect.x, g_app.map_rect.y,
+                       g_app.map_rect.w, g_app.map_rect.h, g_app.player->capital->x,
+                       g_app.player->capital->y, g_app.mouse_x, g_app.mouse_y);
             fflush(stdout);
         } else if (cmd == "opt") {
             std::string opt_name;
             int val;
             stream >> opt_name >> val;
-            if (G.g && G.g->map) {
-                if (int* field = G.g->map->options.Field(opt_name)) *field = val;
+            if (g_app.g && g_app.g->map) {
+                if (int* field = g_app.g->map->options.Field(opt_name)) *field = val;
             }
         } else if (cmd == "load") {
             std::string slot_name;
@@ -4365,13 +4407,13 @@ static void StepScript() {
         } else if (cmd == "tileptr") {
             int tile_x, tile_y;
             stream >> tile_x >> tile_y;
-            int pixel_x = G.map_rect.x + static_cast<int>((tile_x + 0.5 - G.cx) * kTile * G.zoom /
-                                                          display::d.scale);
-            int pixel_y = G.map_rect.y + static_cast<int>((tile_y + 0.5 - G.cy) * kTile * G.zoom /
-                                                          display::d.scale);
+            int pixel_x = g_app.map_rect.x + static_cast<int>((tile_x + 0.5 - g_app.cx) * kTile *
+                                                              g_app.zoom / display::state.scale);
+            int pixel_y = g_app.map_rect.y + static_cast<int>((tile_y + 0.5 - g_app.cy) * kTile *
+                                                              g_app.zoom / display::state.scale);
             printf("tileptr(%d,%d)=%d\n", tile_x, tile_y, PointerKind(pixel_x, pixel_y));
             fflush(stdout);
-        } else if (cmd == "spawn" && G.g) {
+        } else if (cmd == "spawn" && g_app.g) {
             int tile_x, tile_y, owner, type;
             stream >> tile_x >> tile_y >> owner >> type;
             auto army = std::make_unique<Army>();
@@ -4380,12 +4422,12 @@ static void StepScript() {
             army->owner = owner;
             army->type = type;
             army->moves = 10;
-            G.g->armies.push_back(army.get());
-            G.g->pool.push_back(std::move(army));
+            g_app.g->armies.push_back(army.get());
+            g_app.g->pool.push_back(std::move(army));
         } else if (cmd == "advise") {
             int x, y;
             stream >> x >> y;
-            miladvisor::Open(G.selection ? &G.selection->stack : nullptr, x, y);
+            miladvisor::Open(g_app.selection ? &g_app.selection->stack : nullptr, x, y);
         } else if (cmd == "select") {
             int x, y;
             stream >> x >> y;
@@ -4394,12 +4436,12 @@ static void StepScript() {
             int x, y;
             stream >> x >> y;
             AttackTile(x, y);
-        } else if (cmd == "near" && G.g && G.selection) {
+        } else if (cmd == "near" && g_app.g && g_app.selection) {
             std::vector<std::pair<int, City*>> found;
-            for (auto& city : G.g->map->cities) {
-                if (city.owner_index != G.player->index && !city.razed)
-                    found.push_back({std::max(std::abs(city.x - G.selection->x),
-                                              std::abs(city.y - G.selection->y)),
+            for (auto& city : g_app.g->map->cities) {
+                if (city.owner_index != g_app.player->index && !city.razed)
+                    found.push_back({std::max(std::abs(city.x - g_app.selection->x),
+                                              std::abs(city.y - g_app.selection->y)),
                                      &city});
             }
             std::sort(found.begin(), found.end(),
@@ -4428,7 +4470,7 @@ static void StepScript() {
                 SDL_PushEvent(&event);
             }
         } else if (cmd == "quit") {
-            G.quit_requested = true;
+            g_app.quit_requested = true;
             return;
         }
     }
@@ -4454,13 +4496,13 @@ int main(int argc, char** argv) {
     bool force_diplomacy = false;
     bool force_hidden_map = false;
     bool spectate_all_ai = false;
-    G.modern_ui = false;
-    G.data_dir = "original";
+    g_app.modern_ui = false;
+    g_app.data_dir = "original";
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         auto next = [&]() { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
         if (arg == "--data")
-            G.data_dir = next();
+            g_app.data_dir = next();
         else if (arg == "--scenario")
             scenario = w2::Upper(next());
         else if (arg == "--seed")
@@ -4478,9 +4520,9 @@ int main(int argc, char** argv) {
         else if (arg == "--modern-ai")
             use_classic_ai = false;
         else if (arg == "--modern-ui")
-            G.modern_ui = true;
+            g_app.modern_ui = true;
         else if (arg == "--classic-ui")
-            G.modern_ui = false;
+            g_app.modern_ui = false;
         else if (arg == "--weights")
             weights_file = next();
         else if (arg == "--diplomacy")
@@ -4511,8 +4553,8 @@ int main(int argc, char** argv) {
                 weights_path.empty() ? "(none found)" : "'", weights_path.c_str(),
                 weights_path.empty() ? "" : "'");
     }
-    if (!w2::FileExists(G.data_dir + "/TERRAIN0/ARMYTYPE.DAT"))
-        return Fail("cannot find the game's files in '" + G.data_dir +
+    if (!w2::FileExists(g_app.data_dir + "/TERRAIN0/ARMYTYPE.DAT"))
+        return Fail("cannot find the game's files in '" + g_app.data_dir +
                     "': run from the repository root, or pass --data DIR");
     pad::Hints();
     // Windows: the window sized in points and drawn in pixels, as on a Mac,
@@ -4552,29 +4594,30 @@ int main(int argc, char** argv) {
     try {
         LoadArt();
         InstallHooks();
-        auto ui_data = w2::uidata::Load(G.data_dir);
-        sound::Init(G.data_dir, ui_data.files);
+        auto ui_data = w2::uidata::Load(g_app.data_dir);
+        sound::Init(g_app.data_dir, ui_data.files);
         // the screen: its real pixels, the UI's scale, and the map's zoom
-        if (prefs::Get("4:3") == "on") display::d.wanted = std::make_pair(layout::kW, layout::kH);
-        display::d.crt = prefs::Get("crt") == "on";
-        display::d.chosen =
+        if (prefs::Get("4:3") == "on")
+            display::state.wanted = std::make_pair(layout::kScreenW, layout::kScreenH);
+        display::state.crt = prefs::Get("crt") == "on";
+        display::state.chosen =
                 prefs::Get("scale") == "smooth" ? display::kSmooth : prefs::GetInt("scale", 0);
         display::Measure();
-        G.zoom = prefs::GetInt("zoom", display::d.scale);
+        g_app.zoom = prefs::GetInt("zoom", display::state.scale);
         if (scenario.empty()) {
             front::OpenStart();
             // Greet the player the first time round.
             if (script_file.empty()) advisor::Say(w2::cues::kGreet);
         } else {
-            G.starting = false;
-            G.scenario = scenario;
+            g_app.starting = false;
+            g_app.scenario = scenario;
             game::NewGameOptions game_opts;
             game_opts.seed = seed != 0 ? seed : static_cast<double>(time(nullptr) % 1000000007);
             static const char* const kOptionKeys[10] = {
                 "neutralCities",  "diplomacy",     "quests",     "hiddenMap",       "viewEnemies",
                 "viewProduction", "intenseCombat", "quickStart", "militaryAdvisor", "randomTurns"};
             int default_options[10] = {0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
-            if (auto opt_bytes = w2::ReadFile(G.data_dir + "/DATA/OPTIONS.DAT")) {
+            if (auto opt_bytes = w2::ReadFile(g_app.data_dir + "/DATA/OPTIONS.DAT")) {
                 for (size_t i = 0; i <= 9 && 2 * i + 2 <= opt_bytes->size(); i++) {
                     default_options[i] = w2::U16(*opt_bytes, 2 * i);
                 }
@@ -4601,17 +4644,17 @@ int main(int argc, char** argv) {
                 // from the seed, in place of the last one the original left on disk
                 w2::Rng rng(game_opts.seed);
                 w2::randommap::Options rand_opts;
-                rand_opts.data_dir = G.data_dir;
+                rand_opts.data_dir = g_app.data_dir;
                 rand_opts.rng = &rng;
-                w2::randommap::Install(G.data_dir, w2::randommap::GenerateNow(rand_opts));
+                w2::randommap::Install(g_app.data_dir, w2::randommap::GenerateNow(rand_opts));
             }
-            G.g = game::NewGame(G.data_dir, scenario, game_opts);
-            for (size_t i = 0; i < G.g->sides.size(); i++)
-                G.g->sides[i]->computer = spectate_all_ai || (i > 0);
+            g_app.g = game::NewGame(g_app.data_dir, scenario, game_opts);
+            for (size_t i = 0; i < g_app.g->sides.size(); i++)
+                g_app.g->sides[i]->computer = spectate_all_ai || (i > 0);
             auto start_war = [=]() {
                 SyncLayout();
                 BeginGame();
-                if (G.g->side && G.g->side->computer) PlayComputers(G.g->side);
+                if (g_app.g->side && g_app.g->side->computer) PlayComputers(g_app.g->side);
             };
             if (script_file.empty() && !spectate_all_ai && sound::SpeechOn()) {
                 sound::Music(w2::cues::kBegin);
@@ -4631,27 +4674,27 @@ int main(int argc, char** argv) {
         SDL_GetMouseState(&mouse_x, &mouse_y);
         last_x = mouse_x;
         last_y = mouse_y;
-        display::d.mouse_inside = (SDL_GetWindowFlags(win) & SDL_WINDOW_MOUSE_FOCUS) != 0;
-        display::d.off = display::OffFrame(mouse_x, mouse_y);
-        std::tie(G.mouse_x, G.mouse_y) = display::ToUi(mouse_x, mouse_y);
-        pad_x = G.mouse_x + 0.5;
-        pad_y = G.mouse_y + 0.5;
+        display::state.mouse_inside = (SDL_GetWindowFlags(win) & SDL_WINDOW_MOUSE_FOCUS) != 0;
+        display::state.off = display::OffFrame(mouse_x, mouse_y);
+        std::tie(g_app.mouse_x, g_app.mouse_y) = display::ToUi(mouse_x, mouse_y);
+        pad_x = g_app.mouse_x + 0.5;
+        pad_y = g_app.mouse_y + 0.5;
     }
-    while (!G.quit_requested) {
+    while (!g_app.quit_requested) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
             try {
                 switch (event.type) {
                 case SDL_QUIT:
-                    G.quit_requested = true;
+                    g_app.quit_requested = true;
                     break;
                 case SDL_WINDOWEVENT:
                     if (event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED ||
                         event.window.event == SDL_WINDOWEVENT_RESIZED) {
                         display::Measure();
-                        G.have_layout = false;
+                        g_app.have_layout = false;
                     } else if (event.window.event == SDL_WINDOWEVENT_LEAVE) {
-                        display::d.mouse_inside = false;
+                        display::state.mouse_inside = false;
                     } else if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
                         keys::Clear();
                         PadLetGo();
@@ -4686,8 +4729,8 @@ int main(int argc, char** argv) {
                         SDL_RaiseWindow(win);
                     }
                     auto [x, y] = display::ToUi(event.button.x, event.button.y);
-                    G.mouse_x = x;
-                    G.mouse_y = y;
+                    g_app.mouse_x = x;
+                    g_app.mouse_y = y;
                     int button = event.button.button == SDL_BUTTON_RIGHT    ? 2
                                  : event.button.button == SDL_BUTTON_MIDDLE ? 3
                                                                             : 1;
@@ -4706,11 +4749,11 @@ int main(int argc, char** argv) {
                         break;
                     }
                     auto [x, y] = display::ToUi(event.motion.x, event.motion.y);
-                    G.mouse_x = x;
-                    G.mouse_y = y;
-                    display::d.mouse_inside = true;
-                    display::d.off = display::OffFrame(event.motion.x, event.motion.y);
-                    double scale = display::d.dpi / display::d.scale;
+                    g_app.mouse_x = x;
+                    g_app.mouse_y = y;
+                    display::state.mouse_inside = true;
+                    display::state.off = display::OffFrame(event.motion.x, event.motion.y);
+                    double scale = display::state.dpi / display::state.scale;
                     Mousemoved((event.motion.x - last_x) * scale,
                                (event.motion.y - last_y) * scale);
                     last_x = event.motion.x;
@@ -4752,18 +4795,18 @@ int main(int argc, char** argv) {
             if (mouse_x >= 0 && mouse_y >= 0 && mouse_x < win_w && mouse_y < win_h &&
                 (mouse_x != static_cast<int>(last_x) || mouse_y != static_cast<int>(last_y))) {
                 auto [x, y] = display::ToUi(mouse_x, mouse_y);
-                G.mouse_x = x;
-                G.mouse_y = y;
-                display::d.mouse_inside = true;
-                display::d.off = display::OffFrame(mouse_x, mouse_y);
-                double scale = display::d.dpi / display::d.scale;
+                g_app.mouse_x = x;
+                g_app.mouse_y = y;
+                display::state.mouse_inside = true;
+                display::state.off = display::OffFrame(mouse_x, mouse_y);
+                double scale = display::state.dpi / display::state.scale;
                 Mousemoved((mouse_x - last_x) * scale, (mouse_y - last_y) * scale);
                 last_x = mouse_x;
                 last_y = mouse_y;
             }
         }
         try {
-            display::d.min_h = G.starting || !G.g ? layout::kH : layout::kShortH;
+            display::state.min_h = g_app.starting || !g_app.g ? layout::kScreenH : layout::kShortH;
             display::Measure();
             display::BeginFrame();
             PadUpdate();
@@ -4776,8 +4819,8 @@ int main(int argc, char** argv) {
         }
         display::Present();
     }
-    G.ai_run.reset();
-    G.modals.clear();
+    g_app.ai_run.reset();
+    g_app.modals.clear();
     sound::Shutdown();
     gfx::Shutdown();
     SDL_DestroyRenderer(ren);

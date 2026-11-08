@@ -47,7 +47,7 @@ struct Settings : kit::Modal {
         for (int i = 0; i < 3; i++) states[kSound + i] = w2::uidata::kNormal;
         hidden.clear();
         for (int i = 0; i < 8; i++) {
-            if (G.g->map->sides[i].in_use) {
+            if (g_app.g->map->sides[i].in_use) {
                 states[kHuman + i] = states[kEnhanced + i] = states[kObserve + i] =
                         w2::uidata::kNormal;
             } else {
@@ -60,13 +60,13 @@ struct Settings : kit::Modal {
     /** @brief Draws a check box at (x, y), ticked when `checked`. */
     static void Box(bool checked, int x, int y) {
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.abits, gfx::NewQuad(320, checked ? 0 : 20, 24, 20), x, y);
+        gfx::Draw(g_app.abits, gfx::NewQuad(320, checked ? 0 : 20, 24, 20), x, y);
     }
     /** @brief Draws the headings, a row a side and the sound boxes. */
     void Draw() override {
         kit::Popup(kPopupRect);
         const Font& font = kit::GetFont(2);
-        w2::Side* player = G.player;
+        w2::Side* player = g_app.player;
         const Font& head = font.Colours(player->colour, player->edge);
         gfx::SetColor(1, 1, 1);
         kit::Right(head, "Name", 248, 60);
@@ -74,7 +74,7 @@ struct Settings : kit::Modal {
         kit::Centred(head, "Enhanced", 396, 60);
         kit::Centred(head, "Observe", 468, 60);
         for (int i = 0; i < 8; i++) {
-            const w2::Side& side = G.g->map->sides[i];
+            const w2::Side& side = g_app.g->map->sides[i];
             int y = 90 + 30 * i;
             gfx::SetColor(1, 1, 1);
             kit::Right(font.Colours(side.colour, side.edge), side.name, 248, y);
@@ -114,13 +114,13 @@ struct Settings : kit::Modal {
         int control_id = control->id;
         if (control_id == kOk) return Finish();
         if (control_id >= kHuman && control_id < kHuman + 8) {
-            w2::Side& side = G.g->map->sides[control_id - kHuman];
+            w2::Side& side = g_app.g->map->sides[control_id - kHuman];
             side.computer = !side.computer;
         } else if (control_id >= kEnhanced && control_id < kEnhanced + 8) {
-            w2::Side& side = G.g->map->sides[control_id - kEnhanced];
+            w2::Side& side = g_app.g->map->sides[control_id - kEnhanced];
             side.enhanced = !side.enhanced;
         } else if (control_id >= kObserve && control_id < kObserve + 8) {
-            w2::Side& side = G.g->map->sides[control_id - kObserve];
+            w2::Side& side = g_app.g->map->sides[control_id - kObserve];
             if (side.computer) side.observe = !side.observe;
         } else if (control_id >= kSound && control_id < kSound + 3) {
             sound::Toggle(kSounds[control_id - kSound].key);

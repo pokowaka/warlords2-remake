@@ -31,9 +31,9 @@ void Show(const std::string& moment, kit::Done after) {
         if (after) after();
     };
     auto page = kPages.find(moment);
-    if (!G.g || page == kPages.end() || G.g->map->options.tutorial == 0) return done();
-    if (G.g->tutorial_seen.count(moment)) return done();
-    G.g->tutorial_seen.insert(moment);
+    if (!g_app.g || page == kPages.end() || g_app.g->map->options.tutorial == 0) return done();
+    if (g_app.g->tutorial_seen.count(moment)) return done();
+    g_app.g->tutorial_seen.insert(moment);
     if (!help::Open(std::string("TUTORIA\\") + kFiles[page->second] + ".GFX", after)) done();
 }
 

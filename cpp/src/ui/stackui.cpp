@@ -58,29 +58,30 @@ struct Stack : kit::Modal {
     }
     /** @brief Draws the column heads and a row for each army of the stack. */
     void Draw() override {
-        w2::Side* side = G.player;
+        w2::Side* side = g_app.player;
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
-        if (auto head = G.screen->ArtFor(46))
+        if (auto head = g_app.screen->ArtFor(46))
             gfx::Draw(head->image, gfx::NewQuad(0, 0, 400, 23), 80, 62);
         const Font& font = kit::GetFont(2);
-        font.Draw(w2::Fmt("(max +%d)", G.g->map->combat_cap), 480, 66);
+        font.Draw(w2::Fmt("(max +%d)", g_app.g->map->combat_cap), 480, 66);
         // draws a cell of ABITS at (x, y)
         auto abits = [](int cell_x, int cell_y, int width, int height, int x, int y) {
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.abits, gfx::NewQuad(cell_x, cell_y, width, height), x, y);
+            gfx::Draw(g_app.abits, gfx::NewQuad(cell_x, cell_y, width, height), x, y);
         };
         std::vector<w2::Army*> moving;
         for (int i = 0; i < stack_slots.n; i++)
             if (stack_slots.in_group[i]) moving.push_back(stack_slots.army[i]);
         w2::Army* first = stack_slots.n > 0 ? stack_slots.army[0] : nullptr;
-        auto fight_strengths = first ? w2::combat::StackStrengths(*G.g, moving, first->x, first->y)
-                                     : std::map<const w2::Army*, int>{};
+        auto fight_strengths =
+                first ? w2::combat::StackStrengths(*g_app.g, moving, first->x, first->y)
+                      : std::map<const w2::Army*, int>{};
         for (int i = 0; i < kRows; i++) {
             int x = 112, y = 90 + 30 * i;
             if (i < stack_slots.n && stack_slots.army[i]) {
                 w2::Army* army = stack_slots.army[i];
-                const w2::ArmyType* type = G.g->types.ById(army->type);
+                const w2::ArmyType* type = g_app.g->types.ById(army->type);
                 if (stack_slots.mark[i] != w2::slots::kNomark)
                     abits(448, stack_slots.mark[i] == w2::slots::kTick ? 16 : 0, 32, 16, x - 32,
                           y + 5);
@@ -126,7 +127,7 @@ struct Stack : kit::Modal {
     void Keep() {
         w2::slots::Slots kept = stack_slots;
         kit::Pop(this);
-        if (G.selection) G.selection->slots = kept;
+        if (g_app.selection) g_app.selection->slots = kept;
         front::AfterSlotChange();
     }
     /** @brief OK, Cancel, Group, Ungroup, or a row's army or mark, as the bar does. */
@@ -140,13 +141,13 @@ struct Stack : kit::Modal {
             return;
         }
         if (control_id == kGroup)
-            w2::slots::All(stack_slots, *G.g);
+            w2::slots::All(stack_slots, *g_app.g);
         else if (control_id == kUngroup)
-            w2::slots::Single(stack_slots, *G.g);
+            w2::slots::Single(stack_slots, *g_app.g);
         else if (control_id >= kArmy && control_id < kArmy + kRows)
-            w2::slots::Toggle(stack_slots, *G.g, control_id - kArmy);
+            w2::slots::Toggle(stack_slots, *g_app.g, control_id - kArmy);
         else if (control_id >= kMark && control_id < kMark + kRows)
-            w2::slots::PickGroup(stack_slots, *G.g, control_id - kMark);
+            w2::slots::PickGroup(stack_slots, *g_app.g, control_id - kMark);
         Refresh();
     }
     /** @brief The right button on a row (sub-ids 37-44): the army's info box. */
@@ -170,9 +171,9 @@ struct Stack : kit::Modal {
 
 /** @brief Opens the stack dialog on the selected stack, if any. */
 void Open() {
-    if (!G.selection) return;
+    if (!g_app.selection) return;
     auto dialog = std::make_shared<Stack>();
-    dialog->stack_slots = G.selection->slots;
+    dialog->stack_slots = g_app.selection->slots;
     dialog->dialog_view = kit::View(kDialog);
     dialog->view = &dialog->dialog_view;
     dialog->Refresh();

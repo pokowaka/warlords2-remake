@@ -35,7 +35,8 @@ bool Playing(const w2::Game& game, int side) {
  * the first side still playing.
  */
 int ActiveViewerIndex(const w2::Game& game) {
-    if (G.player && G.player->index >= 0 && G.player->index < 8) return G.player->index;
+    if (g_app.player && g_app.player->index >= 0 && g_app.player->index < 8)
+        return g_app.player->index;
     for (int i = 0; i < 8; i++) {
         if (Playing(game, i)) return i;
     }
@@ -44,7 +45,7 @@ int ActiveViewerIndex(const w2::Game& game) {
 
 /** @brief Draws a piece of DIPLOM.PCK: (source_x, source_y, width, height) at (x, y). */
 void Diplom(int source_x, int source_y, int width, int height, int x, int y) {
-    if (auto art = G.screen->ArtFor(47)) {
+    if (auto art = g_app.screen->ArtFor(47)) {
         gfx::SetColor(1, 1, 1);
         gfx::Draw(art->image, gfx::NewQuad(source_x, source_y, width, height), x, y);
     }
@@ -53,7 +54,7 @@ void Diplom(int source_x, int source_y, int width, int height, int x, int y) {
 /** @brief Draws a side's 16x16 shield. */
 void SmallShield(int side, int x, int y) {
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.shields_img, gfx::NewQuad(side * 40 + 24, 46, 16, 16), x, y);
+    gfx::Draw(g_app.shields_img, gfx::NewQuad(side * 40 + 24, 46, 16, 16), x, y);
 }
 
 /** @brief Draws an empty 40x40 box where a stance would go. */
@@ -81,7 +82,7 @@ struct ClassicReport : kit::Modal {
 
     /** @brief Draws the grid of stances and the ranking. */
     void Draw() override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(0x6b, 0), 320, 64);
@@ -151,9 +152,9 @@ void OpenClassicReport() {
     report->v = kit::View(kReportDialog);
     report->view = &report->v;
     report->v.state[kDone] = report->v.state[kAction] = w2::uidata::kNormal;
-    if (!w2::game::HasActiveHuman(*G.g)) report->hidden.insert(kAction);
-    report->titles = dip::Ratings(*G.g);
-    for (w2::Side* side : G.g->sides)
+    if (!w2::game::HasActiveHuman(*g_app.g)) report->hidden.insert(kAction);
+    report->titles = dip::Ratings(*g_app.g);
+    for (w2::Side* side : g_app.g->sides)
         if (side->alive) report->order.push_back(side);
     w2::LuaSort(report->order, [](w2::Side* lhs, w2::Side* rhs) {
         if (lhs->diplo_score != rhs->diplo_score) return lhs->diplo_score < rhs->diplo_score;
@@ -172,7 +173,7 @@ struct ClassicAction : kit::Modal {
 
     /** @brief Draws the player's side and a column per other side. */
     void Draw() override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         const w2::Side& my_side = game.map->sides[viewer];
         kit::Popup(kPopupRect);
@@ -223,11 +224,11 @@ struct ClassicAction : kit::Modal {
             OpenClassicReport();
             return;
         }
-        int viewer = ActiveViewerIndex(*G.g);
+        int viewer = ActiveViewerIndex(*g_app.g);
         for (int stance = 0; stance <= 2; stance++) {
             int column = control->id - kOffer[stance];
             if (column >= 0 && column < 7 && column < static_cast<int>(others.size()))
-                dip::Propose(*G.g, viewer, others[column], stance);
+                dip::Propose(*g_app.g, viewer, others[column], stance);
         }
     }
 
@@ -244,7 +245,7 @@ void OpenClassicAction() {
     action->view = &action->v;
     for (auto& control : action->v.dialog.controls)
         action->v.state[control.id] = w2::uidata::kNormal;
-    int viewer = ActiveViewerIndex(*G.g);
+    int viewer = ActiveViewerIndex(*g_app.g);
     for (int i = 0; i < 8; i++)
         if (i != viewer) action->others.push_back(i);
     kit::Push(action);
@@ -422,7 +423,7 @@ struct ReportDialog : kit::Modal {
 
     /** @brief Draws the grid of stances (allies marked), the ranking and a hint. */
     void Draw() override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(0x6b, 0), 320, 64);
@@ -487,7 +488,7 @@ struct ReportDialog : kit::Modal {
      * Parley with it; Done closes, Action goes on to Diplomatic Action.
      */
     void Mousepressed(int x, int y, int) override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         for (int i = 0; i < 8; i++) {
             if (i == viewer || !Playing(game, i)) continue;
@@ -535,8 +536,8 @@ void OpenReport() {
     report->v = kit::View(kReportDialog);
     report->view = &report->v;
     report->v.state[kDone] = report->v.state[kAction] = w2::uidata::kNormal;
-    report->titles = dip::Ratings(*G.g);
-    for (w2::Side* side : G.g->sides)
+    report->titles = dip::Ratings(*g_app.g);
+    for (w2::Side* side : g_app.g->sides)
         if (side->alive) report->order.push_back(side);
     w2::LuaSort(report->order, [](w2::Side* lhs, w2::Side* rhs) {
         if (lhs->diplo_score != rhs->diplo_score) return lhs->diplo_score < rhs->diplo_score;
@@ -555,7 +556,7 @@ struct ActionDialog : kit::Modal {
 
     /** @brief Draws the player's side and a column per other side. */
     void Draw() override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         const w2::Side& my_side = game.map->sides[viewer];
         kit::Popup(kPopupRect);
@@ -636,7 +637,7 @@ struct ActionDialog : kit::Modal {
      * where peace is already proposed toggles proposing an alliance.
      */
     void Mousepressed(int x, int y, int) override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         for (size_t col = 0; col < others.size(); col++) {
             int other = others[col];
@@ -688,7 +689,7 @@ void OpenAction() {
     auto action = std::make_shared<ActionDialog>();
     action->v = kit::View(kActionDialog);
     action->view = &action->v;
-    int viewer = ActiveViewerIndex(*G.g);
+    int viewer = ActiveViewerIndex(*g_app.g);
     for (auto& control : action->v.dialog.controls)
         action->v.state[control.id] = w2::uidata::kNormal;
     for (int i = 0; i < 8; i++)
@@ -731,7 +732,7 @@ struct ParleyModal : kit::Modal {
      * the first one that is.
      */
     void Draw() override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         if (!Playing(game, other) || other == viewer) {
             auto fallback_rivals = RivalList(game, viewer);
@@ -921,7 +922,7 @@ struct ParleyModal : kit::Modal {
      * gold and war target buttons change what the viewer proposes.
      */
     void Mousepressed(int x, int y, int) override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         auto rivals = RivalList(game, viewer);
         int shields_x = 568 - static_cast<int>(rivals.size()) * 24;
@@ -979,7 +980,7 @@ struct ParleyModal : kit::Modal {
      * Return and Escape go back.
      */
     void Keypressed(const std::string& key) override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         if (key == "left" || key == "right") {
             auto rivals = RivalList(game, viewer);
@@ -1031,7 +1032,7 @@ struct MissiveModal : kit::Modal {
 
     /** @brief Draws the envoy's banner, the message and its context. */
     void Draw() override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         const w2::Side& sender = game.map->sides[std::clamp(m.from_side, 0, 7)];
         kit::Popup(box);
 
@@ -1075,7 +1076,7 @@ struct MissiveModal : kit::Modal {
 
         // Diplomatic Context Box
         DrawSunkenPanel(100, 260, 440, 78, "DIPLOMATIC CONTEXT",
-                        w2::Fmt("Your Treasury: %d gp", G.player ? G.player->gold : 0), 5);
+                        w2::Fmt("Your Treasury: %d gp", g_app.player ? g_app.player->gold : 0), 5);
         gfx::SetScissor(102, 280, 436, 56);
         auto context_lines = WrapText(small_font, m.reason_summary, 420);
         int context_y = 283;
@@ -1086,7 +1087,7 @@ struct MissiveModal : kit::Modal {
         }
         gfx::SetScissor();
 
-        int my_gold = G.player ? G.player->gold : 0;
+        int my_gold = g_app.player ? g_app.player->gold : 0;
         bool can_afford = (m.gold_demand <= 0 || my_gold >= m.gold_demand);
         DrawButton(
                 btn_accept.x, btn_accept.y, btn_accept.w, btn_accept.h,
@@ -1103,7 +1104,7 @@ struct MissiveModal : kit::Modal {
      * target); Open Parley goes to the sender; Decline moves on.
      */
     void Mousepressed(int x, int y, int) override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         if (btn_accept.Contains(x, y)) {
             if (m.gold_demand > 0 && game.map->sides[viewer].gold < m.gold_demand) return;
@@ -1167,7 +1168,7 @@ struct BrainInspectorModal : kit::Modal {
      * to the first computer still playing, else the viewer.
      */
     void Draw() override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         if (!Playing(game, side_idx)) {
             for (int candidate = 0; candidate < 8; candidate++) {
                 if (Playing(game, candidate) && game.map->sides[candidate].computer) {
@@ -1345,7 +1346,7 @@ struct BrainInspectorModal : kit::Modal {
 
     /** @brief A shield switches side; the engine button toggles the side's AI; Close closes. */
     void Mousepressed(int x, int y, int) override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         for (int i = 0; i < 8; i++) {
             if (!Playing(game, i)) continue;
             kit::Rect shield{374 + i * 26, 41, 20, 20};
@@ -1365,7 +1366,7 @@ struct BrainInspectorModal : kit::Modal {
 
     /** @brief Left and Right switch to the previous or next side playing; F10 and Escape close. */
     void Keypressed(const std::string& key) override {
-        w2::Game& game = *G.g;
+        w2::Game& game = *g_app.g;
         if (key == "left" || key == "right") {
             int direction = (key == "right") ? 1 : 7;
             for (int step = 1; step <= 8; step++) {
@@ -1387,8 +1388,8 @@ struct BrainInspectorModal : kit::Modal {
 
 /** @brief Opens the Diplomatic Report, modern or classic; nothing when diplomacy is off. */
 void Open() {
-    if (G.g->map->options.diplomacy == 0) return;
-    if (G.modern_ui)
+    if (g_app.g->map->options.diplomacy == 0) return;
+    if (g_app.modern_ui)
         OpenReport();
     else
         OpenClassicReport();
@@ -1396,8 +1397,8 @@ void Open() {
 
 /** @brief Opens Diplomatic Action, modern or classic; nothing when diplomacy is off. */
 void Action() {
-    if (G.g->map->options.diplomacy == 0) return;
-    if (G.modern_ui)
+    if (g_app.g->map->options.diplomacy == 0) return;
+    if (g_app.modern_ui)
         OpenAction();
     else
         OpenClassicAction();
@@ -1405,7 +1406,7 @@ void Action() {
 
 /** @brief Opens the Parley with a side; the modern UI only. */
 void OpenParley(int other_side, bool return_to_action) {
-    if (!G.modern_ui || !G.g || other_side < 0 || other_side >= 8) return;
+    if (!g_app.modern_ui || !g_app.g || other_side < 0 || other_side >= 8) return;
     auto parley = std::make_shared<ParleyModal>();
     parley->other = other_side;
     parley->return_to_action = return_to_action;
@@ -1420,18 +1421,18 @@ void OpenParley(int other_side, bool return_to_action) {
  * longer playing are skipped.
  */
 void PollMissives(kit::Done after) {
-    if (!G.modern_ui) {
-        if (G.player) G.player->missives.clear();
+    if (!g_app.modern_ui) {
+        if (g_app.player) g_app.player->missives.clear();
         if (after) after();
         return;
     }
-    if (!G.g || !G.player || G.player->computer || G.player->missives.empty()) {
+    if (!g_app.g || !g_app.player || g_app.player->computer || g_app.player->missives.empty()) {
         if (after) after();
         return;
     }
-    w2::DiplomaticMissive missive = G.player->missives.front();
-    G.player->missives.erase(G.player->missives.begin());
-    if (!Playing(*G.g, missive.from_side)) {
+    w2::DiplomaticMissive missive = g_app.player->missives.front();
+    g_app.player->missives.erase(g_app.player->missives.begin());
+    if (!Playing(*g_app.g, missive.from_side)) {
         PollMissives(after);
         return;
     }
@@ -1446,13 +1447,13 @@ void PollMissives(kit::Done after) {
  * playing when that side isn't playing; the modern UI only.
  */
 void OpenBrainInspector(int initial_side) {
-    if (!G.modern_ui || !G.g) return;
+    if (!g_app.modern_ui || !g_app.g) return;
     auto inspector = std::make_shared<BrainInspectorModal>();
-    if (initial_side >= 0 && initial_side < 8 && Playing(*G.g, initial_side)) {
+    if (initial_side >= 0 && initial_side < 8 && Playing(*g_app.g, initial_side)) {
         inspector->side_idx = initial_side;
     } else {
         for (int i = 0; i < 8; i++) {
-            if (Playing(*G.g, i) && G.g->map->sides[i].computer) {
+            if (Playing(*g_app.g, i) && g_app.g->map->sides[i].computer) {
                 inspector->side_idx = i;
                 break;
             }
@@ -1477,7 +1478,7 @@ int ButtonFor(w2::Game& game, int side) {
                     friendlier = true;
                 else
                     hostile = true;
-            } else if (G.modern_ui && dip::ProposalAllied(game, other, side) &&
+            } else if (g_app.modern_ui && dip::ProposalAllied(game, other, side) &&
                        !dip::IsAllied(game, other, side)) {
                 friendlier = true;
             }

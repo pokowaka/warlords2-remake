@@ -32,7 +32,7 @@ struct Levels : kit::Modal {
     screen::View dialog_view;     ///< Dialog 28's button.
     std::vector<w2::Army*> rows;  ///< The heroes, highest level first.
     void Draw() override {
-        w2::Side* side = G.player;
+        w2::Side* side = g_app.player;
         const Font& font = kit::GetFont(2);
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
@@ -81,9 +81,9 @@ void Open() {
     dialog->view = &dialog->dialog_view;
     dialog->dialog_view.state[kDone] = w2::uidata::kNormal;
     for (int level = 4; level >= 1; level--) {
-        for (int i = static_cast<int>(G.g->armies.size()) - 1; i >= 0; i--) {
-            w2::Army* army = G.g->armies[i];
-            if (army->Hero() && army->owner == G.player->index &&
+        for (int i = static_cast<int>(g_app.g->armies.size()) - 1; i >= 0; i--) {
+            w2::Army* army = g_app.g->armies[i];
+            if (army->Hero() && army->owner == g_app.player->index &&
                 (army->level ? army->level : 1) == level)
                 dialog->rows.push_back(army);
         }

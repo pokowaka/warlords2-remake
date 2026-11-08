@@ -20,10 +20,9 @@ struct SDL_Window;
 
 namespace display {
 
-// NOLINTNEXTLINE(readability-identifier-length)
-constexpr int kW = 640, kH = 480;  ///< Classic 640x480 screen dimensions.
-constexpr int kShortH = 400;       ///< Minimum UI rows needed by the main screen layout.
-constexpr int kSmooth = -1;        ///< Sentinel scale value selecting smooth fractional scaling.
+constexpr int kScreenW = 640, kScreenH = 480;  ///< Classic 640x480 screen dimensions.
+constexpr int kShortH = 400;  ///< Minimum UI rows needed by the main screen layout.
+constexpr int kSmooth = -1;   ///< Sentinel scale value selecting smooth fractional scaling.
 
 /**
  * @brief Current window, canvas, and scaling state.
@@ -34,9 +33,10 @@ struct State {
     double shrink =
             1;      ///< Ratio of physical window pixels to canvas device pixels (< 1 on canvas).
     int scale = 1;  ///< Device pixels per UI pixel.
-    int max_scale = 1;  ///< Largest integer scale that fits 640x480.
-    int max_short = 1;  ///< Largest integer scale that fits 640x400 (`kShortH`).
-    int min_h = kH;  ///< Minimum UI height required by the active screen (`kH` on start screens).
+    int max_scale = 1;     ///< Largest integer scale that fits 640x480.
+    int max_short = 1;     ///< Largest integer scale that fits 640x400 (`kShortH`).
+    int min_h = kScreenH;  ///< Minimum UI height required by the active screen (`kScreenH` on start
+                           ///< screens).
     double smooth_scale =
             0;              ///< Fractional UI scale when smooth scaling is available; 0 otherwise.
     bool smooth = false;    ///< True when rendering via the smooth-scaled offscreen canvas.
@@ -51,7 +51,7 @@ struct State {
             off;             ///< UI coordinates when cursor is over the black border.
     std::string glass_shot;  ///< Path for a post-CRT window screenshot (`glass` script cmd).
 };
-extern State d;  // NOLINT(readability-identifier-length)
+extern State state;
 
 /**
  * @brief Opens the SDL window in fullscreen desktop or windowed mode (with

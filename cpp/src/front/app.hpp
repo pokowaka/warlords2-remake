@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief The front end's state, shared with the dialogs: the Lua remake's G.
+ * @brief The front end's state, shared with the dialogs: the Lua remake's g_app.
  *
  * main.cpp is the main screen (love2d/main.lua); the dialogs live in ui/ and
  * reach the screen through the functions declared here.
@@ -228,7 +228,7 @@ struct App {
 };
 /** The front end's state. Named for the Lua remake's G; it goes away when the
  *  front end is restructured. */
-extern App G;  // NOLINT(readability-identifier-length)
+extern App g_app;
 
 /** @brief What the dialogs ask of the main screen. */
 namespace front {

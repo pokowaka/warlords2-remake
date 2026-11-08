@@ -146,19 +146,19 @@ struct QuestDialog : kit::Modal {
         gfx::SetScissor(kMapX, kMapY, 224, 312);
         if (quest->type == kSlayType || quest->type == kSlaughter) {
             std::set<int> marked_tiles;
-            int viewer = w2::game::ViewerSide(*G.g, G.player);
-            for (w2::Army* army : G.g->armies) {
+            int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
+            for (w2::Army* army : g_app.g->armies) {
                 bool match = (quest->type == kSlayType && quest->army_type &&
                               army->type == quest->army_type->id) ||
                              (quest->type == kSlaughter && quest->side &&
                               army->owner == quest->side->index);
-                if (match && army->x != w2::kNone && army->owner != G.player->index &&
+                if (match && army->x != w2::kNone && army->owner != g_app.player->index &&
                     !marked_tiles.count(army->x + army->y * 1000) &&
-                    w2::game::Seen(*G.g, viewer, army->x, army->y)) {
+                    w2::game::Seen(*g_app.g, viewer, army->x, army->y)) {
                     marked_tiles.insert(army->x + army->y * 1000);
                     gfx::SetColor(1, 1, 1);
                     int owner = army->owner == w2::kNone ? 8 : army->owner;
-                    gfx::Draw(G.atrans_shields, gfx::NewQuad(owner * 16, 164, 16, 10),
+                    gfx::Draw(g_app.atrans_shields, gfx::NewQuad(owner * 16, 164, 16, 10),
                               kMapX + std::max(0, army->x * 2 - 1),
                               kMapY + std::max(0, army->y * 2 - 1));
                 }
@@ -176,12 +176,12 @@ struct QuestDialog : kit::Modal {
         if (!quest) {
             kit::Centred(kit::GetFont(2), no_quest, 432, 134);
         } else {
-            gfx::Draw(G.scroll_pic, 304, 95);
+            gfx::Draw(g_app.scroll_pic, 304, 95);
             const Font& font = kit::GetFont(2).Colours(0, 7);
             kit::Centred(font, quest->hero->name + "'s Quest", 432, 145);
             kit::SetPal(0);
             gfx::Rectangle(gfx::kFill, 360, 165, 160, 1);
-            QuestText text = DescribeQuest(*G.g, *G.player, *quest);
+            QuestText text = DescribeQuest(*g_app.g, *g_app.player, *quest);
             for (auto& line : text.lines) kit::Centred(font, line.second, 432, line.first);
             MapMarks(text.target_x, text.target_y);
             front::DrawHeroFigure(kMapX, kMapY, quest->hero->x, quest->hero->y);
@@ -207,10 +207,10 @@ void Open() {
     dialog->dialog_view = kit::View(kDialog);
     dialog->view = &dialog->dialog_view;
     dialog->dialog_view.state[kDone] = w2::uidata::kNormal;
-    auto quest = G.player->quest;
-    if (quest && quest->hero && G.g->Alive(quest->hero) && quest->hero->x != w2::kNone)
+    auto quest = g_app.player->quest;
+    if (quest && quest->hero && g_app.g->Alive(quest->hero) && quest->hero->x != w2::kNone)
         dialog->quest = quest;
-    dialog->no_quest = kit::Text(0x14, G.g->rng.Dice(1, 4, -1));
+    dialog->no_quest = kit::Text(0x14, g_app.g->rng.Dice(1, 4, -1));
     kit::Push(dialog);
 }
 

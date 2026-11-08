@@ -89,8 +89,8 @@ struct Helmet : kit::Modal {
     void Draw() override {
         if (waiting) return;
         if (!voice_pic) {
-            voice_pic = pckimage::Load(G.data_dir + "/PICS/VOICE.PCK", G.palette, 10);
-            voice_bits = pckimage::Load(G.data_dir + "/PICS/VOICEBIT.PCK", G.palette, 10);
+            voice_pic = pckimage::Load(g_app.data_dir + "/PICS/VOICE.PCK", g_app.palette, 10);
+            voice_bits = pckimage::Load(g_app.data_dir + "/PICS/VOICEBIT.PCK", g_app.palette, 10);
         }
         gfx::SetColor(1, 1, 1);
         gfx::Draw(voice_pic, kAtX, kAtY);

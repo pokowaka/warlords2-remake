@@ -22,7 +22,7 @@ namespace layout {
 
 /** The original screen's width and height. main.cpp uses these names, so
  *  they are left for the central rename. */
-constexpr int kW = 640, kH = 480;  // NOLINT(readability-identifier-length)
+constexpr int kScreenW = 640, kScreenH = 480;
 /** The fewest rows the main screen fits in; below 480 the map and the
  *  strategic map give rows up. */
 constexpr int kShortH = 400;
@@ -48,8 +48,8 @@ struct Offset {
 
 /** @brief The main screen's pieces placed for one screen size. */
 struct Layout {
-    int w = kW;           ///< The screen's width, at least kW.
-    int h = kH;           ///< The screen's height, at least kShortH.
+    int w = kScreenW;     ///< The screen's width, at least kScreenW.
+    int h = kScreenH;     ///< The screen's height, at least kShortH.
     int ex = 0;           ///< Columns beyond the original 640.
     int ey = 0;           ///< Rows beyond the original 480 (negative on a short screen).
     int cut = 0;          ///< Rows under 480, taken off the strategic map's foot.

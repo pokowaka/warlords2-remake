@@ -2,7 +2,7 @@
  * @file
  * @brief Personality vectors and archetypes for the 27 computer character cards.
  *
- * Maps each (level, card) pair of CARDS/*.DSC (K000-K008, L000-L008,
+ * Maps each (level, card) pair of CARDS/<name>.DSC (K000-K008, L000-L008,
  * W000-W008) to a 10-dimensional PersonalityVector in [-1, 1]^10 that
  * conditions the neural policy's four heads and shapes the self-play
  * rewards.

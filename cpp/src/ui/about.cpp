@@ -37,7 +37,7 @@ struct About : kit::Modal {
 
 /** @brief Opens the About box, loading the scroll picture the first time. */
 void Open() {
-    if (!bscroll) bscroll = pckimage::Load(G.data_dir + "/PICS/BSCROLL.PCK", G.palette, 10);
+    if (!bscroll) bscroll = pckimage::Load(g_app.data_dir + "/PICS/BSCROLL.PCK", g_app.palette, 10);
     auto dialog = std::make_shared<About>();
     // Group 139's lines 1 and 3 with the version between them.
     dialog->lines = {kit::Text(0x8b, 1), "Version 1.02", kit::Text(0x8b, 3)};

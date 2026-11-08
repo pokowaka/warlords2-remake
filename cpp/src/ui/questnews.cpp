@@ -48,7 +48,7 @@ struct Reward : kit::Modal {
         if (hero && hero->x != w2::kNone) front::DrawHeroFigure(kMapX, kMapY, hero->x, hero->y);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), "Quest", 432, 64);
-        gfx::Draw(G.scroll_pic, 304, 95);
+        gfx::Draw(g_app.scroll_pic, 304, 95);
         const Font& font = kit::GetFont(2).Colours(0, 7);
         kit::Centred(font, (hero ? hero->name : std::string()) + "'s Quest", 440, 145);
         kit::SetPal(0);
@@ -111,7 +111,7 @@ void Show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
  * is theirs again.
  */
 void Poll() {
-    w2::Side* side = G.player;
+    w2::Side* side = g_app.player;
     if (!side || side->computer || !side->quest_news) return;
     auto news = side->quest_news;
     side->quest_news.reset();

@@ -46,7 +46,7 @@ struct PictureDialog : kit::Modal {
     /** @brief Draws the frame, the picture and its controls. */
     void Draw() override {
         kit::PopupFrame(kPopupRect);
-        if (auto art = G.screen->ArtFor(ArtForPopup(popup))) {
+        if (auto art = g_app.screen->ArtFor(ArtForPopup(popup))) {
             gfx::SetColor(1, 1, 1);
             gfx::Draw(art->image, gfx::NewQuad(0, 0, kPopupRect.w, kPopupRect.h), kPopupRect.x,
                       kPopupRect.y);
@@ -100,7 +100,7 @@ void ShowPicture(int popup, int dialog_id, std::vector<int> live_ids, int defaul
 void Victory(kit::Done after) {
     sound::Music(w2::cues::kTriumph);
     ShowPicture(22, 32, {483}, 483, 483, [after](int) {
-        G.g->map->options.hidden_map = 0;
+        g_app.g->map->options.hidden_map = 0;
         front::StratDirty();
         search::ShowMessage(GroupLine(0x10, 0), GroupLine(0x10, 1), after);
     });
@@ -164,19 +164,19 @@ void Show(w2::Ending& outcome, kit::Done after) {
         return;
     }
     // The last computer side has triumphed, and is the player's now.
-    if (outcome.triumph && outcome.winner == G.player && !outcome.shown) {
+    if (outcome.triumph && outcome.winner == g_app.player && !outcome.shown) {
         outcome.shown = true;
-        search::Say(w2::Format(GroupLine(0xf, 0), G.player->name), done);
+        search::Say(w2::Format(GroupLine(0xf, 0), g_app.player->name), done);
         return;
     }
     // The offer waits on the game, not on the round's finding: computer
     // turns may have come between.
-    if (w2::game::SurrenderPending(*G.g)) {
-        G.g->surrender_shown = true;
+    if (w2::game::SurrenderPending(*g_app.g)) {
+        g_app.g->surrender_shown = true;
         sound::Music(w2::cues::kSurrender);
         ShowPicture(20, 30, {485, 486}, 485, 486, [after, done](int control_id) {
             if (control_id == 485) {
-                w2::game::AcceptSurrender(*G.g, *G.player);
+                w2::game::AcceptSurrender(*g_app.g, *g_app.player);
                 Victory(after);
             } else {
                 sound::Music(w2::cues::kDefiance);
@@ -185,8 +185,8 @@ void Show(w2::Ending& outcome, kit::Done after) {
         });
         return;
     }
-    if (outcome.won && outcome.winner == G.player) {
-        search::ShowMessage(w2::Format(GroupLine(0xf, 0), G.player->name), GroupLine(0xf, 1),
+    if (outcome.won && outcome.winner == g_app.player) {
+        search::ShowMessage(w2::Format(GroupLine(0xf, 0), g_app.player->name), GroupLine(0xf, 1),
                             [after]() { Victory(after); });
         return;
     }
@@ -209,8 +209,8 @@ void Over(w2::Ending& outcome) {
         return;
     }
     bool humans = false;
-    for (w2::Side* side : G.g->sides)
-        if (side->alive && !side->computer && !w2::game::SideCities(*G.g, *side).empty())
+    for (w2::Side* side : g_app.g->sides)
+        if (side->alive && !side->computer && !w2::game::SideCities(*g_app.g, *side).empty())
             humans = true;
     if (!humans && w2::Contains(outcome.message, "No more players")) {
         search::ShowMessage(GroupLine(0xc, 0), GroupLine(0xc, 1), []() {

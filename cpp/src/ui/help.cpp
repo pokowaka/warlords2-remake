@@ -142,7 +142,7 @@ struct Page : kit::Modal {
                 else
                     coloured.Draw(step.text, rect.x + step.x, rect.y + step.y);
             } else if (step.bitmap >= 0) {
-                if (auto art = G.screen->ArtFor(step.bitmap)) {
+                if (auto art = g_app.screen->ArtFor(step.bitmap)) {
                     gfx::SetColor(1, 1, 1);
                     gfx::Draw(art->image,
                               gfx::NewQuad(step.source_x, step.source_y, step.width, step.height),
@@ -167,7 +167,7 @@ bool Open(const std::string& name, kit::Done after, const kit::Rect* rect) {
     std::string path = name;
     for (auto& character : path)
         if (character == '\\') character = '/';
-    auto text = w2::ReadFile(G.data_dir + "/" + path);
+    auto text = w2::ReadFile(g_app.data_dir + "/" + path);
     if (!text) return false;
     auto dialog = std::make_shared<Page>();
     int page = Parse(*text, dialog->steps);

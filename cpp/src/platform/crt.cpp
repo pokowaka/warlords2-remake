@@ -362,7 +362,7 @@ bool ThroughShader(SDL_Renderer* ren, SDL_Texture* canvas, const Look& look) {
         shader = is_gl && MakeShader() ? Shader::kReady : Shader::kNone;
         if (shader == Shader::kNone) return false;
     }
-    const auto& disp = display::d;
+    const auto& disp = display::state;
     SDL_RenderFlush(ren);
 
     // Save SDL's current OpenGL state.
@@ -431,7 +431,7 @@ bool ThroughShader(SDL_Renderer* ren, SDL_Texture* canvas, const Look& look) {
 }  // namespace
 
 std::pair<double, double> Unwarp(double x, double y) {
-    const auto& disp = display::d;
+    const auto& disp = display::state;
     double frame_w = disp.w * disp.scale, frame_h = disp.h * disp.scale;
     if (frame_w <= 0 || frame_h <= 0) return {x, y};
     double norm_x = (x - disp.ox) / frame_w * 2 - 1;
@@ -442,7 +442,7 @@ std::pair<double, double> Unwarp(double x, double y) {
 }
 
 void Present(SDL_Renderer* ren, SDL_Texture* canvas) {
-    const auto& disp = display::d;
+    const auto& disp = display::state;
     int frame_x = disp.ox, frame_y = disp.oy;
     int frame_w = disp.w * disp.scale, frame_h = disp.h * disp.scale;
     SDL_SetTextureBlendMode(canvas, SDL_BLENDMODE_NONE);

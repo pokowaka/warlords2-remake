@@ -18,10 +18,10 @@ const Offset& Layout::Offset(const std::string& group) const {
 
 Layout Compute(int width, int height) {
     Layout screen_layout;
-    screen_layout.w = std::max(kW, width);
+    screen_layout.w = std::max(kScreenW, width);
     screen_layout.h = std::max(kShortH, height);
-    screen_layout.ex = screen_layout.w - kW;
-    screen_layout.ey = screen_layout.h - kH;
+    screen_layout.ex = screen_layout.w - kScreenW;
+    screen_layout.ey = screen_layout.h - kScreenH;
     screen_layout.cut = std::max(0, -screen_layout.ey);
     screen_layout.classic = screen_layout.ex == 0 && screen_layout.ey == 0;
     screen_layout.strat = {screen_layout.ex, 0};

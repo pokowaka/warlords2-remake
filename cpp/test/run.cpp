@@ -978,7 +978,7 @@ static void TestMovement(const std::string& scenario) {
        2, "a flier pays 2 over hills");
     Eq(unwrap_cost(
                movement::StepCost(land, 0 + movement::kCityF, movement::kFlying, false, false, 10)),
-       kNone, "a flier cannot cross a city that is not its own (1555:08bf)");
+       kNone, "a flier cannot cross a city that is not its own");
     Eq(movement::Distance(5, 5, 6, 6), 1, "a diagonal neighbour is one away");
     Eq(movement::Distance(5, 5, 7, 6), 2, "a knight's move is two");
     Eq(movement::Direction(5, 5, 6, 4), 1, "up and right is north-east");
@@ -2115,7 +2115,7 @@ static void TestSites(const std::string& scenario) {
         army.strength = 3;
         army.moves = 0;
         Ok(site::Search(game, {&army}, temple->x, temple->y) == nullptr,
-           "searching needs a move left (6536:0000)");
+           "searching needs a move left");
         army.moves = 10;
         auto result = site::Search(game, {&army}, temple->x, temple->y, true);
         Eq(result->kind, "temple", "with no hero a temple blesses at once, a human's too");
@@ -3235,29 +3235,26 @@ static void TestRandomMap() {
            std::string("the generator writes RANDOM.") + ext);
         Ok(made[ext] == remade[ext], std::string("the same dice make the same RANDOM.") + ext);
     }
-    Eq(static_cast<int>(made["SCN"].size()), 12001,
-       "RANDOM.SCN is Erythea's .SCN rewritten (4fef:1001)");
+    Eq(static_cast<int>(made["SCN"].size()), 12001, "RANDOM.SCN is Erythea's .SCN rewritten");
     Eq(static_cast<int>(made["MAP"].size()), 2 * 112 * 156, "RANDOM.MAP is a word a tile");
     randommap::Install(kData, made);
     auto map = scn::Load(kData + "/RANDOM", "RANDOM");
-    Eq(static_cast<int>(map->cities.size()), 80,
-       "Cities at its third place gives RANDOM.DAT's 80 (4bed:0000)");
-    Eq(static_cast<int>(map->sites.size()), 40, "forty sites (513d:003a)");
-    Ok(map->signs.size() >= 41 && map->signs.size() <= 70, "1d30+40 signposts (4fef:113d)");
+    Eq(static_cast<int>(map->cities.size()), 80, "Cities at its third place gives RANDOM.DAT's 80");
+    Eq(static_cast<int>(map->sites.size()), 40, "forty sites");
+    Ok(map->signs.size() >= 41 && map->signs.size() <= 70, "1d30+40 signposts");
     std::set<City*> capitals;
     for (auto& side : map->sides) {
-        Ok(side.capital && side.capital->owner == &side,
-           side.name + " holds its capital (513d:0689)");
+        Ok(side.capital && side.capital->owner == &side, side.name + " holds its capital");
         capitals.insert(side.capital);
     }
     Eq(static_cast<int>(capitals.size()), 8, "eight capitals, one a side");
     for (auto& city : map->cities) {
         Eq(map->terrain_type[scn::TileAt(*map, city.x, city.y) % 256], 10,
            city.name + " stands on a castle tile");
-        Ok(!city.produces.empty(), city.name + " makes something (513d:161d)");
+        Ok(!city.produces.empty(), city.name + " makes something");
         bool capital = city.owner != nullptr;
         Ok(city.income >= (capital ? 33 : 15) && city.income <= (capital ? 40 : 28),
-           city.name + "'s income is value x 2 + 1d8 + 14 (513d:1171)");
+           city.name + "'s income is value x 2 + 1d8 + 14");
         auto description = map->city_text.find(city.index);
         Ok(description != map->city_text.end() &&
                    StartsWith(description->second[0], city.name + " is a"),
@@ -3270,7 +3267,7 @@ static void TestRandomMap() {
     for (auto& city : map->cities)
         for (int produced : city.produces)
             if (magical(produced)) none = false;
-    Ok(none, "without allies no city makes a magical army (513d:161d, 1c1d)");
+    Ok(none, "without allies no city makes a magical army");
     int allies = 0;
     for (int seed = 1; seed <= 10; seed++) {
         randommap::Install(kData, make(seed, {{3, 3, 2, 3}}, true));
@@ -3279,7 +3276,7 @@ static void TestRandomMap() {
             for (int produced : city.produces)
                 if (magical(produced)) allies++;
     }
-    Ok(allies > 0, "with allies on, 2d3 cities may make them (513d:1b3f)");
+    Ok(allies > 0, "with allies on, 2d3 cities may make them");
     randommap::Install(kData, make(3, {{0, 0, 6, 0}}, false));
     Eq(static_cast<int>(scn::Load(kData + "/RANDOM", "RANDOM")->cities.size()), 100,
        "Cities at its last place: 80 + 20");
@@ -3291,7 +3288,7 @@ static void TestRandomMap() {
     bool in_range = true;
     for (int slider : rolled)
         if (slider < 0 || slider > 6) in_range = false;
-    Ok(in_range, "a slider left to chance is rolled 1d7-1 (7bab:10e8)");
+    Ok(in_range, "a slider left to chance is rolled 1d7-1");
     // the shipped RANDOM folder is the original's last world, left alone
     std::ifstream disk(kData + "/RANDOM/RANDOM.SCN", std::ios::binary);
     if (disk) {
@@ -3396,7 +3393,7 @@ static void TestComputerPlayers() {
     int unclaimed = 0;
     for (auto& city : game.map->cities)
         if (city.claim == kNone || city.claim == core::kNeutral) unclaimed++;
-    Eq(unclaimed, 0, "the computers claim every city between them (623c:010b)");
+    Eq(unclaimed, 0, "the computers claim every city between them");
     for (Side* player : game.sides)
         Eq(player->capital->claim, player->index, player->name + " claims its capital");
     for (Side* player : game.sides)
@@ -3742,9 +3739,9 @@ static void TestVerified() {
         Eq(game.armies.size(), count_before - 7, "set again, it builds");
         Eq(static_cast<int>(game::ArmiesAt(game, city->x + 1, city->y + 1).size()), 1,
            "on the tile with room");
-        Eq(city->countdown, city->slots[0].time, "and starts the next (6f8c:06bd)");
+        Eq(city->countdown, city->slots[0].time, "and starts the next");
         Army* built = game::ArmiesAt(game, city->x + 1, city->y + 1)[0];
-        Eq(built->moves, built->max_moves, "a new army has its full move (6f8c:0dd7)");
+        Eq(built->moves, built->max_moves, "a new army has its full move");
     }
 
     // P7: the city's tiles fill x first
@@ -3776,7 +3773,7 @@ static void TestVerified() {
             Eq(side->index, game.turn_order[game.order_at], "the side to play is the order's");
             side = game::EndTurn(game);
         }
-        Ok(shuffled, "with Random Turns the order is shuffled (8065:1732)");
+        Ok(shuffled, "with Random Turns the order is shuffled");
         auto sorted = game.turn_order;
         std::sort(sorted.begin(), sorted.end());
         Ok(sorted == plain, "it is still every side once");
@@ -3798,13 +3795,12 @@ static void TestVerified() {
         for (Army* defender : game::ArmiesAt(game, city->x, city->y)) defender->strength = 9;
         Army* weak = make_army(game, city->x - 1, city->y, side->index, 11, 1);
         Battle battle = game::DecideAttack(game, {weak}, city->x, city->y);
-        Ok(city->attacked & (1 << side->index), "an attacked city is marked (67cc:02b1)");
+        Ok(city->attacked & (1 << side->index), "an attacked city is marked");
         if (!battle.won) {
             game::ApplyAttack(game, battle);
             size_t before = game::ArmiesAt(game, city->x, city->y).size();
             for (size_t i = 0; i < 12 * game.sides.size(); i++) EndTurn(game);
-            Ok(game::ArmiesAt(game, city->x, city->y).size() > before,
-               "the neutral city builds (6bd8:025a)");
+            Ok(game::ArmiesAt(game, city->x, city->y).size() > before, "the neutral city builds");
             Ok(game::ArmiesAt(game, city->x, city->y).size() <= 4 || before >= 4,
                "while its tile holds fewer than 4");
         }
@@ -3835,7 +3831,7 @@ static void TestVerified() {
                 Ok(applied.medal->type != armytype::kHero, "for an ordinary army, not the hero");
             }
         }
-        Ok(medals > 0, "a hero's stack wins medals (67cc:2274)");
+        Ok(medals > 0, "a hero's stack wins medals");
     }
 
     // S1: nothing guards an allies ruin
@@ -3919,7 +3915,7 @@ static void TestVerified() {
         bool cached = false;
         for (auto& entry : game.path_cache->slots)
             if (entry && entry->dx == far->x && entry->dy == far->y) cached = true;
-        Ok(cached, "is kept (1555:16f0)");
+        Ok(cached, "is kept");
         auto mid = (*first_path)[2];
         auto second_path = movement::FindPath(game, {army}, mid.x, mid.y, far->x, far->y);
         Eq(second_path->size(), first_path->size() - 3,
@@ -3948,7 +3944,7 @@ static void TestVerified() {
                 }
             }
         }
-        Ok(!beyond, "a flood of 5 rounds reaches no further than 5 (1555:0373)");
+        Ok(!beyond, "a flood of 5 rounds reaches no further than 5");
     }
 
     // a walk that leaves fewer than 2 moves is out of moves: the interface

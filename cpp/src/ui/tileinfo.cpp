@@ -52,10 +52,10 @@ struct TileBox : kit::Modal {
  * The box is kept on the screen and its centre snapped to 8 pixels across.
  */
 void Open(int tile_x, int tile_y) {
-    w2::Game& game = *G.g;
-    int viewer = w2::game::ViewerSide(game, G.player);
+    w2::Game& game = *g_app.g;
+    int viewer = w2::game::ViewerSide(game, g_app.player);
     if (!w2::game::Seen(game, viewer, tile_x, tile_y)) return;
-    const auto& screen_layout = G.layout;
+    const auto& screen_layout = g_app.layout;
     auto [exact_centre_x, exact_centre_y] = front::MapToUi(tile_x + 0.5, tile_y + 0.5);
     int centre_x = static_cast<int>(std::floor(exact_centre_x)),
         centre_y = static_cast<int>(std::floor(exact_centre_y));
@@ -64,7 +64,7 @@ void Open(int tile_x, int tile_y) {
     centre_y = std::max(kBoxHeight / 2, std::min(screen_layout.h - 2 - kBoxHeight / 2, centre_y));
     int box_x = centre_x - kBoxWidth / 2 - screen_layout.dialog.x,
         box_y = centre_y - kBoxHeight / 2 - screen_layout.dialog.y;
-    w2::Side* player = G.player;
+    w2::Side* player = g_app.player;
     auto box = std::make_shared<TileBox>();
     box->box_x = box_x;
     box->box_y = box_y;
@@ -108,8 +108,9 @@ void Open(int tile_x, int tile_y) {
     } else if (city) {
         box->paint = [city, player, box_x, box_y, colours]() {
             const Font& font = kit::GetFont(2);
-            const w2::Side* owner_side =
-                    city->owner_index != w2::kNone ? &G.g->map->sides[city->owner_index] : player;
+            const w2::Side* owner_side = city->owner_index != w2::kNone
+                                                 ? &g_app.g->map->sides[city->owner_index]
+                                                 : player;
             kit::Centred(colours(owner_side), city->name, box_x + kBoxWidth / 2 - 8, box_y + 11);
             if (city->razed) {
                 kit::Centred(font, "Razed!", box_x + kBoxWidth / 2 - 8, box_y + 35);
@@ -118,20 +119,20 @@ void Open(int tile_x, int tile_y) {
             if (city->owner_index != w2::kNone && city->owner_index < 8) {
                 for (int x : {box_x + 24, box_x + kBoxWidth - 48}) {
                     gfx::SetColor(1, 1, 1);
-                    gfx::Draw(G.shields_img, gfx::NewQuad(city->owner_index * 40 + 24, 46, 16, 16),
-                              x, box_y + 10);
+                    gfx::Draw(g_app.shields_img,
+                              gfx::NewQuad(city->owner_index * 40 + 24, 46, 16, 16), x, box_y + 10);
                 }
             }
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.abits, gfx::NewQuad(424, 0, 24, 11), box_x + 48, box_y + 36);
+            gfx::Draw(g_app.abits, gfx::NewQuad(424, 0, 24, 11), box_x + 48, box_y + 36);
             font.Draw(w2::Fmt("%d", city->income), box_x + 80, box_y + 33);
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.abits, gfx::NewQuad(424, 11, 24, 11), box_x + 144, box_y + 36);
+            gfx::Draw(g_app.abits, gfx::NewQuad(424, 11, 24, 11), box_x + 144, box_y + 36);
             font.Draw(w2::Fmt("%d", city->defence), box_x + 176, box_y + 33);
             // a capital is marked on both sides with its side's cell of art 38
-            auto capital_marks = G.screen->ArtFor(38);
+            auto capital_marks = g_app.screen->ArtFor(38);
             for (int i = 0; i < 8; i++) {
-                if (G.g->map->sides[i].capital == city && capital_marks) {
+                if (g_app.g->map->sides[i].capital == city && capital_marks) {
                     for (int x : {box_x + 16, box_x + kBoxWidth - 56}) {
                         gfx::SetColor(1, 1, 1);
                         gfx::Draw(capital_marks->image, gfx::NewQuad(i * 32, 36, 32, 23), x,

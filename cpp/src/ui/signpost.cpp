@@ -95,8 +95,8 @@ struct Sign : kit::Modal {
 void Open(const std::vector<w2::Army*>& stack) {
     if (stack.empty()) return;
     w2::Army* first = stack[0];
-    if (w2::scn::TerrainAt(*G.g->map, first->x, first->y) != w2::move::kTower) return;
-    w2::Sign* sign = w2::game::SignAt(*G.g, first->x, first->y);
+    if (w2::scn::TerrainAt(*g_app.g->map, first->x, first->y) != w2::move::kTower) return;
+    w2::Sign* sign = w2::game::SignAt(*g_app.g, first->x, first->y);
     if (!sign) return;
     auto dialog = std::make_shared<Sign>();
     dialog->sign = sign;

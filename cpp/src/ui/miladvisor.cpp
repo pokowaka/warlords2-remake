@@ -33,7 +33,7 @@ struct Advice : kit::Modal {
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(kTitle, 0), 320, 67);
-        if (auto art = G.screen->ArtFor(kPicture)) {
+        if (auto art = g_app.screen->ArtFor(kPicture)) {
             gfx::SetColor(1, 1, 1);
             gfx::Draw(art->image, gfx::NewQuad(0, 0, 128, 130), 256, 117);
         }
@@ -62,7 +62,7 @@ struct Advice : kit::Modal {
  * The trial battles roll the game's own dice, as the original's do.
  */
 void Open(const std::vector<w2::Army*>* stack, int x, int y) {
-    w2::Game& game = *G.g;
+    w2::Game& game = *g_app.g;
     if (game.map->options.military_advisor == 0 || !stack || stack->empty()) return;
     auto lines = w2::combat::BattleLines(game, *stack, x, y);
     int wins = w2::combat::Advise(game, lines.attackers, lines.defenders, x, y).second;

@@ -43,7 +43,7 @@ struct Entry {
  */
 std::vector<Entry> ReadItems() {
     std::vector<Entry> entries;
-    auto data = w2::ReadFile(G.data_dir + "/UDB/UDB.DAT");
+    auto data = w2::ReadFile(g_app.data_dir + "/UDB/UDB.DAT");
     if (!data) return entries;
     int count = w2::U16(*data, 0);
     for (int i = 0; i < count; i++) {
@@ -69,8 +69,8 @@ struct Shortcuts : kit::Modal {
     }
     /** @brief The id of the item on slot `shortcut_slot`, or kNone. */
     int Shortcut(int shortcut_slot) const {
-        auto found = G.screen->ui.shortcuts.find(shortcut_slot);
-        return found == G.screen->ui.shortcuts.end() ? w2::kNone : found->second;
+        auto found = g_app.screen->ui.shortcuts.find(shortcut_slot);
+        return found == g_app.screen->ui.shortcuts.end() ? w2::kNone : found->second;
     }
     /** @brief Enables OK, the items and the slots. */
     void Refresh() {
@@ -81,7 +81,7 @@ struct Shortcuts : kit::Modal {
     }
     /** @brief Draws the shortcut bitmap's 32x29 cell at (cell_x, cell_y) at (x, y). */
     void Button(int x, int y, int cell_x, int cell_y) {
-        auto art = G.screen->ArtFor(w2::uidata::kShortcutBitmap);
+        auto art = g_app.screen->ArtFor(w2::uidata::kShortcutBitmap);
         if (!art) return;
         gfx::SetColor(1, 1, 1);
         gfx::Draw(art->image, gfx::NewQuad(cell_x, cell_y, 32, 29), x, y);
@@ -124,7 +124,7 @@ struct Shortcuts : kit::Modal {
     void Mousepressed(int x, int y, int) override {
         auto control = kit::ControlAt(dialog_view, x, y);
         if (!control) return;
-        auto& screen_ui = G.screen->ui;
+        auto& screen_ui = g_app.screen->ui;
         if (control->id == kOk) {
             w2::Json json = w2::Json::Array();
             for (int slot_index = 0; slot_index < 4; slot_index++) json.Push(Shortcut(slot_index));

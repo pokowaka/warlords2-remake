@@ -40,7 +40,7 @@ struct BuyDialog : kit::Modal {
             states[kSlotFirst + i] = full ? w2::uidata::kNormal : w2::uidata::kDisabled;
         for (size_t type_index = 0; type_index < types.size(); type_index++)
             states[kTypeFirst + static_cast<int>(type_index)] =
-                    w2::game::CannotBuy(*G.g, *G.player, *city, *types[type_index]).empty()
+                    w2::game::CannotBuy(*g_app.g, *g_app.player, *city, *types[type_index]).empty()
                             ? w2::uidata::kNormal
                             : w2::uidata::kDisabled;
     }
@@ -57,8 +57,8 @@ struct BuyDialog : kit::Modal {
     void Buy(int type_index) {
         if (type_index < 0 || type_index >= static_cast<int>(types.size())) return;
         const w2::ArmyType* type = types[type_index];
-        if (!w2::game::CannotBuy(*G.g, *G.player, *city, *type).empty()) return;
-        w2::game::BuyProduction(*G.g, *G.player, *city, slot, type->id);
+        if (!w2::game::CannotBuy(*g_app.g, *g_app.player, *city, *type).empty()) return;
+        w2::game::BuyProduction(*g_app.g, *g_app.player, *city, slot, type->id);
         // On to the next empty slot, if there is one.
         if (slot < 3 && slot + 1 >= static_cast<int>(city->slots.size())) slot++;
         Refresh();
@@ -66,7 +66,7 @@ struct BuyDialog : kit::Modal {
 
     /** @brief Draws the title, the city's slots, the gold and the types for sale. */
     void Draw() override {
-        int side = G.player->index;
+        int side = g_app.player->index;
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(kStringGroup, 0), 320, 64);
@@ -74,9 +74,9 @@ struct BuyDialog : kit::Modal {
         kit::Shield(side, 512, 64);
         const Font& body = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
-        kit::Centred(body, w2::Format(kit::Text(kStringGroup, 1), G.player->name, city->name), 320,
-                     104);
-        kit::Centred(body, w2::Format(kit::Text(kStringGroup, 2), G.player->gold), 352, 365);
+        kit::Centred(body, w2::Format(kit::Text(kStringGroup, 1), g_app.player->name, city->name),
+                     320, 104);
+        kit::Centred(body, w2::Format(kit::Text(kStringGroup, 2), g_app.player->gold), 352, 365);
         kit::Centred(body, kit::Text(kStringGroup, 3), 176, 348);
         for (int i = 0; i < 4; i++) {
             bool have = i < static_cast<int>(city->slots.size());
@@ -98,7 +98,8 @@ struct BuyDialog : kit::Modal {
             int col = static_cast<int>(type_index) % 4, row = static_cast<int>(type_index) / 4;
             int x = 88 + col * 120, y = 136 + row * 31;
             kit::Army(types[type_index]->id, side, x, y, 1,
-                      !w2::game::CannotBuy(*G.g, *G.player, *city, *types[type_index]).empty());
+                      !w2::game::CannotBuy(*g_app.g, *g_app.player, *city, *types[type_index])
+                               .empty());
             gfx::SetColor(1, 1, 1);
             body.Draw(w2::Fmt("%d gp", types[type_index]->price), x + 40, y + 6);
         }
@@ -145,7 +146,7 @@ void Open(w2::City* city, kit::Done after) {
     dialog->done = after;
     dialog->dialog_view = kit::View(kDialog);
     dialog->view = &dialog->dialog_view;
-    dialog->types = w2::game::BuyableTypes(*G.g);
+    dialog->types = w2::game::BuyableTypes(*g_app.g);
     dialog->slot = w2::game::BuySlot(*city);
     dialog->Refresh();
     kit::Push(dialog);

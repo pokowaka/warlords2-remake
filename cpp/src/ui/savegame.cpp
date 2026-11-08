@@ -74,7 +74,7 @@ std::unique_ptr<w2::Game> ReadSlot(const std::string& key) {
     auto text = w2::ReadFile(SlotFile(key));
     if (!text) return nullptr;
     try {
-        return w2::save::Decode(*text, G.data_dir);
+        return w2::save::Decode(*text, g_app.data_dir);
     } catch (...) {
         return nullptr;
     }
@@ -107,7 +107,7 @@ void Save() {
         options.max_width = 160;
         options.ok = [names, slot](const std::string& typed) mutable {
             std::string name = typed.empty() ? unused_name : typed;
-            if (!WriteSlot(SlotKey(slot), *G.g)) {
+            if (!WriteSlot(SlotKey(slot), *g_app.g)) {
                 search::ShowMessage("The game could not be saved:",
                                     "the file could not be written.");
                 return;

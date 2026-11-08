@@ -94,7 +94,7 @@ int remembered_options[10] = {0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
  * table is left as it is.
  */
 void RecallOptions() {
-    auto file = w2::ReadFile(G.data_dir + "/DATA/OPTIONS.DAT");
+    auto file = w2::ReadFile(g_app.data_dir + "/DATA/OPTIONS.DAT");
     if (!file) return;
     for (size_t i = 0; i <= 9 && 2 * i + 2 <= file->size(); i++)
         remembered_options[i] = w2::U16(*file, 2 * i);
@@ -107,7 +107,7 @@ void KeepOptions() {
         bytes += static_cast<char>(remembered_options[i] & 255);
         bytes += static_cast<char>((remembered_options[i] >> 8) & 255);
     }
-    w2::WriteFile(G.data_dir + "/DATA/OPTIONS.DAT", bytes);
+    w2::WriteFile(g_app.data_dir + "/DATA/OPTIONS.DAT", bytes);
 }
 
 /** @brief A scenario to choose, as the chooser shows it. */
@@ -127,7 +127,7 @@ struct Scenario {
  */
 std::vector<Scenario> Scenarios() {
     std::vector<Scenario> out;
-    for (auto& entry : w2::scenarios::List(G.data_dir))
+    for (auto& entry : w2::scenarios::List(g_app.data_dir))
         out.push_back(Scenario{entry.name, entry.dir, entry.text, entry.cities, entry.ruins,
                                entry.players});
     return out;
@@ -142,7 +142,7 @@ gfx::ImageP Image(const std::string& path, int key = pckimage::kNokey) {
     if (cached != art.end()) return cached->second;
     gfx::ImageP image;
     try {
-        image = pckimage::Load(path, G.palette, key);
+        image = pckimage::Load(path, g_app.palette, key);
     } catch (...) {
     }
     return art[path] = image;
@@ -175,7 +175,7 @@ struct Setup {
  */
 std::shared_ptr<Setup> NewSetup(const Scenario& scenario) {
     std::string dir = w2::Upper(scenario.dir);
-    auto map = w2::scn::Load(G.data_dir + "/" + dir, dir);
+    auto map = w2::scn::Load(g_app.data_dir + "/" + dir, dir);
     auto setup = std::make_shared<Setup>();
     setup->sc = scenario;
     if (map->options.tutorial != 0)
@@ -395,7 +395,7 @@ struct SideDialog : kit::Modal {
         saved_card = side.card;
         // Off has no deck: its letter is past the end of "KLW"
         if (side.computer && side.level >= 0 && side.level < 3)
-            deck = w2::aicard::Deck(G.data_dir, side.level);
+            deck = w2::aicard::Deck(g_app.data_dir, side.level);
         // the chosen one on the last row when it is past the first five
         for (int row = 0; row < 5; row++) rows[row] = row < DeckSize() ? row : -1;
         if (side.card > 4)
@@ -497,7 +497,8 @@ struct SideDialog : kit::Modal {
                 desc_card = side.card;
                 desc.clear();
                 if (side.level >= 0 && side.level < 3)
-                    if (auto description = w2::aicard::Describe(G.data_dir, side.level, side.card))
+                    if (auto description =
+                                w2::aicard::Describe(g_app.data_dir, side.level, side.card))
                         desc = description->second;
             }
             for (int line = 0; line < 6 && line < static_cast<int>(desc.size()); line++)
@@ -593,7 +594,7 @@ const int kQuoteY[5] = {366, 384, 402, 420, 440};
  */
 std::vector<std::string> Quote(const std::function<int(int)>& roll) {
     std::vector<std::string> lines;
-    auto file = w2::ReadFile(G.data_dir + "/DATA/QUOTES.DAT");
+    auto file = w2::ReadFile(g_app.data_dir + "/DATA/QUOTES.DAT");
     if (!file || file->size() < 2) return lines;
     int count = atoi(file->substr(0, 2).c_str());
     if (count < 1) return lines;
@@ -636,7 +637,7 @@ struct SetupScreen : kit::Modal {
 
     /** @brief Draws a piece of SETUPBU.PCK: (source_x, source_y, width, height) at (x, y). */
     void Blit(int source_x, int source_y, int width, int height, int x, int y) {
-        auto buttons = G.screen->ArtFor(31);  // SETUPBU.PCK
+        auto buttons = g_app.screen->ArtFor(31);  // SETUPBU.PCK
         if (!buttons) return;
         gfx::SetColor(1, 1, 1);
         gfx::Draw(buttons->image, gfx::NewQuad(source_x, source_y, width, height), x, y);
@@ -644,12 +645,12 @@ struct SetupScreen : kit::Modal {
 
     /** @brief Draws the screen: marble, a box a side, the logo, rating and quote. */
     void Draw() override {
-        screen::DrawBackground(*G.screen, layout::Compute(640, 480));
+        screen::DrawBackground(*g_app.screen, layout::Compute(640, 480));
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.marble, gfx::NewQuad(0, 0, 360, 360), 16, 30);
-        gfx::Draw(G.marble, gfx::NewQuad(0, 0, 224, 312), 400, 30);
-        gfx::Draw(G.marble, gfx::NewQuad(0, 60, 360, 66), 16, 403);
-        gfx::Draw(G.marble, gfx::NewQuad(0, 0, 224, 114), 400, 355);
+        gfx::Draw(g_app.marble, gfx::NewQuad(0, 0, 360, 360), 16, 30);
+        gfx::Draw(g_app.marble, gfx::NewQuad(0, 0, 224, 312), 400, 30);
+        gfx::Draw(g_app.marble, gfx::NewQuad(0, 60, 360, 66), 16, 403);
+        gfx::Draw(g_app.marble, gfx::NewQuad(0, 0, 224, 114), 400, 355);
         const Font& font = kit::GetFont(2);
         for (int i = 0; i < 8; i++) {
             const SideSetup& side = st->sides[i];
@@ -692,7 +693,7 @@ struct SetupScreen : kit::Modal {
         }
         // the logo's (0, 0, 144, 64) at (440, 277)
         gfx::SetColor(1, 1, 1);
-        if (auto logo = G.screen->ArtFor(52))
+        if (auto logo = g_app.screen->ArtFor(52))
             gfx::Draw(logo->image, gfx::NewQuad(0, 0, 144, 64), 440, 277);  // SSG.PCK
         kit::Centred(font, kit::Text(7, 0), 512, 48);
         kit::Centred(font, kit::Text(7, 1), 512, 206);
@@ -779,7 +780,7 @@ struct SetupScreen : kit::Modal {
             for (auto& side : st->sides) {
                 if (side.in_use && side.computer && side.level >= 0 && side.level < 3) {
                     int deck_size =
-                            static_cast<int>(w2::aicard::Deck(G.data_dir, side.level).size());
+                            static_cast<int>(w2::aicard::Deck(g_app.data_dir, side.level).size());
                     side.card = deck_size > 1
                                         ? 1 + static_cast<int>(dice() %
                                                                static_cast<unsigned>(deck_size - 1))
@@ -839,7 +840,7 @@ struct Chooser : kit::Modal {
     void Draw() override {
         const kit::Rect popup_rect{80, 45, 480, 360};  // popup 19
         kit::PopupFrame(popup_rect);
-        auto picture = Image(G.data_dir + "/PICS/NEWSCEN.PCK");
+        auto picture = Image(g_app.data_dir + "/PICS/NEWSCEN.PCK");
         gfx::SetColor(1, 1, 1);
         if (picture) gfx::Draw(picture, popup_rect.x, popup_rect.y);
         kit::SetPal(0);
@@ -925,7 +926,7 @@ void DrawWorld() {
     kit::SetPal(3);
     gfx::Rectangle(gfx::kFill, 328, 200, 264, 225);
     const Font& font = kit::GetFont(2);
-    auto buttons = G.screen->ArtFor(1);  // STARTBU.PCK
+    auto buttons = g_app.screen->ArtFor(1);  // STARTBU.PCK
     for (int i = 0; i < 4; i++) {
         int y = 215 + 30 * i;
         gfx::SetColor(1, 1, 1);
@@ -939,7 +940,7 @@ void DrawWorld() {
                                          : "(?)";
         font.Draw(shows, 504, y);
     }
-    font.Draw(w2::randommap::TerrainSetName(G.data_dir, world.terrain_set), 336, 340);
+    font.Draw(w2::randommap::TerrainSetName(g_app.data_dir, world.terrain_set), 336, 340);
     font.Draw(kit::Text(3, world.allies ? 1 : 0), 336, 365);
 }
 
@@ -961,7 +962,7 @@ struct MakeWorldDialog : kit::Modal {
     /** @brief Runs a phase of the generator a frame, so the bar moves as it works. */
     void Update() override {
         if (run->Step()) return;
-        w2::randommap::Install(G.data_dir, run->GetFiles());
+        w2::randommap::Install(g_app.data_dir, run->GetFiles());
         auto done = after;
         kit::Pop(this);
         if (done) done();
@@ -994,7 +995,7 @@ void MakeWorld(kit::Done after) {
     auto dialog = std::make_shared<MakeWorldDialog>();
     dialog->rng = w2::Rng(static_cast<double>(time(nullptr) % 1000000007));
     w2::randommap::Options options;
-    options.data_dir = G.data_dir;
+    options.data_dir = g_app.data_dir;
     options.rng = &dialog->rng;
     for (int i = 0; i < 4; i++)
         options.sliders[i] = world.set[i] ? world.sliders[i] : w2::randommap::kRandomSlider;
@@ -1002,8 +1003,8 @@ void MakeWorld(kit::Done after) {
     options.terrain_set = world.terrain_set;
     dialog->run = std::make_unique<w2::randommap::Run>(options);
     dialog->after = after;
-    dialog->scroll = Image(G.data_dir + "/PICS/BSCROLL.PCK", 10);
-    dialog->bar = Image(G.data_dir + "/PICS/RMAPBAR.PCK", 10);
+    dialog->scroll = Image(g_app.data_dir + "/PICS/BSCROLL.PCK", 10);
+    dialog->bar = Image(g_app.data_dir + "/PICS/RMAPBAR.PCK", 10);
     kit::Push(dialog);
 }
 
@@ -1038,7 +1039,7 @@ struct Menu : kit::Modal {
     void Draw() override {
         gfx::SetColor(1, 1, 1);
         for (int quarter = 0; quarter < 4; quarter++) {
-            auto image = Image(G.data_dir + "/PICS/STARTUP" + std::to_string(quarter) + ".PCK");
+            auto image = Image(g_app.data_dir + "/PICS/STARTUP" + std::to_string(quarter) + ".PCK");
             if (image) gfx::Draw(image, (quarter % 2) * 320, (quarter / 2) * 240);
         }
         bool have = cur < static_cast<int>(list.size());
@@ -1046,7 +1047,7 @@ struct Menu : kit::Modal {
             DrawWorld();
         } else if (have) {
             std::string dir = w2::Upper(list[cur].dir);
-            if (auto picture = Image(G.data_dir + "/" + dir + "/PICS/SCENARIO.PCK")) {
+            if (auto picture = Image(g_app.data_dir + "/" + dir + "/PICS/SCENARIO.PCK")) {
                 gfx::SetColor(1, 1, 1);
                 gfx::Draw(picture, gfx::NewQuad(0, 0, 264, 225), 328, 200);
             }
@@ -1121,7 +1122,8 @@ struct Menu : kit::Modal {
         } else if (control_id == 102) {
             world.on = true;
         } else if (control_id == 104) {
-            world.terrain_set = (world.terrain_set + 1) % w2::randommap::TerrainSets(G.data_dir);
+            world.terrain_set =
+                    (world.terrain_set + 1) % w2::randommap::TerrainSets(g_app.data_dir);
         } else if (control_id == 105) {
             world.allies = !world.allies;
         } else if (control_id >= 106 && control_id <= 109) {
@@ -1172,7 +1174,7 @@ void Open(std::function<void(const std::string& dir, const w2::game::NewGameOpti
         if (menu->list[i].dir == "Erythea") menu->cur = static_cast<int>(i);
     menu->begin_game = begin;
     menu->loaded = loaded;
-    if (G.scenario == w2::randommap::kDir) world.on = true;
+    if (g_app.scenario == w2::randommap::kDir) world.on = true;
     menu->v = kit::View(1);
     menu->v.screen = true;  // a screen, not a dialog: Begin has no ring
     menu->view = &menu->v;

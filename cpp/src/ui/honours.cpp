@@ -85,7 +85,7 @@ void Promotion(std::vector<w2::Promotion> list, size_t index, kit::Done after) {
     std::string name = hero->name;
     int strength = hero->strength, moves = hero->max_moves;
     sound::Music(w2::cues::kPromotion);
-    auto pic = G.level_pic.count(level) ? G.level_pic[level] : nullptr;
+    auto pic = g_app.level_pic.count(level) ? g_app.level_pic[level] : nullptr;
     Show(
             pic,
             [=]() {
@@ -120,14 +120,16 @@ void Medal(w2::Army* army, kit::Done after) {
     int medal_number = army->medals ? army->medals : 1;  // 1-4: which medal this is
     bool grew_move = army->strength >= 15;
     int now = grew_move ? army->max_moves : army->strength;
-    auto pick = [](int group, int count) { return kit::Text(group, G.g->rng.Dice(1, count, -1)); };
+    auto pick = [](int group, int count) {
+        return kit::Text(group, g_app.g->rng.Dice(1, count, -1));
+    };
     std::string line1 = pick(kMedalFor, 7), line3 = pick(kMedalGiven, 4);
-    const w2::ArmyType* army_type = G.g->types.ById(army->type);
+    const w2::ArmyType* army_type = g_app.g->types.ById(army->type);
     std::string type_name = army_type ? army_type->name : "";
     int type = army->type, owner = army->owner;
     sound::Music(w2::cues::kMedal);
     Show(
-            G.medal_pic[medal_number - 1],
+            g_app.medal_pic[medal_number - 1],
             [=]() {
                 kit::Army(type, owner, 176, 155, 0);
                 gfx::SetColor(1, 1, 1);

@@ -56,15 +56,16 @@ void DrawArmyBanners() {
     std::set<int> marked_tiles;
     gfx::SetScissor(kMapX, kMapY, 224, 312);
     gfx::SetColor(1, 1, 1);
-    int viewer = w2::game::ViewerSide(*G.g, G.player);
-    for (w2::Army* army : G.g->armies) {
+    int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
+    for (w2::Army* army : g_app.g->armies) {
         if (!army->transit && army->x != w2::kNone) {
             int tile_key = army->y * 1000 + army->x;
-            if (!marked_tiles.count(tile_key) && w2::game::Seen(*G.g, viewer, army->x, army->y) &&
-                !w2::game::CityAt(*G.g, army->x, army->y)) {
+            if (!marked_tiles.count(tile_key) &&
+                w2::game::Seen(*g_app.g, viewer, army->x, army->y) &&
+                !w2::game::CityAt(*g_app.g, army->x, army->y)) {
                 marked_tiles.insert(tile_key);
                 int side = army->owner == w2::kNone ? 8 : army->owner;
-                gfx::Draw(G.atrans_shields, gfx::NewQuad(side * 16, 164, 16, 10),
+                gfx::Draw(g_app.atrans_shields, gfx::NewQuad(side * 16, 164, 16, 10),
                           kMapX + std::max(0, army->x * 2 - 1),
                           kMapY + std::max(0, army->y * 2 - 1));
             }
@@ -88,7 +89,8 @@ void DrawBars(const report::Figures& figures) {
             int shield_x = 320 + 8 * (i % 4), shield_y = 40 + 8 * (i / 4);
             for (int x = 0; x < bar_width; x += 8) {
                 int piece = std::min(8, bar_width - x);
-                gfx::Draw(G.shields_img, gfx::NewQuad(shield_x, shield_y, piece, 8), 312 + x, y);
+                gfx::Draw(g_app.shields_img, gfx::NewQuad(shield_x, shield_y, piece, 8), 312 + x,
+                          y);
             }
             kit::Bevel(311, y - 1, bar_width + 2, 10, 0, 1);
         }
@@ -127,7 +129,7 @@ struct Reports : kit::Modal {
         states[kDone] = w2::uidata::kNormal;
         hidden.clear();
         if (shown_report == report::kProduction) {
-            int count = static_cast<int>(G.player->produced.size());
+            int count = static_cast<int>(g_app.player->produced.size());
             states[kUp] = top_row > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
             states[kPageUp] = states[kUp];
             states[kDown] = top_row + kRows < count ? w2::uidata::kNormal : w2::uidata::kDisabled;
@@ -138,13 +140,13 @@ struct Reports : kit::Modal {
     }
     /** @brief Scrolls the Production list by `rows`, kept within the list. */
     void Scroll(int rows) {
-        int count = static_cast<int>(G.player->produced.size());
+        int count = static_cast<int>(g_app.player->produced.size());
         top_row = std::max(0, std::min(std::max(0, count - kRows), top_row + rows));
         Refresh();
     }
     /** @brief The Production list: a page of what was built or sent this turn. */
     void DrawProduction() {
-        const auto& list = G.player->produced;
+        const auto& list = g_app.player->produced;
         const Font& font = kit::GetFont(2);
         for (int i = 0; i < kRows; i++) {
             if (top_row + i >= static_cast<int>(list.size())) break;
@@ -152,8 +154,8 @@ struct Reports : kit::Modal {
             int y = 176 + 30 * i;
             gfx::SetColor(1, 1, 1);
             font.Draw(w2::Fmt("%d", top_row + i + 1), 312, y);
-            kit::Army(entry.type, G.player->index, 328, 170 + 30 * i, 1);
-            w2::City* city = entry.city != w2::kNone ? G.g->map->City(entry.city) : nullptr;
+            kit::Army(entry.type, g_app.player->index, 328, 170 + 30 * i, 1);
+            w2::City* city = entry.city != w2::kNone ? g_app.g->map->City(entry.city) : nullptr;
             std::string name = entry.standard ? "Standard" : (city ? city->name : "");
             std::string text;
             if (entry.kind == "sent")
@@ -167,7 +169,7 @@ struct Reports : kit::Modal {
         }
     }
     void Draw() override {
-        auto figures = report::ComputeFigures(*G.g, *G.player, shown_report);
+        auto figures = report::ComputeFigures(*g_app.g, *g_app.player, shown_report);
         kit::Popup(kPopupRect);
         if (shown_report == report::kProduction) {
             front::DrawVectorMap(kMapX, kMapY, nullptr, w2::kNone, true);
@@ -182,7 +184,7 @@ struct Reports : kit::Modal {
             DrawProduction();
         else
             DrawBars(figures);
-        kit::Centred(kit::GetFont(2).Colours(G.player->colour, G.player->edge),
+        kit::Centred(kit::GetFont(2).Colours(g_app.player->colour, g_app.player->edge),
                      Summary(shown_report, figures), 432, 322);
         kit::DrawControls(dialog_view, hidden);
     }

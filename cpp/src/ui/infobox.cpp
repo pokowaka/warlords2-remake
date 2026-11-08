@@ -84,7 +84,7 @@ void ArmyBoard(int x, int y, const std::string& name, int type_id, int side, int
     kit::Centred(font, name, x + 112, y + 8);
     kit::Army(type_id, side, x + 96, y + 31, 1);
     (void)medals;  // the remake keeps no medals yet
-    const w2::ArmyType* army_type = G.g->types.ById(type_id);
+    const w2::ArmyType* army_type = g_app.g->types.ById(type_id);
     const int* move_icon = nullptr;
     if (army_type && army_type->flies)
         move_icon = kMoveFly;
@@ -96,7 +96,7 @@ void ArmyBoard(int x, int y, const std::string& name, int type_id, int side, int
         move_icon = kMoveHills;
     if (move_icon) {
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.abits, gfx::NewQuad(move_icon[0], move_icon[1], 32, 10), x + 96, y + 103);
+        gfx::Draw(g_app.abits, gfx::NewQuad(move_icon[0], move_icon[1], 32, 10), x + 96, y + 103);
     }
 }
 
@@ -133,7 +133,7 @@ std::map<int, HelpRecord>& HelpFile() {
     // HELP\WARLORD2.HLP (docs/formats/hlp.md): a u16 count, then 104-byte
     // records -- u16 id, u16 sub-id, title and description, 50 bytes each.
     // Only the first record with an id counts.
-    if (auto contents = w2::ReadFile(G.data_dir + "/HELP/WARLORD2.HLP")) {
+    if (auto contents = w2::ReadFile(g_app.data_dir + "/HELP/WARLORD2.HLP")) {
         int count = w2::U16(*contents, 0);
         for (int i = 0; i < count; i++) {
             size_t offset = 2 + static_cast<size_t>(i) * 104;
@@ -158,7 +158,7 @@ gfx::ImageP BoardImage(const Board& which) {
     if (cached != boards.end()) return cached->second;
     gfx::ImageP image;
     try {
-        image = pckimage::Load(G.data_dir + "/PICS/" + which.file, G.palette, which.key);
+        image = pckimage::Load(g_app.data_dir + "/PICS/" + which.file, g_app.palette, which.key);
     } catch (...) {
     }
     return boards[which.bitmap] = image;
@@ -170,7 +170,7 @@ gfx::ImageP BoardImage(const Board& which) {
  * @return The board's top left, in the dialogs' frame.
  */
 std::pair<int, int> Place(const Board& which, int screen_x, int screen_y) {
-    const auto& layout = G.layout;
+    const auto& layout = g_app.layout;
     int half_width = which.w / 2, half_height = which.h / 2;
     int centre_x = (screen_x + 4) / 8 * 8;
     centre_x = std::max(half_width, std::min(layout.w - half_width, centre_x));
@@ -196,11 +196,11 @@ void ShowLines(int screen_x, int screen_y, const std::string& title, const std::
  * colours.
  */
 void Army(int screen_x, int screen_y, const w2::Army* army) {
-    const w2::ArmyType* army_type = G.g->types.ById(army->type);
+    const w2::ArmyType* army_type = g_app.g->types.ById(army->type);
     bool hero = army->Hero();
     std::string name = hero ? army->name : (army_type ? army_type->name : "");
     w2::Army army_copy = *army;
-    int side = G.player->index;
+    int side = g_app.player->index;
     Show(kArmy, screen_x, screen_y, [name, army_copy, side](int x, int y) {
         ArmyBoard(x, y, name, army_copy.type, side, 0);
         Numbers(x, y, w2::Fmt("Strength: %d", army_copy.strength),
@@ -215,9 +215,9 @@ void Army(int screen_x, int screen_y, const w2::Army* army) {
  * @param side The side whose colours to show it in; kNone for the player's.
  */
 void ArmyType(int screen_x, int screen_y, int type_id, const w2::Slot& slot, int side) {
-    const w2::ArmyType* army_type = G.g->types.ById(type_id);
+    const w2::ArmyType* army_type = g_app.g->types.ById(type_id);
     std::string name = army_type ? army_type->name : "";
-    int shown_side = side == w2::kNone ? G.player->index : side;
+    int shown_side = side == w2::kNone ? g_app.player->index : side;
     w2::Slot slot_copy = slot;
     Show(kArmy, screen_x, screen_y, [name, type_id, shown_side, slot_copy](int x, int y) {
         ArmyBoard(x, y, name, type_id, shown_side, 0);
@@ -247,7 +247,7 @@ bool ExplainControl(int screen_x, int screen_y, int control_id, kit::Modal* dial
     int sub = record.sub;
     if (sub >= 33 && sub <= 36) {
         // the configurable buttons: the menu item each one runs
-        const auto& screen_ui = G.screen->ui;
+        const auto& screen_ui = g_app.screen->ui;
         auto item = screen_ui.shortcuts.find(sub - 33);
         std::string name;
         if (item != screen_ui.shortcuts.end()) {

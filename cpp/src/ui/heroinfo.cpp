@@ -78,7 +78,7 @@ struct HeroInfo : kit::Modal {
     bool ground = false;            ///< The chosen item lies on the ground (not carried).
 
     /** @brief The items carried by the shown hero and lying where he stands. */
-    std::vector<w2::Item*> List() { return w2::hero::ItemsHere(*G.g, heroes[current_hero]); }
+    std::vector<w2::Item*> List() { return w2::hero::ItemsHere(*g_app.g, heroes[current_hero]); }
 
     /**
      * @brief Chooses item `index` of the list (from 0; anything else chooses none).
@@ -125,7 +125,7 @@ struct HeroInfo : kit::Modal {
     /** @brief Closes, and lets the quests know items may have changed hands. */
     void Close() {
         kit::Pop(this);
-        w2::quest::Notify(*G.g, *G.player, "item");
+        w2::quest::Notify(*g_app.g, *g_app.player, "item");
     }
 
     /** @brief Draws the map with the heroes, the hero's stack, his bonuses and his items. */
@@ -143,24 +143,24 @@ struct HeroInfo : kit::Modal {
         kit::Bevel(307, 205, 250, 131, 4, 2);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), hero->name, 432, 62);
-        kit::Army(w2::armytype::kHero, G.player->index, 304, 110, 1);
+        kit::Army(w2::armytype::kHero, g_app.player->index, 304, 110, 1);
         // The rest of his stack, then empty rings up to eight.
         int stack_slot = 1;
-        for (w2::Army* army : w2::game::ArmiesAt(*G.g, hero->x, hero->y)) {
+        for (w2::Army* army : w2::game::ArmiesAt(*g_app.g, hero->x, hero->y)) {
             if (army != hero && stack_slot < 8) {
                 kit::Army(army->type, army->owner, 304 + stack_slot * 32, 110, 1);
                 stack_slot++;
             }
         }
         for (int j = stack_slot; j <= 7; j++)
-            kit::Army(w2::kNone, G.player->index, 304 + j * 32, 110, 1);
-        w2::City* in_city = w2::game::CityAt(*G.g, hero->x, hero->y);
+            kit::Army(w2::kNone, g_app.player->index, 304 + j * 32, 110, 1);
+        w2::City* in_city = w2::game::CityAt(*g_app.g, hero->x, hero->y);
         // The nearest city the viewer has seen.
         w2::City* near = nullptr;
         int near_distance = w2::kNone;
-        int viewer = w2::game::ViewerSide(*G.g, G.player);
-        for (auto& city : G.g->map->cities) {
-            if (w2::game::Seen(*G.g, viewer, city.x, city.y)) {
+        int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
+        for (auto& city : g_app.g->map->cities) {
+            if (w2::game::Seen(*g_app.g, viewer, city.x, city.y)) {
                 int distance = std::max(std::abs(city.x - hero->x), std::abs(city.y - hero->y));
                 if (near_distance == w2::kNone || distance < near_distance) {
                     near = &city;
@@ -205,7 +205,7 @@ struct HeroInfo : kit::Modal {
         }
         auto box = [](const int* cell, int x) {
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.abits, gfx::NewQuad(cell[0], cell[1], 24, 20), x, 311);
+            gfx::Draw(g_app.abits, gfx::NewQuad(cell[0], cell[1], 24, 20), x, 311);
         };
         box(ground ? kClear : kChecked, 312);
         box(ground ? kChecked : kClear, 400);
@@ -231,12 +231,12 @@ struct HeroInfo : kit::Modal {
             Choose(item + 1);
         else if (control->id == kDrop && item != w2::kNone) {
             w2::Item* dropped = items[item];
-            w2::hero::DropItem(*G.g, heroes[current_hero], dropped);
+            w2::hero::DropItem(*g_app.g, heroes[current_hero], dropped);
             // Dropped at sea it is gone, with a splash.
             if (dropped->status == 0) sound::Effect("splash");
             Choose(std::min(item, static_cast<int>(List().size()) - 1));
         } else if (control->id == kTake && item != w2::kNone) {
-            w2::hero::TakeItem(*G.g, heroes[current_hero], items[item]);
+            w2::hero::TakeItem(*g_app.g, heroes[current_hero], items[item]);
             Choose(std::min(item, static_cast<int>(List().size()) - 1));
         } else if (control->id == kGround) {
             FirstOf(1);
@@ -255,9 +255,9 @@ struct HeroInfo : kit::Modal {
 /** @brief Opens hero info on the side's hero nearest the view's centre; nothing without one. */
 void Open() {
     auto dialog = std::make_shared<HeroInfo>();
-    for (int i = static_cast<int>(G.g->armies.size()) - 1; i >= 0; i--) {
-        w2::Army* army = G.g->armies[i];
-        if (army->Hero() && army->owner == G.player->index && !army->transit &&
+    for (int i = static_cast<int>(g_app.g->armies.size()) - 1; i >= 0; i--) {
+        w2::Army* army = g_app.g->armies[i];
+        if (army->Hero() && army->owner == g_app.player->index && !army->transit &&
             army->x != w2::kNone)
             dialog->heroes.push_back(army);
     }

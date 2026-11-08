@@ -46,14 +46,14 @@ struct Bonus : kit::Modal {
 
     /** @brief Draws the frame, the column heads and the visible rows of army types. */
     void Draw() override {
-        w2::Side* side = G.player;
+        w2::Side* side = g_app.player;
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(0xa4, 0), 320, 62);
         kit::Bevel(124, 146, 434, 186, 4, 2);
         kit::SetPal(0);
         kit::Outline(125, 147, 432, 184);
-        if (auto stack = G.screen->ArtFor(46)) {
+        if (auto stack = g_app.screen->ArtFor(46)) {
             gfx::SetColor(1, 1, 1);
             gfx::Draw(stack->image, gfx::NewQuad(188, 0, 216, 22), 256, 125);
         }
@@ -61,7 +61,7 @@ struct Bonus : kit::Modal {
         for (int i = 0; i < kRows; i++) {
             auto ranked = by_rank.find(top_row + i);
             const w2::ArmyType* type =
-                    ranked != by_rank.end() ? G.g->types.ById(ranked->second) : nullptr;
+                    ranked != by_rank.end() ? g_app.g->types.ById(ranked->second) : nullptr;
             if (type) {
                 int y = 148 + 30 * i;
                 kit::Army(type->id, side->index, 128, y, side->index + 2);
@@ -81,7 +81,7 @@ struct Bonus : kit::Modal {
                     icon_x = 152;
                 if (icon_x >= 0) {
                     gfx::SetColor(1, 1, 1);
-                    gfx::Draw(G.abits, gfx::NewQuad(icon_x, 30, 32, 10), 352, y + 8);
+                    gfx::Draw(g_app.abits, gfx::NewQuad(icon_x, 30, 32, 10), 352, y + 8);
                 }
                 gfx::SetColor(1, 1, 1);
                 font.Draw(BonusText(*type), 400, y + 6);
@@ -154,7 +154,7 @@ std::string BonusText(const w2::ArmyType& type, const w2::Army* army) {
 /** @brief Opens Army Bonus with the player's fight order. */
 void Open() {
     auto dialog = std::make_shared<Bonus>();
-    const auto& row = G.g->map->fight_order[G.player->index];
+    const auto& row = g_app.g->map->fight_order[g_app.player->index];
     for (int rank = 0; rank <= 28 && rank < static_cast<int>(row.size()); rank++)
         dialog->by_rank[row[rank]] = rank;
     dialog->dialog_view = kit::View(kDialog);

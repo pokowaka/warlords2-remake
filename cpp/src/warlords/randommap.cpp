@@ -1,15 +1,14 @@
-// The random map generator: see randommap.hpp and docs/re/random_map.md.
-//
-// RANDOM\RANDOM.DAT is both the generator's parameters and its memory: the
-// original reads the whole 0xa560 bytes into one buffer and works in it, the
-// 112x156 grid of terrain types at +0x6120 included. This does the same, so
-// the offsets below are RANDOM.DAT's own, and the few reads the original makes
-// off the edge of the grid land where they did. Writes off the grid are
-// dropped; the original's would corrupt its own tables.
-//
-// Every roll is its own statement: C++ leaves the order of a call's arguments
-// and of an operator's operands open, and the dice must fall in the order the
-// web port's do.
+/**
+ * @file
+ * @brief The random map and scenario generator.
+ *
+ * RANDOM/RANDOM.DAT holds both the generator's parameters and its working
+ * memory: the 0xa560-byte buffer includes the 112x156 grid of terrain types at
+ * offset 0x6120. Reads off the edge of the grid land in the buffer where the
+ * original's did; writes off the grid are dropped.
+ *
+ * Every die roll is its own statement so evaluation order is deterministic.
+ */
 #include "warlords/randommap.hpp"
 
 #include <algorithm>
@@ -38,8 +37,6 @@ const int kSliderShows[4][7] = {{5, 7, 9, 11, 13, 15, 17},
 const char* const kSliderFormats[4] = {"(%d%%)", "(%d%%)", "(%d)", "(%d%%)"};
 
 namespace {
-
-constexpr int kW = 112, kH = 156;
 
 // terrain type ids, as the grid and the scenario's tile table number them
 constexpr int kRoad = 0, kBridge = 1, kWater = 2, kShore = 3, kForest = 4, kHills = 5;
@@ -71,414 +68,489 @@ constexpr int kSTerrain = 0x710, kSSiteCount = 0x80f, kSSites = 0x811, kSiteStri
 constexpr int kSCityCount = 5499, kSCities = 5501, kCityStride = 65;
 constexpr int kNSites = 40;
 
-// directions the signposts give (4125:2b7c)
+// directions the signposts give
 const char* const kCompass[8] = {"north", "northeast", "east", "southeast",
                                  "south", "southwest", "west", "northwest"};
-// the twelve tiles round a city's 2x2 footprint, where its roads start (DS:0382)
+// the twelve tiles round a city's 2x2 footprint, where its roads start
 const int kRoundCity[12][2] = {{-1, -1}, {0, -1}, {1, -1}, {2, -1}, {2, 0},  {2, 1},
                                {2, 2},   {1, 2},  {0, 2},  {-1, 2}, {-1, 1}, {-1, 0}};
-// the road builder's terrain costs, pseudo-player 14 (DS:01e0)
+// the road builder's terrain costs, pseudo-player 14
 const int kRoadCost[12] = {1, 1, 3, 3, 4, 5, 7, 2, 5, 2, 1, 7};
-const int kFootprint[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};  // DS:02c4, 02cc
+const int kFootprint[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
 constexpr int kSafety = 200000;  // a loop the original might never leave
 
-struct P {
-    int x = 0, y = 0;
+/** @brief A tile position or step vector on the map. */
+struct Point {
+    int x = 0;  ///< Column.
+    int y = 0;  ///< Row.
 };
 
-/** Chebyshev distance (4c49:0fed). */
-int Reach(int x1, int y1, int x2, int y2) {
-    return std::max(std::abs(x1 - x2), std::abs(y1 - y2));
+/** @brief Chebyshev distance between two tiles. */
+int Reach(int from_x, int from_y, int to_x, int to_y) {
+    return std::max(std::abs(from_x - to_x), std::abs(from_y - to_y));
 }
 
-/** map_distance (1a8b:0acc): the straight line, rounded down. */
-int Distance(int x1, int y1, int x2, int y2) {
-    double dx = x1 - x2, dy = y1 - y2;
+/** @brief Euclidean distance between two tiles, rounded down. */
+int Distance(int from_x, int from_y, int to_x, int to_y) {
+    double dx = from_x - to_x, dy = from_y - to_y;
     return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
 }
 
-/** 4c49:0dd0: the step from one tile towards another, one of 8 compass
- *  directions by the slope, cut at tan 22.5 and tan 67.5 (4125:0292). */
-P Step(int x1, int y1, int x2, int y2) {
-    if (x2 == x1) return P{0, y2 == y1 ? 0 : (y2 < y1 ? -1 : 1)};
-    if (y2 == y1) return P{x2 < x1 ? -1 : 1, 0};
-    double s = static_cast<double>(y2 - y1) / static_cast<double>(x2 - x1);
-    if (x2 < x1) {
-        if (s >= 2.414) return P{0, -1};
-        if (s >= 0.414) return P{-1, -1};
-        if (s >= -0.414) return P{-1, 0};
-        if (s >= -2.414) return P{-1, 1};
-        return P{0, 1};
+/**
+ * @brief The step from one tile towards another, one of 8 compass directions
+ *        by the slope, cut at tan 22.5 and tan 67.5.
+ */
+Point Step(int from_x, int from_y, int to_x, int to_y) {
+    if (to_x == from_x) return Point{0, to_y == from_y ? 0 : (to_y < from_y ? -1 : 1)};
+    if (to_y == from_y) return Point{to_x < from_x ? -1 : 1, 0};
+    double slope = static_cast<double>(to_y - from_y) / static_cast<double>(to_x - from_x);
+    if (to_x < from_x) {
+        if (slope >= 2.414) return Point{0, -1};
+        if (slope >= 0.414) return Point{-1, -1};
+        if (slope >= -0.414) return Point{-1, 0};
+        if (slope >= -2.414) return Point{-1, 1};
+        return Point{0, 1};
     }
-    if (s >= 2.414) return P{0, 1};
-    if (s >= 0.414) return P{1, 1};
-    if (s >= -0.414) return P{1, 0};
-    if (s >= -2.414) return P{1, -1};
-    return P{0, -1};
+    if (slope >= 2.414) return Point{0, 1};
+    if (slope >= 0.414) return Point{1, 1};
+    if (slope >= -0.414) return Point{1, 0};
+    if (slope >= -2.414) return Point{1, -1};
+    return Point{0, -1};
 }
 
-/** The direction from one tile to another for a signpost (828e:0b51). */
-int Compass(int x1, int y1, int x2, int y2) {
-    if (x1 == x2) return y1 < y2 ? 4 : 0;
-    if (y1 == y2) return x1 < x2 ? 2 : 6;
-    if (x2 < x1 && y2 < y1) return 7;
-    if (x2 < x1 && y1 < y2) return 5;
-    if (x1 < x2 && y2 < y1) return 1;
+/** @brief The compass direction (0..7) from one tile to another for a signpost. */
+int Compass(int from_x, int from_y, int to_x, int to_y) {
+    if (from_x == to_x) return from_y < to_y ? 4 : 0;
+    if (from_y == to_y) return from_x < to_x ? 2 : 6;
+    if (to_x < from_x && to_y < from_y) return 7;
+    if (to_x < from_x && from_y < to_y) return 5;
+    if (from_x < to_x && to_y < from_y) return 1;
     return 3;
 }
 
-/** The checkerboard: 1 where x + y is even (C's (n)/2 != (n-1)/2). */
+/** @brief The checkerboard parity: 1 where x + y is even. */
 int Parity(int x, int y) {
-    int n = x + y;
-    return n == 0 || n / 2 != (n - 1) / 2 ? 1 : 0;
+    int sum = x + y;
+    return sum == 0 || sum / 2 != (sum - 1) / 2 ? 1 : 0;
 }
 
-void Clamp(P& p) {  // 4bed:0470
-    if (p.x < 1) p.x = 0;
-    if (p.y < 1) p.y = 0;
-    if (p.x > kW - 1) p.x = kW - 1;
-    if (p.y > kH - 1) p.y = kH - 1;
+/** @brief Clamps a point to the map bounds. */
+void Clamp(Point& point) {
+    if (point.x < 1) point.x = 0;
+    if (point.y < 1) point.y = 0;
+    if (point.x > kMapW - 1) point.x = kMapW - 1;
+    if (point.y > kMapH - 1) point.y = kMapH - 1;
 }
 
-int I8(int b) {
-    return b > 127 ? b - 256 : b;
+/** @brief Converts an unsigned byte (0..255) to signed (-128..127). */
+int I8(int byte_val) {
+    return byte_val > 127 ? byte_val - 256 : byte_val;
 }
 
-int GetI16(const std::vector<uint8_t>& t, int o) {
-    return static_cast<int16_t>(t[o] | (t[o + 1] << 8));
+/** @brief Reads a signed 16-bit little-endian integer from `table` at `offset`. */
+int GetI16(const std::vector<uint8_t>& table, int offset) {
+    return static_cast<int16_t>(table[offset] | (table[offset + 1] << 8));
 }
-void SetI16(std::vector<uint8_t>& t, int o, int v) {
-    t[o] = static_cast<uint8_t>(v & 0xff);
-    t[o + 1] = static_cast<uint8_t>((v >> 8) & 0xff);
+
+/** @brief Writes a signed 16-bit little-endian integer into `table` at `offset`. */
+void SetI16(std::vector<uint8_t>& table, int offset, int value) {
+    table[offset] = static_cast<uint8_t>(value & 0xff);
+    table[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xff);
 }
-std::string CstrOf(const std::vector<uint8_t>& t, int o, int n) {
-    std::string s;
-    for (int i = o; i < o + n && i < static_cast<int>(t.size()); i++) {
-        if (t[i] == 0) break;
-        s += static_cast<char>(t[i]);
+
+/** @brief Reads a null-terminated string of up to `max_len` bytes from `table` at `offset`. */
+std::string CstrOf(const std::vector<uint8_t>& table, int offset, int max_len) {
+    std::string out;
+    for (int i = offset; i < offset + max_len && i < static_cast<int>(table.size()); i++) {
+        if (table[i] == 0) break;
+        out += static_cast<char>(table[i]);
     }
-    return s;
+    return out;
 }
 
+/** @brief Candidate spots for bridges or crossings. */
 struct SpotList {
-    int x[50], y[50], ew[50], city_dist[50], chosen[50], chosen_dist[50];
+    int x[50];            ///< Column of each candidate spot.
+    int y[50];            ///< Row of each candidate spot.
+    int east_west[50];    ///< 1 if bridged east-west, 0 if north-south.
+    int city_dist[50];    ///< Distance to the nearest city.
+    int chosen[50];       ///< 1 if selected, 0 otherwise.
+    int chosen_dist[50];  ///< Distance to the nearest already-chosen spot.
 };
 
+/** @brief Terrain types adjacent to a city's 2x2 footprint. */
 struct Surroundings {
-    bool shore, forest, road, hills, marsh;
+    bool shore;   ///< Touches shore.
+    bool forest;  ///< Touches forest.
+    bool road;    ///< Touches road.
+    bool hills;   ///< Touches hills.
+    bool marsh;   ///< Touches marsh.
 };
 
 }  // namespace
 
+/** @brief Stateful random map and scenario generator. */
 class Generator {
   public:
-    std::vector<uint8_t> m, scn;
-    Types types;
-    Rng* rng;
-    bool allies;
-    bool fair = false;        // Options::fairCapitals
-    bool modern = false;      // Options::scenario: the scenario generator
-    scengen::Settings world;  // Options::world
-    scengen::World plan;      // what the scenario generator made
-    std::vector<uint16_t> tiles;
-    std::vector<uint8_t> rd;
-    std::string cty, spc, sgn;
-    int site_cell = -1;  // 4125:02d4, where the sites' round begins
+    std::vector<uint8_t> memory;  ///< RANDOM.DAT buffer and working terrain grid.
+    std::vector<uint8_t> scn;     ///< Scenario (.SCN) binary image.
+    Types types;                  ///< Loaded army type definitions.
+    Rng* rng;                     ///< Dice roller.
+    bool allies;                  ///< Whether non-capital cities may produce magical allies.
+    bool fair = false;            ///< Options::fair_capitals.
+    bool modern = false;          ///< Options::scenario (modern scenario generator).
+    scengen::Settings world;      ///< Options::world settings.
+    scengen::World plan;          ///< World layout built by the modern scenario generator.
+    std::vector<uint16_t> tiles;  ///< Map tile words (.MAP).
+    std::vector<uint8_t> roads;   ///< Road overlay bytes (.RD).
+    std::string cty;              ///< City description text (.CTY).
+    std::string spc;              ///< Site description text (.SPC).
+    std::string sgn;              ///< Signpost binary data (.SGN).
+    int site_cell = -1;           ///< Current 4x4 grid cell for site placement.
 
-    // the phases, as the original's progress bar moves through them
-    int stage = 0;
-    int site_i = 0, tenth = 0;
-    std::vector<uint8_t> served;
-    int shown = 4;
-    std::optional<std::pair<int, int>> pending;
+    int stage = 0;                               ///< Current progress-bar stage.
+    int site_i = 0;                              ///< Next site index to place.
+    int tenth = 0;                               ///< Last reported tenth of site placement.
+    std::vector<uint8_t> served;                 ///< Per-city flag: connected by road.
+    int shown = 4;                               ///< Road progress steps reported so far.
+    std::optional<std::pair<int, int>> pending;  ///< Pending city pair for road laying.
 
     // --- memory -------------------------------------------------------------
 
-    int R16(int o) const { return GetI16(m, o); }
-    void W16(int o, int v) { SetI16(m, o, v); }
-    std::string Str(int o, int n) const { return CstrOf(m, o, n); }
-    int S16(int o) const { return GetI16(scn, o); }
-    void Ws16(int o, int v) { SetI16(scn, o, v); }
-    void Wstr(int o, const std::string& s) {  // strcpy into the scenario image
-        for (size_t i = 0; i < s.size(); i++) scn[o + i] = static_cast<uint8_t>(s[i]);
-        scn[o + s.size()] = 0;
+    /** @brief Reads a signed 16-bit integer from `memory` at `offset`. */
+    int R16(int offset) const { return GetI16(memory, offset); }
+    /** @brief Writes a signed 16-bit integer to `memory` at `offset`. */
+    void W16(int offset, int value) { SetI16(memory, offset, value); }
+    /** @brief Reads a C string of up to `max_len` bytes from `memory` at `offset`. */
+    std::string Str(int offset, int max_len) const { return CstrOf(memory, offset, max_len); }
+    /** @brief Reads a signed 16-bit integer from `scn` at `offset`. */
+    int S16(int offset) const { return GetI16(scn, offset); }
+    /** @brief Writes a signed 16-bit integer to `scn` at `offset`. */
+    void Ws16(int offset, int value) { SetI16(scn, offset, value); }
+    /** @brief Copies a null-terminated string into `scn` at `offset`. */
+    void Wstr(int offset, const std::string& text) {
+        for (size_t i = 0; i < text.size(); i++) scn[offset + i] = static_cast<uint8_t>(text[i]);
+        scn[offset + text.size()] = 0;
     }
 
-    /** The terrain grid. Off the grid a read gets whatever RANDOM.DAT holds
-     *  there, as the original's did. */
+    /**
+     * @brief Reads the terrain grid at (x, y). Off the grid a read gets
+     *        whatever RANDOM.DAT holds there, as the original did.
+     */
     int At(int x, int y) const {
-        int o = kGrid + y * kW + x;
-        return o >= 0 && o < kDatSize ? m[o] : 0;
+        int offset = kGrid + y * kMapW + x;
+        return offset >= 0 && offset < kDatSize ? memory[offset] : 0;
     }
-    void Put(int x, int y, int t) {
-        int i = y * kW + x;
-        if (i >= 0 && i < kW * kH) m[kGrid + i] = static_cast<uint8_t>(t);
+    /** @brief Writes `terrain` into the terrain grid at (x, y) if in bounds. */
+    void Put(int x, int y, int terrain) {
+        int idx = y * kMapW + x;
+        if (idx >= 0 && idx < kMapW * kMapH) memory[kGrid + idx] = static_cast<uint8_t>(terrain);
     }
-    int Nx(int i) const { return R16(kNb + 4 * i); }
-    int Ny(int i) const { return R16(kNb + 4 * i + 2); }
-    /** The index of a step among the 8 neighbours, or -1. */
+    /** @brief X step of neighbour `dir` (0..7). */
+    int Nx(int dir) const { return R16(kNb + 4 * dir); }
+    /** @brief Y step of neighbour `dir` (0..7). */
+    int Ny(int dir) const { return R16(kNb + 4 * dir + 2); }
+    /** @brief The index of step (dx, dy) among the 8 neighbours, or -1. */
     int NbIndex(int dx, int dy) const {
-        int k = -1;
+        int found = -1;
         for (int i = 0; i < 8; i++)
-            if (Nx(i) == dx && Ny(i) == dy) k = i;
-        return k;
+            if (Nx(i) == dx && Ny(i) == dy) found = i;
+        return found;
     }
 
-    // the tile map: the low byte is the tile, bit 15 a crossing
+    /** @brief Low tile byte at (x, y), or 0 if out of bounds. */
     int Tile(int x, int y) const {
-        return x >= 0 && y >= 0 && x < kW && y < kH ? tiles[y * kW + x] & 0xff : 0;
+        return x >= 0 && y >= 0 && x < kMapW && y < kMapH ? tiles[y * kMapW + x] & 0xff : 0;
     }
-    void SetTile(int x, int y, int t) {
-        if (x < 0 || y < 0 || x >= kW || y >= kH) return;
-        uint16_t& v = tiles[y * kW + x];
-        v = static_cast<uint16_t>((v & 0xff00) | (t & 0xff));
+    /** @brief Sets the low tile byte at (x, y), preserving bit 15 (crossing). */
+    void SetTile(int x, int y, int tile_byte) {
+        if (x < 0 || y < 0 || x >= kMapW || y >= kMapH) return;
+        uint16_t& word = tiles[y * kMapW + x];
+        word = static_cast<uint16_t>((word & 0xff00) | (tile_byte & 0xff));
     }
+    /** @brief Road piece at (x, y), or 0 if none / out of bounds. */
     int Road(int x, int y) const {
-        return x >= 0 && y >= 0 && x < kW && y < kH ? rd[y * kW + x] & 0x1f : 0;
+        return x >= 0 && y >= 0 && x < kMapW && y < kMapH ? roads[y * kMapW + x] & 0x1f : 0;
     }
-    void SetRoad(int x, int y, int r) {
-        if (x < 0 || y < 0 || x >= kW || y >= kH) return;
-        uint8_t& v = rd[y * kW + x];
-        v = static_cast<uint8_t>((v & 0xe0) | (r & 0x1f));
+    /** @brief Sets the road piece at (x, y). */
+    void SetRoad(int x, int y, int piece) {
+        if (x < 0 || y < 0 || x >= kMapW || y >= kMapH) return;
+        uint8_t& byte_val = roads[y * kMapW + x];
+        byte_val = static_cast<uint8_t>((byte_val & 0xe0) | (piece & 0x1f));
     }
-    int TerrainOf(int t) const { return scn[kSTerrain + t]; }
-    /** Variant `v` of terrain type `t` from RANDOM.DAT's tile table, the
-     *  checkerboard picking one of its pair. */
-    int TileFor(int t, int v, int x, int y) const {
-        return R16(kTiles + 64 * t + 4 * v + 2 * Parity(x, y)) & 0xff;
+    /** @brief Terrain type id for tile byte `tile_byte`. */
+    int TerrainOf(int tile_byte) const { return scn[kSTerrain + tile_byte]; }
+    /**
+     * @brief Variant `variant` of terrain type `terrain` from RANDOM.DAT's tile
+     *        table, the checkerboard picking one of its pair.
+     */
+    int TileFor(int terrain, int variant, int x, int y) const {
+        return R16(kTiles + 64 * terrain + 4 * variant + 2 * Parity(x, y)) & 0xff;
     }
 
-    // the cities, as the scenario holds them
+    /** @brief Number of cities currently recorded in `scn`. */
     int CityCount() const { return S16(kSCityCount); }
-    void SetCityCount(int n) { Ws16(kSCityCount, n); }
-    int Crec(int i) const { return kSCities + kCityStride * i; }
-    int Cx(int i) const { return S16(Crec(i)); }
-    int Cy(int i) const { return S16(Crec(i) + 2); }
+    /** @brief Sets the number of cities in `scn`. */
+    void SetCityCount(int count) { Ws16(kSCityCount, count); }
+    /** @brief Byte offset of city `city_idx`'s record in `scn`. */
+    int Crec(int city_idx) const { return kSCities + kCityStride * city_idx; }
+    /** @brief X coordinate of city `city_idx`. */
+    int Cx(int city_idx) const { return S16(Crec(city_idx)); }
+    /** @brief Y coordinate of city `city_idx`. */
+    int Cy(int city_idx) const { return S16(Crec(city_idx) + 2); }
 
-    /** dice(n, sides, bonus) (6ecb:02bf): no sides gives the bonus, and the
-     *  clamp makes fewer than none give n + bonus. */
-    int Dice(int n, int sides, int bonus = 0) {
+    /**
+     * @brief Rolls `count` dice of `sides` plus `bonus`: 0 sides gives `bonus`,
+     *        and negative sides gives `count + bonus`.
+     */
+    int Dice(int count, int sides, int bonus = 0) {
         if (sides == 0) return bonus;
-        if (sides < 0) return n + bonus;
-        return rng->Dice(n, sides, bonus);
+        if (sides < 0) return count + bonus;
+        return rng->Dice(count, sides, bonus);
     }
 
-    /** terrain_near (4c49:11f5): is type `t` on any of the 8 tiles round. */
-    bool Near(int x, int y, int t) const {
+    /** @brief True if terrain `terrain` is on any of the 8 tiles around (x, y). */
+    bool Near(int x, int y, int terrain) const {
         for (int i = 0; i < 8; i++) {
-            int ax = x + Nx(i), ay = y + Ny(i);
-            if (ax >= 0 && ay >= 0 && ax < kW && ay < kH && At(ax, ay) == t) return true;
+            int adj_x = x + Nx(i), adj_y = y + Ny(i);
+            if (adj_x >= 0 && adj_y >= 0 && adj_x < kMapW && adj_y < kMapH &&
+                At(adj_x, adj_y) == terrain)
+                return true;
         }
         return false;
     }
+    /** @brief True if any of the 8 tiles around (x, y) is plain. */
     bool NearPlain(int x, int y) const { return Near(x, y, kPlain); }
 
-    /** 4bed:04ae: push a point by (1d3-2) x 1dn each way; with `toEdge`, 30%
-     *  of the time it then goes to the nearest edge. Clamped to the map. */
-    void Jitter(P& p, int n, bool to_edge) {
-        int s1 = Dice(1, 3, -2);
-        p.x += s1 * Dice(1, n, 0);
-        int s2 = Dice(1, 3, -2);
-        p.y += s2 * Dice(1, n, 0);
+    /**
+     * @brief Pushes a point by (1d3-2) x 1d(range) each way; with `to_edge`,
+     *        30% of the time it then snaps to the nearest map edge.
+     */
+    void Jitter(Point& point, int range, bool to_edge) {
+        int step_x = Dice(1, 3, -2);
+        point.x += step_x * Dice(1, range, 0);
+        int step_y = Dice(1, 3, -2);
+        point.y += step_y * Dice(1, range, 0);
         if (Dice(1, 100, 0) < 30 && to_edge) {
-            int l = p.x, t = p.y, r = kW - 1 - p.x, b = kH - 1 - p.y;
-            if (l <= t && l <= r && l <= b) p.x = 0;
-            if (t <= l && t <= r && t <= b) p.y = 0;
-            if (r <= t && r <= l && r <= b) p.x = kW - 1;
-            if (b <= t && b <= l && b <= r) p.y = kH - 1;
+            int left = point.x, top = point.y;
+            int right = kMapW - 1 - point.x, bottom = kMapH - 1 - point.y;
+            if (left <= top && left <= right && left <= bottom) point.x = 0;
+            if (top <= left && top <= right && top <= bottom) point.y = 0;
+            if (right <= top && right <= left && right <= bottom) point.x = kMapW - 1;
+            if (bottom <= top && bottom <= left && bottom <= right) point.y = kMapH - 1;
         }
-        Clamp(p);
+        Clamp(point);
     }
 
-    // --- 4c49: the coastline --------------------------------------------------
+    // --- the coastline --------------------------------------------------------
 
-    P Pt(int o) const { return P{R16(o), R16(o + 2)}; }
-    void SetPt(int o, P p) {
-        W16(o, p.x);
-        W16(o + 2, p.y);
+    /** @brief Reads a 2-word point from `memory` at `offset`. */
+    Point Pt(int offset) const { return Point{R16(offset), R16(offset + 2)}; }
+    /** @brief Writes a 2-word point to `memory` at `offset`. */
+    void SetPt(int offset, Point point) {
+        W16(offset, point.x);
+        W16(offset + 2, point.y);
     }
 
-    /** 4c49:0087: where edge `i`'s stretch of coast begins and ends -- the
-     *  map's corners drawn in 10 along the diagonal, then pushed about. */
-    void CoastEnds(int i) {
-        int j = (i + 1) % 4;
-        if (R16(kPEdgePoints + 2 * i) < 3) {
-            SetPt(kEdgeStart + 4 * i, Pt(kEdges + 8 * i));
-            SetPt(kEdgeEnd + 4 * i, Pt(kEdges + 8 * i + 4));
+    /**
+     * @brief Determines where edge `edge_idx`'s stretch of coast begins and
+     *        ends: the map's corners drawn in 10 along the diagonal, then jittered.
+     */
+    void CoastEnds(int edge_idx) {
+        int next_edge = (edge_idx + 1) % 4;
+        if (R16(kPEdgePoints + 2 * edge_idx) < 3) {
+            SetPt(kEdgeStart + 4 * edge_idx, Pt(kEdges + 8 * edge_idx));
+            SetPt(kEdgeEnd + 4 * edge_idx, Pt(kEdges + 8 * edge_idx + 4));
             return;
         }
-        P a = Pt(kEdges + 8 * i);
-        a.x -= 10 * R16(kDiagonals + 4 * i);
-        a.y -= 10 * R16(kDiagonals + 4 * i + 2);
-        Jitter(a, 16, true);
-        Put(a.x, a.y, kPlain);
-        SetPt(kEdgeStart + 4 * i, a);
-        P b = Pt(kEdges + 8 * i + 4);
-        b.x -= 10 * R16(kDiagonals + 4 * j);
-        b.y -= 10 * R16(kDiagonals + 4 * j + 2);
-        Jitter(b, 16, true);
-        Put(b.x, b.y, kPlain);
-        SetPt(kEdgeEnd + 4 * i, b);
+        Point start_pt = Pt(kEdges + 8 * edge_idx);
+        start_pt.x -= 10 * R16(kDiagonals + 4 * edge_idx);
+        start_pt.y -= 10 * R16(kDiagonals + 4 * edge_idx + 2);
+        Jitter(start_pt, 16, true);
+        Put(start_pt.x, start_pt.y, kPlain);
+        SetPt(kEdgeStart + 4 * edge_idx, start_pt);
+        Point end_pt = Pt(kEdges + 8 * edge_idx + 4);
+        end_pt.x -= 10 * R16(kDiagonals + 4 * next_edge);
+        end_pt.y -= 10 * R16(kDiagonals + 4 * next_edge + 2);
+        Jitter(end_pt, 16, true);
+        Put(end_pt.x, end_pt.y, kPlain);
+        SetPt(kEdgeEnd + 4 * edge_idx, end_pt);
     }
 
-    /** 4c49:0206: swap an edge's end with the next one's start where that
-     *  keeps the outline turning round the middle. */
+    /**
+     * @brief Swaps an edge's end with the next one's start where that keeps
+     *        the outline turning around the middle.
+     */
     void CoastOrder() {
         for (int i = 0; i < 4; i++) {
-            int j = (i + 1) % 4;
-            P e = Pt(kEdgeEnd + 4 * i), s = Pt(kEdgeStart + 4 * j);
-            if (static_cast<double>(56 - e.x) / static_cast<double>(78 - e.y) <
-                static_cast<double>(56 - s.x) / static_cast<double>(78 - s.y)) {
-                SetPt(kEdgeEnd + 4 * i, s);
-                SetPt(kEdgeStart + 4 * j, e);
+            int next_edge = (i + 1) % 4;
+            Point end_pt = Pt(kEdgeEnd + 4 * i), start_pt = Pt(kEdgeStart + 4 * next_edge);
+            if (static_cast<double>(56 - end_pt.x) / static_cast<double>(78 - end_pt.y) <
+                static_cast<double>(56 - start_pt.x) / static_cast<double>(78 - start_pt.y)) {
+                SetPt(kEdgeEnd + 4 * i, start_pt);
+                SetPt(kEdgeStart + 4 * next_edge, end_pt);
             }
         }
     }
 
-    static bool OnEdge(P p) { return p.x == 0 || p.y == 0 || p.x == kW - 1 || p.y == kH - 1; }
+    /** @brief True if `point` lies on the outer border of the map. */
+    static bool OnEdge(Point point) {
+        return point.x == 0 || point.y == 0 || point.x == kMapW - 1 || point.y == kMapH - 1;
+    }
 
-    /** 4c49:02f9: the points along edge `i`, each a step on from the last
-     *  towards the end and pushed about by up to half a step. */
-    void CoastPoints(int i) {
-        int base = kEdgePts + 0x50 * i, want = R16(kPEdgePoints + 2 * i);
-        P s = Pt(kEdgeStart + 4 * i), e = Pt(kEdgeEnd + 4 * i);
-        SetPt(base, s);
-        int n = 1;
-        if (want < 3 || (OnEdge(s) && OnEdge(e))) {
-            SetPt(base + 4, e);
-            W16(kEdgeCount + 2 * i, 2);
+    /**
+     * @brief Places intermediate points along edge `edge_idx`, each a step on
+     *        from the last towards the end and jittered by up to half a step.
+     */
+    void CoastPoints(int edge_idx) {
+        int base = kEdgePts + 0x50 * edge_idx, want = R16(kPEdgePoints + 2 * edge_idx);
+        Point start_pt = Pt(kEdgeStart + 4 * edge_idx), end_pt = Pt(kEdgeEnd + 4 * edge_idx);
+        SetPt(base, start_pt);
+        int count = 1;
+        if (want < 3 || (OnEdge(start_pt) && OnEdge(end_pt))) {
+            SetPt(base + 4, end_pt);
+            W16(kEdgeCount + 2 * edge_idx, 2);
             return;
         }
-        int len = Reach(e.x, e.y, s.x, s.y) / (want - 1);
-        int k = 0;
+        int step_len = Reach(end_pt.x, end_pt.y, start_pt.x, start_pt.y) / (want - 1);
+        int idx = 0;
         for (;;) {
-            P p = Pt(base + 4 * k);
-            P d = Step(p.x, p.y, e.x, e.y);
-            P q{p.x + d.x * len, p.y + d.y * len};
-            Jitter(q, len / 2, false);
-            k++;
-            Put(q.x, q.y, kPlain);
-            SetPt(base + 4 * k, q);
-            n++;
-            if (Reach(e.x, e.y, q.x, q.y) < len || n >= want - 1) break;
+            Point cur = Pt(base + 4 * idx);
+            Point dir = Step(cur.x, cur.y, end_pt.x, end_pt.y);
+            Point next_pt{cur.x + dir.x * step_len, cur.y + dir.y * step_len};
+            Jitter(next_pt, step_len / 2, false);
+            idx++;
+            Put(next_pt.x, next_pt.y, kPlain);
+            SetPt(base + 4 * idx, next_pt);
+            count++;
+            if (Reach(end_pt.x, end_pt.y, next_pt.x, next_pt.y) < step_len || count >= want - 1)
+                break;
         }
-        SetPt(base + 4 * (k + 1), e);
-        W16(kEdgeCount + 2 * i, n + 1);
+        SetPt(base + 4 * (idx + 1), end_pt);
+        W16(kEdgeCount + 2 * edge_idx, count + 1);
     }
 
-    /** 4c49:104a: turn a step by -1 to +3 eighths. */
-    P Turn(P d) {
-        int k = NbIndex(d.x, d.y);
-        int i = Dice(1, 5, (k < 0 ? 8 : k) - 2) % 8;
-        return P{Nx(i), Ny(i)};
+    /** @brief Turns a step vector by -1 to +3 eighths of a circle. */
+    Point Turn(Point dir) {
+        int idx = NbIndex(dir.x, dir.y);
+        int next_dir = Dice(1, 5, (idx < 0 ? 8 : idx) - 2) % 8;
+        return Point{Nx(next_dir), Ny(next_dir)};
     }
 
-    /** 4c49:0a0e: a wandering line of plain from a to b. */
-    void CoastLine(P a, P b) {
-        P cur = a;
-        P first = Step(a.x, a.y, b.x, b.y);
-        for (int n = 0; n < kSafety; n++) {
-            P d = Step(cur.x, cur.y, b.x, b.y);
-            int r = Reach(cur.x, cur.y, b.x, b.y) < 3 ? 1 : Dice(1, 3, 0);
-            if (r == 2)
-                d = first;
-            else if (r == 3) {
-                d = Turn(d);
-                first = d;
+    /** @brief Draws a wandering line of plain from `from` to `to_pt`. */
+    void CoastLine(Point from, Point to_pt) {
+        Point cur = from;
+        Point first = Step(from.x, from.y, to_pt.x, to_pt.y);
+        for (int step = 0; step < kSafety; step++) {
+            Point dir = Step(cur.x, cur.y, to_pt.x, to_pt.y);
+            int roll = Reach(cur.x, cur.y, to_pt.x, to_pt.y) < 3 ? 1 : Dice(1, 3, 0);
+            if (roll == 2)
+                dir = first;
+            else if (roll == 3) {
+                dir = Turn(dir);
+                first = dir;
             }
-            cur.x += d.x;
-            cur.y += d.y;
+            cur.x += dir.x;
+            cur.y += dir.y;
             Clamp(cur);
             Put(cur.x, cur.y, kPlain);
-            if (cur.x == b.x && cur.y == b.y) return;
+            if (cur.x == to_pt.x && cur.y == to_pt.y) return;
         }
     }
 
-    /** 4c49:1016: which edge a point lies on, -1 for none. */
-    static int EdgeOf(P p) {
-        if (p.x == 0) return 3;
-        if (p.y == 0) return 0;
-        if (p.x == kW - 1) return 1;
-        if (p.y == kH - 1) return 2;
+    /** @brief Which edge (0..3) a point lies on, or -1 for none. */
+    static int EdgeOf(Point point) {
+        if (point.x == 0) return 3;
+        if (point.y == 0) return 0;
+        if (point.x == kMapW - 1) return 1;
+        if (point.y == kMapH - 1) return 2;
         return -1;
     }
 
-    /** A straight run of plain from a to b, one step each. */
-    void Straight(P a, P b) {
-        P d = Step(a.x, a.y, b.x, b.y);
-        P cur = a;
-        for (int n = 0; n < kSafety && !(cur.x == b.x && cur.y == b.y); n++) {
-            cur.x += d.x;
-            cur.y += d.y;
+    /** @brief Draws a straight run of plain from `from` to `to_pt`. */
+    void Straight(Point from, Point to_pt) {
+        Point dir = Step(from.x, from.y, to_pt.x, to_pt.y);
+        Point cur = from;
+        for (int step = 0; step < kSafety && !(cur.x == to_pt.x && cur.y == to_pt.y); step++) {
+            cur.x += dir.x;
+            cur.y += dir.y;
             Clamp(cur);
             Put(cur.x, cur.y, kPlain);
         }
     }
 
-    /** 4c49:0b0e: two points on the map's edge are joined along it, round a
-     *  corner if need be; across the map they wander as any other. */
-    void CoastAlongEdge(P a, P b) {
-        int ea = EdgeOf(a), eb = EdgeOf(b);
-        if (ea == eb) return Straight(a, b);
-        int apart = std::abs(ea - eb);
-        if (apart == 2) return CoastLine(a, b);
-        P corner = Pt(kCorners + 4 * (apart == 3 ? 0 : std::max(ea, eb)));
-        Straight(a, corner);
-        Straight(b, corner);
+    /**
+     * @brief Joins two points on the map's edge along the border, around a
+     *        corner if needed; across the map they wander like any coastline.
+     */
+    void CoastAlongEdge(Point from, Point to_pt) {
+        int edge_a = EdgeOf(from), edge_b = EdgeOf(to_pt);
+        if (edge_a == edge_b) return Straight(from, to_pt);
+        int apart = std::abs(edge_a - edge_b);
+        if (apart == 2) return CoastLine(from, to_pt);
+        Point corner = Pt(kCorners + 4 * (apart == 3 ? 0 : std::max(edge_a, edge_b)));
+        Straight(from, corner);
+        Straight(to_pt, corner);
     }
 
-    void CoastSegment(P a, P b) {
-        if (OnEdge(a) && OnEdge(b))
-            CoastAlongEdge(a, b);
+    /** @brief Connects two coastline control points `from` and `to_pt`. */
+    void CoastSegment(Point from, Point to_pt) {
+        if (OnEdge(from) && OnEdge(to_pt))
+            CoastAlongEdge(from, to_pt);
         else
-            CoastLine(a, b);
+            CoastLine(from, to_pt);
     }
 
-    /** 4c49:05c7: join every point of the outline to the next. */
+    /** @brief Joins every point of the coastline outline to the next. */
     void CoastJoin() {
         for (int i = 0; i < 4; i++) {
-            int base = kEdgePts + 0x50 * i, n = R16(kEdgeCount + 2 * i);
-            int k = 0;
-            for (; k < n - 1; k++) CoastSegment(Pt(base + 4 * k), Pt(base + 4 * (k + 1)));
-            int j = (i + 1) % 4;
-            CoastSegment(Pt(base + 4 * k), Pt(kEdgePts + 0x50 * j));
+            int base = kEdgePts + 0x50 * i, count = R16(kEdgeCount + 2 * i);
+            int idx = 0;
+            for (; idx < count - 1; idx++)
+                CoastSegment(Pt(base + 4 * idx), Pt(base + 4 * (idx + 1)));
+            int next_edge = (i + 1) % 4;
+            CoastSegment(Pt(base + 4 * idx), Pt(kEdgePts + 0x50 * next_edge));
         }
     }
 
-    /** 4c49:10bd: may the sea flood into this tile? */
+    /** @brief True if sea water may flood into (x, y). */
     bool Floods(int x, int y) const {
-        int t = At(x, y);
-        if (t == kShore || t == kBridge) return false;
-        bool inside = x != 0 && y != 0 && x != kW - 1 && y != kH - 1;
-        if (!inside && t == 0) return true;
+        int terrain = At(x, y);
+        if (terrain == kShore || terrain == kBridge) return false;
+        bool inside = x != 0 && y != 0 && x != kMapW - 1 && y != kMapH - 1;
+        if (!inside && terrain == 0) return true;
         return At(x + 1, y) == kWater || At(x - 1, y) == kWater || At(x, y + 1) == kWater ||
                At(x, y - 1) == kWater;
     }
 
-    /** 4c49:0867: the sea floods in from the edges up to the outline; what it
-     *  does not reach is land. */
+    /**
+     * @brief Floods sea water in from the edges up to the coastline outline;
+     *        everything unreached becomes plain.
+     */
     void CoastFill() {
-        for (int i = 0; i < kW * kH; i++) m[kGrid + i] = m[kGrid + i] == kPlain ? kShore : 0;
+        for (int i = 0; i < kMapW * kMapH; i++)
+            memory[kGrid + i] = memory[kGrid + i] == kPlain ? kShore : 0;
         auto flood = [&](int x, int y) {
             if (Floods(x, y)) Put(x, y, kWater);
         };
         for (int pass = 0; pass < 2; pass++) {
-            for (int x = 0; x < kW; x++)
-                for (int y = 0; y < kH; y++) flood(x, y);
-            for (int y = 0; y < kH; y++)
-                for (int x = 0; x < kW; x++) flood(x, y);
-            for (int x = kW - 1; x >= 0; x--)
-                for (int y = kH - 1; y >= 0; y--) flood(x, y);
-            for (int y = kH - 1; y >= 0; y--)
-                for (int x = kW - 1; x >= 0; x--) flood(x, y);
+            for (int x = 0; x < kMapW; x++)
+                for (int y = 0; y < kMapH; y++) flood(x, y);
+            for (int y = 0; y < kMapH; y++)
+                for (int x = 0; x < kMapW; x++) flood(x, y);
+            for (int x = kMapW - 1; x >= 0; x--)
+                for (int y = kMapH - 1; y >= 0; y--) flood(x, y);
+            for (int y = kMapH - 1; y >= 0; y--)
+                for (int x = kMapW - 1; x >= 0; x--) flood(x, y);
         }
-        for (int i = 0; i < kW * kH; i++) m[kGrid + i] = m[kGrid + i] == kWater ? kWater : kPlain;
+        for (int i = 0; i < kMapW * kMapH; i++)
+            memory[kGrid + i] = memory[kGrid + i] == kWater ? kWater : kPlain;
     }
 
-    /** 4c49:0ce7: water beside land is shore. */
+    /** @brief Marks water tiles adjacent to land as shore. */
     void Shores() {
-        for (int x = 0; x < kW; x++) {
-            for (int y = 0; y < kH; y++) {
+        for (int x = 0; x < kMapW; x++) {
+            for (int y = 0; y < kMapH; y++) {
                 if (At(x, y) != kWater) continue;
                 if (NearPlain(x, y)) Put(x, y, kShore);
                 if (Near(x, y, kHills)) Put(x, y, kShore);
@@ -487,7 +559,7 @@ class Generator {
         }
     }
 
-    /** 4c49:0000: the land. */
+    /** @brief Generates the landmass, coastline, and optional sea channels. */
     void Coast() {
         for (int i = 0; i < 4; i++) CoastEnds(i);
         CoastOrder();
@@ -496,175 +568,180 @@ class Generator {
         CoastFill();
         Shores();
         if (Dice(1, 100, 0) < 50) {
-            // 4c49:0daa: 0-2 channels straight across, west to east
-            int n = Dice(1, 3, -1);
-            for (int i = 0; i < n; i++) River(true, false, true);
+            // 0-2 channels straight across, west to east
+            int channels = Dice(1, 3, -1);
+            for (int i = 0; i < channels; i++) River(true, false, true);
             WaterTidy();
         }
         Shores();
     }
 
-    // --- 4d71: mountains and hills -----------------------------------------
+    // --- mountains and hills ------------------------------------------------
 
-    int Node(int i) const { return kNodes + 14 * i; }
+    /** @brief Byte offset of highland node `node_idx` in `memory`. */
+    int Node(int node_idx) const { return kNodes + 14 * node_idx; }
 
-    /** 4d71:0495 / 03af: seeds on random plain tiles, each a node. */
-    void Seeds(int n, int t, int kind) {
-        for (int k = 0; k < n; k++) {
+    /** @brief Places `count` seed nodes of `terrain` (`kind` 1=hill, 2=mountain) on random plain
+     * tiles. */
+    void Seeds(int count, int terrain, int kind) {
+        for (int idx = 0; idx < count; idx++) {
             int x = 0, y = 0;
             for (int tries = 0; tries < kSafety; tries++) {
-                x = Dice(1, kW, -1);
-                y = Dice(1, kH, -1);
+                x = Dice(1, kMapW, -1);
+                y = Dice(1, kMapH, -1);
                 if (At(x, y) == kPlain) break;
             }
-            Put(x, y, t);
-            int c = R16(kNodeCount), o = Node(c);
-            W16(o, x);
-            W16(o + 2, y);
-            W16(o + 4, kind);
-            W16(o + 6, 0);
-            W16(kNodeCount, c + 1);
+            Put(x, y, terrain);
+            int cur_count = R16(kNodeCount), offset = Node(cur_count);
+            W16(offset, x);
+            W16(offset + 2, y);
+            W16(offset + 4, kind);
+            W16(offset + 6, 0);
+            W16(kNodeCount, cur_count + 1);
         }
     }
 
-    /** 4d71:057b: each node is linked to its nearest others -- a hill to 0-1,
-     *  a mountain to 0-3. */
+    /**
+     * @brief Links each highland node to its nearest neighbours: a hill to
+     *        0..1, a mountain to 0..3.
+     */
     void Link() {
         int count = R16(kNodeCount);
         if (count < 2) return;
         for (int i = 0; i < count; i++) {
-            int o = Node(i);
-            int n = R16(o + 4) == 1 ? Dice(1, 2, -1) : Dice(1, 4, -1);
-            if (n >= count - 1) n = count - 1;
-            W16(o + 6, n);
-            for (int l = 0; l < n; l++) {
+            int offset = Node(i);
+            int links = R16(offset + 4) == 1 ? Dice(1, 2, -1) : Dice(1, 4, -1);
+            if (links >= count - 1) links = count - 1;
+            W16(offset + 6, links);
+            for (int link_idx = 0; link_idx < links; link_idx++) {
                 int best = 10000, best_j = -1;
                 for (int j = 0; j < count; j++) {
                     if (j == i) continue;
-                    int k = 0;
-                    while (k < l && R16(o + 8 + 2 * k) != j) k++;
-                    if (k != l) continue;
-                    int p = Node(j);
-                    int d = Reach(R16(p), R16(p + 2), R16(o), R16(o + 2));
-                    if (d < best) {
-                        best = d;
+                    int prev = 0;
+                    while (prev < link_idx && R16(offset + 8 + 2 * prev) != j) prev++;
+                    if (prev != link_idx) continue;
+                    int other = Node(j);
+                    int dist = Reach(R16(other), R16(other + 2), R16(offset), R16(offset + 2));
+                    if (dist < best) {
+                        best = dist;
                         best_j = j;
                     }
                 }
-                W16(o + 8 + 2 * l, best_j);
+                W16(offset + 8 + 2 * link_idx, best_j);
             }
         }
     }
 
-    /** 4d71:09a7: a ridge from a to b, wandering as the coast does; `width` 2
-     *  adds a tile to either side, 3 one two out. Only plain and hills give
-     *  way to it. */
-    void Ridge(P a, P b, int width, int t) {
-        P cur = a;
-        P first = Step(a.x, a.y, b.x, b.y);
-        int k = 0;
+    /**
+     * @brief Draws a ridge from `from` to `to_pt`: `width` 2 adds a tile to
+     *        either side, 3 adds one two tiles out. Only plain and hills give way.
+     */
+    void Ridge(Point from, Point to_pt, int width, int terrain) {
+        Point cur = from;
+        Point first = Step(from.x, from.y, to_pt.x, to_pt.y);
+        int dir_idx = 0;
         auto lay = [&](int x, int y) {
-            int v = At(x, y);
-            if (v == kPlain || v == kHills) Put(x, y, t);
+            int cur_terr = At(x, y);
+            if (cur_terr == kPlain || cur_terr == kHills) Put(x, y, terrain);
         };
-        for (int n = 0; n < kSafety; n++) {
-            P d = Step(cur.x, cur.y, b.x, b.y);
-            int r = Reach(cur.x, cur.y, b.x, b.y) < 3 ? 1 : Dice(1, 3, 0);
-            if (r == 2)
-                d = first;
-            else if (r == 3) {
-                d = Turn(d);
-                first = d;
+        for (int step = 0; step < kSafety; step++) {
+            Point dir = Step(cur.x, cur.y, to_pt.x, to_pt.y);
+            int roll = Reach(cur.x, cur.y, to_pt.x, to_pt.y) < 3 ? 1 : Dice(1, 3, 0);
+            if (roll == 2)
+                dir = first;
+            else if (roll == 3) {
+                dir = Turn(dir);
+                first = dir;
             }
-            cur.x += d.x;
-            cur.y += d.y;
-            int ki = NbIndex(d.x, d.y);
-            if (ki >= 0) k = ki;
-            int l = (k + 2) % 8, rr = (k + 6) % 8;
-            P p1{cur.x + Nx(l), cur.y + Ny(l)};
-            P p2{cur.x + Nx(rr), cur.y + Ny(rr)};
-            P p3{cur.x + 2 * Nx(l), cur.y + 2 * Ny(l)};
-            P p4{cur.x + 2 * Nx(rr), cur.y + 2 * Ny(rr)};
+            cur.x += dir.x;
+            cur.y += dir.y;
+            int found_dir = NbIndex(dir.x, dir.y);
+            if (found_dir >= 0) dir_idx = found_dir;
+            int left = (dir_idx + 2) % 8, right = (dir_idx + 6) % 8;
+            Point side1{cur.x + Nx(left), cur.y + Ny(left)};
+            Point side2{cur.x + Nx(right), cur.y + Ny(right)};
+            Point outer1{cur.x + 2 * Nx(left), cur.y + 2 * Ny(left)};
+            Point outer2{cur.x + 2 * Nx(right), cur.y + 2 * Ny(right)};
             Clamp(cur);
             lay(cur.x, cur.y);
-            bool done = cur.x == b.x && cur.y == b.y;
+            bool done = cur.x == to_pt.x && cur.y == to_pt.y;
             if (width == 2) {
-                Clamp(p1);
-                lay(p1.x, p1.y);
-                lay(p2.x, p2.y);  // the original clamps only the one
+                Clamp(side1);
+                lay(side1.x, side1.y);
+                lay(side2.x, side2.y);  // the original clamps only the one
             }
             if (width == 3) {
-                Clamp(p3);
-                lay(p3.x, p3.y);
-                lay(p4.x, p4.y);
+                Clamp(outer1);
+                lay(outer1.x, outer1.y);
+                lay(outer2.x, outer2.y);
             }
             if (done) return;
         }
     }
 
-    /** 4d71:0884 / 08f3: a node with no links gets a short ridge of its own,
-     *  up and to the left. */
-    void Blob(P p, int t) {
-        P q;
-        q.x = p.x + Dice(1, 5, -10);
-        q.y = p.y + Dice(1, 5, -10);
-        Clamp(q);
+    /** @brief Gives a node with no links a short ridge of its own, up and to the left. */
+    void Blob(Point start_pt, int terrain) {
+        Point end_pt;
+        end_pt.x = start_pt.x + Dice(1, 5, -10);
+        end_pt.y = start_pt.y + Dice(1, 5, -10);
+        Clamp(end_pt);
         int width = Dice(1, 2, 1);
-        Ridge(p, q, width, t);
+        Ridge(start_pt, end_pt, width, terrain);
     }
 
-    /** 4d71:06d2: the ridges along the links. */
+    /** @brief Draws ridges along all highland node links. */
     void Ridges() {
         int count = R16(kNodeCount);
         if (count < 2) return;
         for (int i = 0; i < count; i++) {
-            int o = Node(i);
-            P p{R16(o), R16(o + 2)};
-            bool hill = R16(o + 4) == 1;
-            int links = R16(o + 6);
+            int offset = Node(i);
+            Point from{R16(offset), R16(offset + 2)};
+            bool hill = R16(offset + 4) == 1;
+            int links = R16(offset + 6);
             if (links == 0) {
-                Blob(p, hill ? kHills : kMountains);
+                Blob(from, hill ? kHills : kMountains);
                 continue;
             }
-            for (int l = 0; l < links; l++) {
-                int q = Node(R16(o + 8 + 2 * l));
-                P to{R16(q), R16(q + 2)};
-                if (hill && R16(q + 4) == 1)
-                    Ridge(p, to, 3, kHills);
+            for (int link_idx = 0; link_idx < links; link_idx++) {
+                int other = Node(R16(offset + 8 + 2 * link_idx));
+                Point to_pt{R16(other), R16(other + 2)};
+                if (hill && R16(other + 4) == 1)
+                    Ridge(from, to_pt, 3, kHills);
                 else {
                     int width = Dice(1, 2, 1);
-                    Ridge(p, to, width, kMountains);
+                    Ridge(from, to_pt, width, kMountains);
                 }
             }
         }
     }
 
-    /** 4d71:002e: plain hemmed in by mountains (or hills) on all four sides
-     *  joins them, mountains on the shore come down, and a diagonal run of
-     *  three mountains is thickened on one side. */
+    /**
+     * @brief Tidies mountains: plain hemmed in on all four sides joins them,
+     *        mountains on the shore come down, and diagonal runs are thickened.
+     */
     void MountainTidy() {
-        for (int x = 0; x < kW; x++) {
-            for (int y = 0; y < kH; y++) {
-                if (x != 0 && y != 0 && x != kW - 1 && y != kH - 1 && At(x, y) == kPlain) {
-                    for (int t : {kMountains, kHills}) {
-                        if (At(x, y + 1) == t && At(x + 1, y) == t && At(x - 1, y) == t &&
-                            At(x, y - 1) == t)
-                            Put(x, y, t);
+        for (int x = 0; x < kMapW; x++) {
+            for (int y = 0; y < kMapH; y++) {
+                if (x != 0 && y != 0 && x != kMapW - 1 && y != kMapH - 1 && At(x, y) == kPlain) {
+                    for (int terrain : {kMountains, kHills}) {
+                        if (At(x, y + 1) == terrain && At(x + 1, y) == terrain &&
+                            At(x - 1, y) == terrain && At(x, y - 1) == terrain)
+                            Put(x, y, terrain);
                     }
                 }
                 if (At(x, y) == kMountains && Near(x, y, kShore)) Put(x, y, kPlain);
             }
         }
-        for (int x = 1; x < kW - 1; x++) {
-            for (int y = 1; y < kH - 1; y++) {
+        for (int x = 1; x < kMapW - 1; x++) {
+            for (int y = 1; y < kMapH - 1; y++) {
                 if (At(x, y) != kMountains) continue;
-                auto mm = [&](int dx, int dy) { return At(x + dx, y + dy) == kMountains; };
-                if (mm(1, 1) && mm(-1, -1) && !mm(1, -1) && !mm(-1, 1)) {
+                auto is_mtn = [&](int dx, int dy) { return At(x + dx, y + dy) == kMountains; };
+                if (is_mtn(1, 1) && is_mtn(-1, -1) && !is_mtn(1, -1) && !is_mtn(-1, 1)) {
                     if (Dice(1, 10, 0) > 5)
                         Put(x - 1, y + 1, kMountains);
                     else
                         Put(x + 1, y - 1, kMountains);
-                } else if (mm(-1, 1) && mm(1, -1) && !mm(-1, -1) && !mm(1, 1)) {
+                } else if (is_mtn(-1, 1) && is_mtn(1, -1) && !is_mtn(-1, -1) && !is_mtn(1, 1)) {
                     if (Dice(1, 10, 0) > 5)
                         Put(x + 1, y + 1, kMountains);
                     else
@@ -674,17 +751,18 @@ class Generator {
         }
     }
 
-    /** 4d71:033a: mountains are ringed with hills. */
+    /** @brief Rings mountains with foothills. */
     void Foothills() {
-        for (int x = 0; x < kW; x++) {
-            for (int y = 0; y < kH; y++) {
-                int t = At(x, y);
-                if (t != kMountains && t != kHills && Near(x, y, kMountains)) Put(x, y, kHills);
+        for (int x = 0; x < kMapW; x++) {
+            for (int y = 0; y < kMapH; y++) {
+                int terrain = At(x, y);
+                if (terrain != kMountains && terrain != kHills && Near(x, y, kMountains))
+                    Put(x, y, kHills);
             }
         }
     }
 
-    /** 4d71:0000. */
+    /** @brief Generates mountains, hills, ridges, and foothills. */
     void Highlands() {
         W16(kNodeCount, 0);
         Seeds(R16(kPMountains), kMountains, 2);
@@ -695,56 +773,59 @@ class Generator {
         Foothills();
     }
 
-    // --- 4f5f: erosion and passes --------------------------------------------
+    // --- erosion and passes --------------------------------------------------
 
-    /** 4f5f:0044: a walk between two random tiles; erosion wears its
-     *  mountains to hills, a pass cuts mountains and hills to plain, five tiles
-     *  across. */
+    /**
+     * @brief Walks between two random tiles: erosion wears mountains to hills,
+     *        while a pass cuts mountains and hills to plain, five tiles across.
+     */
     void Wear(bool pass) {
-        P a, b;
-        a.x = Dice(1, kW, -1);
-        a.y = Dice(1, kH, -1);
-        b.x = Dice(1, kW, -1);
-        b.y = Dice(1, kH, -1);
-        P cur = a;
-        while (!(cur.x == b.x && cur.y == b.y)) {
-            P d = Step(cur.x, cur.y, b.x, b.y);
-            int k = NbIndex(d.x, d.y);
-            int l = (k + 1) % 8, r = (k + 7) % 8;
-            int t = At(cur.x, cur.y);
-            bool hit = pass ? t == kMountains || t == kHills : t == kMountains;
+        Point from, to_pt;
+        from.x = Dice(1, kMapW, -1);
+        from.y = Dice(1, kMapH, -1);
+        to_pt.x = Dice(1, kMapW, -1);
+        to_pt.y = Dice(1, kMapH, -1);
+        Point cur = from;
+        while (!(cur.x == to_pt.x && cur.y == to_pt.y)) {
+            Point dir = Step(cur.x, cur.y, to_pt.x, to_pt.y);
+            int dir_idx = NbIndex(dir.x, dir.y);
+            int left = (dir_idx + 1) % 8, right = (dir_idx + 7) % 8;
+            int terrain = At(cur.x, cur.y);
+            bool hit = pass ? terrain == kMountains || terrain == kHills : terrain == kMountains;
             if (hit) {
-                int to = pass ? kPlain : kHills;
+                int target_terr = pass ? kPlain : kHills;
                 const int offs[5][2] = {{0, 0},
-                                        {Nx(l), Ny(l)},
-                                        {Nx(r), Ny(r)},
-                                        {2 * Nx(l), 2 * Ny(l)},
-                                        {2 * Nx(r), 2 * Ny(r)}};
-                for (auto& o : offs) {
-                    P p{cur.x + o[0], cur.y + o[1]};
-                    Clamp(p);
-                    Put(p.x, p.y, to);
+                                        {Nx(left), Ny(left)},
+                                        {Nx(right), Ny(right)},
+                                        {2 * Nx(left), 2 * Ny(left)},
+                                        {2 * Nx(right), 2 * Ny(right)}};
+                for (auto& off : offs) {
+                    Point pos{cur.x + off[0], cur.y + off[1]};
+                    Clamp(pos);
+                    Put(pos.x, pos.y, target_terr);
                 }
             }
-            cur.x += d.x;
-            cur.y += d.y;
+            cur.x += dir.x;
+            cur.y += dir.y;
         }
     }
 
-    /** Hills with three mountains on their four sides become mountain
-     *  (4f5f:04d6); plain with three hills, hills (05ae). */
-    void Surrounded(int t, int by) {
-        for (int x = 1; x < kW - 1; x++) {
-            for (int y = 1; y < kH - 1; y++) {
-                if (At(x, y) != t) continue;
-                int n = (At(x, y + 1) == by) + (At(x, y - 1) == by) + (At(x + 1, y) == by) +
-                        (At(x - 1, y) == by);
-                if (n > 2) Put(x, y, by);
+    /**
+     * @brief Converts tiles of `terrain` with at least three orthogonal
+     *        neighbours of `surrounding` into `surrounding`.
+     */
+    void Surrounded(int terrain, int surrounding) {
+        for (int x = 1; x < kMapW - 1; x++) {
+            for (int y = 1; y < kMapH - 1; y++) {
+                if (At(x, y) != terrain) continue;
+                int count = (At(x, y + 1) == surrounding) + (At(x, y - 1) == surrounding) +
+                            (At(x + 1, y) == surrounding) + (At(x - 1, y) == surrounding);
+                if (count > 2) Put(x, y, surrounding);
             }
         }
     }
 
-    /** 4f5f:0000. */
+    /** @brief Applies erosion and mountain passes. */
     void Erosion() {
         for (int i = 0; i < R16(kPErosion); i++) Wear(false);
         for (int i = 0; i < R16(kPPasses); i++) Wear(true);
@@ -753,67 +834,65 @@ class Generator {
         Foothills();
     }
 
-    // --- 4eb7: rivers ----------------------------------------------------------
+    // --- rivers --------------------------------------------------------------
 
-    /** 4eb7:005d: a river. Without `channel` it runs from a random hill or
-     *  mountain to a random water or shore tile, 200 tries each; a channel
-     *  runs from the west edge to the east. Each step lays water three tiles
-     *  across (`wide`: five, a channel seven), turns aside a quarter of the
-     *  time each way, and with `stops` the river ends on meeting water the
-     *  second time. */
+    /**
+     * @brief Carves a river or east-west sea channel across the map.
+     */
     void River(bool wide, bool stops, bool channel) {
-        P a, b;
+        Point from, to_pt;
         if (channel) {
-            a.x = 0;
-            a.y = Dice(1, kH, -1);
-            b.x = kW - 1;
-            b.y = Dice(1, kH, -1);
+            from.x = 0;
+            from.y = Dice(1, kMapH, -1);
+            to_pt.x = kMapW - 1;
+            to_pt.y = Dice(1, kMapH, -1);
         } else {
             for (int i = 0; i < 200; i++) {
-                a.x = Dice(1, kW, -1);
-                a.y = Dice(1, kH, -1);
-                int t = At(a.x, a.y);
-                if (t == kHills || t == kMountains) break;
+                from.x = Dice(1, kMapW, -1);
+                from.y = Dice(1, kMapH, -1);
+                int terrain = At(from.x, from.y);
+                if (terrain == kHills || terrain == kMountains) break;
             }
             for (int i = 0; i < 200; i++) {
-                b.x = Dice(1, kW, -1);
-                b.y = Dice(1, kH, -1);
-                int t = At(b.x, b.y);
-                if (t == kWater || t == kShore) break;
+                to_pt.x = Dice(1, kMapW, -1);
+                to_pt.y = Dice(1, kMapH, -1);
+                int terrain = At(to_pt.x, to_pt.y);
+                if (terrain == kWater || terrain == kShore) break;
             }
         }
-        P cur = a;
+        Point cur = from;
         int met = 0;
-        bool done = cur.x == b.x && cur.y == b.y;
-        for (int n = 0; !done && n < kSafety; n++) {
-            P d = Step(cur.x, cur.y, b.x, b.y);
-            int k = NbIndex(d.x, d.y);
-            int l = (k + 1) % 8, r = (k + 7) % 8, aside1 = (k + 2) % 8, aside2 = (k + 6) % 8;
+        bool done = cur.x == to_pt.x && cur.y == to_pt.y;
+        for (int step = 0; !done && step < kSafety; step++) {
+            Point dir = Step(cur.x, cur.y, to_pt.x, to_pt.y);
+            int dir_idx = NbIndex(dir.x, dir.y);
+            int left = (dir_idx + 1) % 8, right = (dir_idx + 7) % 8;
+            int aside1 = (dir_idx + 2) % 8, aside2 = (dir_idx + 6) % 8;
             if (stops) {
                 // nb(-1) reads the word before the table, as the original's did
-                int ahead = At(cur.x + Nx(k), cur.y + Ny(k));
+                int ahead = At(cur.x + Nx(dir_idx), cur.y + Ny(dir_idx));
                 if (ahead == kWater && met == 1) done = true;
                 if (ahead == kWater && met == 0) met++;
             }
-            auto lay = [&](int ox, int oy) {
-                P p{cur.x + ox, cur.y + oy};
-                Clamp(p);
-                Put(p.x, p.y, kWater);
+            auto lay = [&](int off_x, int off_y) {
+                Point pos{cur.x + off_x, cur.y + off_y};
+                Clamp(pos);
+                Put(pos.x, pos.y, kWater);
             };
             lay(0, 0);
-            lay(Nx(l), Ny(l));
-            lay(Nx(r), Ny(r));
+            lay(Nx(left), Ny(left));
+            lay(Nx(right), Ny(right));
             if (wide) {
-                lay(2 * Nx(l), 2 * Ny(l));
-                lay(2 * Nx(r), 2 * Ny(r));
+                lay(2 * Nx(left), 2 * Ny(left));
+                lay(2 * Nx(right), 2 * Ny(right));
                 if (channel) {
-                    lay(3 * Nx(l), 3 * Ny(l));
-                    lay(3 * Nx(r), 3 * Ny(r));
+                    lay(3 * Nx(left), 3 * Ny(left));
+                    lay(3 * Nx(right), 3 * Ny(right));
                 }
             }
-            cur.x += d.x;
-            cur.y += d.y;
-            if (cur.x == b.x && cur.y == b.y) done = true;
+            cur.x += dir.x;
+            cur.y += dir.y;
+            if (cur.x == to_pt.x && cur.y == to_pt.y) done = true;
             int roll = Dice(1, 4, 0);
             if (roll == 2) {
                 cur.x += Nx(aside1);
@@ -825,39 +904,47 @@ class Generator {
         }
     }
 
-    static bool Wet(int t) { return t == kShore || t == kWater; }
+    /** @brief True if `terrain` is shore or open water. */
+    static bool Wet(int terrain) { return terrain == kShore || terrain == kWater; }
 
-    /** 4eb7:060c: land with water on three of its four sides goes under, shore
-     *  out of sight of land becomes open water, and a diagonal of water is
-     *  given a shore tile beside it. */
+    /**
+     * @brief Tidies water and shores: land surrounded on three sides by water
+     *        submerges, shore far from land becomes open water, and diagonal
+     *        water runs receive an adjacent shore tile.
+     */
     void WaterTidy() {
-        auto land = [](int t) { return t == kPlain || t == kHills || t == kMountains; };
-        for (int x = 0; x < kW; x++) {
-            for (int y = 0; y < kH; y++) {
+        auto land = [](int terrain) {
+            return terrain == kPlain || terrain == kHills || terrain == kMountains;
+        };
+        for (int x = 0; x < kMapW; x++) {
+            for (int y = 0; y < kMapH; y++) {
                 if (!land(At(x, y))) continue;
-                int n = Wet(At(x, y + 1)) + Wet(At(x, y - 1)) + Wet(At(x + 1, y)) +
-                        Wet(At(x - 1, y));
-                if (n > 2) Put(x, y, kWater);
+                int wet_adj = Wet(At(x, y + 1)) + Wet(At(x, y - 1)) + Wet(At(x + 1, y)) +
+                              Wet(At(x - 1, y));
+                if (wet_adj > 2) Put(x, y, kWater);
             }
         }
-        for (int x = 0; x < kW; x++) {
-            for (int y = 0; y < kH; y++) {
+        for (int x = 0; x < kMapW; x++) {
+            for (int y = 0; y < kMapH; y++) {
                 if (At(x, y) == kShore && !Near(x, y, kPlain) && !Near(x, y, kHills) &&
                     !Near(x, y, kMountains))
                     Put(x, y, kWater);
             }
         }
-        auto dry = [](int t) { return t == kHills || t == kForest || t == kPlain; };
-        for (int x = 1; x < kW - 1; x++) {
-            for (int y = 1; y < kH - 1; y++) {
+        auto dry = [](int terrain) {
+            return terrain == kHills || terrain == kForest || terrain == kPlain;
+        };
+        for (int x = 1; x < kMapW - 1; x++) {
+            for (int y = 1; y < kMapH - 1; y++) {
                 if (!Wet(At(x, y))) continue;
-                auto a = [&](int dx, int dy) { return At(x + dx, y + dy); };
-                if (Wet(a(1, 1)) && Wet(a(-1, -1)) && dry(a(1, -1)) && dry(a(-1, 1))) {
+                auto adj = [&](int dx, int dy) { return At(x + dx, y + dy); };
+                if (Wet(adj(1, 1)) && Wet(adj(-1, -1)) && dry(adj(1, -1)) && dry(adj(-1, 1))) {
                     if (Dice(1, 10, 0) > 4)
                         Put(x - 1, y + 1, kShore);
                     else
                         Put(x + 1, y - 1, kShore);
-                } else if (Wet(a(-1, 1)) && Wet(a(1, -1)) && dry(a(-1, -1)) && dry(a(1, 1))) {
+                } else if (Wet(adj(-1, 1)) && Wet(adj(1, -1)) && dry(adj(-1, -1)) &&
+                           dry(adj(1, 1))) {
                     if (Dice(1, 10, 0) > 4)
                         Put(x + 1, y + 1, kShore);
                     else
@@ -867,7 +954,7 @@ class Generator {
         }
     }
 
-    /** 4eb7:0000. */
+    /** @brief Generates narrow and wide rivers and tidies water and shores. */
     void Rivers() {
         for (int i = 0; i < R16(kPRivers); i++) River(false, true, false);
         for (int i = 0; i < R16(kPWideRivers); i++) River(true, true, false);
@@ -879,17 +966,20 @@ class Generator {
         Shores();
     }
 
-    // --- 4e47: forests --------------------------------------------------------
+    // --- forests -------------------------------------------------------------
 
+    /** @brief Increments the count of forest tiles placed. */
     void AddForest() { W16(kForestDone, R16(kForestDone) + 1); }
 
-    /** 4e47:00b5: a wood round a random plain tile: eight arms, and off each
-     *  step of an arm two side shoots that shorten as it goes. */
+    /**
+     * @brief Grows a wood around a random plain tile: eight arms with two side
+     *        shoots off each step that shorten along the arm.
+     */
     void Wood() {
         int x = 0, y = 0;
         for (int tries = 0; tries < kSafety; tries++) {
-            x = Dice(1, kW, -1);
-            y = Dice(1, kH, -1);
+            x = Dice(1, kMapW, -1);
+            y = Dice(1, kMapH, -1);
             if (At(x, y) == kPlain) break;
         }
         int arms[8];
@@ -903,69 +993,73 @@ class Generator {
             span = 6;
             base = 4;
         }
-        auto grow = [&](P& p) {
-            Clamp(p);
-            if (At(p.x, p.y) == kPlain) {
-                Put(p.x, p.y, kForest);
+        auto grow = [&](Point& pos) {
+            Clamp(pos);
+            if (At(pos.x, pos.y) == kPlain) {
+                Put(pos.x, pos.y, kForest);
                 AddForest();
             }
         };
         Put(x, y, kForest);
         AddForest();
         for (int i = 0; i < 8; i++) {
-            P cur{x, y};
-            int k = 0;
-            for (int s = 0; s < arms[i]; s++) {
+            Point cur{x, y};
+            int dist = 0;
+            for (int step = 0; step < arms[i]; step++) {
                 cur.x += Nx(i);
                 cur.y += Ny(i);
                 grow(cur);
-                int l = (i + 2) % 8, r = (i + 6) % 8;
-                k++;
-                int nl = Dice(1, span - k / 2, base - k / 4);
-                int nr = Dice(1, span - k / 2, base - k / 3);
-                P p = cur;
-                for (int j = 0; j < nl; j++) {
-                    p.x += Nx(l);
-                    p.y += Ny(l);
-                    grow(p);
+                int left = (i + 2) % 8, right = (i + 6) % 8;
+                dist++;
+                int num_left = Dice(1, span - dist / 2, base - dist / 4);
+                int num_right = Dice(1, span - dist / 2, base - dist / 3);
+                Point left_pt = cur;
+                for (int j = 0; j < num_left; j++) {
+                    left_pt.x += Nx(left);
+                    left_pt.y += Ny(left);
+                    grow(left_pt);
                 }
-                P q = cur;
-                for (int j = 0; j < nr; j++) {
-                    q.x += Nx(r);
-                    q.y += Ny(r);
-                    grow(q);
+                Point right_pt = cur;
+                for (int j = 0; j < num_right; j++) {
+                    right_pt.x += Nx(right);
+                    right_pt.y += Ny(right);
+                    grow(right_pt);
                 }
             }
         }
     }
 
-    /** 4e47:03d9: plain with forest on three sides is forest, and a diagonal
-     *  of forest is given a tile beside it. */
+    /**
+     * @brief Tidies forests: plain with forest on three sides becomes forest,
+     *        and diagonal runs of forest get an adjacent forest tile.
+     */
     void ForestTidy() {
-        for (int x = 0; x < kW; x++) {
-            for (int y = 0; y < kH; y++) {
+        for (int x = 0; x < kMapW; x++) {
+            for (int y = 0; y < kMapH; y++) {
                 if (At(x, y) != kPlain) continue;
-                int n = (At(x, y + 1) == kForest) + (At(x, y - 1) == kForest) +
-                        (At(x + 1, y) == kForest) + (At(x - 1, y) == kForest);
-                if (n > 2) {
+                int adj_forest = (At(x, y + 1) == kForest) + (At(x, y - 1) == kForest) +
+                                 (At(x + 1, y) == kForest) + (At(x - 1, y) == kForest);
+                if (adj_forest > 2) {
                     Put(x, y, kForest);
                     AddForest();
                 }
             }
         }
-        auto open = [](int t) { return t == kHills || t == kShore || t == kPlain; };
-        for (int x = 1; x < kW - 1; x++) {
-            for (int y = 1; y < kH - 1; y++) {
+        auto open = [](int terrain) {
+            return terrain == kHills || terrain == kShore || terrain == kPlain;
+        };
+        for (int x = 1; x < kMapW - 1; x++) {
+            for (int y = 1; y < kMapH - 1; y++) {
                 if (At(x, y) != kForest) continue;
-                auto a = [&](int dx, int dy) { return At(x + dx, y + dy); };
-                if (a(1, 1) == kForest && a(-1, -1) == kForest && open(a(1, -1)) &&
-                    open(a(-1, 1))) {
+                auto adj = [&](int dx, int dy) { return At(x + dx, y + dy); };
+                if (adj(1, 1) == kForest && adj(-1, -1) == kForest && open(adj(1, -1)) &&
+                    open(adj(-1, 1))) {
                     if (Dice(1, 10, 0) < 5)
                         Put(x + 1, y - 1, kForest);
                     else
                         Put(x - 1, y + 1, kForest);
-                } else if (a(-1, 1) == kForest && a(1, -1) == kForest && open(a(-1, -1)) &&
-                           open(a(1, 1))) {
+                } else if (adj(-1, 1) == kForest && adj(1, -1) == kForest && open(adj(-1, -1)) &&
+                           open(adj(1, 1))) {
                     if (Dice(1, 10, 0) < 5)
                         Put(x - 1, y - 1, kForest);
                     else
@@ -975,43 +1069,43 @@ class Generator {
         }
     }
 
-    /** 4e47:0000: woods until they cover land / 100 x the Forest parameter. */
+    /** @brief Grows woods until they cover land / 100 x the Forest parameter. */
     void Forests() {
         int land = 0;
-        for (int i = 0; i < kW * kH; i++) {
-            int t = m[kGrid + i];
-            if (t == kPlain || t == kHills || t == kMountains) land++;
+        for (int i = 0; i < kMapW * kMapH; i++) {
+            int terrain = memory[kGrid + i];
+            if (terrain == kPlain || terrain == kHills || terrain == kMountains) land++;
         }
         W16(kForestWanted, land / 100 * R16(kPForest));
         W16(kForestDone, 0);
-        for (int n = 0; n < 10000 && R16(kForestDone) < R16(kForestWanted); n++) {
+        for (int step = 0; step < 10000 && R16(kForestDone) < R16(kForestWanted); step++) {
             Wood();
             ForestTidy();
         }
     }
 
-    // --- 4fc9: marshes ----------------------------------------------------------
+    // --- marshes -------------------------------------------------------------
 
-    /** 4fc9:0029: 1d5+3 tiles of marsh scattered round (x, y). */
+    /** @brief Scatters 1d5+3 tiles of marsh around (x, y). */
     void MarshAround(int x, int y) {
-        int n = Dice(1, 5, 3);
-        for (int i = 0; i < n; i++) {
-            P p;
-            int r1 = Dice(1, 3, 0);
-            int k1 = Dice(1, 8, -1);
-            p.x = x + r1 * Nx(k1);
-            int r2 = Dice(1, 3, 0);
-            int k2 = Dice(1, 8, -1);
-            p.y = y + r2 * Ny(k2);
-            Clamp(p);
-            if (At(p.x, p.y) == kPlain) Put(p.x, p.y, kMarsh);
+        int count = Dice(1, 5, 3);
+        for (int i = 0; i < count; i++) {
+            Point pos;
+            int dist1 = Dice(1, 3, 0);
+            int dir1 = Dice(1, 8, -1);
+            pos.x = x + dist1 * Nx(dir1);
+            int dist2 = Dice(1, 3, 0);
+            int dir2 = Dice(1, 8, -1);
+            pos.y = y + dist2 * Ny(dir2);
+            Clamp(pos);
+            if (At(pos.x, pos.y) == kPlain) Put(pos.x, pos.y, kMarsh);
         }
     }
 
-    /** 4fc9:010a: a marsh, near the shore if one of four tries finds it. */
+    /** @brief Places a marsh cluster, near the shore if one of four tries finds it. */
     void Marsh() {
         int x = 0, y = 0, tries = 0;
-        for (int n = 0; n < kSafety; n++) {
+        for (int step = 0; step < kSafety; step++) {
             x = Dice(1, 102, 5);
             y = Dice(1, 146, 5);
             if (At(x, y) != kPlain) continue;
@@ -1029,62 +1123,65 @@ class Generator {
         MarshAround(x + 1, y - 1);
     }
 
-    /** 4f5f:06a0: 1d3 marshes. */
+    /** @brief Places 1d3 marsh clusters. */
     void Marshes() {
-        int n = Dice(1, 3, 0);
-        for (int i = 0; i < n; i++) Marsh();
+        int count = Dice(1, 3, 0);
+        for (int i = 0; i < count; i++) Marsh();
     }
 
-    // --- 513d: cities and sites ---------------------------------------------
+    // --- cities and sites ----------------------------------------------------
 
-    /** 513d:0331: a city's 2x2 footprint, clear of water, hills and other
-     *  cities by a tile; on the coast if one of four tries finds it. */
+    /**
+     * @brief Places a city's 2x2 footprint clear of water, hills, and other
+     *        cities by a tile; on the coast if one of four tries finds it.
+     */
     void PlaceCity() {
         int x = 0, y = 0, tries = 0;
-        for (int n = 0; n < kSafety; n++) {
+        for (int step = 0; step < kSafety; step++) {
             x = Dice(1, 102, 5);
             y = Dice(1, 146, 5);
-            bool ok = true;
-            for (auto& f : kFootprint) {
-                int dx = f[0], dy = f[1];
-                int t = At(x + dx, y + dy);
-                if (t == kShore || t == kWater || t == kCity || t == kMountains || t == kHills)
-                    ok = false;
+            bool valid = true;
+            for (auto& cell : kFootprint) {
+                int dx = cell[0], dy = cell[1];
+                int terrain = At(x + dx, y + dy);
+                if (terrain == kShore || terrain == kWater || terrain == kCity ||
+                    terrain == kMountains || terrain == kHills)
+                    valid = false;
                 if (Near(x + dx, y + dy, kCity) || Near(x + dx + 1, y + dy + 1, kCity) ||
                     Near(x + dx - 1, y + dy - 1, kCity))
-                    ok = false;
+                    valid = false;
             }
-            if (!ok) continue;
+            if (!valid) continue;
             if (tries >= 4) break;
             tries++;
             if (Near(x, y, kShore) || Near(x + 1, y, kShore) || Near(x, y + 1, kShore) ||
                 Near(x + 1, y + 1, kShore))
                 break;
         }
-        int c = CityCount();
-        Ws16(Crec(c), x);
-        Ws16(Crec(c) + 2, y);
-        SetCityCount(c + 1);
-        for (auto& f : kFootprint) Put(x + f[0], y + f[1], kCity);
+        int city_idx = CityCount();
+        Ws16(Crec(city_idx), x);
+        Ws16(Crec(city_idx) + 2, y);
+        SetCityCount(city_idx + 1);
+        for (auto& cell : kFootprint) Put(x + cell[0], y + cell[1], kCity);
     }
 
-    /** 513d:0000. */
+    /** @brief Places all cities on the terrain grid. */
     void Cities() {
         SetCityCount(0);
         for (int i = R16(0xa84); i < R16(kPCities); i++) PlaceCity();
     }
 
-    /** 513d:0a77: somewhere for a site. The map is taken a sixteenth at a time,
-     *  round in turn: 50 tries there for plain clear of cities and of other
-     *  sites by three, then 50 anywhere, then 50 for anything not a city. */
-    P SiteSpot() {
+    /**
+     * @brief Finds a spot for a site, cycling through the map's 16 cells in turn.
+     */
+    Point SiteSpot() {
         if (site_cell == -1) site_cell = Dice(1, 16, -1);
-        int cxx = site_cell % 4, cyy = site_cell / 4;
+        int cell_x = site_cell % 4, cell_y = site_cell / 4;
         int x = 0, y = 0;
         bool found = false;
         for (int i = 0; i < 50 && !found; i++) {
-            x = Dice(1, 20, cxx * kW / 4 + 3);
-            y = Dice(1, 31, cyy * kH / 4 + 3);
+            x = Dice(1, 20, cell_x * kMapW / 4 + 3);
+            y = Dice(1, 31, cell_y * kMapH / 4 + 3);
             found = At(x, y) == kPlain && !Near(x, y, kCity) && !Near(x, y, kSite) &&
                     !Near(x - 3, y, kSite) && !Near(x + 3, y, kSite) && !Near(x, y - 3, kSite) &&
                     !Near(x, y + 3, kSite);
@@ -1104,10 +1201,10 @@ class Generator {
             }
         }
         site_cell = (site_cell + 1) % 16;
-        return P{x, y};
+        return Point{x, y};
     }
 
-    /** 513d:003a, its start: forty sites, every one unplaced. */
+    /** @brief Initialises the 40 site records as unplaced. */
     void SitesBegin() {
         Ws16(kSSiteCount, kNSites);
         for (int i = 0; i < kNSites; i++) {
@@ -1116,109 +1213,115 @@ class Generator {
         }
     }
 
-    /** 513d:003a: site `i`, keeping the template's temples and ruins, with
-     *  names and descriptions from RANDOM.DAT's word lists. */
-    void Site(int i) { SiteAt(i, SiteSpot()); }
+    /** @brief Places site `site_idx` at a chosen spot and generates its name and text. */
+    void Site(int site_idx) { SiteAt(site_idx, SiteSpot()); }
 
-    /** Site `i` at `s`: its record, its name and its description. */
-    void SiteAt(int i, P s) {
-        int o = kSSites + kSiteStride * i;
-        Ws16(o, s.x);
-        Ws16(o + 2, s.y);
-        Put(s.x, s.y, kSite);
+    /** @brief Writes site `site_idx` at `spot` with its generated name and description. */
+    void SiteAt(int site_idx, Point spot) {
+        int offset = kSSites + kSiteStride * site_idx;
+        Ws16(offset, spot.x);
+        Ws16(offset + 2, spot.y);
+        Put(spot.x, spot.y, kSite);
         std::string name, text;
-        if (scn[o + 24] == 1) {
-            int k = Dice(1, 10, -1);
-            name = Str(0x1000 + 10 * k, 10) + " Temple";
+        if (scn[offset + 24] == 1) {
+            int word_idx = Dice(1, 10, -1);
+            name = Str(0x1000 + 10 * word_idx, 10) + " Temple";
             text = "#%03d|The %s can bless your|armies or give you|quests|\n";
         } else {
-            int f = Dice(1, R16(kSiteFormats), -1);
-            int k1 = Dice(1, 10, -1);
-            std::string end = Str(0xf9c + 10 * k1, 10);
-            int k2 = Dice(1, 10, -1);
-            std::string word = Str(0xf38 + 10 * k2, 10) + end;
-            name = Format(Str(kSiteFormats + 2 + 20 * f, 20), word);
+            int fmt_idx = Dice(1, R16(kSiteFormats), -1);
+            int idx1 = Dice(1, 10, -1);
+            std::string suffix = Str(0xf9c + 10 * idx1, 10);
+            int idx2 = Dice(1, 10, -1);
+            std::string word = Str(0xf38 + 10 * idx2, 10) + suffix;
+            name = Format(Str(kSiteFormats + 2 + 20 * fmt_idx, 20), word);
             text = "#%03d|%s is|inhabited by monsters and|full of treasure!|\n";
         }
-        Wstr(o + 4, name);
-        spc += Format(text, i, name);
+        Wstr(offset + 4, name);
+        spc += Format(text, site_idx, name);
     }
 
-    // --- 4fef: terrain to tiles -----------------------------------------------
+    // --- terrain to tiles ----------------------------------------------------
 
-    /** 4fef:005c: every terrain type its first tile, a city its castle and the
-     *  first eight sites their own. */
+    /**
+     * @brief Assigns initial tile indices for every terrain cell, castle tiles
+     *        for cities, and temple tiles for the first eight sites.
+     */
     void ToTiles() {
-        for (int y = 0; y < kH; y++) {
-            for (int x = 0; x < kW; x++) {
-                int t = At(x, y);
-                if (t == kCity && At(x, y - 1) != kCity && At(x - 1, y) != kCity && x > 0 &&
+        for (int y = 0; y < kMapH; y++) {
+            for (int x = 0; x < kMapW; x++) {
+                int terrain = At(x, y);
+                if (terrain == kCity && At(x, y - 1) != kCity && At(x - 1, y) != kCity && x > 0 &&
                     y > 0) {
-                    int c = R16(kTiles + 64 * kCity) & 0xff;
-                    SetTile(x, y, c);
-                    SetTile(x + 1, y, c + 1);
-                    SetTile(x, y + 1, c + 16);
-                    SetTile(x + 1, y + 1, c + 17);
-                } else if (t == kSite) {
+                    int castle = R16(kTiles + 64 * kCity) & 0xff;
+                    SetTile(x, y, castle);
+                    SetTile(x + 1, y, castle + 1);
+                    SetTile(x, y + 1, castle + 16);
+                    SetTile(x + 1, y + 1, castle + 17);
+                } else if (terrain == kSite) {
                     SetTile(x, y, TileFor(kSite, 0, x, y));
-                } else if (t != kCity) {
-                    SetTile(x, y, TileFor(t, 0, x, y));
+                } else if (terrain != kCity) {
+                    SetTile(x, y, TileFor(terrain, 0, x, y));
                 }
             }
         }
         for (int i = 0; i < 8; i++) {
-            int o = kSSites + kSiteStride * i;
-            SetTile(S16(o), S16(o + 2), R16(kTiles + 64 * kSite + 4) & 0xff);
+            int offset = kSSites + kSiteStride * i;
+            SetTile(S16(offset), S16(offset + 2), R16(kTiles + 64 * kSite + 4) & 0xff);
         }
     }
 
-    /** The 8 neighbours as a mask (bit i for neighbour i), counting the map's
-     *  edge in: 4fef:0c9d (water, shore, bridge), 0d4f (forest), 0dcb
-     *  (mountains), 0e47 (hills or mountains). */
+    /**
+     * @brief Builds an 8-bit neighbour mask (bit i for neighbour i), counting
+     *        the map's outer edge as matching.
+     */
     int Mask(int x, int y, const std::function<bool(int)>& test) const {
-        int mk = 0;
+        int mask = 0;
         for (int i = 0; i < 8; i++) {
-            int ax = x + Nx(i), ay = y + Ny(i);
-            bool off = ax < 0 || ay < 0 || ax >= kW || ay >= kH;
-            if (off || test(At(ax, ay))) mk |= 1 << i;
+            int adj_x = x + Nx(i), adj_y = y + Ny(i);
+            bool off = adj_x < 0 || adj_y < 0 || adj_x >= kMapW || adj_y >= kMapH;
+            if (off || test(At(adj_x, adj_y))) mask |= 1 << i;
         }
-        return mk;
+        return mask;
     }
 
-    int Shape(int mk) const { return I8(m[kShape + mk]); }
+    /** @brief Looks up the tile variant for neighbour mask `mask` (-1 if none). */
+    int Shape(int mask) const { return I8(memory[kShape + mask]); }
 
-    template <class F>
-    void Each(int t, F f) {
-        for (int y = 0; y < kH; y++)
-            for (int x = 0; x < kW; x++)
-                if (At(x, y) == t) f(x, y);
+    /** @brief Calls `func(x, y)` for every tile whose terrain equals `terrain`. */
+    template <class Func>
+    void Each(int terrain, Func func) {
+        for (int y = 0; y < kMapH; y++)
+            for (int x = 0; x < kMapW; x++)
+                if (At(x, y) == terrain) func(x, y);
     }
 
-    /** 4fef:0464: the tiles that join each kind of ground to its neighbours. A
-     *  shape the tile set has no tile for gives way: water to marsh, forest
-     *  and hills often to plain, mountains to hills. */
+    /**
+     * @brief Selects transition tile variants that join each terrain type to
+     *        its neighbours, replacing unrepresentable shapes with fallback terrain.
+     */
     void Shapes() {
-        for (int y = 0; y < kH; y++) {
-            for (int x = 0; x < kW; x++) {
-                int t = At(x, y);
-                if (t != kWater && t != kShore) continue;
-                int v = Shape(Mask(
-                        x, y, [](int n) { return n == kWater || n == kShore || n == kBridge; }));
-                if (v < 0) {
+        for (int y = 0; y < kMapH; y++) {
+            for (int x = 0; x < kMapW; x++) {
+                int terrain = At(x, y);
+                if (terrain != kWater && terrain != kShore) continue;
+                int variant = Shape(Mask(x, y, [](int adj) {
+                    return adj == kWater || adj == kShore || adj == kBridge;
+                }));
+                if (variant < 0) {
                     Put(x, y, kMarsh);
                     SetTile(x, y, TileFor(kMarsh, 0, x, y));
                     MarshAround(x, y);
-                    tiles[y * kW + x] &= 0x7fff;
+                    tiles[y * kMapW + x] &= 0x7fff;
                 } else {
                     Put(x, y, kWater);
-                    SetTile(x, y, TileFor(kWater, v, x, y));
+                    SetTile(x, y, TileFor(kWater, variant, x, y));
                 }
             }
         }
         Each(kForest, [&](int x, int y) {
-            int v = Shape(Mask(x, y, [](int n) { return n == kForest; }));
-            if (v >= 0) {
-                SetTile(x, y, TileFor(kForest, v, x, y));
+            int variant = Shape(Mask(x, y, [](int adj) { return adj == kForest; }));
+            if (variant >= 0) {
+                SetTile(x, y, TileFor(kForest, variant, x, y));
                 Put(x, y, kForest);
             } else if (Dice(1, 10, 0) < 6) {
                 SetTile(x, y, TileFor(kPlain, 0, x, y));
@@ -1228,9 +1331,9 @@ class Generator {
             }
         });
         Each(kMountains, [&](int x, int y) {
-            int v = Shape(Mask(x, y, [](int n) { return n == kMountains; }));
-            if (v >= 0) {
-                SetTile(x, y, TileFor(kMountains, v, x, y));
+            int variant = Shape(Mask(x, y, [](int adj) { return adj == kMountains; }));
+            if (variant >= 0) {
+                SetTile(x, y, TileFor(kMountains, variant, x, y));
                 Put(x, y, kMountains);
             } else {
                 SetTile(x, y, TileFor(kHills, 0, x, y));
@@ -1238,9 +1341,10 @@ class Generator {
             }
         });
         Each(kHills, [&](int x, int y) {
-            int v = Shape(Mask(x, y, [](int n) { return n == kMountains || n == kHills; }));
-            if (v >= 0) {
-                SetTile(x, y, TileFor(kHills, v, x, y));
+            int variant =
+                    Shape(Mask(x, y, [](int adj) { return adj == kMountains || adj == kHills; }));
+            if (variant >= 0) {
+                SetTile(x, y, TileFor(kHills, variant, x, y));
                 Put(x, y, kHills);
             } else if (Dice(1, 10, 0) < 6) {
                 SetTile(x, y, TileFor(kPlain, 0, x, y));
@@ -1252,48 +1356,49 @@ class Generator {
         });
         Each(kMarsh, [&](int x, int y) {
             // mostly the plain marsh; three in ten one of four others
-            int o = Dice(1, 10, 0) < 7 ? 2 * Parity(x, y) : 4 * Dice(1, 4, 0);
-            SetTile(x, y, R16(kTiles + 64 * kMarsh + o) & 0xff);
+            int offset = Dice(1, 10, 0) < 7 ? 2 * Parity(x, y) : 4 * Dice(1, 4, 0);
+            SetTile(x, y, R16(kTiles + 64 * kMarsh + offset) & 0xff);
             Put(x, y, kMarsh);
         });
     }
 
-    // --- 5311: bridges, crossings and roads -----------------------------------
+    // --- bridges, crossings and roads ----------------------------------------
 
-    /** 5311:0a7f: ground a bridge may land on. */
+    /** @brief True if (x, y) is firm ground a bridge may land on. */
     bool Firm(int x, int y) const {
-        int t = At(x, y);
-        return t == kPlain || t == kForest || t == kHills;
+        int terrain = At(x, y);
+        return terrain == kPlain || terrain == kForest || terrain == kHills;
     }
 
-    /** The nearest city, by map distance, to each listed spot (shared by
-     *  5311:03c3 and 08f6; a spot's figure is worked out once). */
-    void NearestCities(SpotList& list, int n) {
+    /** @brief Computes the distance from each spot in `list` to its nearest city. */
+    void NearestCities(SpotList& list, int count) {
         if (list.city_dist[0] != -1) return;
-        for (int i = n - 1; i >= 0; i--) {
+        for (int i = count - 1; i >= 0; i--) {
             if (list.x[i] == -1) continue;
             int best = 10000;
-            for (int c = CityCount() - 1; c >= 0; c--)
-                best = std::min(best, Distance(list.x[i], list.y[i], Cx(c), Cy(c)));
+            for (int city_idx = CityCount() - 1; city_idx >= 0; city_idx--)
+                best = std::min(best, Distance(list.x[i], list.y[i], Cx(city_idx), Cy(city_idx)));
             list.city_dist[i] = best;
         }
     }
 
-    /** 5311:08f6 (bridges) and 03c3 (crossings): the best spot still free --
-     *  a die roll, plus more the nearer a city is. Bridges keep 10 apart. */
-    int PickSpot(SpotList& list, int n, bool apart) {
-        NearestCities(list, n);
-        for (int i = n - 1; i >= 0; i--) {
+    /**
+     * @brief Picks the highest-scoring unchosen spot in `list`, favouring
+     *        spots near cities and (if `apart`) keeping spots at least 10 apart.
+     */
+    int PickSpot(SpotList& list, int count, bool apart) {
+        NearestCities(list, count);
+        for (int i = count - 1; i >= 0; i--) {
             if (list.chosen[i] != 0 || list.x[i] == -1) continue;
             int best = 10000;
-            for (int j = n - 1; j >= 0; j--) {
+            for (int j = count - 1; j >= 0; j--) {
                 if (list.chosen[j] != 0)
                     best = std::min(best, Distance(list.x[i], list.y[i], list.x[j], list.y[j]));
             }
             list.chosen_dist[i] = best;
         }
         int best_score = -1, pick = -1;
-        for (int i = n - 1; i >= 0; i--) {
+        for (int i = count - 1; i >= 0; i--) {
             if (list.chosen[i] != 0 || list.x[i] == -1) continue;
             if (apart && !(list.chosen_dist[i] > 9)) continue;
             int roll = Dice(1, 15, 1);
@@ -1306,34 +1411,33 @@ class Generator {
         return pick;
     }
 
-    /** 5311:05b4: bridges over two-tile rivers. As the original has it, only
-     *  a river running north and south (tiles 0x26 and 0x28) is ever bridged. */
+    /** @brief Places bridges across two-tile rivers. */
     void Bridges(SpotList& list) {
-        int n = 0;
-        for (int y = 1; y < kH - 2; y++) {
-            for (int x = 1; x < kW - 2; x++) {
-                int t = Tile(x, y);
-                bool across = (t == 0x26 || t == 0x16) &&
+        int count = 0;
+        for (int y = 1; y < kMapH - 2; y++) {
+            for (int x = 1; x < kMapW - 2; x++) {
+                int tile = Tile(x, y);
+                bool across = (tile == 0x26 || tile == 0x16) &&
                               (Tile(x + 1, y) == 0x28 || Tile(x + 1, y) == 0x18);
-                bool along = (t == 0x21 || t == 0x11) &&
+                bool along = (tile == 0x21 || tile == 0x11) &&
                              (Tile(x, y + 1) == 0x24 || Tile(x, y + 1) == 0x14);
                 if (!across && !along) continue;
-                int ew = t == 0x26 ? 1 : 0;
-                bool ok = ew && ((Firm(x - 1, y) && Firm(x + 2, y)) ||
-                                 (Firm(x, y - 1) && Firm(x, y + 2)));
-                if (ok && n < 50) {
-                    list.x[n] = x;
-                    list.y[n] = y;
-                    list.ew[n] = ew;
-                    n++;
+                int east_west = tile == 0x26 ? 1 : 0;
+                bool valid = east_west && ((Firm(x - 1, y) && Firm(x + 2, y)) ||
+                                           (Firm(x, y - 1) && Firm(x, y + 2)));
+                if (valid && count < 50) {
+                    list.x[count] = x;
+                    list.y[count] = y;
+                    list.east_west[count] = east_west;
+                    count++;
                 }
             }
         }
-        if (n == 0) return;
-        for (int i; (i = PickSpot(list, n, true)) != -1;) {
+        if (count == 0) return;
+        for (int i; (i = PickSpot(list, count, true)) != -1;) {
             list.chosen[i] = 1;
             int x = list.x[i], y = list.y[i];
-            if (list.ew[i] == 0) {
+            if (list.east_west[i] == 0) {
                 SetTile(x, y, 0x84);
                 SetTile(x, y + 1, 0x94);
                 Put(x, y + 1, kBridge);
@@ -1351,11 +1455,13 @@ class Generator {
         }
     }
 
-    /** 5311:01f6: up to ten crossings -- shore that looks out on three tiles of
-     *  open water, at least 15 from the others. */
+    /**
+     * @brief Marks up to ten sea crossings on shore tiles that face three
+     *        tiles of open water and lie at least 15 tiles from other candidates.
+     */
     void Crossings(SpotList& list) {
-        for (int y = 1; y < kH - 2; y++) {
-            for (int x = 1; x < kW - 2; x++) {
+        for (int y = 1; y < kMapH - 2; y++) {
+            for (int x = 1; x < kMapW - 2; x++) {
                 if (Dice(1, 2, -1) != 0) continue;
                 int dx = 0, dy = 0;
                 switch (Tile(x, y)) {
@@ -1377,8 +1483,8 @@ class Generator {
                     continue;
                 }
                 bool open = true;
-                for (int k = 1; k <= 3; k++)
-                    if (At(x + k * dx, y + k * dy) != kWater) open = false;
+                for (int dist = 1; dist <= 3; dist++)
+                    if (At(x + dist * dx, y + dist * dy) != kWater) open = false;
                 if (!open) continue;
                 int near_by = 10000;
                 for (int i = 49; i >= 0; i--) {
@@ -1396,119 +1502,132 @@ class Generator {
             }
         }
         list.city_dist[0] = -1;
-        for (int n = 0, i; n < 10 && (i = PickSpot(list, 50, false)) != -1; n++) {
+        for (int count = 0, i; count < 10 && (i = PickSpot(list, 50, false)) != -1; count++) {
             list.chosen[i] = 1;
-            tiles[list.y[i] * kW + list.x[i]] |= 0x8000;
+            tiles[list.y[i] * kMapW + list.x[i]] |= 0x8000;
         }
     }
 
-    bool IsServed(int c) const {
-        return c >= 0 && c < static_cast<int>(served.size()) ? served[c] != 0 : false;
+    /** @brief True if city `city_idx` has already been connected by road. */
+    bool IsServed(int city_idx) const {
+        return city_idx >= 0 && city_idx < static_cast<int>(served.size()) ? served[city_idx] != 0
+                                                                           : false;
     }
-    void Serve(int c) {
-        if (c >= 0 && c < static_cast<int>(served.size())) served[c] = 1;
+    /** @brief Marks city `city_idx` as connected by road. */
+    void Serve(int city_idx) {
+        if (city_idx >= 0 && city_idx < static_cast<int>(served.size())) served[city_idx] = 1;
     }
 
-    /** 5311:0e22: a pair of cities to join -- a random one not yet served, and
-     *  of the unserved 30 to 70 away, the one that rolls highest. */
+    /**
+     * @brief Picks a pair of unserved cities 30..70 tiles apart to connect by road.
+     */
     std::optional<std::pair<int, int>> RoadPair() {
         for (;;) {
-            int a = -1;
-            for (int n = 80; n > 0; n--) {
-                a = Dice(1, CityCount(), -1);
-                if (!IsServed(a)) break;
-                a = -1;
+            int first = -1;
+            for (int tries = 80; tries > 0; tries--) {
+                first = Dice(1, CityCount(), -1);
+                if (!IsServed(first)) break;
+                first = -1;
             }
-            if (a == -1) return std::nullopt;
-            Serve(a);
-            int b = -1, best = -1;
-            for (int c = CityCount() - 1; c >= 0; c--) {
-                if (IsServed(c)) continue;
-                int d = Distance(Cx(a), Cy(a), Cx(c), Cy(c));
-                if (d > 29 && d < 71) {
+            if (first == -1) return std::nullopt;
+            Serve(first);
+            int second = -1, best = -1;
+            for (int city_idx = CityCount() - 1; city_idx >= 0; city_idx--) {
+                if (IsServed(city_idx)) continue;
+                int dist = Distance(Cx(first), Cy(first), Cx(city_idx), Cy(city_idx));
+                if (dist > 29 && dist < 71) {
                     int roll = Dice(1, 1000, 0);
                     if (best < roll) {
                         best = roll;
-                        b = c;
+                        second = city_idx;
                     }
                 }
             }
-            if (b != -1) {
-                Serve(b);
-                return std::make_pair(a, b);
+            if (second != -1) {
+                Serve(second);
+                return std::make_pair(first, second);
             }
         }
     }
 
-    /** 5311:0ad0: a tile round a city's footprint to start a road from. */
-    std::optional<P> RoadEnd(int c) {
-        for (int n = 8; n > 0; n--) {
-            const int* r = kRoundCity[Dice(1, 12, -1)];
-            int x = Cx(c) + r[0], y = Cy(c) + r[1];
-            int t = At(x, y);
-            if (t == kPlain || t == kForest || t == kHills) return P{x, y};
+    /** @brief Picks a firm tile adjacent to city `city_idx`'s footprint to start a road. */
+    std::optional<Point> RoadEnd(int city_idx) {
+        for (int tries = 8; tries > 0; tries--) {
+            const int* off = kRoundCity[Dice(1, 12, -1)];
+            int x = Cx(city_idx) + off[0], y = Cy(city_idx) + off[1];
+            int terrain = At(x, y);
+            if (terrain == kPlain || terrain == kForest || terrain == kHills) return Point{x, y};
         }
         return std::nullopt;
     }
 
-    /** 5311:0c1c: lay a road along the path the game's own pathfinder finds,
-     *  as pseudo-player 14 -- not over water, shore or bridges -- and every six
-     *  steps count the cities within 10 as served. */
-    void LayRoad(P from, P to) {
+    /**
+     * @brief Lays a road along the pathfinder route from `from` to `to_pt`,
+     *        marking cities within 10 tiles every six steps as served.
+     */
+    void LayRoad(Point from, Point to_pt) {
         move::RoadGround ground;
         ground.terrain = [this](int x, int y) { return TerrainOf(Tile(x, y)); };
         ground.road = [this](int x, int y) { return Road(x, y) != 0; };
         ground.crossing = [this](int x, int y) {
-            return x >= 0 && y >= 0 && x < kW && y < kH && (tiles[y * kW + x] & 0x8000) != 0;
+            return x >= 0 && y >= 0 && x < kMapW && y < kMapH &&
+                   (tiles[y * kMapW + x] & 0x8000) != 0;
         };
-        auto route = move::RoadRoute(ground, kRoadCost, kW, kH, from.x, from.y, to.x, to.y);
+        auto route =
+                move::RoadRoute(ground, kRoadCost, kMapW, kMapH, from.x, from.y, to_pt.x, to_pt.y);
         if (!route) return;
         int x = from.x, y = from.y, since = 0;
         for (size_t i = 0; i < route->size() && i < 200; i++) {
             since++;
-            if (x == to.x && y == to.y) break;
+            if (x == to_pt.x && y == to_pt.y) break;
             x = (*route)[i].first;
             y = (*route)[i].second;
-            int t = At(x, y);
-            if (t != kShore && t != kWater && t != kBridge) SetRoad(x, y, 1);
+            int terrain = At(x, y);
+            if (terrain != kShore && terrain != kWater && terrain != kBridge) SetRoad(x, y, 1);
             if (since > 5) {
                 since = 0;
-                for (int c = CityCount() - 1; c >= 0; c--) {
-                    if (Distance(x, y, Cx(c), Cy(c)) < 10) Serve(c);
+                for (int city_idx = CityCount() - 1; city_idx >= 0; city_idx--) {
+                    if (Distance(x, y, Cx(city_idx), Cy(city_idx)) < 10) Serve(city_idx);
                 }
             }
         }
     }
 
-    /** 5311:0000, its tiles: then bridges and crossings. */
+    /** @brief Converts terrain to tiles, applies transition shapes twice, and clears road/crossing
+     * bits. */
     void RoadTiles() {
         ToTiles();
         Shapes();
         Shapes();
-        for (int i = 0; i < kW * kH; i++) {
+        for (int i = 0; i < kMapW * kMapH; i++) {
             tiles[i] &= 0x7fff;
-            rd[i] &= 0xe0;
+            roads[i] &= 0xe0;
         }
     }
 
+    /** @brief Places bridges and sea crossings and resets road service tracking. */
     void RoadCrossings() {
         SpotList list;
         for (int i = 0; i < 50; i++) {
-            list.x[i] = list.y[i] = list.ew[i] = list.city_dist[i] = list.chosen_dist[i] = -1;
+            list.x[i] = list.y[i] = list.east_west[i] = list.city_dist[i] = list.chosen_dist[i] =
+                    -1;
             list.chosen[i] = 0;
         }
         Bridges(list);
         for (int i = 49; i >= 0; i--) {
             if (list.chosen[i] == 0)
-                list.x[i] = list.y[i] = list.ew[i] = list.city_dist[i] = list.chosen_dist[i] = -1;
+                list.x[i] = list.y[i] = list.east_west[i] = list.city_dist[i] =
+                        list.chosen_dist[i] = -1;
         }
         Crossings(list);
         served.assign(100, 0);
         shown = 4;
     }
 
-    /** The cities joined by roads, a pair at a time; a progress figure when
-     *  the original's bar moves on, nothing once every city is served. */
+    /**
+     * @brief Connects cities by road a pair at a time, returning a progress
+     *        percentage when the bar advances or `std::nullopt` when finished.
+     */
     std::optional<int> RoadsUntilShown() {
         for (;;) {
             std::pair<int, int> pair;
@@ -1516,41 +1635,43 @@ class Generator {
                 pair = *pending;
                 pending.reset();
             } else {
-                auto p = RoadPair();
-                if (!p) break;
-                pair = *p;
+                auto next_pair = RoadPair();
+                if (!next_pair) break;
+                pair = *next_pair;
                 if (shown < 10 && Dice(1, 3, -1) == 0) {
                     pending = pair;
                     return 80 + shown++;
                 }
             }
-            auto a = RoadEnd(pair.first);
-            std::optional<P> b;
-            if (a) b = RoadEnd(pair.second);
-            if (a && b && !(a->x == b->x && a->y == b->y)) LayRoad(*a, *b);
+            auto start_pt = RoadEnd(pair.first);
+            std::optional<Point> end_pt;
+            if (start_pt) end_pt = RoadEnd(pair.second);
+            if (start_pt && end_pt && !(start_pt->x == end_pt->x && start_pt->y == end_pt->y))
+                LayRoad(*start_pt, *end_pt);
         }
-        for (int i = 0; i < kW * kH; i++)
-            if (m[kGrid + i] == kSite) rd[i] &= 0xe0;
+        for (int i = 0; i < kMapW * kMapH; i++)
+            if (memory[kGrid + i] == kSite) roads[i] &= 0xe0;
         return std::nullopt;
     }
 
-    /** 4fef:0a4b: each road its shape from the roads and bridges round it; a
-     *  shape there is no piece for leaves plain or hills. Then a dozen or two
-     *  straight pieces take their other look. */
+    /**
+     * @brief Assigns road piece shapes from neighbouring roads and bridges,
+     *        and randomly swaps a few straight pieces to their alternate look.
+     */
     void RoadShapes() {
-        for (int y = 0; y < kH; y++) {
-            for (int x = 0; x < kW; x++) {
+        for (int y = 0; y < kMapH; y++) {
+            for (int x = 0; x < kMapW; x++) {
                 if (Road(x, y) == 0) continue;
-                int mk = 0;
+                int mask = 0;
                 for (int i = 0; i < 8; i++) {
-                    int ax = x + R16(kNbRoad + 4 * i), ay = y + R16(kNbRoad + 4 * i + 2);
-                    if (ax >= 0 && ay >= 0 && ax < kW && ay < kH &&
-                        (Road(ax, ay) != 0 || TerrainOf(Tile(ax, ay)) == kBridge))
-                        mk |= 1 << i;
+                    int adj_x = x + R16(kNbRoad + 4 * i), adj_y = y + R16(kNbRoad + 4 * i + 2);
+                    if (adj_x >= 0 && adj_y >= 0 && adj_x < kMapW && adj_y < kMapH &&
+                        (Road(adj_x, adj_y) != 0 || TerrainOf(Tile(adj_x, adj_y)) == kBridge))
+                        mask |= 1 << i;
                 }
-                int v = I8(m[kRoadShape + mk]);
-                if (v >= 0)
-                    SetRoad(x, y, v + 1);
+                int variant = I8(memory[kRoadShape + mask]);
+                if (variant >= 0)
+                    SetRoad(x, y, variant + 1);
                 else if (Dice(1, 10, 0) < 6) {
                     SetTile(x, y, TileFor(kPlain, 0, x, y));
                     Put(x, y, kPlain);
@@ -1560,14 +1681,14 @@ class Generator {
             }
         }
         const int swaps[2][2] = {{2, 17}, {1, 16}};
-        for (auto& sw : swaps) {
-            int n = Dice(1, 10, 10);
-            for (int k = 0; k < n; k++) {
+        for (auto& swap_pair : swaps) {
+            int count = Dice(1, 10, 10);
+            for (int idx = 0; idx < count; idx++) {
                 for (int tries = 0; tries < 10000; tries++) {
-                    int x = Dice(1, kW, -1);
-                    int y = Dice(1, kH, -1);
-                    if (Road(x, y) == sw[0]) {
-                        SetRoad(x, y, sw[1]);
+                    int x = Dice(1, kMapW, -1);
+                    int y = Dice(1, kMapH, -1);
+                    if (Road(x, y) == swap_pair[0]) {
+                        SetRoad(x, y, swap_pair[1]);
                         break;
                     }
                 }
@@ -1575,67 +1696,71 @@ class Generator {
         }
     }
 
-    // --- 513d / 5132: the sides and the cities' details ---------------------
+    // --- the sides and the cities' details -----------------------------------
 
-    /** 513d:05e3: the cities, read back off the tile map in rows. */
+    /** @brief Reads the cities back off the tile map in row order. */
     void CityList() {
-        int n = 0;
-        for (int y = 0; y < kH; y++) {
-            for (int x = 0; x < kW; x++) {
+        int count = 0;
+        for (int y = 0; y < kMapH; y++) {
+            for (int x = 0; x < kMapW; x++) {
                 if (Tile(x, y) != 0x60) continue;
-                int o = Crec(n);
-                Ws16(o, x);
-                Ws16(o + 2, y);
-                scn[o + 21] = 15;
-                scn[o + 20] = static_cast<uint8_t>(Dice(1, 3, 2));
-                n++;
+                int offset = Crec(count);
+                Ws16(offset, x);
+                Ws16(offset + 2, y);
+                scn[offset + 21] = 15;
+                scn[offset + 20] = static_cast<uint8_t>(Dice(1, 3, 2));
+                count++;
             }
         }
-        SetCityCount(n);
+        SetCityCount(count);
     }
 
-    /** 513d:08f0: a random city in one of the map's eight regions, four
-     *  across and two down; after 202 tries, wherever the last one was. */
+    /**
+     * @brief Picks a random city in one of the map's eight regions (4x2);
+     *        after 202 tries, returns whatever the last draw was.
+     */
     int CityIn(int region) {
-        int x0 = (region % 4) * 28, y0 = region / 4 * 78;
-        int c = 0;
+        int min_x = (region % 4) * 28, min_y = region / 4 * 78;
+        int city_idx = 0;
         for (int tries = 0; tries < 202; tries++) {
-            c = Dice(1, CityCount(), -1);
-            int x = Cx(c), y = Cy(c);
-            if (x >= x0 && x < x0 + 28 && y >= y0 && y < y0 + 78) break;
+            city_idx = Dice(1, CityCount(), -1);
+            int x = Cx(city_idx), y = Cy(city_idx);
+            if (x >= min_x && x < min_x + 28 && y >= min_y && y < min_y + 78) break;
         }
-        return c;
+        return city_idx;
     }
 
-    static int SideRec(int s) { return kSSideRec + 20 * s; }
+    /** @brief Byte offset of side `side_idx`'s record in `scn`. */
+    static int SideRec(int side_idx) { return kSSideRec + 20 * side_idx; }
 
-    /** 513d:0689: each side a capital in a region of its own, 12 from the
-     *  edge and 20 from the others both ways; ten rounds of 100 tries a side,
-     *  the last round taking what it gets. A side's armies favour its region. */
+    /**
+     * @brief Assigns each side a capital in its own region, at least 12 tiles
+     *        from the map edge and 20 from other capitals along both axes.
+     */
     void Capitals() {
         for (int round = 1;; round++) {
             bool used[8] = {false};
-            for (int s = 0; s < 8; s++) {
-                Ws16(SideRec(s) + 6, -100);
-                Ws16(SideRec(s) + 8, -100);
+            for (int side_idx = 0; side_idx < 8; side_idx++) {
+                Ws16(SideRec(side_idx) + 6, -100);
+                Ws16(SideRec(side_idx) + 8, -100);
             }
             bool again = false;
-            for (int s = 0; s < 8 && !again; s++) {
+            for (int side_idx = 0; side_idx < 8 && !again; side_idx++) {
                 int region;
                 do region = Dice(1, 8, -1);
                 while (used[region]);
                 used[region] = true;
-                int c = 0, tries = 0;
-                bool ok = false;
-                for (; !ok && tries < 100; tries++) {
-                    c = CityIn(region);
-                    int x = Cx(c), y = Cy(c);
+                int city_idx = 0, tries = 0;
+                bool valid = false;
+                for (; !valid && tries < 100; tries++) {
+                    city_idx = CityIn(region);
+                    int x = Cx(city_idx), y = Cy(city_idx);
                     if (x < 12 || x > 100 || y < 12 || y > 144) continue;
-                    ok = true;
-                    for (int o = 0; o < 8; o++) {
-                        if (std::abs(x - S16(SideRec(o) + 6)) < 20 ||
-                            std::abs(y - S16(SideRec(o) + 8)) < 20) {
-                            ok = false;
+                    valid = true;
+                    for (int other = 0; other < 8; other++) {
+                        if (std::abs(x - S16(SideRec(other) + 6)) < 20 ||
+                            std::abs(y - S16(SideRec(other) + 8)) < 20) {
+                            valid = false;
                             break;
                         }
                     }
@@ -1645,111 +1770,105 @@ class Generator {
                     again = true;
                     break;
                 }
-                W16(kRegionClass + 2 * region, R16(kSideClass + 2 * s));
-                Ws16(SideRec(s) + 6, Cx(c));
-                Ws16(SideRec(s) + 8, Cy(c));
+                W16(kRegionClass + 2 * region, R16(kSideClass + 2 * side_idx));
+                Ws16(SideRec(side_idx) + 6, Cx(city_idx));
+                Ws16(SideRec(side_idx) + 8, Cy(city_idx));
             }
             if (!again) break;
         }
         Crown();
     }
 
-    /** The capitals in the side records take their sides: the city's owner
-     *  byte, and the castle in the side's colours (513d:09b3). */
+    /** @brief Marks each capital's owner byte and paints its castle in the side's colours. */
     void Crown() {
-        for (int s = 0; s < 8; s++) {
-            int x = S16(SideRec(s) + 6), y = S16(SideRec(s) + 8);
-            for (int c = 0; c < CityCount(); c++) {
-                if (Cx(c) == x && Cy(c) == y) {
-                    scn[Crec(c) + 21] = static_cast<uint8_t>(s);
+        for (int side_idx = 0; side_idx < 8; side_idx++) {
+            int x = S16(SideRec(side_idx) + 6), y = S16(SideRec(side_idx) + 8);
+            for (int city_idx = 0; city_idx < CityCount(); city_idx++) {
+                if (Cx(city_idx) == x && Cy(city_idx) == y) {
+                    scn[Crec(city_idx) + 21] = static_cast<uint8_t>(side_idx);
                     break;
                 }
             }
-            // 513d:09b3: the castle in the side's colours
-            int t = s < 6 ? 0x62 + 2 * s : 0x80 + 2 * (s - 6);
-            SetTile(x, y, t);
-            SetTile(x + 1, y, t + 1);
-            SetTile(x, y + 1, t + 16);
-            SetTile(x + 1, y + 1, t + 17);
+            int tile_base = side_idx < 6 ? 0x62 + 2 * side_idx : 0x80 + 2 * (side_idx - 6);
+            SetTile(x, y, tile_base);
+            SetTile(x + 1, y, tile_base + 1);
+            SetTile(x, y + 1, tile_base + 16);
+            SetTile(x + 1, y + 1, tile_base + 17);
         }
     }
 
-    /** Not the original's (Options::fairCapitals): the eight capitals chosen
-     *  among the cities for a fair start, by travel cost between them
-     *  (warlords/travel). What a fair start is was learned from the hand-made
-     *  scenarios and from votes on generated maps (docs/mapeval.md):
-     *   - no city far from every capital (a swathe nobody is near becomes one
-     *     side's free hinterland),
-     *   - each side about as many cities it reaches first as the next,
-     *   - capitals at least FAIR_GAP turns apart (none of the designers' maps
-     *     comes nearer than 2.5).
-     *  A local search from a few random starts, swapping one capital at a
-     *  time while the start gets fairer. */
+    /**
+     * @brief Chooses the eight capitals by local search over travel-cost
+     *        fairness (Options::fair_capitals).
+     */
     void FairCapitals() {
         constexpr int kSides = 8;
         constexpr double kFairGap = 3.0;  // turns
         constexpr double kRemote = 5.0;   // turns from the nearest capital
         constexpr int kStarts = 12, kPasses = 40;
-        const int n = CityCount();
-        if (n < kSides) {
+        const int num_cities = CityCount();
+        if (num_cities < kSides) {
             Capitals();
             return;
         }
-        travel::Ground g;
-        g.w = kW;
-        g.h = kH;
-        g.terrain.resize(static_cast<size_t>(kW) * kH);
-        g.road.resize(static_cast<size_t>(kW) * kH);
-        g.crossing.resize(static_cast<size_t>(kW) * kH);
-        for (int y = 0; y < kH; y++)
-            for (int x = 0; x < kW; x++) {
-                int i = y * kW + x, t = TerrainOf(Tile(x, y));
-                g.terrain[i] = t;
-                g.road[i] = Road(x, y) != 0;
-                g.crossing[i] = (tiles[i] & 0x8000) != 0 || t == kBridge;
+        travel::Ground ground;
+        ground.w = kMapW;
+        ground.h = kMapH;
+        ground.terrain.resize(static_cast<size_t>(kMapW) * kMapH);
+        ground.road.resize(static_cast<size_t>(kMapW) * kMapH);
+        ground.crossing.resize(static_cast<size_t>(kMapW) * kMapH);
+        for (int y = 0; y < kMapH; y++)
+            for (int x = 0; x < kMapW; x++) {
+                int cell = y * kMapW + x, terrain = TerrainOf(Tile(x, y));
+                ground.terrain[cell] = terrain;
+                ground.road[cell] = Road(x, y) != 0;
+                ground.crossing[cell] = (tiles[cell] & 0x8000) != 0 || terrain == kBridge;
             }
-        auto footprint = [&](int c) {
-            std::vector<int> f;
-            for (auto& d : kFootprint)
-                if (Cx(c) + d[0] < kW && Cy(c) + d[1] < kH)
-                    f.push_back((Cy(c) + d[1]) * kW + Cx(c) + d[0]);
-            return f;
+        auto footprint = [&](int city_idx) {
+            std::vector<int> cells;
+            for (auto& off : kFootprint)
+                if (Cx(city_idx) + off[0] < kMapW && Cy(city_idx) + off[1] < kMapH)
+                    cells.push_back((Cy(city_idx) + off[1]) * kMapW + Cx(city_idx) + off[0]);
+            return cells;
         };
-        // a port city is a crossing (1555:109d): its footprint touches the sea
-        for (int c = 0; c < n; c++) {
+        // a port city is a crossing: its footprint touches the sea
+        for (int city_idx = 0; city_idx < num_cities; city_idx++) {
             bool port = false;
-            for (auto& r : kRoundCity) {
-                int t = TerrainOf(Tile(Cx(c) + r[0], Cy(c) + r[1]));
-                if (t == kBridge || t == kWater || t == kShore) port = true;
+            for (auto& ring : kRoundCity) {
+                int terrain = TerrainOf(Tile(Cx(city_idx) + ring[0], Cy(city_idx) + ring[1]));
+                if (terrain == kBridge || terrain == kWater || terrain == kShore) port = true;
             }
             if (port)
-                for (int i : footprint(c)) g.crossing[i] = 1;
+                for (int cell : footprint(city_idx)) ground.crossing[cell] = 1;
         }
-        std::vector<std::vector<int>> d(n, std::vector<int>(n, travel::kUnreached));
-        for (int c = 0; c < n; c++) {
-            auto field = travel::Costs(g, footprint(c));
-            for (int o = 0; o < n; o++)
-                for (int i : footprint(o)) d[c][o] = std::min(d[c][o], field[i]);
+        std::vector<std::vector<int>> cost_matrix(num_cities,
+                                                  std::vector<int>(num_cities, travel::kUnreached));
+        for (int city_idx = 0; city_idx < num_cities; city_idx++) {
+            auto field = travel::Costs(ground, footprint(city_idx));
+            for (int other = 0; other < num_cities; other++)
+                for (int cell : footprint(other))
+                    cost_matrix[city_idx][other] =
+                            std::min(cost_matrix[city_idx][other], field[cell]);
         }
         // how unfair a choice is; lower is better
-        std::vector<int> owner(n);
+        std::vector<int> owner(num_cities);
         auto unfairness = [&](const std::array<int, kSides>& caps) {
             double gap = 1e9;
-            for (int a = 0; a < kSides; a++)
-                for (int b = a + 1; b < kSides; b++)
-                    gap = std::min(gap, static_cast<double>(d[caps[a]][caps[b]]));
+            for (int i = 0; i < kSides; i++)
+                for (int j = i + 1; j < kSides; j++)
+                    gap = std::min(gap, static_cast<double>(cost_matrix[caps[i]][caps[j]]));
             if (gap >= travel::kUnreached) return 1e12;  // a capital cut off from another
             gap /= travel::kTurn;
             std::array<int, kSides> share{};
             int remote = 0;
             double reach = 0;
-            for (int c = 0; c < n; c++) {
-                if (std::find(caps.begin(), caps.end(), c) != caps.end()) continue;
+            for (int city_idx = 0; city_idx < num_cities; city_idx++) {
+                if (std::find(caps.begin(), caps.end(), city_idx) != caps.end()) continue;
                 int best = travel::kUnreached, who = 0;
-                for (int s = 0; s < kSides; s++)
-                    if (d[caps[s]][c] < best) {
-                        best = d[caps[s]][c];
-                        who = s;
+                for (int side_idx = 0; side_idx < kSides; side_idx++)
+                    if (cost_matrix[caps[side_idx]][city_idx] < best) {
+                        best = cost_matrix[caps[side_idx]][city_idx];
+                        who = side_idx;
                     }
                 if (best == travel::kUnreached) {
                     remote++;
@@ -1759,34 +1878,35 @@ class Generator {
                 reach += static_cast<double>(best) / travel::kTurn;
                 if (best > kRemote * travel::kTurn) remote++;
             }
-            auto [lo, hi] = std::minmax_element(share.begin(), share.end());
-            return 3.0 * remote + 1.0 * (*hi - *lo) + reach / n +
+            auto [min_it, max_it] = std::minmax_element(share.begin(), share.end());
+            return 3.0 * remote + 1.0 * (*max_it - *min_it) + reach / num_cities +
                    (gap < kFairGap ? 10.0 * (kFairGap - gap) : 0.0);
         };
         std::array<int, kSides> best{};
         double best_score = 1e18;
         for (int start = 0; start < kStarts; start++) {
             std::array<int, kSides> caps{};
-            for (int s = 0; s < kSides; s++) {
-                int c;
-                do c = Dice(1, n, -1);
-                while (std::find(caps.begin(), caps.begin() + s, c) != caps.begin() + s);
-                caps[s] = c;
+            for (int side_idx = 0; side_idx < kSides; side_idx++) {
+                int city_idx;
+                do city_idx = Dice(1, num_cities, -1);
+                while (std::find(caps.begin(), caps.begin() + side_idx, city_idx) !=
+                       caps.begin() + side_idx);
+                caps[side_idx] = city_idx;
             }
             double score = unfairness(caps);
             for (int pass = 0; pass < kPasses; pass++) {
                 bool better = false;
-                for (int s = 0; s < kSides; s++)
-                    for (int c = 0; c < n; c++) {
-                        if (std::find(caps.begin(), caps.end(), c) != caps.end()) continue;
-                        int was = caps[s];
-                        caps[s] = c;
+                for (int side_idx = 0; side_idx < kSides; side_idx++)
+                    for (int city_idx = 0; city_idx < num_cities; city_idx++) {
+                        if (std::find(caps.begin(), caps.end(), city_idx) != caps.end()) continue;
+                        int was = caps[side_idx];
+                        caps[side_idx] = city_idx;
                         double now = unfairness(caps);
                         if (now < score - 1e-9) {
                             score = now;
                             better = true;
                         } else
-                            caps[s] = was;
+                            caps[side_idx] = was;
                     }
                 if (!better) break;
             }
@@ -1796,324 +1916,334 @@ class Generator {
             }
         }
         // the sides take the capitals in a random order; a side's armies favour
-        // the region its capital stands in, as 513d:0689 has it
-        for (int s = kSides - 1; s > 0; s--) std::swap(best[s], best[Dice(1, s + 1, -1)]);
-        for (int s = 0; s < kSides; s++) {
-            int x = Cx(best[s]), y = Cy(best[s]);
+        // the region its capital stands in
+        for (int side_idx = kSides - 1; side_idx > 0; side_idx--)
+            std::swap(best[side_idx], best[Dice(1, side_idx + 1, -1)]);
+        for (int side_idx = 0; side_idx < kSides; side_idx++) {
+            int x = Cx(best[side_idx]), y = Cy(best[side_idx]);
             int region = std::min(3, x / 28) + 4 * std::min(1, y / 78);
-            W16(kRegionClass + 2 * region, R16(kSideClass + 2 * s));
-            Ws16(SideRec(s) + 6, x);
-            Ws16(SideRec(s) + 8, y);
+            W16(kRegionClass + 2 * region, R16(kSideClass + 2 * side_idx));
+            Ws16(SideRec(side_idx) + 6, x);
+            Ws16(SideRec(side_idx) + 8, y);
         }
         Crown();
     }
 
-    /** 5132:0014 / 006b: each side a name from five, and 3d50+20 gold. */
+    /** @brief Assigns each side one of five names and 3d50+20 starting gold. */
     void Sides() {
-        for (int s = 0; s < 8; s++) {
-            int k = Dice(1, 5, -1);
-            std::string name = Str(kSideNames + 100 * s + 20 * k, 20);
-            for (int i = 0; i < 20; i++) scn[20 * s + i] = 0;
-            Wstr(20 * s, name);
+        for (int side_idx = 0; side_idx < 8; side_idx++) {
+            int name_idx = Dice(1, 5, -1);
+            std::string name = Str(kSideNames + 100 * side_idx + 20 * name_idx, 20);
+            for (int i = 0; i < 20; i++) scn[20 * side_idx + i] = 0;
+            Wstr(20 * side_idx, name);
         }
-        for (int s = 0; s < 8; s++) Ws16(SideRec(s) + 2, Dice(3, 50, 20));
+        for (int side_idx = 0; side_idx < 8; side_idx++)
+            Ws16(SideRec(side_idx) + 2, Dice(3, 50, 20));
     }
 
-    /** What touches a city's footprint (513d:0ce0, into 4125:02d6-02de). */
-    Surroundings SurroundingsOf(int c) const {
-        int x = Cx(c), y = Cy(c);
-        auto by = [&](int t) {
-            return Near(x, y, t) || Near(x + 1, y, t) || Near(x, y + 1, t) || Near(x + 1, y + 1, t);
+    /** @brief Inspects which terrain features touch city `city_idx`'s 2x2 footprint. */
+    Surroundings SurroundingsOf(int city_idx) const {
+        int x = Cx(city_idx), y = Cy(city_idx);
+        auto touches = [&](int terrain) {
+            return Near(x, y, terrain) || Near(x + 1, y, terrain) || Near(x, y + 1, terrain) ||
+                   Near(x + 1, y + 1, terrain);
         };
-        return Surroundings{by(kShore), by(kForest), by(kRoad), by(kHills), by(kMarsh)};
+        return Surroundings{touches(kShore), touches(kForest), touches(kRoad), touches(kHills),
+                            touches(kMarsh)};
     }
 
-    /** random_city_value (513d:1104): a capital 9; else 1d4-1, +4 by the
-     *  shore, +2 by a road, -1 by forest, -2 by marsh, within 0..9. */
-    int Value(int c, const Surroundings& f) {
-        if (scn[Crec(c) + 21] != 15) return 9;
-        int v = Dice(1, 4, -1);
-        if (f.shore) v += 4;
-        if (f.road) v += 2;
-        if (f.forest) v -= 1;
-        if (f.marsh) v -= 2;
-        if (v > 8) v = 9;
-        if (v < 1) v = 0;
-        return v;
+    /**
+     * @brief Computes a city's value (0..9): 9 for a capital, otherwise
+     *        1d4-1 +4 by shore, +2 by road, -1 by forest, -2 by marsh.
+     */
+    int Value(int city_idx, const Surroundings& surr) {
+        if (scn[Crec(city_idx) + 21] != 15) return 9;
+        int val = Dice(1, 4, -1);
+        if (surr.shore) val += 4;
+        if (surr.road) val += 2;
+        if (surr.forest) val -= 1;
+        if (surr.marsh) val -= 2;
+        if (val > 8) val = 9;
+        if (val < 1) val = 0;
+        return val;
     }
 
-    /** 513d:1468: a name of two or three syllables, ending most often in a
-     *  word for what lies round it. */
-    std::string CityName(int c, const Surroundings& f) {
+    /** @brief Generates a two- or three-syllable name for city `city_idx`. */
+    std::string CityName(int city_idx, const Surroundings& surr) {
         bool three = Dice(1, 10, 0) < 7;
-        int k = Dice(1, 20, -1);
-        std::string name = Str(0xa86 + 10 * k, 10);
+        int idx1 = Dice(1, 20, -1);
+        std::string name = Str(0xa86 + 10 * idx1, 10);
         if (three) {
-            int k2 = Dice(1, 20, -1);
-            name += Str(0xb4e + 10 * k2, 10);
+            int idx2 = Dice(1, 20, -1);
+            name += Str(0xb4e + 10 * idx2, 10);
         }
-        int end = -1;
+        int suffix_table = -1;
         if (Dice(1, 10, 0) < 7) {
-            if (f.marsh)
-                end = 0xda6;
-            else if (f.forest)
-                end = 0xcde;
-            else if (f.shore)
-                end = 0xd42;
-            else if (f.hills)
-                end = 0xe0a;
+            if (surr.marsh)
+                suffix_table = 0xda6;
+            else if (surr.forest)
+                suffix_table = 0xcde;
+            else if (surr.shore)
+                suffix_table = 0xd42;
+            else if (surr.hills)
+                suffix_table = 0xe0a;
             else if (Dice(1, 10, 0) < 5)
-                end = 0xe6e;
+                suffix_table = 0xe6e;
         }
-        if (end != -1) {
-            int k3 = Dice(1, 10, -1);
-            name += Str(end + 10 * k3, 10);
+        if (suffix_table != -1) {
+            int idx3 = Dice(1, 10, -1);
+            name += Str(suffix_table + 10 * idx3, 10);
         } else {
-            int k3 = Dice(1, 20, -1);
-            name += Str(0xc16 + 10 * k3, 10);
+            int idx3 = Dice(1, 20, -1);
+            name += Str(0xc16 + 10 * idx3, 10);
         }
         name = name.substr(0, 15);
-        int o = Crec(c) + 4;
-        for (int i = 0; i < 16; i++) scn[o + i] = 0;
-        Wstr(o, name);
+        int offset = Crec(city_idx) + 4;
+        for (int i = 0; i < 16; i++) scn[offset + i] = 0;
+        Wstr(offset, name);
         return name;
     }
 
-    /** Does a city before `c` already have this name? */
-    bool NameTaken(int c, const std::string& name) const {
-        for (int j = 0; j < c; j++)
+    /** @brief True if any city before `city_idx` already has `name`. */
+    bool NameTaken(int city_idx, const std::string& name) const {
+        for (int j = 0; j < city_idx; j++)
             if (CstrOf(scn, Crec(j) + 4, 16) == name) return true;
         return false;
     }
 
-    /** 513d:1171: the city's name, income -- value x 2 + 1d8 + 14 -- and its
-     *  three lines of description, grander as the city is richer. */
-    void CityText(int c, int v, const Surroundings& f) {
-        std::string name = CityName(c, f);
+    /**
+     * @brief Generates city `city_idx`'s name, income, and three-line `.CTY`
+     *        description.
+     */
+    void CityText(int city_idx, int val, const Surroundings& surr) {
+        std::string name = CityName(city_idx, surr);
         // the scenario generator's names never repeat (the original's may)
-        for (int tries = 0; modern && tries < 200 && NameTaken(c, name); tries++)
-            name = CityName(c, f);
-        Ws16(Crec(c) + 42, v * 2 + Dice(1, 8, 0) + 14);
-        auto grade = [&]() { return std::min(9, std::max(0, Dice(1, 3, v - 2))); };
-        int g1 = grade();
-        int g2 = grade();
-        auto w = [&](int o, int i) { return Str(o + 16 * i, 16); };
-        std::string a, b, cc;
-        bool plain = !f.forest && !f.marsh && !f.hills;
+        for (int tries = 0; modern && tries < 200 && NameTaken(city_idx, name); tries++)
+            name = CityName(city_idx, surr);
+        Ws16(Crec(city_idx) + 42, val * 2 + Dice(1, 8, 0) + 14);
+        auto grade = [&]() { return std::min(9, std::max(0, Dice(1, 3, val - 2))); };
+        int grade1 = grade();
+        int grade2 = grade();
+        auto word_at = [&](int offset, int idx) { return Str(offset + 16 * idx, 16); };
+        std::string part_a, part_b, part_c;
+        bool plain = !surr.forest && !surr.marsh && !surr.hills;
         if (plain || Dice(1, 100, 0) > 79) {
             if (Dice(1, 100, 0) < 50) {
-                a = w(0x16a8, Dice(1, 10, -1));
-                b = w(0x1748, Dice(1, 10, -1));
-                cc = w(0x17e8, Dice(1, 10, -1));
+                part_a = word_at(0x16a8, Dice(1, 10, -1));
+                part_b = word_at(0x1748, Dice(1, 10, -1));
+                part_c = word_at(0x17e8, Dice(1, 10, -1));
             } else {
-                a = w(0x14c8, Dice(1, 10, -1));
-                b = w(0x1568, Dice(1, 10, -1));
-                cc = w(0x1608, Dice(1, 10, -1));
+                part_a = word_at(0x14c8, Dice(1, 10, -1));
+                part_b = word_at(0x1568, Dice(1, 10, -1));
+                part_c = word_at(0x1608, Dice(1, 10, -1));
             }
         } else {
-            int k;
-            if (f.marsh)
-                k = Dice(1, 2, 7);
-            else if (f.hills)
-                k = Dice(1, 4, 3);
+            int sub_idx;
+            if (surr.marsh)
+                sub_idx = Dice(1, 2, 7);
+            else if (surr.hills)
+                sub_idx = Dice(1, 4, 3);
             else
-                k = Dice(1, 4, -1);
-            a = w(0x12e8, Dice(1, 10, -1));
-            b = w(0x1388, Dice(1, 10, -1));
-            cc = w(0x1428, k);
+                sub_idx = Dice(1, 4, -1);
+            part_a = word_at(0x12e8, Dice(1, 10, -1));
+            part_b = word_at(0x1388, Dice(1, 10, -1));
+            part_c = word_at(0x1428, sub_idx);
         }
-        std::string kind = w(0x1248, g2);
-        int k = Dice(1, 3, -1);
-        std::string adj = Str(0x1068 + 0x30 * g1 + 16 * k, 16);
-        cty += Format("#%03d|%s is a %s|%s, %s|%s %s|\n", c, name, adj, kind, a, b, cc);
+        std::string kind = word_at(0x1248, grade2);
+        int adj_idx = Dice(1, 3, -1);
+        std::string adj = Str(0x1068 + 0x30 * grade1 + 16 * adj_idx, 16);
+        cty += Format("#%03d|%s is a %s|%s, %s|%s %s|\n", city_idx, name, adj, kind, part_a, part_b,
+                      part_c);
     }
 
-    /** The army types' flags the generator asks after (build_army_move_flags,
-     *  6715:0000): ARMYTYPE +54 flies, +48 magical -- an ally. */
-    bool Flies(int t) const {
-        const ArmyType* a = types.ById(t);
-        return a && a->bonus[54] != 0;
+    /** @brief True if army type `type_id` has the flying flag (ARMYTYPE +54). */
+    bool Flies(int type_id) const {
+        const ArmyType* army_type = types.ById(type_id);
+        return army_type && army_type->bonus[54] != 0;
     }
-    bool Magical(int t) const {
-        const ArmyType* a = types.ById(t);
-        return a && a->bonus[48] != 0;
-    }
-
-    void SetSlot(int c, int k, int e) {
-        int o = Crec(c);
-        const ArmyType* a = types.ById(e);
-        scn[o + 22 + k] = static_cast<uint8_t>(e);
-        scn[o + 26 + k] = static_cast<uint8_t>(a ? a->time : 0);
-        scn[o + 30 + k] = static_cast<uint8_t>(a ? a->strength : 0);
-        scn[o + 34 + k] = static_cast<uint8_t>(a ? a->move : 0);
-        scn[o + 38 + k] = static_cast<uint8_t>(a ? a->cost : 0);
+    /** @brief True if army type `type_id` is magical / an ally (ARMYTYPE +48). */
+    bool Magical(int type_id) const {
+        const ArmyType* army_type = types.ById(type_id);
+        return army_type && army_type->bonus[48] != 0;
     }
 
-    /** 513d:161d: what a city can make. value / 2 + 1d4 - 1 slots, one more
-     *  each by forest and hills, at most 4, from RANDOM.DAT's list in order:
-     *  each type rolls its chance, and must suit the city's region, or its
-     *  forest, hills or shore, or be at home anywhere. A rich city sometimes
-     *  adds a flier. Allies only where the option lets cities make them. */
-    void Production(int c, int v, const Surroundings& f) {
-        int x = Cx(c), y = Cy(c);
-        int region = x * 4 / kW + y * 2 / kH * 4;
-        int slots = v / 2;
+    /** @brief Populates production slot `slot_idx` of city `city_idx` with army type `type_id`. */
+    void SetSlot(int city_idx, int slot_idx, int type_id) {
+        int offset = Crec(city_idx);
+        const ArmyType* army_type = types.ById(type_id);
+        scn[offset + 22 + slot_idx] = static_cast<uint8_t>(type_id);
+        scn[offset + 26 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->time : 0);
+        scn[offset + 30 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->strength : 0);
+        scn[offset + 34 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->move : 0);
+        scn[offset + 38 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->cost : 0);
+    }
+
+    /** @brief Chooses the up to four army production slots for city `city_idx`. */
+    void Production(int city_idx, int val, const Surroundings& surr) {
+        int x = Cx(city_idx), y = Cy(city_idx);
+        int region = x * 4 / kMapW + y * 2 / kMapH * 4;
+        int slots = val / 2;
         slots += Dice(1, 4, -1);
-        if (f.forest) slots++;
-        if (f.hills) slots++;
+        if (surr.forest) slots++;
+        if (surr.hills) slots++;
         if (slots > 3) slots = 4;
         if (slots < 1) slots = 0;
-        auto rec = [](int e) { return kProduction + 16 * e; };
-        auto suits = [&](int e) {
-            int terr = R16(rec(e) + 6);
-            return terr == 7 || (terr == 4 && f.forest) || (terr == 5 && f.hills) ||
-                   R16(rec(e) + 4) == R16(kRegionClass + 2 * region);
+        auto rec = [](int entry) { return kProduction + 16 * entry; };
+        auto suits = [&](int entry) {
+            int terr = R16(rec(entry) + 6);
+            return terr == 7 || (terr == 4 && surr.forest) || (terr == 5 && surr.hills) ||
+                   R16(rec(entry) + 4) == R16(kRegionClass + 2 * region);
         };
-        int k = 0;
-        for (int e = 0; e < 29 && k < slots; e++) {
-            int t = R16(rec(e));
-            if (!allies && Magical(t)) continue;
-            if (Dice(1, 10, -1) >= R16(rec(e) + 2)) continue;
-            bool ok = suits(e) || (R16(rec(e) + 6) == 3 && f.shore);
-            if (t == 5 && !f.shore) ok = false;
-            if (ok) SetSlot(c, k++, t);
+        int slot_idx = 0;
+        for (int entry = 0; entry < 29 && slot_idx < slots; entry++) {
+            int type_id = R16(rec(entry));
+            if (!allies && Magical(type_id)) continue;
+            if (Dice(1, 10, -1) >= R16(rec(entry) + 2)) continue;
+            bool valid = suits(entry) || (R16(rec(entry) + 6) == 3 && surr.shore);
+            if (type_id == 5 && !surr.shore) valid = false;
+            if (valid) SetSlot(city_idx, slot_idx++, type_id);
         }
-        if (k == 0) SetSlot(c, k++, R16(rec(0)));
-        if (v > 6 && Dice(1, 10, -1) < 5 && k < 4) {
+        if (slot_idx == 0) SetSlot(city_idx, slot_idx++, R16(rec(0)));
+        if (val > 6 && Dice(1, 10, -1) < 5 && slot_idx < 4) {
             bool flier = false;
-            for (int j = 0; j < k; j++)
-                if (Flies(scn[Crec(c) + 22 + j])) flier = true;
-            if (!flier && k < slots) {
-                for (int e = 0; e < 29; e++) {
-                    int t = R16(rec(e));
-                    if (Flies(t) && !Magical(t) && suits(e)) {
-                        SetSlot(c, k++, t);
+            for (int j = 0; j < slot_idx; j++)
+                if (Flies(scn[Crec(city_idx) + 22 + j])) flier = true;
+            if (!flier && slot_idx < slots) {
+                for (int entry = 0; entry < 29; entry++) {
+                    int type_id = R16(rec(entry));
+                    if (Flies(type_id) && !Magical(type_id) && suits(entry)) {
+                        SetSlot(city_idx, slot_idx++, type_id);
                         break;
                     }
                 }
             }
         }
-        for (; k < 4; k++) scn[Crec(c) + 22 + k] = 255;
+        for (; slot_idx < 4; slot_idx++) scn[Crec(city_idx) + 22 + slot_idx] = 255;
     }
 
-    /** random_magical_type (6563:1a9b). */
+    /** @brief Picks a random magical (ally) army type id. */
     int MagicalType() {
-        int n = 0;
-        for (int t = 0; t < 28; t++)
-            if (Magical(t)) n++;
-        int pick = Dice(1, n, -1);
-        int i = 0, t = 0;
-        for (; t < 28; t++) {
-            if (!Magical(t)) continue;
-            if (i == pick) break;
-            i++;
+        int count = 0;
+        for (int type_id = 0; type_id < 28; type_id++)
+            if (Magical(type_id)) count++;
+        int pick = Dice(1, count, -1);
+        int match_idx = 0, type_id = 0;
+        for (; type_id < 28; type_id++) {
+            if (!Magical(type_id)) continue;
+            if (match_idx == pick) break;
+            match_idx++;
         }
-        return t > 27 || !Magical(t) ? 25 : t;
+        return type_id > 27 || !Magical(type_id) ? 25 : type_id;
     }
 
-    /** random_add_production (513d:1b3f): with allies on, 2d3 cities may also
-     *  make one. */
+    /** @brief Adds a magical army type to 2d3 cities when allies are enabled. */
     void AllyProduction() {
-        int n = Dice(2, 3, 0);
-        for (int tries = 0; n > 0 && tries < 100; tries++) {
-            int c = Dice(1, CityCount(), -1), o = Crec(c);
-            int k = 0;
+        int count = Dice(2, 3, 0);
+        for (int tries = 0; count > 0 && tries < 100; tries++) {
+            int city_idx = Dice(1, CityCount(), -1), offset = Crec(city_idx);
+            int slot_idx = 0;
             for (int j = 0; j < 4; j++)
-                if (scn[o + 22 + j] < 128) k++;
-            if (k < 4) {
-                SetSlot(c, k, MagicalType());
-                n--;
+                if (scn[offset + 22 + j] < 128) slot_idx++;
+            if (slot_idx < 4) {
+                SetSlot(city_idx, slot_idx, MagicalType());
+                count--;
             }
         }
     }
 
-    /** 513d:1c1d: a capital adds a strong army it cannot make yet -- strength
-     *  5 or more, not a navy or an ally -- in its last empty slot. */
+    /**
+     * @brief Adds a strong non-magical, non-navy army type (strength >= 5) to
+     *        each capital's last empty production slot.
+     */
     void CapitalArmies() {
-        for (int s = 0; s < 8; s++) {
-            int x = S16(SideRec(s) + 6), y = S16(SideRec(s) + 8);
-            int c = -1;
-            for (int i = 0; i < CityCount() && c < 0; i++)
-                if (Cx(i) == x && Cy(i) == y) c = i;
-            if (c < 0) continue;
-            int o = Crec(c);
+        for (int side_idx = 0; side_idx < 8; side_idx++) {
+            int x = S16(SideRec(side_idx) + 6), y = S16(SideRec(side_idx) + 8);
+            int city_idx = -1;
+            for (int i = 0; i < CityCount() && city_idx < 0; i++)
+                if (Cx(i) == x && Cy(i) == y) city_idx = i;
+            if (city_idx < 0) continue;
+            int offset = Crec(city_idx);
             // the highest empty slot, else the last
-            int k = 3;
-            while (k >= 0 && scn[o + 22 + k] < 128) k--;
-            if (k < 0) k = 3;
+            int slot_idx = 3;
+            while (slot_idx >= 0 && scn[offset + 22 + slot_idx] < 128) slot_idx--;
+            if (slot_idx < 0) slot_idx = 3;
             int draws = 0, pick = -1;
             while (draws <= 39) {
-                int t = Dice(1, 28, -1);
-                if (t == 5 || Magical(t)) continue;
+                int type_id = Dice(1, 28, -1);
+                if (type_id == 5 || Magical(type_id)) continue;
                 draws++;
                 bool has = false;
                 for (int j = 0; j < 4; j++)
-                    if (scn[o + 22 + j] == t) has = true;
-                const ArmyType* a = types.ById(t);
-                if (!has && a && a->strength >= 5) {
-                    pick = t;
+                    if (scn[offset + 22 + j] == type_id) has = true;
+                const ArmyType* army_type = types.ById(type_id);
+                if (!has && army_type && army_type->strength >= 5) {
+                    pick = type_id;
                     break;
                 }
             }
             // one found on the fortieth draw is dropped, as the original has it
-            if (pick >= 0 && draws < 40) scn[o + 22 + k] = static_cast<uint8_t>(pick);
+            if (pick >= 0 && draws < 40) scn[offset + 22 + slot_idx] = static_cast<uint8_t>(pick);
         }
     }
 
-    /** random_map_cities (513d:0ce0). */
+    /** @brief Populates names, descriptions, and army production for all cities. */
     void CityDetails() {
-        for (int c = 0; c < CityCount(); c++) {
-            Surroundings f = SurroundingsOf(c);
-            int v = Value(c, f);
-            CityText(c, v, f);
-            Production(c, v, f);
+        for (int city_idx = 0; city_idx < CityCount(); city_idx++) {
+            Surroundings surr = SurroundingsOf(city_idx);
+            int val = Value(city_idx, surr);
+            CityText(city_idx, val, surr);
+            Production(city_idx, val, surr);
         }
         if (allies) AllyProduction();
         CapitalArmies();
     }
 
-    /** auto_file_random_sgn (4fef:113d): 41-70 signposts on open plain off
-     *  the roads, most pointing the way to the nearest city, a few with
-     *  RANDOM.DAT's own words on them. */
+    /**
+     * @brief Places 41..70 signposts on open plain tiles off the roads, most
+     *        pointing to the nearest city and a few bearing fixed messages.
+     */
     std::string Signs() {
-        int n = Dice(1, 30, 40);
-        std::vector<uint8_t> out(2 + 104 * n, 0);
-        SetI16(out, 0, n);
-        auto put_str = [&](int o, const std::string& s) {
-            for (size_t i = 0; i < s.size() && i < 49; i++) out[o + i] = static_cast<uint8_t>(s[i]);
+        int count = Dice(1, 30, 40);
+        std::vector<uint8_t> out(2 + 104 * count, 0);
+        SetI16(out, 0, count);
+        auto put_str = [&](int offset, const std::string& text) {
+            for (size_t i = 0; i < text.size() && i < 49; i++)
+                out[offset + i] = static_cast<uint8_t>(text[i]);
         };
         int fixed = 0;
-        for (int i = 0; i < n; i++) {
+        for (int i = 0; i < count; i++) {
             int x = 0, y = 0;
             for (int tries = 0; tries < kSafety; tries++) {
-                x = Dice(1, kW, -1);
-                y = Dice(1, kH, -1);
+                x = Dice(1, kMapW, -1);
+                y = Dice(1, kMapH, -1);
                 if (TerrainOf(Tile(x, y)) == kPlain && !Near(x, y, kCity) && !Near(x, y, kTower) &&
                     Road(x, y) == 0)
                     break;
             }
             SetTile(x, y, 0);
-            int o = 2 + 104 * i;
-            SetI16(out, o, x);
-            SetI16(out, o + 2, y);
+            int offset = 2 + 104 * i;
+            SetI16(out, offset, x);
+            SetI16(out, offset + 2, y);
             if (Dice(1, 10, 0) < 4 && fixed < R16(kSigns)) {
-                put_str(o + 4, Str(kSigns + 2 + 60 * fixed, 30));
-                put_str(o + 54, Str(kSigns + 2 + 60 * fixed + 30, 30));
+                put_str(offset + 4, Str(kSigns + 2 + 60 * fixed, 30));
+                put_str(offset + 54, Str(kSigns + 2 + 60 * fixed + 30, 30));
                 fixed++;
             } else {
-                int c = -1, best = 1000;
+                int city_idx = -1, best = 1000;
                 for (int j = 0; j < CityCount(); j++) {
-                    int d = Distance(x, y, Cx(j), Cy(j));
-                    if (d < best) {
-                        best = d;
-                        c = j;
+                    int dist = Distance(x, y, Cx(j), Cy(j));
+                    if (dist < best) {
+                        best = dist;
+                        city_idx = j;
                     }
                 }
-                if (c < 0) continue;
-                int cxx = Cx(c), cyy = Cy(c);
-                put_str(o + 4, Format(Str(kSignCity, 20), CstrOf(scn, Crec(c) + 4, 16)));
-                put_str(o + 54, Format(Str(kSignLeagues, 20), Distance(x, y, cxx, cyy) * 2,
-                                       std::string(kCompass[Compass(x, y, cxx, cyy)])));
+                if (city_idx < 0) continue;
+                int city_x = Cx(city_idx), city_y = Cy(city_idx);
+                put_str(offset + 4,
+                        Format(Str(kSignCity, 20), CstrOf(scn, Crec(city_idx) + 4, 16)));
+                put_str(offset + 54,
+                        Format(Str(kSignLeagues, 20), Distance(x, y, city_x, city_y) * 2,
+                               std::string(kCompass[Compass(x, y, city_x, city_y)])));
             }
         }
         return std::string(out.begin(), out.end());
@@ -2121,16 +2251,15 @@ class Generator {
 
     // --- the whole -------------------------------------------------------------
 
-    /** The world as files: the scenario image, the tile map and the roads, the
-     *  signposts and the descriptions. */
+    /** @brief Packs the generated scenario, tile map, roads, signposts, and texts into `files`. */
     void WriteFiles(Files& files) {
-        std::string map(2UZ * kW * kH, '\0');
-        for (int i = 0; i < kW * kH; i++) {
+        std::string map(2UZ * kMapW * kMapH, '\0');
+        for (int i = 0; i < kMapW * kMapH; i++) {
             map[2UZ * i] = static_cast<char>(tiles[i] & 0xff);
             map[2 * i + 1] = static_cast<char>(tiles[i] >> 8);
         }
-        std::string road(static_cast<size_t>(kW) * kH, '\0');
-        for (int i = 0; i < kW * kH; i++) road[i] = static_cast<char>(rd[i] & 0x1f);
+        std::string road(static_cast<size_t>(kMapW) * kMapH, '\0');
+        for (int i = 0; i < kMapW * kMapH; i++) road[i] = static_cast<char>(roads[i] & 0x1f);
         files["SCN"] = std::string(scn.begin(), scn.end());
         files["MAP"] = map;
         files["RD"] = road;
@@ -2139,26 +2268,24 @@ class Generator {
         files["SPC"] = spc;
     }
 
-    // --- not the original's: the scenario generator (warlords/scengen) -------
+    // --- the modern scenario generator (warlords/scengen) --------------------
 
-    /** The terrain grid as the planners take it. */
+    /** @brief Returns a copy of the 112x156 terrain grid. */
     std::vector<uint8_t> Grid() const {
-        std::vector<uint8_t> t(static_cast<size_t>(kW) * kH);
-        for (int i = 0; i < kW * kH; i++) t[i] = m[kGrid + i];
-        return t;
+        std::vector<uint8_t> grid(static_cast<size_t>(kMapW) * kMapH);
+        for (int i = 0; i < kMapW * kMapH; i++) grid[i] = memory[kGrid + i];
+        return grid;
     }
 
-    /** Where a river may be bridged: two water tiles in a row, drawn as a
-     *  straight stretch of river (the tiles 5311:05b4 looks for), with firm
-     *  ground beyond both ends. */
+    /** @brief Finds all two-tile river stretches that can be bridged. */
     std::vector<scengen::Span> Spans() const {
         std::vector<scengen::Span> out;
-        for (int y = 1; y < kH - 2; y++)
-            for (int x = 1; x < kW - 2; x++) {
-                int t = Tile(x, y);
-                bool across = (t == 0x26 || t == 0x16) &&
+        for (int y = 1; y < kMapH - 2; y++)
+            for (int x = 1; x < kMapW - 2; x++) {
+                int tile = Tile(x, y);
+                bool across = (tile == 0x26 || tile == 0x16) &&
                               (Tile(x + 1, y) == 0x28 || Tile(x + 1, y) == 0x18);
-                bool along = (t == 0x21 || t == 0x11) &&
+                bool along = (tile == 0x21 || tile == 0x11) &&
                              (Tile(x, y + 1) == 0x24 || Tile(x, y + 1) == 0x14);
                 if (across && Firm(x - 1, y) && Firm(x + 2, y)) out.push_back({x, y, true});
                 if (along && Firm(x, y - 1) && Firm(x, y + 2)) out.push_back({x, y, false});
@@ -2166,163 +2293,169 @@ class Generator {
         return out;
     }
 
-    /** The planned roads and bridges onto the map. */
+    /** @brief Lays the modern scenario generator's planned roads, bridges, and crossings. */
     void LayPlannedRoads() {
         std::vector<std::pair<int, int>> where;
-        for (int c = 0; c < CityCount(); c++) where.push_back({Cx(c), Cy(c)});
-        auto sp = Spans();
-        auto plan = scengen::PlanRoads(Grid(), kW, kH, where, sp, *rng);
+        for (int city_idx = 0; city_idx < CityCount(); city_idx++)
+            where.push_back({Cx(city_idx), Cy(city_idx)});
+        auto spans = Spans();
+        auto road_plan = scengen::PlanRoads(Grid(), kMapW, kMapH, where, spans, *rng);
         SpotList list;
         for (int i = 0; i < 50; i++) {
-            list.x[i] = list.y[i] = list.ew[i] = list.city_dist[i] = list.chosen_dist[i] = -1;
+            list.x[i] = list.y[i] = list.east_west[i] = list.city_dist[i] = list.chosen_dist[i] =
+                    -1;
             list.chosen[i] = 0;
         }
-        int n = 0;
-        for (int k : plan.bridges) {
-            auto& b = sp[k];
-            if (b.ew) {
-                SetTile(b.x, b.y, 0x85);
-                SetTile(b.x + 1, b.y, 0x86);
-                Put(b.x, b.y, kBridge);
-                Put(b.x + 1, b.y, kBridge);
+        int count = 0;
+        for (int span_idx : road_plan.bridges) {
+            auto& bridge = spans[span_idx];
+            if (bridge.ew) {
+                SetTile(bridge.x, bridge.y, 0x85);
+                SetTile(bridge.x + 1, bridge.y, 0x86);
+                Put(bridge.x, bridge.y, kBridge);
+                Put(bridge.x + 1, bridge.y, kBridge);
             } else {
-                SetTile(b.x, b.y, 0x84);
-                SetTile(b.x, b.y + 1, 0x94);
-                Put(b.x, b.y, kBridge);
-                Put(b.x, b.y + 1, kBridge);
+                SetTile(bridge.x, bridge.y, 0x84);
+                SetTile(bridge.x, bridge.y + 1, 0x94);
+                Put(bridge.x, bridge.y, kBridge);
+                Put(bridge.x, bridge.y + 1, kBridge);
             }
-            if (n < 50) {
-                list.x[n] = b.x;
-                list.y[n] = b.y;
-                list.chosen[n] = 1;
-                n++;
+            if (count < 50) {
+                list.x[count] = bridge.x;
+                list.y[count] = bridge.y;
+                list.chosen[count] = 1;
+                count++;
             }
         }
-        for (int i = 0; i < kW * kH; i++)
-            if (plan.road[i]) SetRoad(i % kW, i / kW, 1);
-        // the crossings keep their distance from the bridges, as 5311:01f6 does
+        for (int i = 0; i < kMapW * kMapH; i++)
+            if (road_plan.road[i]) SetRoad(i % kMapW, i / kMapW, 1);
+        // the crossings keep their distance from the bridges
         Crossings(list);
         Landings();
     }
 
-    /** Every stretch of land with a city or a site on it has a way to the sea:
-     *  a port city, or a crossing -- else a river or a strait could leave it
-     *  out of reach of every army that cannot fly. Where there is neither, a
-     *  shore tile beside it becomes a crossing. */
+    /**
+     * @brief Ensures every landmass containing a city or site has at least one
+     *        port city or sea crossing.
+     */
     void Landings() {
         auto sea = [&](int x, int y) {
-            int t = At(x, y);
-            return t == kWater || t == kShore;
+            int terrain = At(x, y);
+            return terrain == kWater || terrain == kShore;
         };
-        std::vector<int> part(static_cast<size_t>(kW) * kH, -1);
+        std::vector<int> part(static_cast<size_t>(kMapW) * kMapH, -1);
         int parts = 0;
-        for (int s0 = 0; s0 < kW * kH; s0++) {
-            if (part[s0] >= 0 || sea(s0 % kW, s0 / kW)) continue;
-            std::vector<int> todo{s0};
-            part[s0] = parts;
-            for (size_t k = 0; k < todo.size(); k++) {
-                int x = todo[k] % kW, y = todo[k] / kW;
-                for (int d = 0; d < 8; d++) {
-                    int ax = x + Nx(d), ay = y + Ny(d);
-                    if (ax < 0 || ay < 0 || ax >= kW || ay >= kH || sea(ax, ay)) continue;
-                    int j = ay * kW + ax;
-                    if (part[j] < 0) {
-                        part[j] = parts;
-                        todo.push_back(j);
+        for (int start = 0; start < kMapW * kMapH; start++) {
+            if (part[start] >= 0 || sea(start % kMapW, start / kMapW)) continue;
+            std::vector<int> todo{start};
+            part[start] = parts;
+            for (size_t idx = 0; idx < todo.size(); idx++) {
+                int x = todo[idx] % kMapW, y = todo[idx] / kMapW;
+                for (int dir = 0; dir < 8; dir++) {
+                    int adj_x = x + Nx(dir), adj_y = y + Ny(dir);
+                    if (adj_x < 0 || adj_y < 0 || adj_x >= kMapW || adj_y >= kMapH ||
+                        sea(adj_x, adj_y))
+                        continue;
+                    int adj_idx = adj_y * kMapW + adj_x;
+                    if (part[adj_idx] < 0) {
+                        part[adj_idx] = parts;
+                        todo.push_back(adj_idx);
                     }
                 }
             }
             parts++;
         }
-        std::vector<uint8_t> needs(parts, 0), served(parts, 0);
-        for (int c = 0; c < CityCount(); c++) {
-            int p = part[Cy(c) * kW + Cx(c)];
-            if (p < 0) continue;
-            needs[p] = 1;
-            for (auto& r : kRoundCity)
-                if (sea(Cx(c) + r[0], Cy(c) + r[1])) served[p] = 1;
+        std::vector<uint8_t> needs(parts, 0), has_landing(parts, 0);
+        for (int city_idx = 0; city_idx < CityCount(); city_idx++) {
+            int part_id = part[Cy(city_idx) * kMapW + Cx(city_idx)];
+            if (part_id < 0) continue;
+            needs[part_id] = 1;
+            for (auto& ring : kRoundCity)
+                if (sea(Cx(city_idx) + ring[0], Cy(city_idx) + ring[1])) has_landing[part_id] = 1;
         }
         for (int i = 0; i < kNSites; i++) {
             int x = S16(kSSites + kSiteStride * i), y = S16(kSSites + kSiteStride * i + 2);
-            if (x >= 0 && y >= 0 && x < kW && y < kH && part[y * kW + x] >= 0)
-                needs[part[y * kW + x]] = 1;
+            if (x >= 0 && y >= 0 && x < kMapW && y < kMapH && part[y * kMapW + x] >= 0)
+                needs[part[y * kMapW + x]] = 1;
         }
-        for (int i = 0; i < kW * kH; i++)
+        for (int i = 0; i < kMapW * kMapH; i++)
             if (tiles[i] & 0x8000) {
-                int x = i % kW, y = i / kW;
-                for (int d = 0; d < 8; d++) {
-                    int ax = x + Nx(d), ay = y + Ny(d);
-                    if (ax >= 0 && ay >= 0 && ax < kW && ay < kH && part[ay * kW + ax] >= 0)
-                        served[part[ay * kW + ax]] = 1;
+                int x = i % kMapW, y = i / kMapW;
+                for (int dir = 0; dir < 8; dir++) {
+                    int adj_x = x + Nx(dir), adj_y = y + Ny(dir);
+                    if (adj_x >= 0 && adj_y >= 0 && adj_x < kMapW && adj_y < kMapH &&
+                        part[adj_y * kMapW + adj_x] >= 0)
+                        has_landing[part[adj_y * kMapW + adj_x]] = 1;
                 }
             }
-        for (int i = 0; i < kW * kH; i++) {
-            int x = i % kW, y = i / kW;
+        for (int i = 0; i < kMapW * kMapH; i++) {
+            int x = i % kMapW, y = i / kMapW;
             if (!sea(x, y) || (tiles[i] & 0x8000)) continue;
             int touched = -1;
-            for (int d = 0; d < 8; d += 2) {  // the four sides
-                int ax = x + Nx(d), ay = y + Ny(d);
-                if (ax >= 0 && ay >= 0 && ax < kW && ay < kH && part[ay * kW + ax] >= 0)
-                    touched = part[ay * kW + ax];
+            for (int dir = 0; dir < 8; dir += 2) {  // the four sides
+                int adj_x = x + Nx(dir), adj_y = y + Ny(dir);
+                if (adj_x >= 0 && adj_y >= 0 && adj_x < kMapW && adj_y < kMapH &&
+                    part[adj_y * kMapW + adj_x] >= 0)
+                    touched = part[adj_y * kMapW + adj_x];
             }
-            if (touched >= 0 && needs[touched] && !served[touched]) {
+            if (touched >= 0 && needs[touched] && !has_landing[touched]) {
                 tiles[i] |= 0x8000;
-                served[touched] = 1;
+                has_landing[touched] = 1;
             }
         }
     }
 
-    /** Each road piece from the roads and bridges beside it, north, east,
-     *  south and west (docs/formats/map.md > .RD), and an arm into the city a
-     *  road ends at. */
+    /**
+     * @brief Assigns road pieces for the modern scenario generator from the 4
+     *        cardinal neighbours and extends road ends into adjacent cities.
+     */
     void ModernRoadShapes() {
         // the piece for each N 1, E 2, S 4, W 8 combination
         static const int kPiece[16] = {0, 15, 14, 10, 13, 2, 11, 7, 12, 9, 1, 6, 8, 5, 4, 3};
         const int dx[4] = {0, 1, 0, -1}, dy[4] = {-1, 0, 1, 0};
-        std::vector<int> shape(static_cast<size_t>(kW) * kH, 0);
-        for (int y = 0; y < kH; y++)
-            for (int x = 0; x < kW; x++) {
+        std::vector<int> shape(static_cast<size_t>(kMapW) * kMapH, 0);
+        for (int y = 0; y < kMapH; y++)
+            for (int x = 0; x < kMapW; x++) {
                 if (Road(x, y) == 0) continue;
-                int mk = 0, city = -1;
-                for (int d = 0; d < 4; d++) {
-                    int ax = x + dx[d], ay = y + dy[d];
-                    if (ax < 0 || ay < 0 || ax >= kW || ay >= kH) continue;
-                    if (Road(ax, ay) != 0 || At(ax, ay) == kBridge)
-                        mk |= 1 << d;
-                    else if (At(ax, ay) == kCity && city < 0)
-                        city = d;
+                int mask = 0, city = -1;
+                for (int dir = 0; dir < 4; dir++) {
+                    int adj_x = x + dx[dir], adj_y = y + dy[dir];
+                    if (adj_x < 0 || adj_y < 0 || adj_x >= kMapW || adj_y >= kMapH) continue;
+                    if (Road(adj_x, adj_y) != 0 || At(adj_x, adj_y) == kBridge)
+                        mask |= 1 << dir;
+                    else if (At(adj_x, adj_y) == kCity && city < 0)
+                        city = dir;
                 }
                 // a road's end runs into the city beside it
-                if (city >= 0 && std::popcount(static_cast<unsigned>(mk)) <= 1) mk |= 1 << city;
-                if (mk == 0) {
+                if (city >= 0 && std::popcount(static_cast<unsigned>(mask)) <= 1) mask |= 1 << city;
+                if (mask == 0) {
                     SetRoad(x, y, 0);
                     continue;
                 }
-                shape[y * kW + x] = kPiece[mk];
+                shape[y * kMapW + x] = kPiece[mask];
             }
-        for (int i = 0; i < kW * kH; i++)
-            if (shape[i]) SetRoad(i % kW, i / kW, shape[i]);
+        for (int i = 0; i < kMapW * kMapH; i++)
+            if (shape[i]) SetRoad(i % kMapW, i / kMapW, shape[i]);
         // a few straight pieces take their standing-stone look
         const int swaps[2][2] = {{2, 17}, {1, 16}};
-        for (auto& sw : swaps) {
-            int n = Dice(1, 6, 3);
-            for (int k = 0; k < n; k++)
+        for (auto& swap_pair : swaps) {
+            int count = Dice(1, 6, 3);
+            for (int idx = 0; idx < count; idx++)
                 for (int tries = 0; tries < 2000; tries++) {
-                    int x = Dice(1, kW, -1), y = Dice(1, kH, -1);
-                    if (Road(x, y) == sw[0]) {
-                        SetRoad(x, y, sw[1]);
+                    int x = Dice(1, kMapW, -1), y = Dice(1, kMapH, -1);
+                    if (Road(x, y) == swap_pair[0]) {
+                        SetRoad(x, y, swap_pair[1]);
                         break;
                     }
                 }
         }
     }
 
-    /** Signposts by the roads, away from the cities, each pointing the way
-     *  to the nearest city, a few with RANDOM.DAT's own words. */
+    /** @brief Places signposts along roads for the modern scenario generator. */
     std::string ModernSigns() {
-        std::vector<P> spots;
+        std::vector<Point> spots;
         for (int tries = 0; tries < 20000 && static_cast<int>(spots.size()) < 60; tries++) {
-            int x = Dice(1, kW - 6, 2), y = Dice(1, kH - 6, 2);
+            int x = Dice(1, kMapW - 6, 2), y = Dice(1, kMapH - 6, 2);
             if (At(x, y) != kPlain || Road(x, y) != 0 || Tile(x, y) == 0) continue;
             bool by_road = false, clear = true;
             for (int dyy = -1; dyy <= 1; dyy++)
@@ -2330,57 +2463,59 @@ class Generator {
                     if (Road(x + dxx, y + dyy) != 0) by_road = true;
             for (int dyy = -3; dyy <= 3 && clear; dyy++)
                 for (int dxx = -3; dxx <= 3 && clear; dxx++) {
-                    int t = At(x + dxx, y + dyy);
-                    if (t == kCity || t == kSite) clear = false;
+                    int terrain = At(x + dxx, y + dyy);
+                    if (terrain == kCity || terrain == kSite) clear = false;
                 }
-            for (auto& p : spots)
-                if (Reach(p.x, p.y, x, y) < 7) clear = false;
-            if (by_road && clear) spots.push_back(P{x, y});
+            for (auto& spot : spots)
+                if (Reach(spot.x, spot.y, x, y) < 7) clear = false;
+            if (by_road && clear) spots.push_back(Point{x, y});
         }
-        int n = static_cast<int>(spots.size());
-        std::vector<uint8_t> out(2 + 104 * n, 0);
-        SetI16(out, 0, n);
-        auto put_str = [&](int o, const std::string& s) {
-            for (size_t i = 0; i < s.size() && i < 49; i++) out[o + i] = static_cast<uint8_t>(s[i]);
+        int count = static_cast<int>(spots.size());
+        std::vector<uint8_t> out(2 + 104 * count, 0);
+        SetI16(out, 0, count);
+        auto put_str = [&](int offset, const std::string& text) {
+            for (size_t i = 0; i < text.size() && i < 49; i++)
+                out[offset + i] = static_cast<uint8_t>(text[i]);
         };
         int fixed = 0;
-        for (int i = 0; i < n; i++) {
-            int x = spots[i].x, y = spots[i].y, o = 2 + 104 * i;
+        for (int i = 0; i < count; i++) {
+            int x = spots[i].x, y = spots[i].y, offset = 2 + 104 * i;
             SetTile(x, y, 0);
-            SetI16(out, o, x);
-            SetI16(out, o + 2, y);
+            SetI16(out, offset, x);
+            SetI16(out, offset + 2, y);
             if (Dice(1, 10, 0) < 3 && fixed < R16(kSigns)) {
-                put_str(o + 4, Str(kSigns + 2 + 60 * fixed, 30));
-                put_str(o + 54, Str(kSigns + 2 + 60 * fixed + 30, 30));
+                put_str(offset + 4, Str(kSigns + 2 + 60 * fixed, 30));
+                put_str(offset + 54, Str(kSigns + 2 + 60 * fixed + 30, 30));
                 fixed++;
                 continue;
             }
-            int c = -1, best = 1 << 30;
+            int city_idx = -1, best = 1 << 30;
             for (int j = 0; j < CityCount(); j++) {
-                int d = Distance(x, y, Cx(j), Cy(j));
-                if (d < best) {
-                    best = d;
-                    c = j;
+                int dist = Distance(x, y, Cx(j), Cy(j));
+                if (dist < best) {
+                    best = dist;
+                    city_idx = j;
                 }
             }
-            if (c < 0) continue;
-            put_str(o + 4, Format(Str(kSignCity, 20), CstrOf(scn, Crec(c) + 4, 16)));
-            put_str(o + 54, Format(Str(kSignLeagues, 20), Distance(x, y, Cx(c), Cy(c)) * 2,
-                                   std::string(kCompass[Compass(x, y, Cx(c), Cy(c))])));
+            if (city_idx < 0) continue;
+            put_str(offset + 4, Format(Str(kSignCity, 20), CstrOf(scn, Crec(city_idx) + 4, 16)));
+            put_str(offset + 54,
+                    Format(Str(kSignLeagues, 20), Distance(x, y, Cx(city_idx), Cy(city_idx)) * 2,
+                           std::string(kCompass[Compass(x, y, Cx(city_idx), Cy(city_idx))])));
         }
         return std::string(out.begin(), out.end());
     }
 
-    /** The scenario generator, a phase a call, as next() is for the original. */
+    /** @brief Runs one stage of the modern scenario generator, returning progress %. */
     std::optional<int> NextModern(Files& files) {
         switch (stage++) {
         case 0:
             return 0;
         case 1: {
-            plan = scengen::MakeWorld(world, *rng, kW, kH);
-            for (int i = 0; i < kW * kH; i++) {
-                m[kGrid + i] = plan.terrain[i];
-                rd[i] &= 0xe0;
+            plan = scengen::MakeWorld(world, *rng, kMapW, kMapH);
+            for (int i = 0; i < kMapW * kMapH; i++) {
+                memory[kGrid + i] = plan.terrain[i];
+                roads[i] &= 0xe0;
             }
             Shores();
             return 40;
@@ -2388,14 +2523,14 @@ class Generator {
         case 2: {
             SetCityCount(0);
             for (auto& [x, y] : plan.cities) {
-                int c = CityCount();
-                Ws16(Crec(c), x);
-                Ws16(Crec(c) + 2, y);
-                SetCityCount(c + 1);
+                int city_idx = CityCount();
+                Ws16(Crec(city_idx), x);
+                Ws16(Crec(city_idx) + 2, y);
+                SetCityCount(city_idx + 1);
             }
             SitesBegin();
             for (int i = 0; i < kNSites && i < static_cast<int>(plan.sites.size()); i++)
-                SiteAt(i, P{plan.sites[i].first, plan.sites[i].second});
+                SiteAt(i, Point{plan.sites[i].first, plan.sites[i].second});
             return 60;
         }
         case 3:
@@ -2428,18 +2563,18 @@ class Generator {
         }
     }
 
-    /** random_map_generate (4bed:011c), a phase a call: the progress figure
-     *  the original's bar shows after it, or nothing once the world is made. */
+    /** @brief Runs one stage of map generation, returning progress % or `std::nullopt` when done.
+     */
     std::optional<int> Next(Files& files) {
         if (modern) return NextModern(files);
         switch (stage++) {
         case 0:
             return 0;
         case 1:
-            // 4bed:036b: the map starts as sea
-            for (int i = 0; i < kW * kH; i++) {
-                m[kGrid + i] = kWater;
-                rd[i] &= 0xe0;
+            // the map starts as sea
+            for (int i = 0; i < kMapW * kMapH; i++) {
+                memory[kGrid + i] = kWater;
+                roads[i] &= 0xe0;
             }
             Coast();
             return 10;
@@ -2491,7 +2626,6 @@ class Generator {
             }
             return 90;
         case 14:
-            // 4fef:0014
             RoadShapes();
             return 92;
         case 15:
@@ -2520,20 +2654,22 @@ class Generator {
 };
 
 std::array<int, 4> Settle(std::array<int, 4> sliders, Rng& rng) {
-    for (int& v : sliders) {
-        if (v == kRandomSlider) v = rng.Dice(1, 7, -1);
+    for (int& val : sliders) {
+        if (val == kRandomSlider) val = rng.Dice(1, 7, -1);
     }
     return sliders;
 }
 
 namespace {
-/** random_map_load_params (4bed:0000): RANDOM.DAT with the sliders added. */
+/** @brief Loads `RANDOM.DAT` and adds the chosen slider offsets to the parameters. */
 std::vector<uint8_t> Params(const std::string& data_dir, const std::array<int, 4>& sliders) {
-    auto s = ReadFile(data_dir + "/RANDOM/RANDOM.DAT");
-    if (!s) throw std::runtime_error("Random data not found");
-    std::vector<uint8_t> m(s->begin(), s->end());
-    if (m.size() < static_cast<size_t>(kDatSize)) m.resize(kDatSize, 0);
-    auto add = [&](int o, int t, int i) { SetI16(m, o, GetI16(m, o) + GetI16(m, t + 2 * i)); };
+    auto bytes = ReadFile(data_dir + "/RANDOM/RANDOM.DAT");
+    if (!bytes) throw std::runtime_error("Random data not found");
+    std::vector<uint8_t> memory(bytes->begin(), bytes->end());
+    if (memory.size() < static_cast<size_t>(kDatSize)) memory.resize(kDatSize, 0);
+    auto add = [&](int offset, int table, int idx) {
+        SetI16(memory, offset, GetI16(memory, offset) + GetI16(memory, table + 2 * idx));
+    };
     int water = sliders[0], hills = sliders[1], cities = sliders[2], forest = sliders[3];
     add(kPCities, kSliderCities, cities);
     add(kPForest, kSliderForest, forest);
@@ -2541,7 +2677,7 @@ std::vector<uint8_t> Params(const std::string& data_dir, const std::array<int, 4
     add(kPMountains, kSliderHills, hills);
     add(kPWideRivers, kSliderWater, water);
     add(kPRivers, kSliderWater, water);
-    return m;
+    return memory;
 }
 }  // namespace
 
@@ -2549,22 +2685,21 @@ Run::Run(const Options& opts) {
     if (!opts.rng) throw std::runtime_error("random map: no dice");
     auto sliders = Settle(opts.sliders, *opts.rng);
     gen_ = std::make_unique<Generator>();
-    Generator& g = *gen_;
-    g.m = Params(opts.data_dir, sliders);
-    // auto_file_x_scn (4fef:1001): the scenario of the chosen terrain set,
-    // Erythea for the only one there is, is the template
-    auto t = ReadFile(opts.data_dir + "/ERYTHEA/ERYTHEA.SCN");
-    if (!t) throw std::runtime_error("cannot open: ERYTHEA.SCN");
-    g.scn.assign(t->begin(), t->end());
-    armytype::Load(opts.data_dir + "/TERRAIN0/ARMYTYPE.DAT", g.types);
-    g.rng = opts.rng;
-    g.allies = opts.allies;
-    g.fair = opts.fair_capitals;
-    g.modern = opts.scenario;
-    g.world = opts.world;
-    g.tiles.assign(static_cast<size_t>(kW) * kH, 0);
-    g.rd.assign(static_cast<size_t>(kW) * kH, 0);
-    g.scn[kSTerrainSet] = static_cast<uint8_t>(opts.terrain_set);
+    Generator& gen = *gen_;
+    gen.memory = Params(opts.data_dir, sliders);
+    // the scenario of the chosen terrain set (Erythea) is the template
+    auto tmpl = ReadFile(opts.data_dir + "/ERYTHEA/ERYTHEA.SCN");
+    if (!tmpl) throw std::runtime_error("cannot open: ERYTHEA.SCN");
+    gen.scn.assign(tmpl->begin(), tmpl->end());
+    armytype::Load(opts.data_dir + "/TERRAIN0/ARMYTYPE.DAT", gen.types);
+    gen.rng = opts.rng;
+    gen.allies = opts.allies;
+    gen.fair = opts.fair_capitals;
+    gen.modern = opts.scenario;
+    gen.world = opts.world;
+    gen.tiles.assign(static_cast<size_t>(kMapW) * kMapH, 0);
+    gen.roads.assign(static_cast<size_t>(kMapW) * kMapH, 0);
+    gen.scn[kSTerrainSet] = static_cast<uint8_t>(opts.terrain_set);
 }
 
 Run::~Run() = default;
@@ -2591,20 +2726,21 @@ void Install(const std::string& data_dir, const Files& files) {
 Files Installed(const std::string& data_dir) {
     Files out;
     for (const char* ext : kFiles) {
-        if (auto b = ReadFile(data_dir + "/" + kDir + "/" + kDir + "." + ext)) out[ext] = *b;
+        if (auto bytes = ReadFile(data_dir + "/" + kDir + "/" + kDir + "." + ext))
+            out[ext] = *bytes;
     }
     return out;
 }
 
 std::string TerrainSetName(const std::string& data_dir, int set) {
-    auto s = ReadFile(data_dir + "/DATA/TERRAIN.DAT");
-    if (!s || set >= U16(*s, 0)) return "";
-    return Cstr(*s, 2 + 52 * set + 2, 50);
+    auto bytes = ReadFile(data_dir + "/DATA/TERRAIN.DAT");
+    if (!bytes || set >= U16(*bytes, 0)) return "";
+    return Cstr(*bytes, 2 + 52 * set + 2, 50);
 }
 
 int TerrainSets(const std::string& data_dir) {
-    auto s = ReadFile(data_dir + "/DATA/TERRAIN.DAT");
-    return s ? std::max(1, U16(*s, 0)) : 1;
+    auto bytes = ReadFile(data_dir + "/DATA/TERRAIN.DAT");
+    return bytes ? std::max(1, U16(*bytes, 0)) : 1;
 }
 
 }  // namespace w2::randommap

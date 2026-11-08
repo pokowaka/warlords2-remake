@@ -26,8 +26,8 @@ std::string ResignLine(int line) {
 
 /** @brief Resigns the player: its cities burn and its armies go; then `after`. */
 void Burn(kit::Done after) {
-    w2::game::Resign(*G.g, *G.player);
-    G.selection.reset();
+    w2::game::Resign(*g_app.g, *g_app.player);
+    g_app.selection.reset();
     front::StratDirty();
     if (after) after();
 }
@@ -74,7 +74,7 @@ struct Resign : kit::Modal {
  */
 void Open() {
     // a side with no city left has nothing to resign
-    if (w2::game::SideCities(*G.g, *G.player).empty()) return;
+    if (w2::game::SideCities(*g_app.g, *g_app.player).empty()) return;
     auto dialog = std::make_shared<Resign>();
     dialog->dialog_view = kit::View(kDialog);
     dialog->view = &dialog->dialog_view;

@@ -45,7 +45,7 @@ struct Ruin : kit::Modal {
         kit::SetPal(0);
         kit::Outline(327, 103, 98, 65);
         const int* pic = kPictures[site->content == w2::site::kTemple ? 0 : (site->index % 5) + 1];
-        if (auto art = G.screen->ArtFor(6)) {
+        if (auto art = g_app.screen->ArtFor(6)) {
             gfx::SetColor(1, 1, 1);
             gfx::Draw(art->image, gfx::NewQuad(pic[0], pic[1], 96, 63), 328, 104);
         }
@@ -59,12 +59,12 @@ struct Ruin : kit::Modal {
         kit::Outline(312, 180, 240, 48);
         for (int i = 0; i < 4; i++) {
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.atrans_shields, gfx::NewQuad(kLegend[i][0], kLegend[i][1], 16, 10),
+            gfx::Draw(g_app.atrans_shields, gfx::NewQuad(kLegend[i][0], kLegend[i][1], 16, 10),
                       kLegendAt[i][0], kLegendAt[i][1]);
             font.Draw(kit::Text(0x73, i), kLegendAt[i][0] + 16, kLegendAt[i][1] - 3);
         }
-        auto description = G.g->map->site_text.find(site->index);
-        if (description != G.g->map->site_text.end())
+        auto description = g_app.g->map->site_text.find(site->index);
+        if (description != g_app.g->map->site_text.end())
             for (int i = 0; i < 3; i++) font.Draw(description->second[i], 310, 259 + 20 * i);
         kit::DrawControls(dialog_view, hidden);
     }
@@ -104,10 +104,10 @@ struct Ruin : kit::Modal {
 w2::Site* Nearest(int x, int y) {
     w2::Site* best = nullptr;
     int best_distance = w2::kNone;
-    int viewer = w2::game::ViewerSide(*G.g, G.player);
-    for (auto& site : G.g->map->sites) {
-        if (viewer == w2::kNone ||
-            (w2::site::ShownTo(site, *G.player) && w2::game::Seen(*G.g, viewer, site.x, site.y))) {
+    int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
+    for (auto& site : g_app.g->map->sites) {
+        if (viewer == w2::kNone || (w2::site::ShownTo(site, *g_app.player) &&
+                                    w2::game::Seen(*g_app.g, viewer, site.x, site.y))) {
             double dx = site.x - x, dy = site.y - y;
             int distance = static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
             if (best_distance == w2::kNone || distance < best_distance) {

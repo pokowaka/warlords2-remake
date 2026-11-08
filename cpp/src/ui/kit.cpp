@@ -9,30 +9,31 @@
 namespace kit {
 
 ModalP Push(ModalP modal) {
-    G.modals.push_back(modal);
+    g_app.modals.push_back(modal);
     return modal;
 }
 
 void Pop(const Modal* modal) {
-    for (int i = static_cast<int>(G.modals.size()) - 1; i >= 0; i--) {
-        if (G.modals[i].get() == modal) {
-            G.modals.erase(G.modals.begin() + i);
+    for (int i = static_cast<int>(g_app.modals.size()) - 1; i >= 0; i--) {
+        if (g_app.modals[i].get() == modal) {
+            g_app.modals.erase(g_app.modals.begin() + i);
             return;
         }
     }
 }
 
 Modal* Top() {
-    return G.modals.empty() ? nullptr : G.modals.back().get();
+    return g_app.modals.empty() ? nullptr : g_app.modals.back().get();
 }
 
 ModalP TopShared() {
-    return G.modals.empty() ? nullptr : G.modals.back();
+    return g_app.modals.empty() ? nullptr : g_app.modals.back();
 }
 
 void SetPal(int index) {
-    const auto& colour = index >= 0 && index < static_cast<int>(G.palette.size()) ? G.palette[index]
-                                                                                  : G.palette[0];
+    const auto& colour = index >= 0 && index < static_cast<int>(g_app.palette.size())
+                                 ? g_app.palette[index]
+                                 : g_app.palette[0];
     gfx::SetColor(static_cast<float>(colour[0]), static_cast<float>(colour[1]),
                   static_cast<float>(colour[2]));
 }
@@ -55,19 +56,20 @@ void Popup(const Rect& rect) {
     PopupFrame(rect);
     gfx::SetColor(1, 1, 1);
     gfx::SetScissor(rect.x, rect.y, rect.w, rect.h);
-    gfx::Draw(G.marble, rect.x, rect.y);
+    gfx::Draw(g_app.marble, rect.x, rect.y);
     // Past the marble's 480 columns the blit reads on into the next row.
-    int marble_w = G.marble->w, marble_h = G.marble->h;
+    int marble_w = g_app.marble->w, marble_h = g_app.marble->h;
     if (rect.w > marble_w)
-        gfx::Draw(G.marble, gfx::NewQuad(0, 1, rect.w - marble_w, std::min(rect.h, marble_h - 1)),
+        gfx::Draw(g_app.marble,
+                  gfx::NewQuad(0, 1, rect.w - marble_w, std::min(rect.h, marble_h - 1)),
                   rect.x + marble_w, rect.y);
     gfx::SetScissor();
 }
 
 const Font& GetFont(int n) {
-    if (n == 1) return *G.title_font;
-    if (n == 2) return *G.big_font;
-    return *G.font;
+    if (n == 1) return *g_app.title_font;
+    if (n == 2) return *g_app.big_font;
+    return *g_app.font;
 }
 
 void Centred(const Font& font, const std::string& text, double x, double y) {
@@ -104,7 +106,7 @@ void Field(double x, double y, double width, double height, const std::string* t
     gfx::Rectangle(gfx::kFill, x, y, width, height);
     Bevel(x, y, width, height, 4, 2);
     gfx::SetColor(1, 1, 1);
-    if (text) (font ? *font : *G.big_font).Draw(*text, x + 3, y + 2);
+    if (text) (font ? *font : *g_app.big_font).Draw(*text, x + 3, y + 2);
 }
 
 gfx::Quad ArmyQuad(int type_id) {
@@ -117,16 +119,16 @@ gfx::Quad ArmyQuad(int type_id) {
 void Army(int type_id, int side, double x, double y, int ring, bool shadow) {
     if (side < 0 || side == 15 || side > 8) side = 8;
     gfx::SetColor(1, 1, 1);
-    if (ring > 0) gfx::Draw(G.abits, gfx::NewQuad((ring - 1) * 32, 0, 32, 30), x, y);
+    if (ring > 0) gfx::Draw(g_app.abits, gfx::NewQuad((ring - 1) * 32, 0, 32, 30), x, y);
     if (type_id != w2::kNone)
-        gfx::Draw(shadow ? G.shadow_img : G.army_img[side], ArmyQuad(type_id), x, y);
+        gfx::Draw(shadow ? g_app.shadow_img : g_app.army_img[side], ArmyQuad(type_id), x, y);
 }
 
 void Shield(int side, double x, double y) {
     if (side < 0 || side == 15 || side > 8) side = 8;
-    if (!G.shields_img) return;
+    if (!g_app.shields_img) return;
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.shields_img, gfx::NewQuad(side * 40, 0, 40, 40), x, y);
+    gfx::Draw(g_app.shields_img, gfx::NewQuad(side * 40, 0, 40, 40), x, y);
 }
 
 void Line(int colour_index, int from_x, int from_y, int to_x, int to_y) {
@@ -154,7 +156,7 @@ void MapTarget(int map_x, int map_y, int hero_x, int hero_y, int target_x, int t
     // seen: the line needs both its ends seen, and the box and its frame need
     // the target's tile.
     auto seen = [](int x, int y) {
-        return w2::game::Seen(*G.g, w2::game::ViewerSide(*G.g, G.player), x, y);
+        return w2::game::Seen(*g_app.g, w2::game::ViewerSide(*g_app.g, g_app.player), x, y);
     };
     if (!seen(target_x, target_y)) return;
     gfx::SetScissor(map_x, map_y, 224, 312);
@@ -175,11 +177,11 @@ void MapTarget(int map_x, int map_y, int hero_x, int hero_y, int target_x, int t
 }
 
 screen::View View(int dialog_id) {
-    return screen::MakeView(*G.screen, dialog_id);
+    return screen::MakeView(*g_app.screen, dialog_id);
 }
 
 void DrawControls(const screen::View& view, const std::set<int>* hidden) {
-    screen::DrawDialogControls(*G.screen, view, hidden);
+    screen::DrawDialogControls(*g_app.screen, view, hidden);
 }
 
 const w2::uidata::Control* ControlAt(const screen::View& view, int x, int y,
@@ -200,7 +202,7 @@ const w2::uidata::Control* FindControl(const screen::View& view, int control_id)
 }
 
 std::string Text(int group, int index) {
-    return w2::uidata::Text(G.screen->ui, group, index);
+    return w2::uidata::Text(g_app.screen->ui, group, index);
 }
 
 double Now() {

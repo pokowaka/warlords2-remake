@@ -127,14 +127,14 @@ struct Ruin : kit::Modal {
     /** @brief Closes the popup and tells the quests an item may have changed hands. */
     void Close() {
         kit::Pop(this);
-        w2::quest::Notify(*G.g, *G.player, "item");
+        w2::quest::Notify(*g_app.g, *g_app.player, "item");
     }
     /** @brief Draws the popup, the picture, the lines shown and, at the end, the buttons. */
     void Draw() override {
         kit::Popup(kRuin);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), "Searching", 320, 53);
-        gfx::Draw(G.search_pic, 160, 92);
+        gfx::Draw(g_app.search_pic, 160, 92);
         kit::SetPal(0);
         kit::Outline(159, 91, 322, 202);
         const Font& font = kit::GetFont(2);
@@ -158,9 +158,9 @@ struct Ruin : kit::Modal {
         auto control = kit::ControlAt(dialog_view, x, y, hidden);
         if (!control) return;
         if (control->id == kTake && hero) {
-            for (auto& item : G.g->map->items) {
+            for (auto& item : g_app.g->map->items) {
                 if (item.status == 1 && item.x == hero->x && item.y == hero->y)
-                    w2::hero::TakeItem(*G.g, hero, &item);
+                    w2::hero::TakeItem(*g_app.g, hero, &item);
             }
             Close();
         } else if (control->id == kDone) {
@@ -222,7 +222,7 @@ struct Temple : kit::Modal {
     void Draw() override {
         kit::PopupFrame(kTemple);
         gfx::SetColor(1, 1, 1);
-        gfx::Draw(G.temple_pic, kTemple.x, kTemple.y);
+        gfx::Draw(g_app.temple_pic, kTemple.x, kTemple.y);
         const Font& font = kit::GetFont(2).Colours(7, 6);
         kit::Centred(font, Format(kit::Text(0x13, 0), result->site->name), 320, 270);
         kit::Centred(font, kit::Text(0x13, 1), 320, 290);
@@ -238,15 +238,15 @@ struct Temple : kit::Modal {
             auto held_result = result;
             auto held_stack = stack;
             kit::Pop(this);
-            ShowMessage(BlessLine(w2::site::Bless(*G.g, *held_result->site, held_stack)),
+            ShowMessage(BlessLine(w2::site::Bless(*g_app.g, *held_result->site, held_stack)),
                         kit::Text(0x38, 2));
         } else if (control->id == kQuest) {
             auto held_result = result;
             auto held_stack = stack;
             kit::Pop(this);
             // the searching stack's mode decides how far the target is uncovered
-            w2::quest::Assign(*G.g, *G.player, held_result->hero, false,
-                              w2::move::ModeOf(*G.g, held_stack) == w2::move::kFlying);
+            w2::quest::Assign(*g_app.g, *g_app.player, held_result->hero, false,
+                              w2::move::ModeOf(*g_app.g, held_stack) == w2::move::kFlying);
             front::OpenQuest();
         }
     }
@@ -266,7 +266,7 @@ void OpenTemple(std::shared_ptr<w2::SearchResult> result, const std::vector<w2::
     dialog->dialog_view = kit::View(kTempleDialog);
     dialog->view = &dialog->dialog_view;
     dialog->dialog_view.state[kBless] = w2::uidata::kNormal;
-    bool can_quest = G.g->map->options.quests != 0 && !G.player->quest && result->hero;
+    bool can_quest = g_app.g->map->options.quests != 0 && !g_app.player->quest && result->hero;
     dialog->dialog_view.state[kQuest] = can_quest ? w2::uidata::kNormal : w2::uidata::kDisabled;
     kit::Push(dialog);
 }
@@ -355,8 +355,8 @@ struct Sage : kit::Modal {
             else
                 sage->said.push_back(Format(kit::Text(0x3e, 0), entry.name));
             sage->said.push_back(kit::Text(0x3e, 1));
-            if (w2::Site* site =
-                        w2::site::SageShow(*G.g, *G.player, entry, sage->hero->x, sage->hero->y)) {
+            if (w2::Site* site = w2::site::SageShow(*g_app.g, *g_app.player, entry, sage->hero->x,
+                                                    sage->hero->y)) {
                 sage->said.push_back(Format(kit::Text(0x3e, 7), site->name));
                 sage->target = site;
             }
@@ -370,7 +370,7 @@ struct Sage : kit::Modal {
             // the map is region 15: a click on it picks the tile
             int tile_x = (x - kSageX) / 2, tile_y = (y - kSageY) / 2;
             if (x >= kSageX && y >= kSageY && x < kSageX + 224 && y < kSageY + 312) {
-                patch = w2::site::SageMap(*G.g, *G.player, tile_x, tile_y);
+                patch = w2::site::SageMap(*g_app.g, *g_app.player, tile_x, tile_y);
                 front::StratDirty();
                 Finished();
             }
@@ -381,7 +381,7 @@ struct Sage : kit::Modal {
         if (control->id == kItems) {
             Items();
         } else if (control->id == kGem) {
-            int gem_value = w2::site::SageGem(*G.g, *G.player);
+            int gem_value = w2::site::SageGem(*g_app.g, *g_app.player);
             said.push_back(kit::Text(0x3b, 0));
             said.push_back(Format(kit::Text(0x3b, 1), gem_value));
             Finished();
@@ -411,8 +411,8 @@ void OpenSage(std::shared_ptr<w2::SearchResult> result) {
     dialog->hero = result->hero;
     dialog->dialog_view = kit::View(kSageDialog);
     dialog->view = &dialog->dialog_view;
-    dialog->entries = w2::site::SageList(*G.g, *G.player, dialog->hero->x, dialog->hero->y);
-    dialog->hidden_map = G.g->map->options.hidden_map != 0;
+    dialog->entries = w2::site::SageList(*g_app.g, *g_app.player, dialog->hero->x, dialog->hero->y);
+    dialog->hidden_map = g_app.g->map->options.hidden_map != 0;
     dialog->Offers(true);
     kit::Push(dialog);
 }
@@ -442,7 +442,7 @@ void Say(const std::string& line, kit::Done after) {
  */
 void Open(const std::vector<w2::Army*>& stack) {
     if (stack.empty()) return;
-    auto result = w2::game::SearchHere(*G.g, stack, true);
+    auto result = w2::game::SearchHere(*g_app.g, stack, true);
     if (!result || result->kind == "no hero") return;
     // with no hero a temple blesses at once, with only its message
     if (result->kind == "temple" && !result->hero)
