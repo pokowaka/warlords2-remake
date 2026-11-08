@@ -1,0 +1,12 @@
+{"batch": 1, "pair": 1, "a": "classic#73", "b": "classic#186", "kind": "close", "winner": "b", "note": "", "penalty": [22.726307015258392, 24.33977843723753], "passed": [false, false]}
+{"batch": 1, "pair": 2, "a": "classic#79", "b": "classic#164", "kind": "rules", "winner": "b", "note": "", "penalty": [5.452485064991163, 8.694746029767586], "passed": [false, true]}
+{"batch": 1, "pair": 3, "a": "classic#129", "b": "classic#55", "kind": "rules", "winner": "a", "note": "Black is very isolated", "penalty": [9.30840198339935, 4.169322244616561], "passed": [true, false]}
+{"batch": 1, "pair": 4, "a": "classic#69", "b": "classic#91", "kind": "clear", "winner": "b", "note": "", "penalty": [28.34547760483983, 4.776037890145776], "passed": [false, false]}
+{"batch": 1, "pair": 5, "a": "classic#36", "b": "classic#117", "kind": "clear", "winner": "a", "note": "", "penalty": [3.7116167881567743, 26.206501567047297], "passed": [false, false]}
+{"batch": 1, "pair": 6, "a": "classic#24", "b": "classic#150", "kind": "close", "winner": "b", "note": "", "penalty": [18.764786136672935, 16.826358266193942], "passed": [false, false]}
+{"batch": 1, "pair": 7, "a": "classic#198", "b": "classic#107", "kind": "rules", "winner": "b", "note": "", "penalty": [4.632772609825139, 12.577931146783301], "passed": [false, true]}
+{"batch": 1, "pair": 8, "a": "classic#70", "b": "classic#175", "kind": "close", "winner": "b", "note": "", "penalty": [24.304924745989872, 23.499307039806816], "passed": [false, false]}
+{"batch": 1, "pair": 9, "a": "classic#50", "b": "classic#57", "kind": "clear", "winner": "a", "note": "9B two capitals very close", "penalty": [4.350030599456053, 24.731136680229696], "passed": [false, false]}
+{"batch": 1, "pair": 10, "a": "classic#41", "b": "classic#153", "kind": "rules", "winner": "b", "note": "", "penalty": [4.947160075496183, 24.09940329198471], "passed": [false, true]}
+{"batch": 1, "pair": 11, "a": "classic#75", "b": "classic#18", "kind": "clear", "winner": "b", "note": "capitals very close in center", "penalty": [29.692652395227725, 3.71828985240236], "passed": [false, false]}
+{"batch": 1, "pair": 12, "a": "classic#77", "b": "classic#65", "kind": "close", "winner": "b", "note": "", "penalty": [18.34302004602447, 16.09622714264609], "passed": [false, false]}
