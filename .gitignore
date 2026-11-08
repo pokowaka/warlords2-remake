@@ -23,5 +23,6 @@ web/assets/data/DATA/SCENGEN.LST
 # Bazel
 /bazel-*
 user.bazelrc
+.cache/
 cpp/.cache/
 compile_commands.json

@@ -131,8 +131,8 @@ struct Mixer {
  * @brief Module-wide audio subsystem state owned by the main thread.
  */
 struct State {
-    std::string data_dir;                              ///< Path to `original/`.
-    std::string rec_dir;                               ///< Path to `pre-rendered-sound/`.
+    std::filesystem::path data_dir;                    ///< Path to `original/`.
+    std::filesystem::path rec_dir;                     ///< Path to `pre-rendered-sound/`.
     w2::uidata::Strings files;                         ///< `FILE.DAT` string table.
     Options enabled{false, false, false};              ///< User-toggled audio switches.
     SDL_AudioDeviceID dev = 0;                         ///< Open SDL audio device ID (0 if none).
@@ -143,11 +143,11 @@ struct State {
     int cue = w2::kNone;                               ///< Currently playing music cue ID.
     std::optional<std::pair<std::string, bool>> song;  ///< Active `(filename, loop)` pair.
     bool song_playing = false;                         ///< True while a song is actively playing.
-    std::string synth = "fm";  ///< Active synthesizer (`"fm"`, `"mt32"`, `"sc55"`).
-    std::string adv;           ///< Contents of `ADLIB.ADV`.
-    std::string ad_bank;       ///< Contents of `MIDPAK.AD`.
-    double rec_at = 0;         ///< Loop point in seconds for `mix.rec`.
-    bool rec_loop = false;     ///< True when `mix.rec` should loop at `rec_at`.
+    std::string synth = "fm";      ///< Active synthesizer (`"fm"`, `"mt32"`, `"sc55"`).
+    std::vector<uint8_t> adv;      ///< Contents of `ADLIB.ADV`.
+    std::vector<uint8_t> ad_bank;  ///< Contents of `MIDPAK.AD`.
+    double rec_at = 0;             ///< Loop point in seconds for `mix.rec`.
+    bool rec_loop = false;         ///< True when `mix.rec` should loop at `rec_at`.
 };
 State sound_state;
 
@@ -270,10 +270,10 @@ void Callback(void*, Uint8* stream, int len) {
 
 /** @brief Converts a DOS relative asset path (e.g. `"SOUND\\army.8SN"`) to a path under `data_dir`.
  */
-std::string DataPath(const std::string& name) {
+std::filesystem::path DataPath(const std::string& name) {
     std::string rel = name;
     std::replace(rel.begin(), rel.end(), '\\', '/');
-    return sound_state.data_dir + "/" + rel;
+    return sound_state.data_dir / rel;
 }
 
 /** @brief Loads and caches an 8-bit unsigned `.8SN` sample as normalized float PCM. */
@@ -281,10 +281,11 @@ Pcm SampleData(const std::string& name) {
     auto found_it = sound_state.samples.find(name);
     if (found_it != sound_state.samples.end()) return found_it->second;
     Pcm pcm;
-    if (auto bytes = w2::ReadFile(DataPath(name)); bytes && !bytes->empty()) {
+    if (auto bytes = w2::ReadBytes(DataPath(name)); bytes.ok() && !bytes->empty()) {
         pcm = std::make_shared<std::vector<float>>(bytes->size());
-        for (size_t i = 0; i < bytes->size(); i++)
-            (*pcm)[i] = (static_cast<uint8_t>((*bytes)[i]) - 128) / 128.0F;
+        for (size_t i = 0; i < bytes->size(); i++) {
+            (*pcm)[i] = (static_cast<int>((*bytes)[i]) - 128) / 128.0F;
+        }
     }
     sound_state.samples[name] = pcm;
     return pcm;
@@ -296,21 +297,21 @@ void SaveOptionsFile() {
     content += sound_state.enabled.music ? '1' : '0';
     content += sound_state.enabled.effects ? '1' : '0';
     content += sound_state.enabled.speech ? '1' : '0';
-    w2::WriteFile(sound_state.data_dir + "/DATA/OPTIONS.SND", content);
+    w2::WriteFile(sound_state.data_dir / "DATA/OPTIONS.SND", content).IgnoreError();
 }
 
 /** @brief Builds the path to a pre-rendered `.ogg` recording for `synth` and XMI `name`. */
-std::string RecordingPath(const std::string& synth, const std::string& name) {
+std::filesystem::path RecordingPath(const std::string& synth, const std::string& name) {
     std::string base = w2::Upper(name);
-    if (w2::EndsWith(base, ".XMI")) base = base.substr(0, base.size() - 4);
-    return sound_state.rec_dir + "/" + kPrefix.at(synth) + base + ".ogg";
+    if (base.ends_with(".XMI")) base = base.substr(0, base.size() - 4);
+    return sound_state.rec_dir / (kPrefix.at(synth) + base + ".ogg");
 }
 
 #ifdef W2_VORBIS
 /** @brief Opens an Ogg Vorbis file at `path` for streaming, or returns nullptr. */
-std::unique_ptr<Stream> OpenStream(const std::string& path) {
+std::unique_ptr<Stream> OpenStream(const std::filesystem::path& path) {
     auto stream = std::make_unique<Stream>();
-    std::string real = w2::ResolvePath(path);
+    std::string real = w2::ResolvePath(path).string();
     if (real.empty() || ov_fopen(real.c_str(), &stream->vorbis) != 0) return nullptr;
     stream->open = true;
     vorbis_info* info = ov_info(&stream->vorbis, -1);
@@ -367,9 +368,9 @@ bool StartSong(const std::string& name, bool loop) {
 #ifdef W2_VORBIS
     if (sound_state.synth != "fm") {
         // Read the XMI sequence alongside the recording to determine its exact loop tick length.
-        auto bytes = w2::ReadFile(sound_state.data_dir + "/SOUND/" + kPrefix.at(sound_state.synth) +
-                                  w2::Upper(name));
-        auto seq = bytes ? w2::xmi::Parse(*bytes) : std::nullopt;
+        auto bytes = w2::ReadBytes(sound_state.data_dir / "SOUND" /
+                                   (kPrefix.at(sound_state.synth) + w2::Upper(name)));
+        auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
         auto stream = seq ? OpenStream(RecordingPath(sound_state.synth, name)) : nullptr;
         if (stream) {
             StopFm();
@@ -386,8 +387,8 @@ bool StartSong(const std::string& name, bool loop) {
 #endif
     // AdLib FM songs use the 'S'-prefixed XMI files (e.g. SINT12.XMI).
     if (sound_state.adv.empty() || sound_state.ad_bank.empty()) return false;
-    auto bytes = w2::ReadFile(sound_state.data_dir + "/SOUND/S" + w2::Upper(name));
-    auto seq = bytes ? w2::xmi::Parse(*bytes) : std::nullopt;
+    auto bytes = w2::ReadBytes(sound_state.data_dir / "SOUND" / ("S" + w2::Upper(name)));
+    auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
     if (!seq) return false;
     StopRecordings();
     auto shared = std::make_shared<w2::xmi::Sequence>(std::move(*seq));
@@ -424,13 +425,13 @@ double Enqueue(const std::string& name, std::function<void()> done) {
 
 // ------------------------------------------------------------- the interface
 
-void Init(const std::string& data_dir, const w2::uidata::Strings& files) {
+void Init(const std::filesystem::path& data_dir, const w2::uidata::Strings& files) {
     sound_state.data_dir = data_dir;
     sound_state.files = files;
     sound_state.rec_dir = w2::FileExists("pre-rendered-sound")
-                                  ? "pre-rendered-sound"
-                                  : data_dir + "/../pre-rendered-sound";
-    std::string opts = w2::ReadFile(data_dir + "/DATA/OPTIONS.SND").value_or("111");
+                                  ? std::filesystem::path("pre-rendered-sound")
+                                  : data_dir / "../pre-rendered-sound";
+    std::string opts = w2::ReadFile(data_dir / "DATA/OPTIONS.SND").value_or("111");
     while (opts.size() < 3) opts += '1';
     sound_state.enabled.music = opts[0] == '1';
     sound_state.enabled.effects = opts[1] == '1';
@@ -439,8 +440,8 @@ void Init(const std::string& data_dir, const w2::uidata::Strings& files) {
     std::string synth = prefs::Get("music");
     if (synth.empty()) synth = "mt32";
     if (kPrefix.count(synth) && SynthAvailable(synth)) sound_state.synth = synth;
-    sound_state.adv = w2::ReadFile(data_dir + "/ADLIB.ADV").value_or("");
-    sound_state.ad_bank = w2::ReadFile(data_dir + "/MIDPAK.AD").value_or("");
+    sound_state.adv = w2::ReadBytes(data_dir / "ADLIB.ADV").value_or(std::vector<uint8_t>{});
+    sound_state.ad_bank = w2::ReadBytes(data_dir / "MIDPAK.AD").value_or(std::vector<uint8_t>{});
     SDL_AudioSpec want{}, have{};
     want.freq = 44100;
     want.format = AUDIO_F32SYS;

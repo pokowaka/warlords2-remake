@@ -3,6 +3,9 @@
  * @brief Random map and modern scenario generator entry points, stage state machine, and file
  * installation.
  */
+#include "absl/status/status.h"
+#include "absl/strings/str_format.h"
+
 #include "warlords/worldgen/randommap_impl.hpp"
 
 namespace w2::randommap {
@@ -196,7 +199,7 @@ void Generator::ModernRoadShapes() {
 }
 
 /** @brief Places signposts along roads for the modern scenario generator. */
-std::string Generator::ModernSigns() {
+std::vector<uint8_t> Generator::ModernSigns() {
     std::vector<Point> spots;
     for (int tries = 0; tries < 20000 && static_cast<int>(spots.size()) < 60; tries++) {
         int x = Dice(1, kMapW - 6, 2), y = Dice(1, kMapH - 6, 2);
@@ -247,7 +250,7 @@ std::string Generator::ModernSigns() {
                 Format(Str(kSignLeagues, 20), Distance(x, y, Cx(city_idx), Cy(city_idx)) * 2,
                        std::string(kCompass[Compass(x, y, Cx(city_idx), Cy(city_idx))])));
     }
-    return std::string(out.begin(), out.end());
+    return out;
 }
 
 /** @brief Runs one stage of the modern scenario generator, returning progress %. */
@@ -405,10 +408,11 @@ std::array<int, 4> Settle(std::array<int, 4> sliders, Rng& rng) {
 
 namespace {
 /** @brief Loads `RANDOM.DAT` and adds the chosen slider offsets to the parameters. */
-std::vector<uint8_t> Params(const std::string& data_dir, const std::array<int, 4>& sliders) {
-    auto bytes = ReadFile(data_dir + "/RANDOM/RANDOM.DAT");
-    if (!bytes) throw std::runtime_error("Random data not found");
-    std::vector<uint8_t> memory(bytes->begin(), bytes->end());
+absl::StatusOr<std::vector<uint8_t>> Params(const std::filesystem::path& data_dir,
+                                            const std::array<int, 4>& sliders) {
+    auto bytes = ReadBytes(data_dir / "RANDOM/RANDOM.DAT");
+    if (!bytes.ok()) return bytes.status();
+    std::vector<uint8_t> memory = std::move(*bytes);
     if (memory.size() < static_cast<size_t>(kDatSize)) memory.resize(kDatSize, 0);
     auto add = [&](int offset, int table, int idx) {
         SetI16(memory, offset, GetI16(memory, offset) + GetI16(memory, table + 2 * idx));
@@ -424,25 +428,42 @@ std::vector<uint8_t> Params(const std::string& data_dir, const std::array<int, 4
 }
 }  // namespace
 
-Run::Run(const Options& opts) {
-    if (!opts.rng) throw std::runtime_error("random map: no dice");
+Run::Run(std::unique_ptr<Generator> gen) : gen_(std::move(gen)) {}
+
+absl::StatusOr<std::unique_ptr<Run>> Run::Create(const Options& opts) {
+    if (!opts.rng) {
+        return absl::InvalidArgumentError(
+                "Failed to start random map generation: Options::rng is null. Provide a non-null "
+                "Rng instance.");
+    }
     auto sliders = Settle(opts.sliders, *opts.rng);
-    gen_ = std::make_unique<Generator>();
-    Generator& gen = *gen_;
-    gen.memory = Params(opts.data_dir, sliders);
+    auto gen = std::make_unique<Generator>();
+    auto params = Params(opts.data_dir, sliders);
+    if (!params.ok()) return params.status();
+    gen->memory = std::move(*params);
     // the scenario of the chosen terrain set (Erythea) is the template
-    auto tmpl = ReadFile(opts.data_dir + "/ERYTHEA/ERYTHEA.SCN");
-    if (!tmpl) throw std::runtime_error("cannot open: ERYTHEA.SCN");
-    gen.scn.assign(tmpl->begin(), tmpl->end());
-    armytype::Load(opts.data_dir + "/TERRAIN0/ARMYTYPE.DAT", gen.types);
-    gen.rng = opts.rng;
-    gen.allies = opts.allies;
-    gen.fair = opts.fair_capitals;
-    gen.modern = opts.scenario;
-    gen.world = opts.world;
-    gen.tiles.assign(static_cast<size_t>(kMapW) * kMapH, 0);
-    gen.roads.assign(static_cast<size_t>(kMapW) * kMapH, 0);
-    gen.scn[kSTerrainSet] = static_cast<uint8_t>(opts.terrain_set);
+    auto tmpl = ReadBytes(opts.data_dir / "ERYTHEA/ERYTHEA.SCN");
+    if (!tmpl.ok()) return tmpl.status();
+    gen->scn = std::move(*tmpl);
+    if (gen->scn.size() <= static_cast<size_t>(kSTerrainSet)) {
+        return absl::InvalidArgumentError(absl::StrFormat(
+                "Failed to load random map template '%s': file is %zu bytes, shorter than header "
+                "offset %d. Verify original/ERYTHEA/ERYTHEA.SCN.",
+                (opts.data_dir / "ERYTHEA/ERYTHEA.SCN").string(), gen->scn.size(), kSTerrainSet));
+    }
+    if (absl::Status status = armytype::Load(opts.data_dir / "TERRAIN0/ARMYTYPE.DAT", gen->types);
+        !status.ok()) {
+        return status;
+    }
+    gen->rng = opts.rng;
+    gen->allies = opts.allies;
+    gen->fair = opts.fair_capitals;
+    gen->modern = opts.scenario;
+    gen->world = opts.world;
+    gen->tiles.assign(static_cast<size_t>(kMapW) * kMapH, 0);
+    gen->roads.assign(static_cast<size_t>(kMapW) * kMapH, 0);
+    gen->scn[kSTerrainSet] = static_cast<uint8_t>(opts.terrain_set);
+    return std::unique_ptr<Run>(new Run(std::move(gen)));
 }
 
 Run::~Run() = default;
@@ -454,36 +475,23 @@ bool Run::Step() {
     return true;
 }
 
-Files GenerateNow(const Options& opts) {
-    Run run(opts);
-    while (run.Step()) {
+absl::StatusOr<Files> GenerateNow(const Options& opts) {
+    auto run = Run::Create(opts);
+    if (!run.ok()) return run.status();
+    while ((*run)->Step()) {
     }
-    return run.GetFiles();
+    return (*run)->GetFiles();
 }
 
-void Install(const std::string& data_dir, const Files& files) {
-    for (auto& [ext, bytes] : files)
-        InstallFile(data_dir + "/" + kDir + "/" + kDir + "." + ext, bytes);
+std::string TerrainSetName(const std::filesystem::path& data_dir, int set) {
+    auto bytes = ReadBytes(data_dir / "DATA/TERRAIN.DAT");
+    if (!bytes.ok() || set < 0 || set >= U16(*bytes, 0)) return "";
+    return Cstr(*bytes, 2 + 52 * static_cast<size_t>(set) + 2, 50);
 }
 
-Files Installed(const std::string& data_dir) {
-    Files out;
-    for (const char* ext : kFiles) {
-        if (auto bytes = ReadFile(data_dir + "/" + kDir + "/" + kDir + "." + ext))
-            out[ext] = *bytes;
-    }
-    return out;
-}
-
-std::string TerrainSetName(const std::string& data_dir, int set) {
-    auto bytes = ReadFile(data_dir + "/DATA/TERRAIN.DAT");
-    if (!bytes || set >= U16(*bytes, 0)) return "";
-    return Cstr(*bytes, 2 + 52 * set + 2, 50);
-}
-
-int TerrainSets(const std::string& data_dir) {
-    auto bytes = ReadFile(data_dir + "/DATA/TERRAIN.DAT");
-    return bytes ? std::max(1, U16(*bytes, 0)) : 1;
+int TerrainSets(const std::filesystem::path& data_dir) {
+    auto bytes = ReadBytes(data_dir / "DATA/TERRAIN.DAT");
+    return bytes.ok() ? std::max(1, U16(*bytes, 0)) : 1;
 }
 
 }  // namespace w2::randommap

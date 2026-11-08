@@ -15,15 +15,14 @@
 
 namespace w2::test {
 
-const std::string kData = "original";
+const std::filesystem::path kData = "original";
 
 const std::vector<std::string> kScenarios = {"ERYTHEA", "ILLURIA", "DRAGON", "HADESHA",
                                              "ISLADIA", "SORCERY", "TUTORIA"};
 
 bool ScenarioExists(std::string_view scenario) {
-    std::filesystem::path scn_path =
-            std::filesystem::path(kData) / scenario / (std::string(scenario) + ".SCN");
-    return FileExists(scn_path.string());
+    std::filesystem::path scn_path = kData / scenario / (std::string(scenario) + ".SCN");
+    return FileExists(scn_path);
 }
 
 std::string ScenarioParamName(const ::testing::TestParamInfo<std::string>& info) {
@@ -57,7 +56,7 @@ std::unique_ptr<Game> SetupGame(const std::string& scenario, const GameOpts& gam
     new_game_options.options = game_options.options;
     new_game_options.sides = game_options.sides;
     new_game_options.greatest = game_options.greatest;
-    return game::NewGame(kData, scenario, new_game_options);
+    return *game::NewGame(kData, scenario, new_game_options);
 }
 
 Side* EndTurn(Game& game) {

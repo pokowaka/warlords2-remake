@@ -8,8 +8,10 @@
 #pragma once
 
 #include <array>
-#include <string>
+#include <filesystem>
 #include <vector>
+
+#include "absl/status/statusor.h"
 
 namespace w2::pal {
 
@@ -19,12 +21,11 @@ using Colour = std::array<double, 3>;
 using Palette = std::vector<Colour>;
 
 /**
- * @brief Reads a .PAL file.
- * @return The palette as 16 {r, g, b} in 0..1, indexed from 0.
- *
- * Throws std::runtime_error when the file is missing or does not hold
- * exactly 16 entries.
+ * @brief Reads a .PAL file from disk.
+ * @param path Path to the `.PAL` file.
+ * @return The palette as 16 `{r, g, b}` entries in `0..1`, or an actionable error status
+ *         when the file is missing or does not hold 16 RGB triplets.
  */
-Palette Load(const std::string& path);
+absl::StatusOr<Palette> Load(const std::filesystem::path& path);
 
 }  // namespace w2::pal

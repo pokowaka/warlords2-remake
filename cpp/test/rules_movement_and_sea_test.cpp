@@ -491,7 +491,7 @@ TEST(MovementTest, EmbarkingDisembarkingFlyingOverWaterAndPortSailing) {
     hero->at_sea = true;
     dragon_army->at_sea = true;
     game->Remove(foot);
-    auto reloaded = save::Decode(save::Encode(*game), kData);
+    auto reloaded = *save::Decode(save::Encode(*game), kData);
     for (const Army* loaded_army : reloaded->armies) {
         if (loaded_army->x == water_x && loaded_army->y == water_y) {
             EXPECT_FALSE(loaded_army->at_sea);

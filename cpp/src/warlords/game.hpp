@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
@@ -14,7 +15,10 @@
 #include <utility>
 #include <vector>
 
+#include "absl/status/statusor.h"
+
 #include "warlords/combat.hpp"
+#include "warlords/scenario_source.hpp"
 #include "warlords/types.hpp"
 
 namespace w2 {
@@ -42,16 +46,16 @@ struct NewGameOptions {
     std::vector<std::pair<std::string, int>> options;  ///< Option name, value.
     std::map<int, SideSetup> sides;                    ///< Setup by side index.
     bool greatest = false;  ///< The setup screen's Greatest mode: every side a level 2 computer.
-    const std::map<std::string, std::string>* memory_files = nullptr;  ///< Scenario files held in
-                                                                       ///< memory, by name; null
-                                                                       ///< reads them from disk.
+    const ScenarioFiles* memory_files = nullptr;  ///< Scenario files held in memory, by name;
+                                                  ///< null reads them from disk.
     int active_sides = 0;  ///< 0 keeps all scenario sides; 2..8 keeps the K nearest capitals.
     int crop_margin = 0;   ///< Above 0, crops the map to the active capitals +/- this many tiles.
 };
 
 /** @brief Builds a fresh game from the original data files. */
-std::unique_ptr<Game> NewGame(const std::string& data_dir, const std::string& scenario,
-                              const NewGameOptions& opts = NewGameOptions());
+absl::StatusOr<std::unique_ptr<Game>> NewGame(const std::filesystem::path& data_dir,
+                                              const std::string& scenario,
+                                              const NewGameOptions& opts = NewGameOptions());
 
 /**
  * @brief The side whose turn it is while the game is set up.

@@ -8,10 +8,9 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -47,7 +46,7 @@ class ShippedMapEvalTest : public ScenarioTest {};
 
 TEST_P(ShippedMapEvalTest, DesignerMapBreaksNoHardRuleAndSpreadsCities) {
     const std::string& scenario = GetParam();
-    auto map = scn::Load(kData + "/" + scenario, scenario);
+    auto map = *scn::Load(kData / scenario, scenario);
     auto evaluation = mapeval::Evaluate(*map, scenario);
     std::string first_issue;
     for (const auto& issue : evaluation.issues) {
@@ -66,7 +65,7 @@ INSTANTIATE_TEST_SUITE_P(DesignerMaps, ShippedMapEvalTest,
                          ScenarioParamName);
 
 TEST(MapEvalTest, BrokenMapsTriggerHardChecksFairCapitalsAndReferenceScores) {
-    auto map = scn::Load(kData + "/ERYTHEA", "ERYTHEA");
+    auto map = *scn::Load(kData / "ERYTHEA", "ERYTHEA");
     Map& broken = *map;
     auto index_of = [](int x, int y) { return y * kMapW + x; };
     auto tile_of = [&](int type) {
@@ -120,7 +119,7 @@ TEST(MapEvalTest, BrokenMapsTriggerHardChecksFairCapitalsAndReferenceScores) {
         EXPECT_GT(broken_eval.Count(check), 0) << check;
     }
 
-    auto near_map = scn::Load(kData + "/ERYTHEA", "ERYTHEA");
+    auto near_map = *scn::Load(kData / "ERYTHEA", "ERYTHEA");
     City* home = near_map->sides[0].capital;
     City* next = nullptr;
     for (auto& candidate : near_map->cities) {
@@ -138,13 +137,13 @@ TEST(MapEvalTest, BrokenMapsTriggerHardChecksFairCapitalsAndReferenceScores) {
     randommap::Options fair_options;
     fair_options.data_dir = kData;
     fair_options.rng = &classic_rng;
-    auto classic_files = randommap::GenerateNow(fair_options);
+    auto classic_files = *randommap::GenerateNow(fair_options);
     fair_options.rng = &fair_rng;
     fair_options.fair_capitals = true;
-    auto fair_files = randommap::GenerateNow(fair_options);
+    auto fair_files = *randommap::GenerateNow(fair_options);
     EXPECT_NE(classic_files["SCN"], fair_files["SCN"]);
 
-    auto fair = scn::LoadFromFiles(kData + "/RANDOM", "RANDOM", fair_files);
+    auto fair = *scn::LoadFromFiles(kData / "RANDOM", "RANDOM", fair_files);
     std::set<City*> capitals;
     for (auto& fair_side : fair->sides) {
         capitals.insert(fair_side.capital);
@@ -157,7 +156,7 @@ TEST(MapEvalTest, BrokenMapsTriggerHardChecksFairCapitalsAndReferenceScores) {
 
     std::vector<mapeval::Evaluation> refs;
     for (const char* scenario : {"ERYTHEA", "HADESHA"}) {
-        refs.push_back(mapeval::Evaluate(*scn::Load(kData + "/" + scenario, scenario), scenario));
+        refs.push_back(mapeval::Evaluate(**scn::Load(kData / scenario, scenario), scenario));
     }
     auto ref = mapeval::MakeReference(refs);
     for (const auto& designed : refs) {
@@ -168,11 +167,11 @@ TEST(MapEvalTest, BrokenMapsTriggerHardChecksFairCapitalsAndReferenceScores) {
     randommap::Options gen_options;
     gen_options.data_dir = kData;
     gen_options.rng = &rng;
-    auto files = randommap::GenerateNow(gen_options);
-    auto made = scn::LoadFromFiles(kData + "/RANDOM", "RANDOM", files);
+    auto files = *randommap::GenerateNow(gen_options);
+    auto made = *scn::LoadFromFiles(kData / "RANDOM", "RANDOM", files);
     auto made_eval = mapeval::Evaluate(*made, "classic#1");
     EXPECT_EQ(static_cast<int>(made_eval.Metric("cities")), 80);
-    EXPECT_NE(mapeval::ToJson(made_eval).Dump().find("\"metrics\""), std::string::npos);
+    EXPECT_NE(mapeval::ToJson(made_eval).dump().find("\"metrics\""), std::string::npos);
 }
 
 TEST(ScengenTest, ShapesTitlesScenarioCatalogAndMenuPreviews) {
@@ -186,12 +185,12 @@ TEST(ScengenTest, ShapesTitlesScenarioCatalogAndMenuPreviews) {
             scengen_options.rng = &seeded_rng;
             scengen_options.scenario = true;
             scengen_options.world.shape = shape;
-            auto scengen_files = randommap::GenerateNow(scengen_options);
+            auto scengen_files = *randommap::GenerateNow(scengen_options);
             scengen_options.rng = &again;
-            EXPECT_EQ(scengen_files, randommap::GenerateNow(scengen_options))
+            EXPECT_EQ(scengen_files, *randommap::GenerateNow(scengen_options))
                     << scengen::ShapeName(shape);
 
-            auto world = scn::LoadFromFiles(kData + "/RANDOM", "RANDOM", scengen_files);
+            auto world = *scn::LoadFromFiles(kData / "RANDOM", "RANDOM", scengen_files);
             auto evaluation = mapeval::Evaluate(
                     *world, std::string(scengen::ShapeName(shape)) + "#" + std::to_string(seed));
             std::string first_issue;
@@ -208,16 +207,15 @@ TEST(ScengenTest, ShapesTitlesScenarioCatalogAndMenuPreviews) {
         }
     }
 
-    auto fin_data = ReadFile(kData + "/CHANCE17.FIN");
-    ASSERT_TRUE(fin_data.has_value());
-    int glyph_count = static_cast<uint8_t>((*fin_data)[0]);
-    int first_char = static_cast<uint8_t>((*fin_data)[1]);
+    auto fin_data = ReadBytes(kData / "CHANCE17.FIN");
+    ASSERT_TRUE(fin_data.ok());
+    int glyph_count = (*fin_data)[0];
+    int first_char = (*fin_data)[1];
     auto measure_width = [&](const std::string& text) {
         int pixels = 0;
         for (unsigned char glyph : text) {
             if (glyph >= first_char && glyph < first_char + glyph_count) {
-                pixels +=
-                        static_cast<uint8_t>((*fin_data)[11 + glyph_count + (glyph - first_char)]);
+                pixels += (*fin_data)[11 + glyph_count + (glyph - first_char)];
             }
         }
         return pixels;
@@ -243,19 +241,18 @@ TEST(ScengenTest, ShapesTitlesScenarioCatalogAndMenuPreviews) {
     std::filesystem::create_directories(root / "DATA");
     std::filesystem::create_directories(root / "GEN7");
     std::filesystem::create_directories(root / "NOINFO");
-    std::filesystem::copy_file(kData + "/DATA/SCENARIO.DAT", root / "DATA" / "SCENARIO.DAT");
+    std::filesystem::copy_file(kData / "DATA/SCENARIO.DAT", root / "DATA" / "SCENARIO.DAT");
     scenarios::Entry made_entry{"Continents 7", "GEN7", "A new world, seed 7", 80, 40, 8, true};
-    WriteFile((root / "GEN7" / "GEN7.INF").string(), scenarios::Info(made_entry));
-    WriteFile((root / "GEN7" / "GEN7.SCN").string(), "");
-    WriteFile((root / "NOINFO" / "NOINFO.SCN").string(), "");
-    EXPECT_TRUE(scenarios::Remember(root.string(), "NOINFO") &&
-                scenarios::Remember(root.string(), "GEN7") &&
-                scenarios::Remember(root.string(), "GEN7"));
-    auto scengen_lst = ReadFile((root / "DATA" / "SCENGEN.LST").string());
-    ASSERT_TRUE(scengen_lst.has_value());
+    ASSERT_TRUE(WriteFile(root / "GEN7" / "GEN7.INF", scenarios::Info(made_entry)).ok());
+    ASSERT_TRUE(WriteFile(root / "GEN7" / "GEN7.SCN", "").ok());
+    ASSERT_TRUE(WriteFile(root / "NOINFO" / "NOINFO.SCN", "").ok());
+    EXPECT_TRUE(scenarios::Remember(root, "NOINFO") && scenarios::Remember(root, "GEN7") &&
+                scenarios::Remember(root, "GEN7"));
+    auto scengen_lst = ReadFile(root / "DATA" / "SCENGEN.LST");
+    ASSERT_TRUE(scengen_lst.ok());
     EXPECT_EQ(*scengen_lst, "GEN7\nNOINFO\n");
 
-    auto list = scenarios::List(root.string());
+    auto list = scenarios::List(root);
     ASSERT_EQ(list.size(), 7U);
     EXPECT_EQ(list[3].dir, "Erythea");
     EXPECT_EQ(list.back().name, "Continents 7");
@@ -266,17 +263,18 @@ TEST(ScengenTest, ShapesTitlesScenarioCatalogAndMenuPreviews) {
     EXPECT_EQ(parsed->text, made_entry.text);
     EXPECT_EQ(parsed->players, 8);
 
-    auto menu_map = scn::Load(kData + "/ERYTHEA", "ERYTHEA");
-    auto pic = preview::MenuPicture(*menu_map, kData);
+    auto menu_map = *scn::Load(kData / "ERYTHEA", "ERYTHEA");
+    auto pic = *preview::MenuPicture(*menu_map, kData);
     EXPECT_EQ(pic.w, 264);
     EXPECT_EQ(pic.h, 225);
     ScopedTempPath pck_file("w2test-SCENARIO.PCK");
-    WriteFile(pck_file.Path().string(), pck::Encode(pic));
-    auto read_pic = pck::Decode(pck_file.Path().string());
+    ASSERT_TRUE(WriteBytes(pck_file.Path(), *pck::Encode(pic)).ok());
+    auto read_pic = *pck::Decode(pck_file.Path());
     ASSERT_NE(read_pic, nullptr);
     EXPECT_TRUE(read_pic->w == pic.w && read_pic->h == pic.h && read_pic->px == pic.px);
-    std::string png = preview::Png(*menu_map, kData);
-    EXPECT_EQ(png.compare(0, 8, "\x89PNG\r\n\x1a\n"), 0);
+    auto png = *preview::Png(*menu_map, kData);
+    ASSERT_GE(png.size(), 8U);
+    EXPECT_EQ(std::string_view(reinterpret_cast<const char*>(png.data()), 8), "\x89PNG\r\n\x1a\n");
 }
 
 TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
@@ -287,7 +285,7 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
         options.rng = &rng;
         options.sliders = sliders;
         options.allies = allies;
-        return randommap::GenerateNow(options);
+        return *randommap::GenerateNow(options);
     };
     auto made = make_world(7, {{3, 3, 2, 3}}, false);
     auto remade = make_world(7, {{3, 3, 2, 3}}, false);
@@ -298,8 +296,7 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
     EXPECT_EQ(made["SCN"].size(), 12001U);
     EXPECT_EQ(made["MAP"].size(), static_cast<size_t>(2 * 112 * 156));
 
-    randommap::Install(kData, made);
-    auto map = scn::Load(kData + "/RANDOM", "RANDOM");
+    auto map = *scn::LoadFromFiles(kData / "RANDOM", "RANDOM", made);
     EXPECT_EQ(map->cities.size(), 80U);
     EXPECT_EQ(map->sites.size(), 40U);
     EXPECT_GE(map->signs.size(), 41U);
@@ -324,7 +321,7 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
     }
 
     Types types;
-    armytype::Load(kData + "/TERRAIN0/ARMYTYPE.DAT", types);
+    ASSERT_TRUE(armytype::Load(kData / "TERRAIN0/ARMYTYPE.DAT", types).ok());
     auto is_magical = [&](int type) {
         return types.ById(type) != nullptr && types.ById(type)->bonus[48] != 0;
     };
@@ -340,8 +337,8 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
 
     int magical_count = 0;
     for (int seed = 1; seed <= 10; ++seed) {
-        randommap::Install(kData, make_world(seed, {{3, 3, 2, 3}}, true));
-        auto allied = scn::Load(kData + "/RANDOM", "RANDOM");
+        auto allied_files = make_world(seed, {{3, 3, 2, 3}}, true);
+        auto allied = *scn::LoadFromFiles(kData / "RANDOM", "RANDOM", allied_files);
         for (const auto& city : allied->cities) {
             for (int produced : city.produces) {
                 if (is_magical(produced)) {
@@ -352,10 +349,14 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
     }
     EXPECT_GT(magical_count, 0);
 
-    randommap::Install(kData, make_world(3, {{0, 0, 6, 0}}, false));
-    EXPECT_EQ(scn::Load(kData + "/RANDOM", "RANDOM")->cities.size(), 100U);
-    randommap::Install(kData, make_world(3, {{6, 6, 0, 6}}, false));
-    EXPECT_EQ(scn::Load(kData + "/RANDOM", "RANDOM")->cities.size(), 70U);
+    EXPECT_EQ(
+            (*scn::LoadFromFiles(kData / "RANDOM", "RANDOM", make_world(3, {{0, 0, 6, 0}}, false)))
+                    ->cities.size(),
+            100U);
+    EXPECT_EQ(
+            (*scn::LoadFromFiles(kData / "RANDOM", "RANDOM", make_world(3, {{6, 6, 0, 6}}, false)))
+                    ->cities.size(),
+            70U);
 
     Rng slider_rng(5);
     auto rolled = randommap::Settle({{7, 7, 7, 7}}, slider_rng);
@@ -364,17 +365,15 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
         EXPECT_LE(slider, 6);
     }
 
-    std::ifstream disk(kData + "/RANDOM/RANDOM.SCN", std::ios::binary);
-    if (disk) {
-        std::string on_disk((std::istreambuf_iterator<char>(disk)),
-                            std::istreambuf_iterator<char>());
-        EXPECT_NE(on_disk, made["SCN"]);
+    auto on_disk = ReadBytes(kData / "RANDOM/RANDOM.SCN");
+    if (on_disk.ok()) {
+        EXPECT_NE(*on_disk, made["SCN"]);
     }
 
-    randommap::Install(kData, made);
     game::NewGameOptions options;
     options.seed = 4;
-    auto game_ptr = game::NewGame(kData, "RANDOM", options);
+    options.memory_files = &made;
+    auto game_ptr = *game::NewGame(kData, "RANDOM", options);
     Game& game = *game_ptr;
     for (Side* player : game.sides) {
         player->computer = true;
@@ -387,8 +386,7 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
     EXPECT_EQ(game.turn, 7);
 
     std::string save_text = save::Encode(game);
-    randommap::Install(kData, make_world(8, {{3, 3, 2, 3}}, false));
-    auto reloaded = save::Decode(save_text, kData);
+    auto reloaded = *save::Decode(save_text, kData);
     ASSERT_NE(reloaded, nullptr);
     EXPECT_EQ(reloaded->map->tiles, game.map->tiles);
     ASSERT_EQ(reloaded->map->cities.size(), game.map->cities.size());

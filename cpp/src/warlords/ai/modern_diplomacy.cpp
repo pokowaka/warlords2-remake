@@ -7,6 +7,8 @@
 #include <map>
 #include <set>
 
+#include "absl/strings/str_format.h"
+
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
@@ -368,8 +370,8 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         side.ai_thoughts.push_back(AIThought{
             "Diplomacy", side.name, other.name, side.cap_x, side.cap_y, other.cap_x, other.cap_y,
             best_logit, 0.0F, false,
-            Fmt("Stance -> %s (Attitude %+d, Trust %+d): %s", stance_names[best_choice],
-                att.total_score, att.trust_score, att.stance_summary.c_str())});
+            absl::StrFormat("Stance -> %s (Attitude %+d, Trust %+d): %s", stance_names[best_choice],
+                            att.total_score, att.trust_score, att.stance_summary)});
 
         if (!other.computer && other.missives.empty() && game.turn > 1 &&
             game.turn - other.last_missive_turn[our_side] >= 4) {
@@ -384,15 +386,16 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 missive.proposed_state = diplomacy::kPeace;
                 missive.propose_alliance = true;
                 missive.joint_war_target = diplomacy::WarTarget(game, our_side, other_idx);
-                missive.headline = Fmt("Envoy from %s (%s)", side.name.c_str(), prof.name.c_str());
-                missive.body = Fmt("\"%s\" We propose a full Military Alliance with shared vision!",
-                                   prof.motto.c_str());
+                missive.headline = absl::StrFormat("Envoy from %s (%s)", side.name, prof.name);
+                missive.body = absl::StrFormat(
+                        "\"%s\" We propose a full Military Alliance with shared vision!",
+                        prof.motto);
             } else if (best_choice == 2 && cur_st == diplomacy::kPeace &&
                        belief.their_border_strength[other_idx] > 6.0F) {
                 send_missive = true;
                 missive.proposed_state = diplomacy::kIntermediate;
                 missive.headline =
-                        Fmt("Border Warning from %s (%s)", side.name.c_str(), prof.name.c_str());
+                        absl::StrFormat("Border Warning from %s (%s)", side.name, prof.name);
                 missive.body =
                         "Your armies mass along our frontier. Withdraw them or our peace shall "
                         "end!";
@@ -404,20 +407,21 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 missive.gold_demand =
                         std::max(75, att.peace_gold_needed > 0 ? att.peace_gold_needed : 100);
                 missive.headline =
-                        Fmt("Tribute Demand from %s (%s)", side.name.c_str(), prof.name.c_str());
-                missive.body =
-                        Fmt("\"%s\" Pay %d gold in tribute to preserve the peace between us!",
-                            prof.motto.c_str(), missive.gold_demand);
+                        absl::StrFormat("Tribute Demand from %s (%s)", side.name, prof.name);
+                missive.body = absl::StrFormat(
+                        "\"%s\" Pay %d gold in tribute to preserve the peace between us!",
+                        prof.motto, missive.gold_demand);
             } else if (best_choice == 1 && cur_st == diplomacy::kWar) {
                 send_missive = true;
                 missive.proposed_state = diplomacy::kPeace;
                 int offered = diplomacy::GoldOffer(game, our_side, other_idx);
                 missive.gold_demand = -offered;
                 missive.headline =
-                        Fmt("Peace Envoy from %s (%s)", side.name.c_str(), prof.name.c_str());
-                missive.body = offered > 0 ? Fmt("We offer %d gold and a 10-turn truce to end this "
-                                                 "war.",
-                                                 offered)
+                        absl::StrFormat("Peace Envoy from %s (%s)", side.name, prof.name);
+                missive.body = offered > 0 ? absl::StrFormat(
+                                                     "We offer %d gold and a 10-turn truce to end "
+                                                     "this war.",
+                                                     offered)
                                            : "Let us lay down arms and sign a 10-turn truce.";
             }
 

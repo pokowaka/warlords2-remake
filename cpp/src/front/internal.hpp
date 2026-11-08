@@ -14,6 +14,8 @@
 
 #include <SDL.h>
 
+#include "absl/status/status.h"
+
 #include "front/app.hpp"
 #include "platform/coroutine.hpp"
 #include "platform/gfx.hpp"
@@ -202,8 +204,8 @@ void DrawHeroOffer();
 /** @brief Starts turn 1 of a newly created game and centres the camera on the capital. */
 void BeginGame();
 /** @brief Starts a scenario specified on the command line (`--scenario NAME`). */
-void StartCliScenario(const std::string& scenario, double seed, bool force_diplomacy,
-                      bool force_hidden_map, bool spectate_all_ai);
+absl::Status StartCliScenario(const std::string& scenario, double seed, bool force_diplomacy,
+                              bool force_hidden_map, bool spectate_all_ai);
 
 // computer.cpp
 /** @brief Returns whether any human-controlled side is still alive in the game. */
@@ -221,7 +223,7 @@ void EndTurn();
 
 // draw.cpp
 /** @brief Loads all .PCK spritesheets, fonts, and the main screen layout from `g_app.data_dir`. */
-void LoadArt();
+absl::Status LoadArt();
 /** @brief Displays status-bar information for a click at `(x, y)` in the bottom bar. */
 void BarInfo(int x, int y);
 /** @brief Updates sound playback and the top modal dialog once per frame. */

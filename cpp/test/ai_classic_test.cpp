@@ -271,7 +271,7 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     grp->rally = warlord.capital->index;
     grp->staged[2] = game.armies.back();
 
-    auto reloaded = save::Decode(save::Encode(game), kData);
+    auto reloaded = *save::Decode(save::Encode(game), kData);
     ASSERT_NE(reloaded, nullptr);
     const auto& reloaded_ai = *reloaded->map->sides[warlord.index].ai;
     EXPECT_EQ(reloaded_ai.max_groups, warlord.ai->max_groups);

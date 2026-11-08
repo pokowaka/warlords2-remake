@@ -76,7 +76,7 @@ TEST(DiceTest, BoundsReachabilityAndSeedDeterminism) {
 
 TEST(ArmyTypesTest, LoadsDocumentedTypesAndSignedModifiers) {
     Types types;
-    armytype::Load(kData + "/TERRAIN0/ARMYTYPE.DAT", types);
+    ASSERT_TRUE(armytype::Load(kData / "TERRAIN0/ARMYTYPE.DAT", types).ok());
     EXPECT_EQ(types.all.size(), 29U);
     ASSERT_NE(types.ById(armytype::kHero), nullptr);
     EXPECT_EQ(types.ById(armytype::kHero)->name, "Hero");
@@ -227,7 +227,7 @@ TEST_F(SlotsTest, CommitPersistsGroupIdsAndKeepRetainsSurvivors) {
 }
 
 TEST(ScreenLayoutTest, UiDataDialogsShortcutsAndSpriteSheets) {
-    auto ui_data = uidata::Load(kData);
+    auto ui_data = *uidata::Load(kData);
     EXPECT_EQ(ui_data.bitmaps[0], "startup.pck");
     EXPECT_EQ(ui_data.bitmaps[4], "button.pck");
     EXPECT_EQ(ui_data.bitmaps[78], "movebar7.pck");
@@ -261,7 +261,7 @@ TEST(ScreenLayoutTest, UiDataDialogsShortcutsAndSpriteSheets) {
         EXPECT_EQ(ui_data.shortcut_names[ui_data.shortcuts[i]], kExpectedShortcuts[i]);
     }
 
-    auto menu_img = pck::Decode(kData + "/PICS/MENUBUTT.PCK");
+    auto menu_img = *pck::Decode(kData / "PICS/MENUBUTT.PCK");
     ASSERT_NE(menu_img, nullptr);
     EXPECT_EQ(menu_img->w, 320);
     EXPECT_EQ(menu_img->h, 197);
@@ -287,7 +287,7 @@ TEST(ScreenLayoutTest, UiDataDialogsShortcutsAndSpriteSheets) {
     EXPECT_EQ(end_turn.src[uidata::kNormal].y, 0);
     EXPECT_EQ(end_turn.src[uidata::kActive].x, 32);
 
-    auto abits_img = pck::Decode(kData + "/PICS/ABITS.PCK");
+    auto abits_img = *pck::Decode(kData / "PICS/ABITS.PCK");
     ASSERT_NE(abits_img, nullptr);
     EXPECT_EQ(abits_img->w, 480);
     EXPECT_EQ(abits_img->h, 40);
@@ -367,10 +367,11 @@ TEST(ScreenLayoutTest, UiDataDialogsShortcutsAndSpriteSheets) {
             const std::string& name = ui_data.bitmaps[control.bitmap];
             if (!sizes.count(name) && !missing.count(name)) {
                 bool found = false;
-                for (const char* dir : {"/PICS/", "/TERRAIN0/", "/"}) {
-                    std::string path = kData + dir + Upper(name);
+                for (const char* dir : {"PICS", "TERRAIN0", ""}) {
+                    std::filesystem::path path =
+                            dir[0] != '\0' ? (kData / dir / Upper(name)) : (kData / Upper(name));
                     if (FileExists(path)) {
-                        auto image = pck::Decode(path);
+                        auto image = *pck::Decode(path);
                         sizes[name] = {image->w, image->h};
                         found = true;
                         break;
@@ -446,7 +447,7 @@ TEST(CityCastlesTest, CastleAndRuinTileBlocksMatchOwnerAndRazer) {
 }
 
 TEST(SoundCuesTest, MusicSelectionAndVoiceAdvisorThresholds) {
-    auto files = uidata::LoadStrings(kData + "/DATA/FILE.DAT");
+    auto files = *uidata::LoadStrings(kData / "DATA/FILE.DAT");
     auto first = [](int) { return 1; };
     auto [title_song, title_loop] = cues::Song(files, cues::kTitle, {}, first);
     EXPECT_EQ(title_song, "STARTUP.XMI");

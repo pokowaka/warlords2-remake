@@ -19,7 +19,6 @@
  */
 #pragma once
 
-#include "util/json.hpp"
 #include "warlords/model/army.hpp"
 #include "warlords/model/army_type.hpp"
 #include "warlords/model/city.hpp"

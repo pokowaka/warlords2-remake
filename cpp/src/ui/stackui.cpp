@@ -14,6 +14,8 @@
  * group that moves its strength in a fight here -- moves, how it moves and
  * its bonus.
  */
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/combat.hpp"
@@ -64,7 +66,7 @@ struct Stack : kit::Modal {
         if (auto head = g_app.screen->ArtFor(46))
             gfx::Draw(head->image, gfx::NewQuad(0, 0, 400, 23), 80, 62);
         const Font& font = kit::GetFont(2);
-        font.Draw(w2::Fmt("(max +%d)", g_app.g->map->combat_cap), 480, 66);
+        font.Draw(absl::StrFormat("(max +%d)", g_app.g->map->combat_cap), 480, 66);
         // draws a cell of ABITS at (x, y)
         auto abits = [](int cell_x, int cell_y, int width, int height, int x, int y) {
             gfx::SetColor(1, 1, 1);
@@ -91,11 +93,11 @@ struct Stack : kit::Modal {
                 font.Draw(army->Hero() ? army->name : type->name, x + 48, y + 5);
                 int strength = army->strength;
                 if (army->Hero()) strength += w2::combat::BattleItems(*army);
-                font.Draw(w2::Fmt("%d", std::min(9, strength)), x + 168, y + 5);
+                font.Draw(absl::StrFormat("%d", std::min(9, strength)), x + 168, y + 5);
                 auto fight_strength = fight_strengths.find(army);
                 if (stack_slots.in_group[i] && fight_strength != fight_strengths.end())
-                    font.Draw(w2::Fmt("(%d)", fight_strength->second), x + 184, y + 5);
-                font.Draw(w2::Fmt("%d", army->moves), x + 232, y + 5);
+                    font.Draw(absl::StrFormat("(%d)", fight_strength->second), x + 184, y + 5);
+                font.Draw(absl::StrFormat("%d", army->moves), x + 232, y + 5);
                 // the left of the ABITS cell showing how it moves; -1 for on foot
                 int move_cell_x = -1;
                 if (Flies(army, type))

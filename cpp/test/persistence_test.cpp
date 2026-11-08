@@ -54,7 +54,7 @@ TEST(PersistenceTest, SaveAndLoadPreservesFullGameStateAndPlaysOn) {
     std::string text = save::Encode(game);
     EXPECT_GT(text.size(), 1000U);
 
-    auto loaded_ptr = save::Decode(text, kData);
+    auto loaded_ptr = *save::Decode(text, kData);
     ASSERT_NE(loaded_ptr, nullptr);
     Game& loaded = *loaded_ptr;
     EXPECT_EQ(loaded.turn, game.turn);
@@ -127,11 +127,10 @@ TEST(PersistenceTest, SaveAndLoadPreservesFullGameStateAndPlaysOn) {
     EXPECT_GT(loaded.turn, turn_before);
 
     ScopedTempPath temp_save("w2-test-save.json");
-    std::string path_str = temp_save.Path().string();
-    ASSERT_TRUE(WriteFile(path_str, text));
-    auto disk_text = ReadFile(path_str);
-    ASSERT_TRUE(disk_text.has_value());
-    auto from_file = save::Decode(*disk_text, kData);
+    ASSERT_TRUE(WriteFile(temp_save.Path(), text).ok());
+    auto disk_text = ReadFile(temp_save.Path());
+    ASSERT_TRUE(disk_text.ok());
+    auto from_file = *save::Decode(*disk_text, kData);
     ASSERT_NE(from_file, nullptr);
     EXPECT_EQ(from_file->armies.size(), game.armies.size());
 }

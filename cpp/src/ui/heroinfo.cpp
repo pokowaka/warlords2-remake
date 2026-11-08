@@ -13,6 +13,8 @@
  */
 #include <cstdlib>
 
+#include "absl/strings/str_format.h"
+
 #include "platform/sound.hpp"
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
@@ -47,11 +49,11 @@ int ItemColour(const w2::Item* item) {
 std::string Effect(const w2::Item* item) {
     int item_type = item->type, value = item->value;
     if (item_type == rules::kItemStandard) return "com +1";
-    if (item_type == rules::kItemCommand) return w2::Fmt("com +%d", value);
-    if (item_type == rules::kItemBattle) return w2::Fmt("bat +%d", value);
+    if (item_type == rules::kItemCommand) return absl::StrFormat("com +%d", value);
+    if (item_type == rules::kItemBattle) return absl::StrFormat("bat +%d", value);
     if (item_type == rules::kItemFlight) return "fly";
     if (item_type == rules::kItemDoubleMove) return "move";
-    if (item_type == rules::kItemGoldPerCity) return w2::Fmt("gld +%d", value);
+    if (item_type == rules::kItemGoldPerCity) return absl::StrFormat("gld +%d", value);
     return "";
 }
 
@@ -178,10 +180,10 @@ struct HeroInfo : kit::Modal {
         kit::Right(font, kit::Text(kStringGroup, 4), 528, 165);
         kit::Right(font, kit::Text(kStringGroup, 5), 528, 185);
         font.Draw(near ? near->name : "", 392, 145);
-        font.Draw(w2::Fmt("+%d", battle), 392, 165);
-        font.Draw(w2::Fmt("+%d", command), 392, 185);
-        font.Draw(w2::Fmt("%d", hero->level ? hero->level : 1), 536, 165);
-        font.Draw(w2::Fmt("%d", hero->experience), 536, 185);
+        font.Draw(absl::StrFormat("+%d", battle), 392, 165);
+        font.Draw(absl::StrFormat("+%d", command), 392, 185);
+        font.Draw(absl::StrFormat("%d", hero->level ? hero->level : 1), 536, 165);
+        font.Draw(absl::StrFormat("%d", hero->experience), 536, 185);
         font.Draw(w2::Format(kit::Text(kStringGroup, 6), current_hero + 1,
                              static_cast<int>(heroes.size())),
                   312, 347);

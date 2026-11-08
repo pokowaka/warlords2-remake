@@ -139,9 +139,9 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
         auto flat1 = net.Flatten();
         EXPECT_EQ(static_cast<int>(flat1.size()), ai::ml::PolicyNetwork::kTotalParams);
         ScopedTempPath weights_file("w2_test_weights.json");
-        ASSERT_TRUE(net.SaveJson(weights_file.Path()));
+        ASSERT_TRUE(net.SaveJson(weights_file.Path()).ok());
         ai::ml::PolicyNetwork net2;
-        ASSERT_TRUE(net2.LoadJson(weights_file.Path()));
+        ASSERT_TRUE(net2.LoadJson(weights_file.Path()).ok());
         auto flat2 = net2.Flatten();
         for (size_t i = 0; i < flat1.size(); ++i) EXPECT_NEAR(flat1[i], flat2[i], 1e-4F);
     }
@@ -368,11 +368,11 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
         EXPECT_FALSE(modern_game->sides[0]->classic_ai);
         std::string modern_json = save::Encode(*modern_game);
 
-        auto decoded_classic = save::Decode(classic_json, kData);
+        auto decoded_classic = *save::Decode(classic_json, kData);
         EXPECT_TRUE(decoded_classic->sides[0]->classic_ai);
 
         ai::SetDefaultClassicAi(true);
-        auto decoded_modern = save::Decode(modern_json, kData);
+        auto decoded_modern = *save::Decode(modern_json, kData);
         EXPECT_FALSE(decoded_modern->sides[0]->classic_ai);
 
         for (Side* side : decoded_modern->sides) side->computer = true;
@@ -409,7 +409,7 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
         rand_opts.data_dir = kData;
         rand_opts.rng = &map_rng;
         rand_opts.sliders = {3, 3, 2, 3};
-        auto rfiles = randommap::GenerateNow(rand_opts);
+        auto rfiles = *randommap::GenerateNow(rand_opts);
 
         game::NewGameOptions small_opts;
         small_opts.seed = 4242.0;
@@ -422,7 +422,7 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
             small_opts.sides[i].computer = true;
             small_opts.sides[i].level = 2;
         }
-        auto small_game = game::NewGame(kData, "RANDOM", small_opts);
+        auto small_game = *game::NewGame(kData, "RANDOM", small_opts);
         EXPECT_EQ(small_game->sides.size(), 2U);
         EXPECT_TRUE(small_game->map->cities.size() >= 2 && small_game->map->cities.size() < 45);
         for (const auto& city : small_game->map->cities) {
@@ -454,7 +454,7 @@ TEST(ModernAiTest, PolicyNetworkWeightsLegacyMigrationAndTemperaturePrior) {
     EXPECT_EQ(PolicyNet::kLegacyV3Params, 6729);
 
     PolicyNet net;
-    EXPECT_TRUE(net.LoadJson("cpp/ai_weights.json"));
+    EXPECT_TRUE(net.LoadJson("cpp/ai_weights.json").ok());
     EXPECT_EQ(net.Flatten().size(), 9700U);
 
     PolicyNet src;

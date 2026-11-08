@@ -23,8 +23,9 @@
 
 #include <cstdint>
 #include <optional>
-#include <string>
 #include <vector>
+
+#include "absl/types/span.h"
 
 namespace w2::xmi {
 
@@ -49,6 +50,6 @@ struct Sequence {
  * @return The sequence, or std::nullopt without an EVNT chunk. Meta events
  *         are dropped.
  */
-std::optional<Sequence> Parse(const std::string& bytes);
+std::optional<Sequence> Parse(absl::Span<const uint8_t> bytes);
 
 }  // namespace w2::xmi

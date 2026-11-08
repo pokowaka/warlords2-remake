@@ -40,9 +40,13 @@ CheckOptions:
   - key:    readability-identifier-naming.VariableCase
     value:  'lower_case'
   # G, the front end's shared state, goes away when the front end is
-  # restructured (docs: code quality plan, phase 5)
+  # restructured (docs: code quality plan, phase 5); FLAGS_* are Abseil flags.
   - key:    readability-identifier-naming.VariableIgnoredRegexp
-    value:  '^G$'
+    value:  '^(G|FLAGS_.*)$'
+  - key:    readability-identifier-naming.ConstexprVariableIgnoredRegexp
+    value:  '^FLAGS_help_storage_.*$'
+  - key:    readability-identifier-naming.StructIgnoredRegexp
+    value:  '^AbslFlag(Default|Help)GenFor.*$'
   - key:    readability-identifier-naming.ParameterCase
     value:  'lower_case'
   - key:    readability-identifier-naming.LocalConstantCase

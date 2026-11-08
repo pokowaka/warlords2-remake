@@ -416,23 +416,29 @@ static void ApplyScaleAndCrop(Map& map, const NewGameOptions& opts) {
             if (x < bx0 || x > bx1 || y < by0 || y > by1) {
                 int key = y * kMapW + x;
                 map.tiles[key] = water_tile;
-                map.roads[key] = '\0';
+                map.roads[key] = 0;
                 map.crossing[key] = false;
             }
         }
     }
 }
 
-std::unique_ptr<Game> NewGame(const std::string& data_dir, const std::string& scenario,
-                              const NewGameOptions& opts) {
+absl::StatusOr<std::unique_ptr<Game>> NewGame(const std::filesystem::path& data_dir,
+                                              const std::string& scenario,
+                                              const NewGameOptions& opts) {
     auto game_ptr = std::make_unique<Game>();
     Game& game = *game_ptr;
     game.rng = Rng(opts.seed);
     game.data_dir = data_dir;
-    armytype::Load(data_dir + "/TERRAIN0/ARMYTYPE.DAT", game.types);
-    game.map = opts.memory_files
-                       ? scn::LoadFromFiles(data_dir + "/" + scenario, scenario, *opts.memory_files)
-                       : scn::Load(data_dir + "/" + scenario, scenario);
+    if (absl::Status status = armytype::Load(data_dir / "TERRAIN0/ARMYTYPE.DAT", game.types);
+        !status.ok()) {
+        return status;
+    }
+    auto loaded_map = opts.memory_files ? scn::LoadFromFiles(data_dir / scenario, scenario,
+                                                             *opts.memory_files)
+                                        : scn::Load(data_dir / scenario, scenario);
+    if (!loaded_map.ok()) return loaded_map.status();
+    game.map = std::move(*loaded_map);
     game.greatest = opts.greatest;
     for (auto& [opt_name, opt_val] : opts.options) {
         if (int* field = game.map->options.Field(opt_name)) *field = opt_val;

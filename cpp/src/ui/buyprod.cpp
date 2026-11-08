@@ -11,6 +11,8 @@
  * 396 is Done, 397-400 pick the slot (live only once all four are full), 401
  * on are the types. Done puts the list back in price order.
  */
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 
@@ -101,7 +103,7 @@ struct BuyDialog : kit::Modal {
                       !w2::game::CannotBuy(*g_app.g, *g_app.player, *city, *types[type_index])
                                .empty());
             gfx::SetColor(1, 1, 1);
-            body.Draw(w2::Fmt("%d gp", types[type_index]->price), x + 40, y + 6);
+            body.Draw(absl::StrFormat("%d gp", types[type_index]->price), x + 40, y + 6);
         }
         kit::DrawControls(dialog_view);
     }

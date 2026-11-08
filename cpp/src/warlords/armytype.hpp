@@ -8,7 +8,9 @@
  */
 #pragma once
 
-#include <string>
+#include <filesystem>
+
+#include "absl/status/status.h"
 
 #include "warlords/types.hpp"
 
@@ -27,11 +29,13 @@ constexpr int kHero = 28;    ///< The hero's type id.
 constexpr int kScouts = 11;  ///< Placeholder garrison when Neutral Cities is off.
 
 /**
- * @brief Reads ARMYTYPE.DAT into `out`, replacing what it held.
+ * @brief Reads `ARMYTYPE.DAT` into `out`, replacing what it held.
  *
- * Fills `out.all` in file order and `out.ids` by type id. Throws
- * std::runtime_error when the file is missing or not 29 records long.
+ * Fills `out.all` in file order and `out.ids` by type id.
+ * @param path Path to `ARMYTYPE.DAT`.
+ * @param out Destination `Types` table.
+ * @return `absl::OkStatus()` on success, or an actionable error status if missing or malformed.
  */
-void Load(const std::string& path, Types& out);
+absl::Status Load(const std::filesystem::path& path, Types& out);
 
 }  // namespace w2::armytype

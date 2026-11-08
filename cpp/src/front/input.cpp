@@ -12,7 +12,6 @@
 #include "platform/pad.hpp"
 #include "platform/sound.hpp"
 #include "ui/dialogs.hpp"
-#include "util/json.hpp"
 #include "util/util.hpp"
 #include "warlords/armytype.hpp"
 #include "warlords/cues.hpp"
@@ -106,8 +105,8 @@ static bool ComputerInput(const std::string& key) {
         return true;
     }
     // Shift and Alt are held to reach Settings, not pressed to skip
-    if (w2::EndsWith(key, "shift") || w2::EndsWith(key, "alt") || w2::EndsWith(key, "ctrl") ||
-        w2::EndsWith(key, "gui")) {
+    if (key.ends_with("shift") || key.ends_with("alt") || key.ends_with("ctrl") ||
+        key.ends_with("gui")) {
         return true;
     }
     if (!HumansLeft()) {
@@ -752,14 +751,14 @@ static void MenuPick(const std::string& menu_key) {
 bool MenuEnabled(const std::string& menu_key) {
     auto& menu_actions = MenuDoes();
     if (menu_key.empty() || !menu_actions.count(menu_key)) return false;
-    bool music = w2::StartsWith(menu_key, "music ");
-    bool ai_opt = w2::StartsWith(menu_key, "ai ");
+    bool music = menu_key.starts_with("music ");
+    bool ai_opt = menu_key.starts_with("ai ");
     if (music && !sound::SynthAvailable(menu_key.substr(6))) return false;
     // On the start screens every menu is greyed except Quit, Load, and display/audio/AI settings.
     if (g_app.starting || !g_app.g) {
         return menu_key == "^Q" || (menu_key == "alt L" && savegame::Used() > 0) ||
-               w2::StartsWith(menu_key, "ui scale ") || w2::StartsWith(menu_key, "screen ") ||
-               music || ai_opt;
+               menu_key.starts_with("ui scale ") || menu_key.starts_with("screen ") || music ||
+               ai_opt;
     }
     // While AI-vs-AI spectating is running, only enable read-only spectator reports, display/audio
     // settings, and quit
@@ -770,8 +769,8 @@ bool MenuEnabled(const std::string& menu_key) {
         return menu_key == "^Q" || menu_key == "alt X" || menu_key == "?" || menu_key == "c" ||
                menu_key == "." || menu_key == "a" || menu_key == "k" || menu_key == "g" ||
                menu_key == "n" || menu_key == "w" || menu_key == "l" ||
-               w2::StartsWith(menu_key, "map zoom ") || w2::StartsWith(menu_key, "ui scale ") ||
-               w2::StartsWith(menu_key, "screen ") || music || ai_opt;
+               menu_key.starts_with("map zoom ") || menu_key.starts_with("ui scale ") ||
+               menu_key.starts_with("screen ") || music || ai_opt;
     }
     w2::Game& game_state = *g_app.g;
     auto side_has_hero = [&]() {
@@ -896,7 +895,7 @@ void Keypressed(const std::string& key) {
     std::string digit;
     if (key.size() == 1 && key[0] >= '0' && key[0] <= '9')
         digit = key;
-    else if (key.size() == 3 && w2::StartsWith(key, "kp") && key[2] >= '0' && key[2] <= '9')
+    else if (key.size() == 3 && key.starts_with("kp") && key[2] >= '0' && key[2] <= '9')
         digit = key.substr(2);
     if (key == "return" || key == "kpenter")
         press(174);

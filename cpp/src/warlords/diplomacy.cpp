@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "absl/strings/str_format.h"
+
 #include "util/util.hpp"
 #include "warlords/ai/belief.hpp"
 #include "warlords/ai/core.hpp"
@@ -186,15 +188,15 @@ void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::s
         side.gold -= paid;
         other.gold += paid;
         AddTrust(game, other_index, side_index, std::min(30, paid / 10 + 5));
-        messages.push_back(Fmt("%s paid %d gold in tribute to %s.", side.name.c_str(), paid,
-                               other.name.c_str()));
+        messages.push_back(
+                absl::StrFormat("%s paid %d gold in tribute to %s.", side.name, paid, other.name));
     } else if (other_offer > 0 && other.gold > 0) {
         int paid = std::min(other.gold, other_offer);
         other.gold -= paid;
         side.gold += paid;
         AddTrust(game, side_index, other_index, std::min(30, paid / 10 + 5));
-        messages.push_back(Fmt("%s paid %d gold in tribute to %s.", other.name.c_str(), paid,
-                               side.name.c_str()));
+        messages.push_back(
+                absl::StrFormat("%s paid %d gold in tribute to %s.", other.name, paid, side.name));
     }
     SetGoldOffer(game, side_index, other_index, 0);
     SetGoldOffer(game, other_index, side_index, 0);
@@ -210,9 +212,9 @@ void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::s
                 game.diplomacy.proposal[Key(participant, war_target)] = kWar;
                 game.diplomacy.proposal[Key(war_target, participant)] = kWar;
                 SetAllied(game, participant, war_target, false);
-                messages.push_back(Fmt("%s joined the war against %s!",
-                                       game.map->sides[participant].name.c_str(),
-                                       game.map->sides[war_target].name.c_str()));
+                messages.push_back(absl::StrFormat("%s joined the war against %s!",
+                                                   game.map->sides[participant].name,
+                                                   game.map->sides[war_target].name));
             }
         }
     }
@@ -428,7 +430,9 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
     if (IsAllied(game, ai_side, target_side)) {
         push_factor("Sworn military alliance", 35);
     } else if (breakdown.truce_remaining > 0) {
-        push_factor(Fmt("Active peace truce (%d turns left)", breakdown.truce_remaining), 15);
+        push_factor(
+                absl::StrFormat("Active peace truce (%d turns left)", breakdown.truce_remaining),
+                15);
     }
 
     // Shared enemies vs opposing wars
@@ -445,9 +449,9 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
         int bonus = shared_wars *
                     static_cast<int>(std::round(
                             18.0F + 10.0F * profile.traits[ai::personality::kCoalitionDrive]));
-        push_factor(
-                Fmt("Fighting %d common %s", shared_wars, shared_wars == 1 ? "enemy" : "enemies"),
-                bonus);
+        push_factor(absl::StrFormat("Fighting %d common %s", shared_wars,
+                                    shared_wars == 1 ? "enemy" : "enemies"),
+                    bonus);
     }
 
     // Border military pressure (from fair-info belief if available)
@@ -474,7 +478,7 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
         }
     }
     if (cities_taken_from_me > 0) {
-        push_factor(Fmt("You hold %d of our claimed cities", cities_taken_from_me),
+        push_factor(absl::StrFormat("You hold %d of our claimed cities", cities_taken_from_me),
                     -cities_taken_from_me * 8);
     }
     if (own_side.capital && own_side.capital->owner_index == target_side) {
@@ -488,8 +492,8 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
         int hegemony_pen = -static_cast<int>(
                 std::round((their_share - 0.25F) * 120.0F *
                            (1.0F + 0.5F * profile.traits[ai::personality::kCoalitionDrive])));
-        push_factor(Fmt("Fear of your growing hegemony (%d%% of cities)",
-                        static_cast<int>(std::round(their_share * 100.0F))),
+        push_factor(absl::StrFormat("Fear of your growing hegemony (%d%% of cities)",
+                                    static_cast<int>(std::round(their_share * 100.0F))),
                     hegemony_pen);
     } else if (leader_side != kNone && leader_side != ai_side && leader_side != target_side &&
                static_cast<float>(leader_cities) /
@@ -512,7 +516,7 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
         int gold_bonus = static_cast<int>(
                 std::round(static_cast<float>(offered_to_ai) / 8.0F *
                            (1.0F + 0.6F * profile.traits[ai::personality::kAvarice])));
-        push_factor(Fmt("Gold tribute offered (%d gold)", offered_to_ai), gold_bonus);
+        push_factor(absl::StrFormat("Gold tribute offered (%d gold)", offered_to_ai), gold_bonus);
     }
 
     breakdown.total_score = std::clamp(breakdown.total_score, -100, 100);
@@ -544,8 +548,8 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
                     static_cast<int>(std::round((35 - breakdown.total_score) * 8.0F / greed_mult)) /
                             25 * 25);
             breakdown.what_it_takes =
-                    Fmt("Accepts Peace freely; Alliance for ~%d gold (or shared war).",
-                        breakdown.ally_gold_needed);
+                    absl::StrFormat("Accepts Peace freely; Alliance for ~%d gold (or shared war).",
+                                    breakdown.ally_gold_needed);
         } else if (breakdown.total_score >= -45) {
             breakdown.stance_summary = "Hostile, Distrustful";
             breakdown.peace_gold_needed =
@@ -554,8 +558,8 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
                                          25 * 25);
             breakdown.ally_gold_needed = kNone;
             breakdown.what_it_takes =
-                    Fmt("Demands %d gold tribute (or border withdrawal) for Peace.",
-                        breakdown.peace_gold_needed);
+                    absl::StrFormat("Demands %d gold tribute (or border withdrawal) for Peace.",
+                                    breakdown.peace_gold_needed);
         } else {
             breakdown.stance_summary = "Implacable Warpath";
             if (profile.traits[ai::personality::kAvarice] > 0.5F && breakdown.total_score > -75) {
@@ -563,8 +567,8 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
                         150,
                         static_cast<int>(std::round((-breakdown.total_score) * 8.0F)) / 50 * 50);
                 breakdown.what_it_takes =
-                        Fmt("Only a heavy tribute of %d gold will stay their hand!",
-                            breakdown.peace_gold_needed);
+                        absl::StrFormat("Only a heavy tribute of %d gold will stay their hand!",
+                                        breakdown.peace_gold_needed);
             } else {
                 breakdown.peace_gold_needed = kNone;
                 breakdown.what_it_takes =

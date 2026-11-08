@@ -1,22 +1,28 @@
 #include "warlords/aicard.hpp"
 
+#include "absl/strings/str_format.h"
+#include "absl/types/span.h"
+
 #include "util/util.hpp"
 #include "warlords/bytes.hpp"
 
 namespace w2::aicard {
 
-std::string Path(const std::string& data_dir, int level, int number, const std::string& ext) {
-    static const char* letters[3] = {"K", "L", "W"};  // one deck per level
-    const char* letter = level >= 0 && level < 3 ? letters[level] : "W";
-    return Fmt("%s/CARDS/%s%03d.%s", data_dir.c_str(), letter, number, ext.c_str());
+std::filesystem::path Path(const std::filesystem::path& data_dir, int level, int number,
+                           std::string_view ext) {
+    static constexpr const char* kLetters[3] = {"K", "L", "W"};  // one deck per level
+    const char* letter = level >= 0 && level < 3 ? kLetters[level] : "W";
+    return data_dir / "CARDS" / absl::StrFormat("%s%03d.%s", letter, number, ext);
 }
 
-std::optional<Card> Load(const std::string& data_dir, int level, int number) {
-    auto file = ReadFile(Path(data_dir, level, number, "CRD"));
-    if (!file || file->size() < static_cast<size_t>(kRecord)) return std::nullopt;
-    const std::string& bytes = *file;
+std::optional<Card> Load(const std::filesystem::path& data_dir, int level, int number) {
+    auto file = ReadBytes(Path(data_dir, level, number, "CRD"));
+    if (!file.ok() || file->size() < static_cast<size_t>(kRecord)) return std::nullopt;
+    absl::Span<const uint8_t> bytes(*file);
     Card card;
-    for (int type = 0; type <= 28; type++) card.fight_order.push_back(U8(bytes, 0x0e + type));
+    for (int type = 0; type <= 28; type++) {
+        card.fight_order.push_back(U8(bytes, 0x0e + static_cast<size_t>(type)));
+    }
     card.groups = I16(bytes, 0x08);
     card.bold = I16(bytes, 0x0a);
     card.cautious = I16(bytes, 0x2b);
@@ -43,9 +49,9 @@ std::optional<Card> Load(const std::string& data_dir, int level, int number) {
 }
 
 std::optional<std::pair<std::string, std::vector<std::string>>> Describe(
-        const std::string& data_dir, int level, int number) {
+        const std::filesystem::path& data_dir, int level, int number) {
     auto file = ReadFile(Path(data_dir, level, number, "DSC"));
-    if (!file) return std::nullopt;
+    if (!file.ok()) return std::nullopt;
     std::vector<std::string> lines;
     std::string line;
     std::string text = *file + "\n";
@@ -64,18 +70,18 @@ std::optional<std::pair<std::string, std::vector<std::string>>> Describe(
     return std::make_pair(name, lines);
 }
 
-std::vector<std::string> Deck(const std::string& data_dir, int level) {
+std::vector<std::string> Deck(const std::filesystem::path& data_dir, int level) {
     std::vector<std::string> names;
     for (int number = 0; number < 30; number++) {
         auto file = ReadFile(Path(data_dir, level, number, "DSC"));
-        if (!file) break;
+        if (!file.ok()) break;
         std::string name = file->substr(0, 40);
         names.push_back(name.substr(0, name.find('\r')));
     }
     return names;
 }
 
-int Count(const std::string& data_dir, int level) {
+int Count(const std::filesystem::path& data_dir, int level) {
     int count = 0;
     while (count < 100 && FileExists(Path(data_dir, level, count, "CRD"))) count++;
     return count;

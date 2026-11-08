@@ -53,6 +53,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/flags/flag.h"
+#include "absl/log/absl_check.h"
+#include "absl/strings/str_format.h"
+
 #include "opponents.hpp"
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
@@ -62,6 +66,49 @@
 #include "warlords/game.hpp"
 #include "warlords/randommap.hpp"
 #include "warlords/save.hpp"
+
+ABSL_FLAG(int, iterations, 300, "Training iterations to run.");
+ABSL_FLAG(int, games_per_iter, 48, "Rollout games per iteration.");
+ABSL_FLAG(int, turns, 40, "Training games cut-off turn.");
+ABSL_FLAG(int, eval_every, 10, "Iterations between selection evaluations.");
+ABSL_FLAG(int, eval_turns, 40, "Evaluation games cut-off turn.");
+ABSL_FLAG(int, select_seeds, 12, "Seeds in the selection set.");
+ABSL_FLAG(int, report_seeds, 32, "Seeds in the held-out report set.");
+ABSL_FLAG(int, epochs, 4, "PPO passes over each iteration's turns.");
+ABSL_FLAG(int, minibatches, 8, "Minibatches per epoch.");
+ABSL_FLAG(double, lr, 3.0e-3, "Initial Adam learning rate.");
+ABSL_FLAG(double, temp_start, 1.0, "Initial sampling temperature.");
+ABSL_FLAG(double, temp_end, w2::ai::ml::kTrainTemperatureEnd, "Final sampling temperature.");
+ABSL_FLAG(double, eval_temp, w2::ai::ml::kDeployTemperature, "Evaluation sampling temperature.");
+ABSL_FLAG(uint32_t, seed_offset, 0, "Offset added to every training seed.");
+ABSL_FLAG(double, classic_frac, 0.0, "Share of training games played against Classic AI.");
+ABSL_FLAG(double, random_map_frac, 0.0, "Share of training games played on random maps.");
+ABSL_FLAG(int, active_sides, 8, "Active sides in play (2 to 8).");
+ABSL_FLAG(int, crop_margin, 0, "Crop margin around active capitals (0 = full map).");
+ABSL_FLAG(double, lambda, 0.95, "GAE lambda.");
+ABSL_FLAG(double, local_weight, 1.0, "Weight of per-stack local advantage.");
+ABSL_FLAG(std::string, out, "cpp/ai_weights.json", "Checkpoint path read and written.");
+ABSL_FLAG(std::string, log, "", "CSV file path with one line per iteration.");
+ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
+ABSL_FLAG(bool, solo_learner, false, "Play one learner seat against K-1 opponents.");
+ABSL_FLAG(bool, from_scratch, false, "Ignore any existing --out checkpoint.");
+ABSL_FLAG(bool, benchmark_only, false, "Evaluate the checkpoint and exit.");
+ABSL_FLAG(std::string, eval_mode, "mixed", "Evaluation seat split: mixed or solo.");
+ABSL_FLAG(std::string, compare, "", "B checkpoint path for paired A/B comparison.");
+ABSL_FLAG(int, dev_seeds, 0, "Benchmark/compare seed count on the development set.");
+ABSL_FLAG(bool, breakdown, false, "Print city shares broken down by preset and scenario.");
+ABSL_FLAG(int, critic_warmup, 0, "Iterations where only the critics learn.");
+ABSL_FLAG(double, mixed_frac, 0.0, "Fraction of solo-learner games played 4v4 instead.");
+ABSL_FLAG(int, save_every, 0, "Write <out>.iterN.json snapshots every N iterations.");
+ABSL_FLAG(double, raider_frac, 0.0, "Share of Classic training seats played by Raider.");
+ABSL_FLAG(double, departure_weight, 0.0, "Credit a city loss to the move that vacated it.");
+ABSL_FLAG(std::string, frozen_opponent, "", "Fixed Modern checkpoint path for opponent seats.");
+ABSL_FLAG(double, frozen_frac, 0.0, "Share of non-learner seats played by --frozen-opponent.");
+ABSL_FLAG(int, search_k, 0, "Candidate turns per learner turn (0 = no search training).");
+ABSL_FLAG(int, search_r, 2, "Rollout copies per candidate turn.");
+ABSL_FLAG(int, search_h, 2, "Rounds played forward after a candidate turn.");
+ABSL_FLAG(std::string, eval_opponent, "classic",
+          "Evaluation opponent personality: classic, raider, or frozen.");
 
 using namespace w2;
 namespace ml = w2::ai::ml;
@@ -221,10 +268,15 @@ std::unique_ptr<Game> MakeArenaGame(const Config& cfg, const std::string& scenar
         map_options.allies = preset.diplomacy != 0;
         map_options.terrain_set = 0;
         auto files = randommap::GenerateNow(map_options);
-        opts.memory_files = &files;
-        return game::NewGame(cfg.data_dir, "RANDOM", opts);
+        ABSL_CHECK_OK(files);
+        opts.memory_files = &*files;
+        auto created = game::NewGame(cfg.data_dir, "RANDOM", opts);
+        ABSL_CHECK_OK(created);
+        return std::move(*created);
     }
-    return game::NewGame(cfg.data_dir, scenario, opts);
+    auto created = game::NewGame(cfg.data_dir, scenario, opts);
+    ABSL_CHECK_OK(created);
+    return std::move(*created);
 }
 
 // ---------------------------------------------------------------- rollouts
@@ -437,7 +489,9 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
 
 /** @brief Returns an independent copy of `game`, made by saving and loading it. */
 std::unique_ptr<Game> CopyGame(const Config& cfg, const Game& game) {
-    return save::Decode(save::Encode(game), cfg.data_dir);
+    auto copy = save::Decode(save::Encode(game), cfg.data_dir);
+    ABSL_CHECK_OK(copy);
+    return std::move(*copy);
 }
 
 /**
@@ -1162,124 +1216,79 @@ void PrintPaired(const char* name_a, const EvalResult& result_a, const char* nam
  * @return false, after printing why, on an unknown option or value.
  */
 bool ParseArgs(int argc, char** argv, Config& cfg) {
-    for (int i = 1; i < argc; i++) {
-        std::string arg = argv[i];
-        auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
-        if (arg == "--iterations")
-            cfg.iterations = std::max(0, std::stoi(next()));
-        else if (arg == "--games-per-iter")
-            cfg.games_per_iter = std::max(2, std::stoi(next()));
-        else if (arg == "--turns")
-            cfg.max_turns = std::max(6, std::stoi(next()));
-        else if (arg == "--eval-every")
-            cfg.eval_every = std::max(1, std::stoi(next()));
-        else if (arg == "--eval-turns")
-            cfg.eval_turns = std::max(6, std::stoi(next()));
-        else if (arg == "--select-seeds")
-            cfg.select_seeds = std::max(1, std::stoi(next()));
-        else if (arg == "--report-seeds")
-            cfg.report_seeds = std::max(0, std::stoi(next()));
-        else if (arg == "--epochs")
-            cfg.epochs = std::max(1, std::stoi(next()));
-        else if (arg == "--minibatches")
-            cfg.minibatches = std::max(1, std::stoi(next()));
-        else if (arg == "--lr")
-            cfg.lr_start = std::stof(next());
-        else if (arg == "--temp-start")
-            cfg.temp_start = std::max(0.1F, std::stof(next()));
-        else if (arg == "--temp-end")
-            cfg.temp_end = std::max(0.1F, std::stof(next()));
-        else if (arg == "--eval-temp")
-            cfg.eval_temp = std::max(0.01F, std::stof(next()));
-        else if (arg == "--seed-offset")
-            cfg.seed_offset =
-                    std::min<uint32_t>(500000U, static_cast<uint32_t>(std::stoul(next())));
-        else if (arg == "--classic-frac")
-            cfg.classic_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (arg == "--random-map-frac")
-            cfg.random_map_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (arg == "--active-sides")
-            cfg.active_sides = std::clamp(std::stoi(next()), 2, 8);
-        else if (arg == "--crop-margin")
-            cfg.crop_margin = std::max(0, std::stoi(next()));
-        else if (arg == "--lambda")
-            cfg.gae_lambda = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (arg == "--local-weight")
-            cfg.local_weight = std::max(0.0F, std::stof(next()));
-        else if (arg == "--out")
-            cfg.out_path = next();
-        else if (arg == "--log")
-            cfg.log_path = next();
-        else if (arg == "--data")
-            cfg.data_dir = next();
-        else if (arg == "--solo-learner")
-            cfg.solo_learner = true;
-        else if (arg == "--from-scratch")
-            cfg.from_scratch = true;
-        else if (arg == "--benchmark-only")
-            cfg.benchmark_only = true;
-        else if (arg == "--eval-mode") {
-            std::string mode = next();
-            if (mode == "solo")
-                cfg.eval_mode = EvalMode::kSolo;
-            else if (mode == "mixed")
-                cfg.eval_mode = EvalMode::kMixed;
-            else {
-                std::fprintf(stderr,
-                             "Unknown --eval-mode '%s'; expected 'mixed' (4 vs 4) or 'solo' (1 vs "
-                             "K-1).\n",
-                             mode.c_str());
-                return false;
-            }
-        } else if (arg == "--compare")
-            cfg.compare_path = next();
-        else if (arg == "--dev-seeds")
-            cfg.dev_seeds = std::max(0, std::stoi(next()));
-        else if (arg == "--breakdown")
-            cfg.breakdown = true;
-        else if (arg == "--critic-warmup")
-            cfg.critic_warmup = std::max(0, std::stoi(next()));
-        else if (arg == "--mixed-frac")
-            cfg.mixed_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (arg == "--save-every")
-            cfg.save_every = std::max(0, std::stoi(next()));
-        else if (arg == "--raider-frac")
-            cfg.raider_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (arg == "--departure-weight")
-            cfg.departure_weight = std::max(0.0F, std::stof(next()));
-        else if (arg == "--frozen-opponent")
-            cfg.frozen_path = next();
-        else if (arg == "--frozen-frac")
-            cfg.frozen_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (arg == "--search-k")
-            cfg.search_k = std::max(0, std::stoi(next()));
-        else if (arg == "--search-r")
-            cfg.search_r = std::max(1, std::stoi(next()));
-        else if (arg == "--search-h")
-            cfg.search_h = std::max(1, std::stoi(next()));
-        else if (arg == "--eval-opponent") {
-            std::string opponent = next();
-            if (opponent == "raider")
-                cfg.eval_opponent = opponents::Kind::kRaider;
-            else if (opponent == "frozen")
-                cfg.eval_opponent = opponents::Kind::kFrozen;
-            else if (opponent == "classic")
-                cfg.eval_opponent = opponents::Kind::kClassic;
-            else {
-                std::fprintf(
-                        stderr,
-                        "Unknown --eval-opponent '%s'; expected 'classic', 'raider' or 'frozen'.\n",
-                        opponent.c_str());
-                return false;
-            }
-        }
-
-        else {
-            std::fprintf(stderr,
-                         "Unknown argument '%s'; see the usage at the top of cpp/test/arena.cpp.\n",
-                         arg.c_str());
-            return false;
-        }
+    auto extra_args = ParseCliFlags(
+            argc, argv, "w2arena [--iterations N] [--games-per-iter G] [--turns T] [--out PATH]");
+    if (!extra_args.empty()) {
+        std::fprintf(stderr,
+                     "Unknown argument '%s'; see the usage at the top of cpp/test/arena.cpp.\n",
+                     extra_args[0].c_str());
+        return false;
+    }
+    cfg.iterations = std::max(0, absl::GetFlag(FLAGS_iterations));
+    cfg.games_per_iter = std::max(2, absl::GetFlag(FLAGS_games_per_iter));
+    cfg.max_turns = std::max(6, absl::GetFlag(FLAGS_turns));
+    cfg.eval_every = std::max(1, absl::GetFlag(FLAGS_eval_every));
+    cfg.eval_turns = std::max(6, absl::GetFlag(FLAGS_eval_turns));
+    cfg.select_seeds = std::max(1, absl::GetFlag(FLAGS_select_seeds));
+    cfg.report_seeds = std::max(0, absl::GetFlag(FLAGS_report_seeds));
+    cfg.epochs = std::max(1, absl::GetFlag(FLAGS_epochs));
+    cfg.minibatches = std::max(1, absl::GetFlag(FLAGS_minibatches));
+    cfg.lr_start = static_cast<float>(absl::GetFlag(FLAGS_lr));
+    cfg.temp_start = std::max(0.1F, static_cast<float>(absl::GetFlag(FLAGS_temp_start)));
+    cfg.temp_end = std::max(0.1F, static_cast<float>(absl::GetFlag(FLAGS_temp_end)));
+    cfg.eval_temp = std::max(0.01F, static_cast<float>(absl::GetFlag(FLAGS_eval_temp)));
+    cfg.seed_offset = std::min<uint32_t>(500000U, absl::GetFlag(FLAGS_seed_offset));
+    cfg.classic_frac =
+            std::clamp(static_cast<float>(absl::GetFlag(FLAGS_classic_frac)), 0.0F, 1.0F);
+    cfg.random_map_frac =
+            std::clamp(static_cast<float>(absl::GetFlag(FLAGS_random_map_frac)), 0.0F, 1.0F);
+    cfg.active_sides = std::clamp(absl::GetFlag(FLAGS_active_sides), 2, 8);
+    cfg.crop_margin = std::max(0, absl::GetFlag(FLAGS_crop_margin));
+    cfg.gae_lambda = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_lambda)), 0.0F, 1.0F);
+    cfg.local_weight = std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_local_weight)));
+    cfg.out_path = absl::GetFlag(FLAGS_out);
+    cfg.log_path = absl::GetFlag(FLAGS_log);
+    cfg.data_dir = absl::GetFlag(FLAGS_data);
+    cfg.solo_learner = absl::GetFlag(FLAGS_solo_learner);
+    cfg.from_scratch = absl::GetFlag(FLAGS_from_scratch);
+    cfg.benchmark_only = absl::GetFlag(FLAGS_benchmark_only);
+    std::string mode = absl::GetFlag(FLAGS_eval_mode);
+    if (mode == "solo") {
+        cfg.eval_mode = EvalMode::kSolo;
+    } else if (mode == "mixed") {
+        cfg.eval_mode = EvalMode::kMixed;
+    } else {
+        std::fprintf(stderr,
+                     "Unknown --eval-mode '%s'; expected 'mixed' (4 vs 4) or 'solo' (1 vs K-1).\n",
+                     mode.c_str());
+        return false;
+    }
+    cfg.compare_path = absl::GetFlag(FLAGS_compare);
+    cfg.dev_seeds = std::max(0, absl::GetFlag(FLAGS_dev_seeds));
+    cfg.breakdown = absl::GetFlag(FLAGS_breakdown);
+    cfg.critic_warmup = std::max(0, absl::GetFlag(FLAGS_critic_warmup));
+    cfg.mixed_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_mixed_frac)), 0.0F, 1.0F);
+    cfg.save_every = std::max(0, absl::GetFlag(FLAGS_save_every));
+    cfg.raider_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_raider_frac)), 0.0F, 1.0F);
+    cfg.departure_weight =
+            std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_departure_weight)));
+    cfg.frozen_path = absl::GetFlag(FLAGS_frozen_opponent);
+    cfg.frozen_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_frozen_frac)), 0.0F, 1.0F);
+    cfg.search_k = std::max(0, absl::GetFlag(FLAGS_search_k));
+    cfg.search_r = std::max(1, absl::GetFlag(FLAGS_search_r));
+    cfg.search_h = std::max(1, absl::GetFlag(FLAGS_search_h));
+    std::string opponent = absl::GetFlag(FLAGS_eval_opponent);
+    if (opponent == "raider") {
+        cfg.eval_opponent = opponents::Kind::kRaider;
+    } else if (opponent == "frozen") {
+        cfg.eval_opponent = opponents::Kind::kFrozen;
+    } else if (opponent == "classic") {
+        cfg.eval_opponent = opponents::Kind::kClassic;
+    } else {
+        std::fprintf(stderr,
+                     "Unknown --eval-opponent '%s'; expected 'classic', 'raider' or 'frozen'.\n",
+                     opponent.c_str());
+        return false;
     }
     return true;
 }
@@ -1296,7 +1305,7 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
 int main(int argc, char** argv) {
     Config cfg;
     if (!ParseArgs(argc, argv, cfg)) return 2;
-    if (!FileExists(cfg.data_dir + "/TERRAIN0/ARMYTYPE.DAT")) {
+    if (!FileExists(std::filesystem::path(cfg.data_dir) / "TERRAIN0/ARMYTYPE.DAT")) {
         std::fprintf(stderr,
                      "Cannot find the game data in '%s': run from the repository root or pass "
                      "--data DIR.\n",
@@ -1307,7 +1316,7 @@ int main(int argc, char** argv) {
     ml::SetDeployTemperature(cfg.eval_temp);
     ml::PolicyNetwork frozen;
     if (!cfg.frozen_path.empty()) {
-        if (!frozen.LoadJson(cfg.frozen_path)) {
+        if (!frozen.LoadJson(cfg.frozen_path).ok()) {
             std::fprintf(stderr,
                          "Cannot load --frozen-opponent '%s'; check the path and JSON format.\n",
                          cfg.frozen_path.c_str());
@@ -1323,7 +1332,7 @@ int main(int argc, char** argv) {
     ml::PolicyNetwork learner;
     bool loaded = false;
     if (!cfg.from_scratch && std::filesystem::exists(cfg.out_path))
-        loaded = learner.LoadJson(cfg.out_path);
+        loaded = learner.LoadJson(cfg.out_path).ok();
     if (!loaded) learner.InitRandomWeights(2026);
     std::printf("=== w2arena: PPO self-play | params %d | threads %u | %s ===\n",
                 ml::PolicyNetwork::kTotalParams, threads,
@@ -1353,7 +1362,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         ml::PolicyNetwork other;
-        if (!other.LoadJson(cfg.compare_path)) {
+        if (!other.LoadJson(cfg.compare_path).ok()) {
             std::fprintf(stderr,
                          "Cannot load --compare checkpoint '%s'; check the path and JSON format.\n",
                          cfg.compare_path.c_str());
@@ -1369,8 +1378,9 @@ int main(int argc, char** argv) {
         PrintPaired(cfg.out_path.c_str(), result_a, cfg.compare_path.c_str(), result_b);
         return 0;
     }
-    std::string mode_label = cfg.solo_learner ? "solo-learner (1 vs K-1 Classic)"
-                                              : Fmt("classic-frac %.2f", cfg.classic_frac);
+    std::string mode_label = cfg.solo_learner
+                                     ? "solo-learner (1 vs K-1 Classic)"
+                                     : absl::StrFormat("classic-frac %.2f", cfg.classic_frac);
     std::printf(
             "iters %d | games/iter %d | turns %d | sides %d (crop %d, rand %.2f) | epochs %d x %d "
             "minibatches | "
@@ -1600,8 +1610,8 @@ int main(int argc, char** argv) {
 
         if (cfg.save_every > 0 && iter % cfg.save_every == 0) {
             std::filesystem::path snap = cfg.out_path;
-            snap.replace_extension(Fmt(".iter%d.json", iter));
-            learner.SaveJson(snap, iter, 0.0F);
+            snap.replace_extension(absl::StrFormat(".iter%d.json", iter));
+            learner.SaveJson(snap, iter, 0.0F).IgnoreError();
         }
         if (iter % 10 == 0) {
             if (hall_of_fame.size() < 12)
@@ -1621,7 +1631,7 @@ int main(int argc, char** argv) {
                 best_share = sel_share;
                 best = learner;
                 best_iter = iter;
-                best.SaveJson(cfg.out_path, best_iter, best_share);
+                best.SaveJson(cfg.out_path, best_iter, best_share).IgnoreError();
             }
         }
         if (logf) {
@@ -1634,11 +1644,11 @@ int main(int argc, char** argv) {
     }
     if (logf) std::fclose(logf);
 
-    best.SaveJson(cfg.out_path, best_iter, best_share);
+    best.SaveJson(cfg.out_path, best_iter, best_share).IgnoreError();
     {
         std::filesystem::path fin = cfg.out_path;
         fin.replace_extension(".final.json");
-        learner.SaveJson(fin, cfg.iterations, 0.0F);
+        learner.SaveJson(fin, cfg.iterations, 0.0F).IgnoreError();
     }
     if (cfg.report_seeds > 0) {
         std::printf("Kept iteration %d (selection share %.1f%%) in %s. Held-out report:\n",

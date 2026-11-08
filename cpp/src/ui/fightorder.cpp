@@ -10,6 +10,8 @@
  * on the chosen one, lets it go; on another, swaps the two. Cancel puts back
  * the copy taken on opening.
  */
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 
@@ -89,7 +91,7 @@ struct Order : kit::Modal {
             if (type_id != w2::kNone)
                 kit::Army(type_id, side->index, 88 + x, 128 + y, i == chosen ? side->index + 2 : 1);
             gfx::SetColor(1, 1, 1);
-            font.Draw(w2::Fmt("%d.", i + 1), 128 + x, 134 + y);
+            font.Draw(absl::StrFormat("%d.", i + 1), 128 + x, 134 + y);
         }
         // The place controls are clicked but not drawn: the armies stand for them.
         std::set<int> place_controls;

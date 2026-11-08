@@ -12,6 +12,8 @@
  */
 #include <cmath>
 
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/history.hpp"
@@ -166,10 +168,11 @@ struct History : kit::Modal {
         axes(15, 0);
         const Font& font = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
-        kit::Right(font, w2::Fmt("%d", top), kGraphX - 8, kGraphY - 6);
+        kit::Right(font, absl::StrFormat("%d", top), kGraphX - 8, kGraphY - 6);
         kit::Right(font, "0", kGraphX - 8, kGraphY + kGraphH - 8);
         kit::Centred(font, "0", kGraphX, kGraphY + kGraphH + 8);
-        kit::Right(font, w2::Fmt("%d", turns), kGraphX + kGraphW + 8, kGraphY + kGraphH + 8);
+        kit::Right(font, absl::StrFormat("%d", turns), kGraphX + kGraphW + 8,
+                   kGraphY + kGraphH + 8);
         kit::Centred(font, "Turns", kGraphX + kGraphW / 2, kGraphY + kGraphH + 8);
         // Each side's line, from where its last step ended.
         int last_x[8], last_y[8];
@@ -254,7 +257,7 @@ struct History : kit::Modal {
         else
             DrawGraph();
         gfx::SetColor(1, 1, 1);
-        kit::Centred(kit::GetFont(2), w2::Fmt("Turn %d", turn), 312, 350);
+        kit::Centred(kit::GetFont(2), absl::StrFormat("Turn %d", turn), 312, 350);
         kit::DrawControls(dialog_view);
     }
 

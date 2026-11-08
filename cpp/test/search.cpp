@@ -29,6 +29,10 @@
 #include <thread>
 #include <vector>
 
+#include "absl/flags/flag.h"
+#include "absl/log/absl_check.h"
+
+#include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
 #include "warlords/ai/ml_policy.hpp"
@@ -36,13 +40,23 @@
 #include "warlords/game.hpp"
 #include "warlords/save.hpp"
 
+ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
+ABSL_FLAG(std::string, mode, "probe", "Search mode: probe or play.");
+ABSL_FLAG(int, seeds, 16, "Number of seed pairs to evaluate.");
+ABSL_FLAG(int, candidates, 4, "Sampled candidate turns K besides the greedy turn.");
+ABSL_FLAG(int, rollouts, 4, "Rollout copies R per candidate.");
+ABSL_FLAG(int, horizon, 2, "Rounds H played forward after each candidate turn.");
+ABSL_FLAG(int, turns, 40, "Maximum turns per game.");
+ABSL_FLAG(std::string, judge, "honest", "Candidate judge mode: peek, honest, or fair.");
+ABSL_FLAG(double, cand_temp, 0.5, "Sampling temperature for candidate turns.");
+ABSL_FLAG(double, switch_z, 0.0, "Minimum standard-error margin to switch off greedy turn.");
+ABSL_FLAG(uint32_t, seed_offset, 0, "Offset added to development benchmark seeds.");
+
 using namespace w2;
 namespace ml = w2::ai::ml;
 
 namespace {
 
-/** @brief Directory holding the original game data. */
-const std::string kData = "original";
 /** @brief The built-in scenarios the benchmark games cycle through. */
 const std::vector<std::string> kScenarios = {"ERYTHEA", "ISLADIA", "DRAGON",
                                              "TUTORIA", "SORCERY", "HADESHA"};
@@ -85,8 +99,10 @@ struct Settings {
 };
 
 /** @brief A deep copy of @p game, made through a save/load round trip. */
-std::unique_ptr<Game> CopyGame(const Game& game) {
-    return save::Decode(save::Encode(game), kData);
+std::unique_ptr<Game> CopyGame(const Game& game, const std::string& data_dir) {
+    auto copy = save::Decode(save::Encode(game), data_dir);
+    ABSL_CHECK_OK(copy);
+    return std::move(*copy);
 }
 
 /**
@@ -168,7 +184,8 @@ struct CandidateResult {
 
 /** @brief Builds and scores the K+1 candidates for the side in @p game (its turn is next). */
 std::vector<CandidateResult> ScoreCandidates(const Game& game, int side_index,
-                                             const Settings& settings) {
+                                             const Settings& settings,
+                                             const std::string& data_dir) {
     std::vector<CandidateResult> out;
     const uint32_t base_seed = static_cast<uint32_t>(game.rng.state * 2654435761U) ^
                                static_cast<uint32_t>(game.turn * 40503U);
@@ -176,16 +193,16 @@ std::vector<CandidateResult> ScoreCandidates(const Game& game, int side_index,
         CandidateResult result;
         std::vector<double> scores;
         if (settings.judge == Judge::kPeek) {
-            result.after = CopyGame(game);
+            result.after = CopyGame(game, data_dir);
             PlayCandidate(*result.after, side_index, candidate, base_seed, settings);
             for (int rollout = 0; rollout < settings.rollouts; rollout++) {
-                auto copy = CopyGame(*result.after);
+                auto copy = CopyGame(*result.after, data_dir);
                 copy->rng.state ^= static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U);
                 scores.push_back(Rollout(*copy, side_index, settings.horizon, *settings.policy));
             }
         } else {
             for (int rollout = 0; rollout < settings.rollouts; rollout++) {
-                auto copy = CopyGame(game);
+                auto copy = CopyGame(game, data_dir);
                 copy->rng.state ^= static_cast<uint32_t>(
                         (rollout + 1) * 0x9e3779b9U);  // fresh dice, also for the candidate turn
                 if (settings.judge == Judge::kFair) RestrictToView(*copy, side_index);
@@ -213,7 +230,7 @@ std::vector<CandidateResult> ScoreCandidates(const Game& game, int side_index,
  * @param scen_out Receives the scenario name.
  */
 std::unique_ptr<Game> NewBenchmarkGame(int case_index, uint32_t seed, int& preset_out,
-                                       std::string& scen_out) {
+                                       std::string& scen_out, const std::string& data_dir) {
     int pair_index = case_index / 2;
     scen_out = kScenarios[(pair_index + pair_index / 4) % kScenarios.size()];
     preset_out = pair_index % 4;
@@ -230,7 +247,9 @@ std::unique_ptr<Game> NewBenchmarkGame(int case_index, uint32_t seed, int& prese
         game_options.sides[side].level = 2;
         game_options.sides[side].card = static_cast<int>((seed + side * 5) % 9);
     }
-    return game::NewGame(kData, scen_out, game_options);
+    auto created = game::NewGame(data_dir, scen_out, game_options);
+    ABSL_CHECK_OK(created);
+    return std::move(*created);
 }
 
 /**
@@ -271,41 +290,58 @@ double ModernShare(const Game& game, const std::array<bool, 8>& modern) {
  * See the file comment for the arguments.
  */
 int main(int argc, char** argv) {
-    if (argc < 2) {
+    auto args = ParseCliFlags(
+            argc, argv,
+            "w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair] "
+            "[CAND_TEMP] [SWITCH_Z] [SEED_OFFSET]");
+    if (args.empty()) {
         std::fprintf(stderr,
                      "usage: w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] "
                      "[peek|honest|fair] [CAND_TEMP] [SWITCH_Z] "
                      "[SEED_OFFSET]\n");
         return 2;
     }
+    std::string data_dir = absl::GetFlag(FLAGS_data);
     ml::PolicyNetwork policy;
-    if (!policy.LoadJson(argv[1])) {
-        std::fprintf(stderr, "w2search: cannot load weights '%s'\n", argv[1]);
+    if (absl::Status status = policy.LoadJson(args[0]); !status.ok()) {
+        std::fprintf(stderr, "w2search: %s\n", std::string(status.message()).c_str());
         return 1;
     }
-    std::string mode = argc > 2 ? argv[2] : "probe";
-    int seeds = argc > 3 ? std::atoi(argv[3]) : 16;
+    std::string mode = args.size() > 1 ? args[1] : absl::GetFlag(FLAGS_mode);
+    int seeds = args.size() > 2 ? static_cast<int>(ToInt(args[2]).value_or(16))
+                                : absl::GetFlag(FLAGS_seeds);
     Settings settings;
     settings.policy = &policy;
-    settings.candidates = argc > 4 ? std::atoi(argv[4]) : 4;
-    settings.rollouts = argc > 5 ? std::atoi(argv[5]) : 4;
-    settings.horizon = argc > 6 ? std::atoi(argv[6]) : 2;
-    int turns = argc > 7 ? std::atoi(argv[7]) : 40;
-    std::string judge = argc > 8 ? argv[8] : "honest";
+    settings.candidates = args.size() > 3 ? static_cast<int>(ToInt(args[3]).value_or(4))
+                                          : absl::GetFlag(FLAGS_candidates);
+    settings.rollouts = args.size() > 4 ? static_cast<int>(ToInt(args[4]).value_or(4))
+                                        : absl::GetFlag(FLAGS_rollouts);
+    settings.horizon = args.size() > 5 ? static_cast<int>(ToInt(args[5]).value_or(2))
+                                       : absl::GetFlag(FLAGS_horizon);
+    int turns = args.size() > 6 ? static_cast<int>(ToInt(args[6]).value_or(40))
+                                : absl::GetFlag(FLAGS_turns);
+    std::string judge = args.size() > 7 ? args[7] : absl::GetFlag(FLAGS_judge);
     settings.judge = judge == "peek"   ? Judge::kPeek
                      : judge == "fair" ? Judge::kFair
                                        : Judge::kHonest;
-    settings.cand_temp = argc > 9 ? static_cast<float>(std::atof(argv[9])) : 0.5F;
-    settings.switch_z = argc > 10 ? static_cast<float>(std::atof(argv[10])) : 0.0F;
-    const uint32_t seed_offset = argc > 11 ? static_cast<uint32_t>(std::atoi(argv[11])) : 0U;
+    settings.cand_temp = args.size() > 8 ? static_cast<float>(std::strtod(args[8].c_str(), nullptr))
+                                         : static_cast<float>(absl::GetFlag(FLAGS_cand_temp));
+    settings.switch_z = args.size() > 9 ? static_cast<float>(std::strtod(args[9].c_str(), nullptr))
+                                        : static_cast<float>(absl::GetFlag(FLAGS_switch_z));
+    const uint32_t seed_offset = args.size() > 10
+                                         ? static_cast<uint32_t>(ToInt(args[10]).value_or(0))
+                                         : absl::GetFlag(FLAGS_seed_offset);
     const bool play = (mode == "play");
 
     const int cases = seeds * 2;
-    std::vector<double> shares(cases, 0.5), plain_shares(cases, 0.5);
+    std::vector<double> shares(cases, 0.5);
     std::mutex results_mutex;
     // probe statistics
-    long probes = 0, beaten = 0, beaten_clearly = 0;
-    double gain_sum = 0.0, rollout_sd_sum = 0.0;
+    long probes = 0;
+    long beaten = 0;
+    long beaten_clearly = 0;
+    double gain_sum = 0.0;
+    double rollout_sd_sum = 0.0;
     std::atomic<int> next{0};
     auto start_time = std::chrono::steady_clock::now();
     std::vector<std::thread> pool;
@@ -317,7 +353,7 @@ int main(int argc, char** argv) {
                 std::string scenario;
                 uint32_t seed = kSeedBase + seed_offset + static_cast<uint32_t>(case_index / 2);
                 auto game = NewBenchmarkGame(case_index + 2 * static_cast<int>(seed_offset), seed,
-                                             preset, scenario);
+                                             preset, scenario, data_dir);
                 auto modern = AssignSeats(*game, case_index % 2);
                 Side* current = game::Begin(*game);
                 int safety = 0;
@@ -329,7 +365,7 @@ int main(int argc, char** argv) {
                             (play ||
                              (!play && (game->turn == 10 || game->turn == 20 || game->turn == 30)));
                     if (search_here) {
-                        auto candidates = ScoreCandidates(*game, side_index, settings);
+                        auto candidates = ScoreCandidates(*game, side_index, settings, data_dir);
                         size_t best = 0;
                         for (size_t candidate = 1; candidate < candidates.size(); candidate++)
                             if (candidates[candidate].mean > candidates[best].mean)

@@ -11,6 +11,8 @@
  */
 #include <cmath>
 
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/move.hpp"
@@ -125,10 +127,10 @@ void Open(int tile_x, int tile_y) {
             }
             gfx::SetColor(1, 1, 1);
             gfx::Draw(g_app.abits, gfx::NewQuad(424, 0, 24, 11), box_x + 48, box_y + 36);
-            font.Draw(w2::Fmt("%d", city->income), box_x + 80, box_y + 33);
+            font.Draw(absl::StrFormat("%d", city->income), box_x + 80, box_y + 33);
             gfx::SetColor(1, 1, 1);
             gfx::Draw(g_app.abits, gfx::NewQuad(424, 11, 24, 11), box_x + 144, box_y + 36);
-            font.Draw(w2::Fmt("%d", city->defence), box_x + 176, box_y + 33);
+            font.Draw(absl::StrFormat("%d", city->defence), box_x + 176, box_y + 33);
             // a capital is marked on both sides with its side's cell of art 38
             auto capital_marks = g_app.screen->ArtFor(38);
             for (int i = 0; i < 8; i++) {

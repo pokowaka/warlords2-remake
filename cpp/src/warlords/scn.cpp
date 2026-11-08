@@ -1,6 +1,11 @@
 #include "warlords/scn.hpp"
 
-#include <stdexcept>
+#include <algorithm>
+#include <utility>
+
+#include "absl/status/status.h"
+#include "absl/strings/str_format.h"
+#include "absl/types/span.h"
 
 #include "util/util.hpp"
 #include "warlords/bytes.hpp"
@@ -44,18 +49,18 @@ const std::pair<const char*, int> kOptions[] = {
     {"tutorial", 0x12e},      {"viewProduction", 0x132},
 };
 
-/** @brief A text file's lines, or std::nullopt if it cannot be read. */
-std::optional<std::vector<std::string>> Lines(const std::string& path) {
-    auto text = ReadFile(path);
-    if (!text) return std::nullopt;
-    return SplitLines(*text);
+/** @brief Converts a raw byte buffer into non-empty text lines. */
+std::vector<std::string> BytesToLines(absl::Span<const uint8_t> bytes) {
+    if (bytes.empty()) return {};
+    std::string_view view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+    return SplitLines(view);
 }
 
 /**
  * @brief The whole number a string starts with, after blanks and a sign,
  *        as C's atol reads it; 0 when there is none.
  */
-long LeadingInt(const std::string& text) {
+long LeadingInt(std::string_view text) {
     size_t pos = 0;
     while (pos < text.size() && (text[pos] == ' ' || text[pos] == '\t')) pos++;
     bool neg = false;
@@ -68,19 +73,18 @@ long LeadingInt(const std::string& text) {
     }
     return any ? (neg ? -value : value) : 0;
 }
-}  // namespace
 
-std::optional<std::vector<PoolItem>> LoadItemPool(const std::string& path) {
-    auto lines = Lines(path);
-    if (!lines || lines->empty()) return std::nullopt;
-    long count = LeadingInt((*lines)[0]);
+std::optional<std::vector<PoolItem>> ParseItemPool(const std::vector<std::string>& lines) {
+    if (lines.empty()) return std::nullopt;
+    long count = LeadingInt(lines[0]);
     std::vector<PoolItem> pool;
-    for (size_t i = 1; i < std::min(lines->size(), static_cast<size_t>(count) + 1); i++) {
-        const std::string& line = (*lines)[i];
+    for (size_t i = 1; i < std::min(lines.size(), static_cast<size_t>(count) + 1); i++) {
+        const std::string& line = lines[i];
         PoolItem item;
         std::string name = line.substr(0, std::min<size_t>(20, line.size()));
-        for (auto& letter : name)
+        for (auto& letter : name) {
             if (letter == '_') letter = ' ';
+        }
         item.name = TrimRight(name);
         item.type = line.size() > 21 ? static_cast<int>(LeadingInt(line.substr(21, 1))) : 0;
         item.value = line.size() > 23 ? static_cast<int>(LeadingInt(line.substr(23, 1))) : 0;
@@ -93,11 +97,9 @@ std::optional<std::vector<PoolItem>> LoadItemPool(const std::string& path) {
  * @brief Parses the lines of a .CTY or .SPC file: "#number|one|two|three|"
  *        gives entry `number` its three lines; other lines are skipped.
  */
-static std::map<int, std::array<std::string, 3>> ParseDescriptions(
-        const std::vector<std::string>& lines) {
+std::map<int, std::array<std::string, 3>> ParseDescriptions(const std::vector<std::string>& lines) {
     std::map<int, std::array<std::string, 3>> out;
-    for (auto& line : lines) {
-        // ^#(\d+)\|(.*)$
+    for (const auto& line : lines) {
         if (line.size() < 2 || line[0] != '#') continue;
         size_t pos = 1;
         long number = 0;
@@ -114,33 +116,29 @@ static std::map<int, std::array<std::string, 3>> ParseDescriptions(
             if (letter == '|') {
                 parts.push_back(cur);
                 cur.clear();
-            } else
+            } else {
                 cur += letter;
+            }
         }
         std::array<std::string, 3> description;
-        for (int part = 0; part < 3; part++)
+        for (int part = 0; part < 3; part++) {
             description[part] = part < static_cast<int>(parts.size()) ? parts[part] : "";
+        }
         out[static_cast<int>(number)] = description;
     }
     return out;
-}
-
-std::map<int, std::array<std::string, 3>> LoadDescriptions(const std::string& path) {
-    auto lines = Lines(path);
-    if (!lines) return {};
-    return ParseDescriptions(*lines);
 }
 
 /**
  * @brief Parses an .SGN file: a count, then 104-byte records of a position
  *        and two 50-byte lines. A record cut short ends the list.
  */
-static std::vector<Sign> ParseSigns(const std::string& bytes) {
+std::vector<Sign> ParseSigns(absl::Span<const uint8_t> bytes) {
     std::vector<Sign> out;
     if (bytes.size() < 2) return out;
     int count = U16(bytes, 0);
     for (int i = 0; i < count; i++) {
-        size_t offset = 2 + 104 * i;
+        size_t offset = 2 + 104UZ * static_cast<size_t>(i);
         if (offset + 104 > bytes.size()) break;
         Sign sign;
         sign.index = i;
@@ -152,35 +150,50 @@ static std::vector<Sign> ParseSigns(const std::string& bytes) {
     return out;
 }
 
-std::vector<Sign> LoadSigns(const std::string& path) {
-    auto bytes = ReadFile(path);
-    if (!bytes) return {};
+}  // namespace
+
+std::optional<std::vector<PoolItem>> LoadItemPool(const std::filesystem::path& path) {
+    auto text = ReadFile(path);
+    if (!text.ok()) return std::nullopt;
+    return ParseItemPool(SplitLines(*text));
+}
+
+std::map<int, std::array<std::string, 3>> LoadDescriptions(const std::filesystem::path& path) {
+    auto text = ReadFile(path);
+    if (!text.ok()) return {};
+    return ParseDescriptions(SplitLines(*text));
+}
+
+std::vector<Sign> LoadSigns(const std::filesystem::path& path) {
+    auto bytes = ReadBytes(path);
+    if (!bytes.ok()) return {};
     return ParseSigns(*bytes);
 }
 
-std::unique_ptr<Map> LoadFromFiles(const std::string& dir, const std::string& name,
-                                   const std::map<std::string, std::string>& files) {
-    std::string base = dir + "/" + name;
-    auto get_opt = [&](const char* ext) -> std::optional<std::string> {
-        auto found = files.find(ext);
-        if (found != files.end()) return found->second;
-        return ReadFile(base + "." + ext);
-    };
-    auto get_must = [&](const char* ext) -> std::string {
-        auto bytes = get_opt(ext);
-        if (!bytes) throw std::runtime_error("cannot open: " + base + "." + ext);
-        return *bytes;
-    };
-    std::string scn_bytes = get_must("SCN");
-    if (scn_bytes.size() != 12001)
-        throw std::runtime_error(
-                Fmt("unexpected .SCN size: %d", static_cast<int>(scn_bytes.size())));
-    auto map = std::make_unique<Map>();
-    map->name = name;
+absl::StatusOr<std::unique_ptr<Map>> LoadFromSource(const IScenarioSource& source,
+                                                    std::string_view name) {
+    auto scn_file = source.ReadExtension("SCN");
+    if (!scn_file.ok()) return scn_file.status();
+    absl::Span<const uint8_t> scn_bytes(*scn_file);
+    if (scn_bytes.size() != static_cast<size_t>(kScnSize)) {
+        return absl::InvalidArgumentError(absl::StrFormat(
+                "Failed to load scenario '%s' from '%s': expected %d bytes in .SCN file, got %zu "
+                "bytes; verify the scenario file is an intact Warlords II v1.10 .SCN asset.",
+                name, source.DescribeSource(), kScnSize, scn_bytes.size()));
+    }
+    auto map_file = source.ReadExtension("MAP");
+    if (!map_file.ok()) return map_file.status();
+    absl::Span<const uint8_t> map_bytes(*map_file);
 
-    for (auto& [option, offset] : kOptions) {
-        uint16_t value = U16(scn_bytes, offset);
-        if (std::string(option) == "militaryAdvisor" && value == 0) value = 1;
+    auto rd_file = source.ReadExtension("RD");
+    if (!rd_file.ok()) return rd_file.status();
+
+    auto map = std::make_unique<Map>();
+    map->name = std::string(name);
+
+    for (const auto& [option, offset] : kOptions) {
+        uint16_t value = static_cast<uint16_t>(U16(scn_bytes, offset));
+        if (std::string_view(option) == "militaryAdvisor" && value == 0) value = 1;
         *map->options.Field(option) = value;
     }
 
@@ -242,9 +255,11 @@ std::unique_ptr<Map> LoadFromFiles(const std::string& dir, const std::string& na
 
     // fight order: 29 bytes per player, row 8 for neutral
     map->fight_order.assign(kFightRows, std::vector<int>(kFightTypes, 0));
-    for (int row = 0; row < kFightRows; row++)
-        for (int type = 0; type < kFightTypes; type++)
+    for (int row = 0; row < kFightRows; row++) {
+        for (int type = 0; type < kFightTypes; type++) {
             map->fight_order[row][type] = U8(scn_bytes, kFightOrder + row * kFightTypes + type);
+        }
+    }
 
     int n_sites = U16(scn_bytes, kSitesCount);
     for (int i = 0; i < n_sites; i++) {
@@ -274,15 +289,17 @@ std::unique_ptr<Map> LoadFromFiles(const std::string& dir, const std::string& na
     for (int i = 0; i < kNMonsters; i++) {
         std::string monster_name = Cstr(scn_bytes, kMonsters + kMonsterStride * i, 12);
         // keyed by slot: a site's guardian byte indexes this directly
-        if (!monster_name.empty())
+        if (!monster_name.empty()) {
             map->monsters[i] = Monster{i, monster_name, U16(scn_bytes, kMonsterStrength + 2 * i)};
+        }
     }
 
     // tile index -> terrain type id, the same table the original reads
-    for (int i = 0; i < kTerrainCount; i++) map->terrain_type[i] = U8(scn_bytes, kTerrainTable + i);
+    for (int i = 0; i < kTerrainCount; i++) {
+        map->terrain_type[i] = U8(scn_bytes, kTerrainTable + i);
+    }
 
     // terrain grid + road overlay; bit 15 of a map word marks a crossing
-    std::string map_bytes = get_must("MAP");
     map->tiles.resize(static_cast<size_t>(kMapW) * kMapH);
     map->crossing.resize(static_cast<size_t>(kMapW) * kMapH);
     for (int i = 0; i < kMapW * kMapH; i++) {
@@ -290,20 +307,40 @@ std::unique_ptr<Map> LoadFromFiles(const std::string& dir, const std::string& na
         map->tiles[i] = word % 0x8000;
         map->crossing[i] = word >= 0x8000;
     }
-    map->roads = get_must("RD");
-    if (static_cast<int>(map->roads.size()) < kMapW * kMapH)
-        map->roads.resize(static_cast<size_t>(kMapW) * kMapH, '\0');
+    map->roads = std::move(*rd_file);
+    if (static_cast<int>(map->roads.size()) < kMapW * kMapH) {
+        map->roads.resize(static_cast<size_t>(kMapW) * kMapH, 0);
+    }
 
-    map->item_pool = LoadItemPool(base + ".ITM");
-    if (auto cty = get_opt("CTY")) map->city_text = ParseDescriptions(SplitLines(*cty));
-    if (auto spc = get_opt("SPC")) map->site_text = ParseDescriptions(SplitLines(*spc));
-    if (auto sgn = get_opt("SGN")) map->signs = ParseSigns(*sgn);
+    if (auto itm_bytes = source.ReadExtension("ITM"); itm_bytes.ok()) {
+        map->item_pool = ParseItemPool(BytesToLines(*itm_bytes));
+    }
+    if (auto cty_bytes = source.ReadExtension("CTY"); cty_bytes.ok()) {
+        map->city_text = ParseDescriptions(BytesToLines(*cty_bytes));
+    }
+    if (auto spc_bytes = source.ReadExtension("SPC"); spc_bytes.ok()) {
+        map->site_text = ParseDescriptions(BytesToLines(*spc_bytes));
+    }
+    if (auto sgn_bytes = source.ReadExtension("SGN"); sgn_bytes.ok()) {
+        map->signs = ParseSigns(*sgn_bytes);
+    }
     map->combat_cap = U16(scn_bytes, kCombatCap);
     return map;
 }
 
-std::unique_ptr<Map> Load(const std::string& dir, const std::string& name) {
-    return LoadFromFiles(dir, name, {});
+absl::StatusOr<std::unique_ptr<Map>> Load(const std::filesystem::path& dir, std::string_view name) {
+    DiskScenarioSource source(dir, std::string(name));
+    return LoadFromSource(source, name);
+}
+
+absl::StatusOr<std::unique_ptr<Map>> LoadFromFiles(const std::filesystem::path& dir,
+                                                   std::string_view name,
+                                                   const ScenarioFiles& files) {
+    MemoryScenarioSource source(files, dir, std::string(name));
+    auto loaded = LoadFromSource(source, name);
+    if (!loaded.ok()) return loaded.status();
+    (*loaded)->source_files = source.Files();
+    return loaded;
 }
 
 int CityTileBase(const City& city) {

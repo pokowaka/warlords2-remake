@@ -8,8 +8,10 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -49,22 +51,22 @@ struct Card {
     int solidarity = 0;            ///< Non-zero: computers stand together.
 };
 
-/** @brief The file name of a card: `<data_dir>/CARDS/<letter><nnn>.<ext>`. */
-std::string Path(const std::string& data_dir, int level, int number,
-                 const std::string& ext = "CRD");
+/** @brief The file path of a card: `<data_dir>/CARDS/<letter><nnn>.<ext>`. */
+std::filesystem::path Path(const std::filesystem::path& data_dir, int level, int number,
+                           std::string_view ext = "CRD");
 /** @brief Reads a card, or std::nullopt when the file is missing or short. */
-std::optional<Card> Load(const std::string& data_dir, int level, int number);
+std::optional<Card> Load(const std::filesystem::path& data_dir, int level, int number);
 /** @brief A card's name and description lines, from its .DSC, or std::nullopt. */
 std::optional<std::pair<std::string, std::vector<std::string>>> Describe(
-        const std::string& data_dir, int level, int number);
+        const std::filesystem::path& data_dir, int level, int number);
 /**
  * @brief A level's deck as the setup screen lists it.
  *
  * The name of each card from 000 up to the first missing .DSC, at most 30:
  * the first 40 bytes of the file, cut at a carriage return.
  */
-std::vector<std::string> Deck(const std::string& data_dir, int level);
+std::vector<std::string> Deck(const std::filesystem::path& data_dir, int level);
 /** @brief How many cards a level has on disk, 000 up to the first missing one. */
-int Count(const std::string& data_dir, int level);
+int Count(const std::filesystem::path& data_dir, int level);
 
 }  // namespace w2::aicard

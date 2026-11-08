@@ -41,8 +41,11 @@
 #include <algorithm>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
 #include <map>
 #include <random>
+
+#include "absl/strings/str_format.h"
 
 #include "front/pckimage.hpp"
 #include "ui/dialogs.hpp"
@@ -80,6 +83,7 @@ struct World {
     bool allies = false;  ///< Whether cities can produce allies.
     std::array<int, 4> sliders{{3, 3, 2, 3}};           ///< Water, Hills, Cities, Forest: 0-6.
     std::array<bool, 4> set{{true, true, true, true}};  ///< Else "?": left to chance.
+    w2::ScenarioFiles generated_files;  ///< Last generated in-memory scenario files.
 };
 World world;
 
@@ -94,20 +98,21 @@ int remembered_options[10] = {0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
  * table is left as it is.
  */
 void RecallOptions() {
-    auto file = w2::ReadFile(g_app.data_dir + "/DATA/OPTIONS.DAT");
-    if (!file) return;
+    auto file = w2::ReadBytes(g_app.data_dir / "DATA/OPTIONS.DAT");
+    if (!file.ok()) return;
     for (size_t i = 0; i <= 9 && 2 * i + 2 <= file->size(); i++)
         remembered_options[i] = w2::U16(*file, 2 * i);
 }
 
 /** @brief Keeps the options for next time in DATA\OPTIONS.DAT, as Begin starts the game. */
 void KeepOptions() {
-    std::string bytes;
+    std::vector<uint8_t> bytes;
+    bytes.reserve(20);
     for (int i = 0; i <= 9; i++) {
-        bytes += static_cast<char>(remembered_options[i] & 255);
-        bytes += static_cast<char>((remembered_options[i] >> 8) & 255);
+        bytes.push_back(static_cast<uint8_t>(remembered_options[i] & 255));
+        bytes.push_back(static_cast<uint8_t>((remembered_options[i] >> 8) & 255));
     }
-    w2::WriteFile(g_app.data_dir + "/DATA/OPTIONS.DAT", bytes);
+    w2::WriteBytes(g_app.data_dir / "DATA/OPTIONS.DAT", bytes).IgnoreError();
 }
 
 /** @brief A scenario to choose, as the chooser shows it. */
@@ -137,15 +142,13 @@ std::vector<Scenario> Scenarios() {
 std::map<std::string, gfx::ImageP> art;
 
 /** @brief Loads a .PCK picture once and keeps it; null when it can't be loaded. */
-gfx::ImageP Image(const std::string& path, int key = pckimage::kNokey) {
-    auto cached = art.find(path);
+gfx::ImageP Image(const std::filesystem::path& path, int key = pckimage::kNokey) {
+    std::string cache_key = path.string();
+    auto cached = art.find(cache_key);
     if (cached != art.end()) return cached->second;
-    gfx::ImageP image;
-    try {
-        image = pckimage::Load(path, g_app.palette, key);
-    } catch (...) {
-    }
-    return art[path] = image;
+    auto loaded = pckimage::Load(path, g_app.palette, key);
+    gfx::ImageP image = loaded.ok() ? std::move(*loaded) : nullptr;
+    return art[cache_key] = image;
 }
 
 /** @brief One side as the setup screen sets it up. */
@@ -175,9 +178,14 @@ struct Setup {
  */
 std::shared_ptr<Setup> NewSetup(const Scenario& scenario) {
     std::string dir = w2::Upper(scenario.dir);
-    auto map = w2::scn::Load(g_app.data_dir + "/" + dir, dir);
+    std::filesystem::path scenario_dir = g_app.data_dir / dir;
+    auto loaded_map = (dir == w2::randommap::kDir && !world.generated_files.empty())
+                              ? w2::scn::LoadFromFiles(scenario_dir, dir, world.generated_files)
+                              : w2::scn::Load(scenario_dir, dir);
     auto setup = std::make_shared<Setup>();
     setup->sc = scenario;
+    if (!loaded_map.ok()) return setup;
+    const auto& map = *loaded_map;
     if (map->options.tutorial != 0)
         for (int i = 0; i <= 9; i++) remembered_options[i] = kPresets[0][i];
     else
@@ -594,8 +602,8 @@ const int kQuoteY[5] = {366, 384, 402, 420, 440};
  */
 std::vector<std::string> Quote(const std::function<int(int)>& roll) {
     std::vector<std::string> lines;
-    auto file = w2::ReadFile(g_app.data_dir + "/DATA/QUOTES.DAT");
-    if (!file || file->size() < 2) return lines;
+    auto file = w2::ReadFile(g_app.data_dir / "DATA/QUOTES.DAT");
+    if (!file.ok() || file->size() < 2) return lines;
     int count = atoi(file->substr(0, 2).c_str());
     if (count < 1) return lines;
     int pick = roll(count);
@@ -840,7 +848,7 @@ struct Chooser : kit::Modal {
     void Draw() override {
         const kit::Rect popup_rect{80, 45, 480, 360};  // popup 19
         kit::PopupFrame(popup_rect);
-        auto picture = Image(g_app.data_dir + "/PICS/NEWSCEN.PCK");
+        auto picture = Image(g_app.data_dir / "PICS/NEWSCEN.PCK");
         gfx::SetColor(1, 1, 1);
         if (picture) gfx::Draw(picture, popup_rect.x, popup_rect.y);
         kit::SetPal(0);
@@ -856,9 +864,9 @@ struct Chooser : kit::Modal {
             const Font& ink = font.Colours(5, 0);
             kit::Centred(ink, scenario.name, 416, 101);
             kit::Centred(ink, scenario.text, 416, 174);
-            kit::Right(ink, w2::Fmt("%d", scenario.cities), 368, 234);
-            ink.Draw(w2::Fmt("%d", scenario.ruins), 472, 234);
-            kit::Centred(ink, w2::Fmt("%d", scenario.players), 416, 254);
+            kit::Right(ink, absl::StrFormat("%d", scenario.cities), 368, 234);
+            ink.Draw(absl::StrFormat("%d", scenario.ruins), 472, 234);
+            kit::Centred(ink, absl::StrFormat("%d", scenario.players), 416, 254);
         }
         std::set<int> row_controls = {476, 477, 478, 479, 480, 481, 482};
         kit::DrawControls(v, row_controls);
@@ -961,8 +969,8 @@ struct MakeWorldDialog : kit::Modal {
 
     /** @brief Runs a phase of the generator a frame, so the bar moves as it works. */
     void Update() override {
-        if (run->Step()) return;
-        w2::randommap::Install(g_app.data_dir, run->GetFiles());
+        if (run && run->Step()) return;
+        if (run) world.generated_files = run->GetFiles();
         auto done = after;
         kit::Pop(this);
         if (done) done();
@@ -983,10 +991,10 @@ struct MakeWorldDialog : kit::Modal {
         kit::SetPal(0);
         gfx::Rectangle(gfx::kLine, 232.5, 255.5, 191, 24);
         gfx::SetColor(1, 1, 1);
-        int percent = run->Progress();
+        int percent = run ? run->Progress() : 100;
         int width = (percent + 10) / 10 * 16 + 16;
         if (bar) gfx::Draw(bar, gfx::NewQuad(0, 0, width, 21), 232, 257);
-        kit::Centred(font, w2::Fmt("%d%%", percent), 328, 237);
+        kit::Centred(font, absl::StrFormat("%d%%", percent), 328, 237);
     }
 };
 
@@ -1001,10 +1009,15 @@ void MakeWorld(kit::Done after) {
         options.sliders[i] = world.set[i] ? world.sliders[i] : w2::randommap::kRandomSlider;
     options.allies = world.allies;
     options.terrain_set = world.terrain_set;
-    dialog->run = std::make_unique<w2::randommap::Run>(options);
+    auto created_run = w2::randommap::Run::Create(options);
+    if (!created_run.ok()) {
+        front::Say(std::string(created_run.status().message()));
+        return;
+    }
+    dialog->run = std::move(*created_run);
     dialog->after = after;
-    dialog->scroll = Image(g_app.data_dir + "/PICS/BSCROLL.PCK", 10);
-    dialog->bar = Image(g_app.data_dir + "/PICS/RMAPBAR.PCK", 10);
+    dialog->scroll = Image(g_app.data_dir / "PICS/BSCROLL.PCK", 10);
+    dialog->bar = Image(g_app.data_dir / "PICS/RMAPBAR.PCK", 10);
     kit::Push(dialog);
 }
 
@@ -1039,7 +1052,8 @@ struct Menu : kit::Modal {
     void Draw() override {
         gfx::SetColor(1, 1, 1);
         for (int quarter = 0; quarter < 4; quarter++) {
-            auto image = Image(g_app.data_dir + "/PICS/STARTUP" + std::to_string(quarter) + ".PCK");
+            auto image =
+                    Image(g_app.data_dir / "PICS" / ("STARTUP" + std::to_string(quarter) + ".PCK"));
             if (image) gfx::Draw(image, (quarter % 2) * 320, (quarter / 2) * 240);
         }
         bool have = cur < static_cast<int>(list.size());
@@ -1047,7 +1061,7 @@ struct Menu : kit::Modal {
             DrawWorld();
         } else if (have) {
             std::string dir = w2::Upper(list[cur].dir);
-            if (auto picture = Image(g_app.data_dir + "/" + dir + "/PICS/SCENARIO.PCK")) {
+            if (auto picture = Image(g_app.data_dir / dir / "PICS/SCENARIO.PCK")) {
                 gfx::SetColor(1, 1, 1);
                 gfx::Draw(picture, gfx::NewQuad(0, 0, 264, 225), 328, 200);
             }
@@ -1087,7 +1101,11 @@ struct Menu : kit::Modal {
                         options.sides[i] = game_side;
                     }
                     options.greatest = chosen_setup->greatest;
-                    on_begin(w2::Upper(chosen_setup->sc.dir), options);
+                    std::string chosen_dir = w2::Upper(chosen_setup->sc.dir);
+                    if (chosen_dir == w2::randommap::kDir && !world.generated_files.empty()) {
+                        options.memory_files = &world.generated_files;
+                    }
+                    on_begin(chosen_dir, options);
                 },
                 [keep]() {
                     auto menu = std::static_pointer_cast<Menu>(keep);

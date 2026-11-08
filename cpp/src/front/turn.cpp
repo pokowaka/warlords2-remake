@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <ctime>
 
+#include "absl/strings/str_format.h"
+
 #include "front/internal.hpp"
 #include "platform/sound.hpp"
 #include "ui/dialogs.hpp"
@@ -327,7 +329,7 @@ void DrawBanner() {
     outline(10, 10, popup_rect.w - 20, popup_rect.h - 20);
     gfx::SetColor(1, 1, 1);
     kit::Centred(*g_app.title_font, banner.name, 320, kBannerNameY);
-    kit::Centred(*g_app.title_font, w2::Fmt("Turn %d", banner.turn), 320, kBannerTurnY);
+    kit::Centred(*g_app.title_font, absl::StrFormat("Turn %d", banner.turn), 320, kBannerTurnY);
 }
 
 /** @brief Draws the hero-offer popup: map, portrait, text lines, name field and sex checkboxes. */
@@ -408,18 +410,27 @@ void OpenStart() {
     sound::Music(w2::cues::kTitle);
     start::Open(
             [](const std::string& dir, const w2::game::NewGameOptions& opts) {
-                auto start_game = [dir, opts]() {
+                std::optional<w2::ScenarioFiles> mem_files;
+                if (opts.memory_files) mem_files = *opts.memory_files;
+                auto start_game = [dir, opts, mem_files = std::move(mem_files)]() {
                     g_app.starting = false;
                     g_app.have_layout = false;
                     g_app.scenario = dir;
                     w2::game::NewGameOptions game_opts = opts;
+                    if (mem_files) game_opts.memory_files = &*mem_files;
                     game_opts.seed = static_cast<double>(time(nullptr) % 1000000007);
                     g_app.seed = game_opts.seed;
                     if (opt_military_advisor >= 0) {
                         for (auto& [opt_name, opt_val] : game_opts.options)
                             if (opt_name == "militaryAdvisor") opt_val = opt_military_advisor;
                     }
-                    g_app.g = game::NewGame(g_app.data_dir, dir, game_opts);
+                    auto created_game = game::NewGame(g_app.data_dir, dir, game_opts);
+                    if (!created_game.ok()) {
+                        Say(std::string(created_game.status().message()));
+                        OpenStart();
+                        return;
+                    }
+                    g_app.g = std::move(*created_game);
                     g_app.selection.reset();
                     g_app.over = false;
                     StratDirty();
@@ -452,8 +463,8 @@ void OpenStart() {
             });
 }
 
-void StartCliScenario(const std::string& scenario, double seed, bool force_diplomacy,
-                      bool force_hidden_map, bool spectate_all_ai) {
+absl::Status StartCliScenario(const std::string& scenario, double seed, bool force_diplomacy,
+                              bool force_hidden_map, bool spectate_all_ai) {
     g_app.starting = false;
     g_app.scenario = scenario;
     game::NewGameOptions game_opts;
@@ -462,7 +473,7 @@ void StartCliScenario(const std::string& scenario, double seed, bool force_diplo
         "neutralCities",  "diplomacy",     "quests",     "hiddenMap",       "viewEnemies",
         "viewProduction", "intenseCombat", "quickStart", "militaryAdvisor", "randomTurns"};
     int default_options[10] = {0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
-    if (auto opt_bytes = w2::ReadFile(g_app.data_dir + "/DATA/OPTIONS.DAT")) {
+    if (auto opt_bytes = w2::ReadBytes(g_app.data_dir / "DATA/OPTIONS.DAT"); opt_bytes.ok()) {
         for (size_t i = 0; i <= 9 && 2 * i + 2 <= opt_bytes->size(); i++) {
             default_options[i] = w2::U16(*opt_bytes, 2 * i);
         }
@@ -484,14 +495,20 @@ void StartCliScenario(const std::string& scenario, double seed, bool force_diplo
         for (auto& [opt_name, opt_val] : game_opts.options)
             if (opt_name == "militaryAdvisor") opt_val = opt_military_advisor;
     }
+    w2::randommap::Files generated_files;
     if (scenario == w2::randommap::kDir) {
         w2::Rng rng(game_opts.seed);
         w2::randommap::Options rand_opts;
         rand_opts.data_dir = g_app.data_dir;
         rand_opts.rng = &rng;
-        w2::randommap::Install(g_app.data_dir, w2::randommap::GenerateNow(rand_opts));
+        auto generated = w2::randommap::GenerateNow(rand_opts);
+        if (!generated.ok()) return generated.status();
+        generated_files = std::move(*generated);
+        game_opts.memory_files = &generated_files;
     }
-    g_app.g = game::NewGame(g_app.data_dir, scenario, game_opts);
+    auto created_game = game::NewGame(g_app.data_dir, scenario, game_opts);
+    if (!created_game.ok()) return created_game.status();
+    g_app.g = std::move(*created_game);
     for (size_t i = 0; i < g_app.g->sides.size(); i++)
         g_app.g->sides[i]->computer = spectate_all_ai || (i > 0);
     auto start_war = [=]() {
@@ -505,6 +522,7 @@ void StartCliScenario(const std::string& scenario, double seed, bool force_diplo
     } else {
         start_war();
     }
+    return absl::OkStatus();
 }
 
 }  // namespace front

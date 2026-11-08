@@ -1,29 +1,35 @@
-// Shared utilities providing Lua-compatible formatting, sorting, case-insensitive
-// file lookup, string helpers, and monotonic timing.
+/**
+ * @file
+ * @brief Shared utilities providing Lua-compatible sorting, runtime `STRING.DAT`
+ * formatting, case-insensitive filesystem I/O, string helpers, CLI flag parsing,
+ * and monotonic timing.
+ */
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <optional>
-#include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
-namespace w2 {
+#include "absl/log/absl_check.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/types/span.h"
 
-/** @brief Formats a string using `printf`-style format specifiers. */
-std::string Fmt(const char* fmt_str, ...)
-#if defined(__GNUC__) || defined(__clang__)
-        __attribute__((format(printf, 1, 2)))
-#endif
-        ;
+namespace w2 {
 
 /**
  * @brief Sorts `vec` using Lua 5.1 / LuaJIT's unstable quicksort (`auxsort`).
  *
  * Matches the exact tie-breaking order of the Lua reference so seeded games
  * and world generation remain bit-identical across ports. `less_than(lhs, rhs)`
- * returns true when `lhs` sorts before `rhs`.
+ * returns true when `lhs` sorts before `rhs`, and must define a strict weak
+ * ordering.
  */
 template <class T, class Lt>
 void LuaSort(std::vector<T>& vec, Lt less_than) {
@@ -46,11 +52,10 @@ void LuaSort(std::vector<T>& vec, Lt less_than) {
             long right = up_idx - 1;
             for (;;) {
                 while (less_than(get(++mid), pivot)) {
-                    if (mid > up_idx)
-                        throw std::runtime_error("invalid order function for sorting");
+                    ABSL_CHECK(mid <= up_idx) << "Invalid strict-weak comparator passed to LuaSort";
                 }
                 while (less_than(pivot, get(--right))) {
-                    if (right < low) throw std::runtime_error("invalid order function for sorting");
+                    ABSL_CHECK(right >= low) << "Invalid strict-weak comparator passed to LuaSort";
                 }
                 if (right < mid) break;
                 swap(mid, right);
@@ -89,17 +94,20 @@ struct FmtArg {
     explicit FmtArg(unsigned val) : num_val(static_cast<long>(val)) {}
     explicit FmtArg(unsigned long val) : num_val(static_cast<long>(val)) {}
     explicit FmtArg(long long val) : num_val(static_cast<long>(val)) {}
+    explicit FmtArg(std::string_view val) : is_str(true), str_val(val) {}
     explicit FmtArg(const std::string& val) : is_str(true), str_val(val) {}
     explicit FmtArg(const char* val) : is_str(true), str_val(val ? val : "") {}
 };
+
 /**
- * @brief Formats `fmt_str` safely for format strings loaded from `STRING.DAT`
+ * @brief Formats `fmt_str` safely for runtime format strings loaded from `STRING.DAT`
  * (`%d`, `%s`, `%x`, `%c`, and `%%` with flags and widths).
  */
-std::string Sfmt(const std::string& fmt_str, const std::vector<FmtArg>& args);
+std::string Sfmt(std::string_view fmt_str, const std::vector<FmtArg>& args);
+
 /** @brief Variadic wrapper around `Sfmt`. */
 template <class... A>
-std::string Format(const std::string& fmt_str, A&&... fmt_args) {
+std::string Format(std::string_view fmt_str, A&&... fmt_args) {
     return Sfmt(fmt_str, {FmtArg(std::forward<A>(fmt_args))...});
 }
 
@@ -109,6 +117,7 @@ inline long FloorDiv(long lhs, long rhs) {
     if ((lhs % rhs != 0) && ((lhs < 0) != (rhs < 0))) quot--;
     return quot;
 }
+
 /** @brief Computes Lua's floored modulo `lhs - floor(lhs / rhs) * rhs`. */
 inline long LuaMod(long lhs, long rhs) {
     long rem = lhs % rhs;
@@ -119,53 +128,87 @@ inline long LuaMod(long lhs, long rhs) {
 // Files. Paths are resolved component-by-component ignoring ASCII case, as DOS
 // did, since the original data files mix upper and lower case names.
 
-/** @brief Resolves a DOS-style path case-insensitively on disk, or returns `""` if not found. */
-std::string ResolvePath(const std::string& path);
-/** @brief Reads the entire contents of `path` (from memory overlay or disk), or `std::nullopt`. */
-std::optional<std::string> ReadFile(const std::string& path);
-/** @brief Reads the entire contents of `path`, or throws `std::runtime_error` if missing. */
-std::string MustRead(const std::string& path);
-/** @brief True when `path` exists in the in-memory overlay or on disk. */
-bool FileExists(const std::string& path);
-/** @brief Atomically writes `bytes` to `path` via a temporary file. */
-bool WriteFile(const std::string& path, const std::string& bytes);
 /**
- * @brief Installs `bytes` under `path` in the in-memory file overlay, taking
- * precedence over disk files (used for generated random maps).
+ * @brief Resolves a DOS-style path case-insensitively on disk.
+ * @param path Target filesystem path (forward or backslash separated).
+ * @return Resolved path on disk, or an empty `std::filesystem::path` when not found.
  */
-void InstallFile(const std::string& path, const std::string& bytes);
-/** @brief Removes `path` from disk and clears the directory listing cache. */
-bool RemoveFile(const std::string& path);
+std::filesystem::path ResolvePath(const std::filesystem::path& path);
+
+/**
+ * @brief Reads the entire text contents of `path` (resolved case-insensitively).
+ * @param path Path to the text file on disk.
+ * @return File contents as `std::string`, or an actionable `absl::Status` error.
+ */
+absl::StatusOr<std::string> ReadFile(const std::filesystem::path& path);
+
+/**
+ * @brief Reads the entire binary payload of `path` (resolved case-insensitively).
+ * @param path Path to the binary file on disk.
+ * @return Raw byte vector, or an actionable `absl::Status` error.
+ */
+absl::StatusOr<std::vector<uint8_t>> ReadBytes(const std::filesystem::path& path);
+
+/** @brief True when `path` resolves to an existing file or directory on disk. */
+bool FileExists(const std::filesystem::path& path);
+
+/**
+ * @brief Atomically writes `content` to `path` via a temporary sibling file.
+ * @param path Destination file path.
+ * @param content Text payload to write.
+ * @return `absl::OkStatus()` on success, or an actionable error status.
+ */
+absl::Status WriteFile(const std::filesystem::path& path, std::string_view content);
+
+/**
+ * @brief Atomically writes binary `bytes` to `path` via a temporary sibling file.
+ * @param path Destination file path.
+ * @param bytes Binary payload to write.
+ * @return `absl::OkStatus()` on success, or an actionable error status.
+ */
+absl::Status WriteBytes(const std::filesystem::path& path, absl::Span<const uint8_t> bytes);
+
+/**
+ * @brief Removes `path` from disk and invalidates the directory listing cache.
+ * @param path File path to remove.
+ * @return `absl::OkStatus()` when removed, or an actionable error status.
+ */
+absl::Status RemoveFile(const std::filesystem::path& path);
 
 // Strings: byte-indexed, one character per byte, matching Lua strings.
 /** @brief Returns byte `index` of `str` as an unsigned 8-bit integer. */
-inline uint8_t ByteAt(const std::string& str, size_t index) {
+inline uint8_t ByteAt(std::string_view str, size_t index) {
     return static_cast<uint8_t>(str[index]);
 }
 /** @brief Converts ASCII characters in `str` to upper case. */
-std::string Upper(std::string str);
+std::string Upper(std::string_view str);
 /** @brief Converts ASCII characters in `str` to lower case. */
-std::string Lower(std::string str);
+std::string Lower(std::string_view str);
 /** @brief Strips trailing ASCII whitespace from `str`. */
-std::string TrimRight(const std::string& str);
+std::string TrimRight(std::string_view str);
 /** @brief Strips leading and trailing ASCII whitespace from `str`. */
-std::string Trim(const std::string& str);
+std::string Trim(std::string_view str);
 /** @brief Splits `str` on runs of CR and LF, dropping empty lines. */
-std::vector<std::string> SplitLines(const std::string& str);
-/** @brief True when `str` starts with `prefix`. */
-bool StartsWith(const std::string& str, const std::string& prefix);
-/** @brief True when `str` ends with `suffix`. */
-bool EndsWith(const std::string& str, const std::string& suffix);
-/** @brief True when `str` contains `needle`. */
-bool Contains(const std::string& str, const std::string& needle);
+std::vector<std::string> SplitLines(std::string_view str);
 /** @brief Converts a Latin-1 byte string to UTF-8. */
-std::string Latin1ToUtf8(const std::string& str);
+std::string Latin1ToUtf8(std::string_view str);
 /** @brief Converts a UTF-8 string to Latin-1 (replacing code points > 255 with `'?'`). */
-std::string Utf8ToLatin1(const std::string& str);
-/** @brief Parses a trimmed decimal integer (like Lua's `tonumber`), or returns `std::nullopt`. */
-std::optional<long> ToInt(const std::string& str);
+std::string Utf8ToLatin1(std::string_view str);
+/** @brief Parses a trimmed decimal integer via `std::from_chars`, or returns `std::nullopt`. */
+std::optional<long> ToInt(std::string_view str);
 
-/** @brief Returns elapsed monotonic time in seconds since process start. */
+/** @brief Returns elapsed monotonic time in seconds since first call. */
 double Now();
+
+/**
+ * @brief Parses CLI flags via `absl::ParseCommandLine`, normalizing `--kebab-case`
+ * flag names to `--snake_case` while preserving positional arguments (including
+ * signed numeric literals such as `-1`).
+ * @param argc Argument count from `main`.
+ * @param argv Argument vector from `main`.
+ * @param usage_message Optional program usage banner registered with Abseil flags.
+ * @return Positional arguments after `argv[0]`, in command-line order.
+ */
+std::vector<std::string> ParseCliFlags(int argc, char** argv, std::string_view usage_message = "");
 
 }  // namespace w2

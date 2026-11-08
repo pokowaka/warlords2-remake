@@ -5,7 +5,7 @@ load(":copts.bzl", "W2_COPTS")
 
 package(default_visibility = ["//visibility:private"])
 
-# Layer 1: Low-level utilities, JSON, RNG, and binary readers.
+# Layer 1: Low-level utilities, RNG, and binary readers.
 cc_library(
     name = "util",
     copts = W2_COPTS,
@@ -15,6 +15,21 @@ cc_library(
         "src/warlords/rng.hpp",
     ],
     includes = ["src"],
+    deps = [
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/base:no_destructor",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/flags:parse",
+        "@abseil-cpp//absl/flags:usage",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+        "@abseil-cpp//absl/synchronization",
+        "@abseil-cpp//absl/time",
+        "@abseil-cpp//absl/types:span",
+    ],
     visibility = ["//cpp:__subpackages__"],
 )
 
@@ -24,7 +39,10 @@ cc_library(
     copts = W2_COPTS,
     hdrs = glob(["src/warlords/model/*.hpp"]) + ["src/warlords/types.hpp"],
     includes = ["src"],
-    deps = [":util"],
+    deps = [
+        ":util",
+        "@abseil-cpp//absl/container:flat_hash_map",
+    ],
     visibility = ["//cpp:__subpackages__"],
 )
 
@@ -41,6 +59,7 @@ cc_library(
         "src/warlords/pal.cpp",
         "src/warlords/pck.cpp",
         "src/warlords/preview.cpp",
+        "src/warlords/scenario_source.cpp",
         "src/warlords/scenarios.cpp",
         "src/warlords/scn.cpp",
         "src/warlords/uidata.cpp",
@@ -55,6 +74,7 @@ cc_library(
         "src/warlords/pal.hpp",
         "src/warlords/pck.hpp",
         "src/warlords/preview.hpp",
+        "src/warlords/scenario_source.hpp",
         "src/warlords/scenarios.hpp",
         "src/warlords/scn.hpp",
         "src/warlords/scn_format.hpp",
@@ -65,6 +85,15 @@ cc_library(
     deps = [
         ":model",
         ":util",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/base:no_destructor",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+        "@abseil-cpp//absl/synchronization",
+        "@abseil-cpp//absl/types:span",
     ],
     visibility = ["//cpp:__subpackages__"],
 )
@@ -108,6 +137,11 @@ cc_library(
         ":formats",
         ":model",
         ":util",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+        "@nlohmann_json//:json",
     ],
     visibility = ["//cpp:__subpackages__"],
 )
@@ -132,6 +166,11 @@ cc_library(
         ":model",
         ":rules",
         ":util",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+        "@nlohmann_json//:json",
     ],
     visibility = ["//cpp:__subpackages__"],
 )
@@ -153,6 +192,11 @@ cc_library(
         ":rules",
         ":util",
         ":worldgen",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+        "@nlohmann_json//:json",
     ],
     visibility = ["//cpp:__subpackages__"],
 )
@@ -185,6 +229,9 @@ cc_library(
     deps = [
         ":formats",
         ":util",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@nlohmann_json//:json",
         "@sdl2",
         "@sdl2//:sdl2_headers_flat",
         "@vorbis//:vorbisfile",
@@ -219,6 +266,10 @@ cc_library(
     deps = [
         ":platform",
         ":w2core",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings:str_format",
+        "@nlohmann_json//:json",
         "@sdl2",
         "@sdl2//:sdl2_headers_flat",
     ],
@@ -236,6 +287,7 @@ cc_binary(
         ":platform",
         ":ui_front",
         ":w2core",
+        "@abseil-cpp//absl/flags:flag",
         "@sdl2",
         "@sdl2//:sdl2_headers_flat",
     ],
@@ -262,6 +314,7 @@ cc_library(
     includes = ["."],
     deps = [
         ":w2core",
+        "@abseil-cpp//absl/strings:str_format",
         "@googletest//:gtest",
     ],
 )
@@ -435,14 +488,20 @@ cc_binary(
     name = "w2trace",
     copts = W2_COPTS,
     srcs = ["test/trace.cpp"],
-    deps = [":w2core"],
+    deps = [
+        ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+    ],
 )
 
 cc_binary(
     name = "w2fm",
     copts = W2_COPTS,
     srcs = ["test/fmrender.cpp"],
-    deps = [":w2core"],
+    deps = [
+        ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+    ],
 )
 
 cc_library(
@@ -460,6 +519,8 @@ cc_binary(
     deps = [
         ":opponents",
         ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/strings:str_format",
     ],
 )
 
@@ -470,6 +531,7 @@ cc_binary(
     deps = [
         ":opponents",
         ":w2core",
+        "@abseil-cpp//absl/flags:flag",
     ],
 )
 
@@ -477,28 +539,44 @@ cc_binary(
     name = "w2search",
     copts = W2_COPTS,
     srcs = ["test/search.cpp"],
-    deps = [":w2core"],
+    deps = [
+        ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+    ],
 )
 
 cc_binary(
     name = "w2imitate",
     copts = W2_COPTS,
     srcs = ["test/imitate.cpp"],
-    deps = [":w2core"],
+    deps = [
+        ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+    ],
 )
 
 cc_binary(
     name = "w2mapeval",
     copts = W2_COPTS,
     srcs = ["test/mapeval.cpp"],
-    deps = [":w2core"],
+    deps = [
+        ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+        "@nlohmann_json//:json",
+    ],
 )
 
 cc_binary(
     name = "w2scengen",
     copts = W2_COPTS,
     srcs = ["test/scengen.cpp"],
-    deps = [":w2core"],
+    deps = [
+        ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings:str_format",
+    ],
 )
 
 # The refactor's safety net: the same games and worlds as when recorded

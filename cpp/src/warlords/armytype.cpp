@@ -1,26 +1,36 @@
 #include "warlords/armytype.hpp"
 
-#include <stdexcept>
+#include "absl/strings/str_format.h"
+#include "absl/types/span.h"
 
 #include "util/util.hpp"
 #include "warlords/bytes.hpp"
 
 namespace w2::armytype {
 
-void Load(const std::string& path, Types& out) {
-    const int count = 29, stride = 62, n_bonus = 15;
-    std::string bytes = MustRead(path);
-    if (static_cast<int>(bytes.size()) != count * stride)
-        throw std::runtime_error(
-                Fmt("unexpected %s size: %d", path.c_str(), static_cast<int>(bytes.size())));
+absl::Status Load(const std::filesystem::path& path, Types& out) {
+    constexpr int kCount = 29;
+    constexpr int kStride = 62;
+    constexpr int kBonusCount = 15;
+    auto file_bytes = ReadBytes(path);
+    if (!file_bytes.ok()) return file_bytes.status();
+    absl::Span<const uint8_t> bytes(*file_bytes);
+    if (bytes.size() != static_cast<size_t>(kCount * kStride)) {
+        return absl::InvalidArgumentError(absl::StrFormat(
+                "Failed to load army types from '%s': expected %d bytes (%d records x %d bytes), "
+                "got %zu bytes; verify TERRAIN0/ARMYTYPE.DAT in your --data directory.",
+                path.string(), kCount * kStride, kCount, kStride, bytes.size()));
+    }
     out.all.clear();
-    out.all.reserve(count);
-    for (int i = 0; i < count; i++) {
-        int record = i * stride;
+    out.all.reserve(kCount);
+    for (int i = 0; i < kCount; i++) {
+        size_t record = static_cast<size_t>(i) * kStride;
         ArmyType army_type;
         // signed: the Elephants' -1 to the enemy stack (+50) is 0xffff
-        for (int bonus = 0; bonus < n_bonus; bonus++)
-            army_type.bonus[32 + bonus * 2] = I16(bytes, record + 32 + bonus * 2);
+        for (int bonus = 0; bonus < kBonusCount; bonus++) {
+            army_type.bonus[32 + bonus * 2] =
+                    I16(bytes, record + 32 + static_cast<size_t>(bonus) * 2);
+        }
         army_type.id = U16(bytes, record);
         army_type.name = Cstr(bytes, record + 2, 16);
         army_type.strength = U16(bytes, record + 22);
@@ -36,8 +46,10 @@ void Load(const std::string& path, Types& out) {
         out.all.push_back(army_type);
     }
     out.ids.fill(nullptr);
-    for (auto& army_type : out.all)
+    for (auto& army_type : out.all) {
         if (army_type.id >= 0 && army_type.id < 64) out.ids[army_type.id] = &army_type;
+    }
+    return absl::OkStatus();
 }
 
 }  // namespace w2::armytype

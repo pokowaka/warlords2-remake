@@ -7,9 +7,11 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <map>
 #include <set>
-#include <string>
+
+#include "absl/status/statusor.h"
 
 #include "platform/gfx.hpp"
 #include "warlords/pal.hpp"
@@ -32,9 +34,10 @@ constexpr int kNokey = -1;   ///< Key out nothing.
 
 /** @brief Decodes a .PCK into an image; `key` is the index to make transparent, kNokey or kCorner.
  */
-gfx::ImageP Load(const std::string& path, const w2::pal::Palette& palette, int key = kNokey);
+absl::StatusOr<gfx::ImageP> Load(const std::filesystem::path& path, const w2::pal::Palette& palette,
+                                 int key = kNokey);
 /** @brief Decodes a .PCK into an image with every index in `keys` transparent. */
-gfx::ImageP Load(const std::string& path, const w2::pal::Palette& palette,
-                 const std::set<int>& keys);
+absl::StatusOr<gfx::ImageP> Load(const std::filesystem::path& path, const w2::pal::Palette& palette,
+                                 const std::set<int>& keys);
 
 }  // namespace pckimage

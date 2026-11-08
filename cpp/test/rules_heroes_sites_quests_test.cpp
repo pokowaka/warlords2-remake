@@ -579,8 +579,9 @@ TEST(BugFlagsTest, DefaultFlagsAreEnabledAndReadByEngineSources) {
     std::set<std::string> used;
     std::regex flag_read("rules::bugs\\.(\\w+)");
     for (const char* module : {"hero", "combat", "game", "move", "ai", "site", "quest"}) {
-        auto text = ReadFile(std::string("cpp/src/warlords/") + module + ".cpp");
-        if (!text) continue;
+        auto text = ReadFile(std::filesystem::path("cpp/src/warlords") /
+                             (std::string(module) + ".cpp"));
+        if (!text.ok()) continue;
         for (auto iter = std::sregex_iterator(text->begin(), text->end(), flag_read);
              iter != std::sregex_iterator(); ++iter) {
             used.insert((*iter)[1]);

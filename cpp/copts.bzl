@@ -5,6 +5,8 @@
 W2_COPTS = [
     "-Wall",
     "-Wextra",
+    "-Wthread-safety",
     "-Wno-unused-parameter",
     "-Wno-sign-compare",
+    "-DJSON_NOEXCEPTION=1",
 ]

@@ -17,15 +17,15 @@ using w2::uidata::Region;
 namespace {
 /** @brief Finds a .pck by name, wherever it lives: PICS/, TERRAIN<n>/ or the root; "" if nowhere.
  */
-std::string FindArt(const std::string& data_dir, const std::string& name, int terrain) {
+std::filesystem::path FindArt(const std::filesystem::path& data_dir, const std::string& name,
+                              int terrain) {
     std::string upper_name = w2::Upper(name);
-    for (const std::string& path :
-         {data_dir + "/PICS/" + upper_name,
-          data_dir + "/TERRAIN" + std::to_string(terrain) + "/" + upper_name,
-          data_dir + "/" + upper_name}) {
+    for (const std::filesystem::path& path :
+         {data_dir / "PICS" / upper_name,
+          data_dir / ("TERRAIN" + std::to_string(terrain)) / upper_name, data_dir / upper_name}) {
         if (w2::FileExists(path)) return path;
     }
-    return "";
+    return {};
 }
 
 /** @brief Sets the drawing colour to the screen palette's entry `palette_index`. */
@@ -163,22 +163,26 @@ const Art* Screen::ArtFor(int bitmap_id) {
     Art loaded;
     auto name = ui.bitmaps.find(bitmap_id);
     if (name != ui.bitmaps.end()) {
-        std::string path = FindArt(data_dir, name->second, terrain);
+        std::filesystem::path path = FindArt(data_dir, name->second, terrain);
         if (!path.empty()) {
-            auto pixels = w2::pck::Decode(path);
-            loaded.image = pckimage::FromPixels(*pixels, palette);
-            loaded.w = pixels->w;
-            loaded.h = pixels->h;
+            if (auto pixels = w2::pck::Decode(path); pixels.ok()) {
+                loaded.image = pckimage::FromPixels(**pixels, palette);
+                loaded.w = (*pixels)->w;
+                loaded.h = (*pixels)->h;
+            }
         }
     }
     art[bitmap_id] = loaded;
     return loaded.image ? &art[bitmap_id] : nullptr;
 }
 
-std::unique_ptr<Screen> Load(const std::string& data_dir, const w2::pal::Palette& palette,
-                             int dialog_id, int terrain) {
+absl::StatusOr<std::unique_ptr<Screen>> Load(const std::filesystem::path& data_dir,
+                                             const w2::pal::Palette& palette, int dialog_id,
+                                             int terrain) {
     auto loaded = std::make_unique<Screen>();
-    loaded->ui = w2::uidata::Load(data_dir);
+    auto ui_data = w2::uidata::Load(data_dir);
+    if (!ui_data.ok()) return ui_data.status();
+    loaded->ui = std::move(*ui_data);
     loaded->dialog = w2::uidata::FindDialog(loaded->ui, dialog_id);
     loaded->original = loaded->dialog;
     loaded->data_dir = data_dir;
@@ -186,9 +190,12 @@ std::unique_ptr<Screen> Load(const std::string& data_dir, const w2::pal::Palette
     loaded->terrain = terrain;
     // The background is four 320x240 quadrants of one 640x480 image.
     for (int i = 0; i < 4; i++) {
-        std::string path = FindArt(data_dir, "screen" + std::to_string(i) + ".pck", terrain);
+        std::filesystem::path path =
+                FindArt(data_dir, "screen" + std::to_string(i) + ".pck", terrain);
         if (!path.empty()) {
-            loaded->background_px[i] = w2::pck::Decode(path);
+            auto quad_px = w2::pck::Decode(path);
+            if (!quad_px.ok()) return quad_px.status();
+            loaded->background_px[i] = std::move(*quad_px);
             loaded->background[i] = pckimage::FromPixels(*loaded->background_px[i], palette);
         }
     }
@@ -196,20 +203,22 @@ std::unique_ptr<Screen> Load(const std::string& data_dir, const w2::pal::Palette
     // per tile id for each of a tile's four pixels, a remap, and the same four
     // pixels for a tile with a road on it.
     if (auto colour_file =
-                w2::ReadFile(data_dir + "/TERRAIN" + std::to_string(terrain) + "/MAPCOLOR.DAT")) {
+                w2::ReadBytes(data_dir / ("TERRAIN" + std::to_string(terrain)) / "MAPCOLOR.DAT");
+        colour_file.ok()) {
         // a byte of the file, 0 past its end
         auto byte_at = [&](size_t offset) {
-            return offset < colour_file->size()
-                           ? static_cast<int>(static_cast<uint8_t>((*colour_file)[offset]))
-                           : 0;
+            return offset < colour_file->size() ? static_cast<int>((*colour_file)[offset]) : 0;
         };
         for (int pixel = 0; pixel < 4; pixel++) {
             for (int i = 0; i < 256; i++)
-                loaded->map_colour.tile[pixel][i] = byte_at(pixel * 256 + i);
+                loaded->map_colour.tile[pixel][i] = byte_at(static_cast<size_t>(pixel * 256 + i));
             for (int i = 0; i < 20; i++)
-                loaded->map_colour.road[pixel][i] = byte_at(1120 + pixel * 20 + i);
+                loaded->map_colour.road[pixel][i] =
+                        byte_at(static_cast<size_t>(1120 + pixel * 20 + i));
         }
-        for (int i = 0; i < 16; i++) loaded->map_colour.remap[i] = byte_at(1024 + i * 2);
+        for (int i = 0; i < 16; i++) {
+            loaded->map_colour.remap[i] = byte_at(static_cast<size_t>(1024 + i * 2));
+        }
         loaded->map_colour.loaded = true;
     } else {
         for (int i = 0; i < 16; i++) loaded->map_colour.remap[i] = i;

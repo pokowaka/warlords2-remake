@@ -21,7 +21,7 @@
 namespace w2::test {
 
 /// Repository-relative path to the shipped Warlords II game assets.
-extern const std::string kData;
+extern const std::filesystem::path kData;
 
 /// Canonical scenario directory names exercised across scenario-parameterized tests.
 extern const std::vector<std::string> kScenarios;

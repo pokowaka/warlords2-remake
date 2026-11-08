@@ -10,9 +10,12 @@
 #pragma once
 
 #include <array>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <string>
+
+#include "absl/status/statusor.h"
 
 #include "platform/gfx.hpp"
 #include "warlords/pal.hpp"
@@ -28,8 +31,10 @@ class Font {
   public:
     /** @brief Loads DATA/<name>.FIN and .FNT, keying out palette index `key_index` (-1 for none).
      */
-    static std::shared_ptr<Font> Load(const std::string& data_dir, const std::string& name,
-                                      const w2::pal::Palette& palette, int key_index);
+    static absl::StatusOr<std::shared_ptr<Font>> Load(const std::filesystem::path& data_dir,
+                                                      const std::string& name,
+                                                      const w2::pal::Palette& palette,
+                                                      int key_index);
     /** @brief How far the pen moves drawing `text`, in pixels. */
     int Width(const std::string& text) const;
     /** @brief Draws `text` with its top left at (x, y); returns the width drawn. */

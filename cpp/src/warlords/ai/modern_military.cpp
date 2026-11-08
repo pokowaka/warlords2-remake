@@ -8,6 +8,8 @@
 #include <map>
 #include <set>
 
+#include "absl/strings/str_format.h"
+
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
@@ -146,7 +148,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         stack_target.value = static_cast<float>(obs.visible_count) * 4.0F;
         stack_target.is_quest_or_own_cap =
                 (side.quest && side.quest->side && side.quest->side->index == obs.owner);
-        stack_target.label = Fmt("Intercept stack (%d,%d)", obs.x, obs.y);
+        stack_target.label = absl::StrFormat("Intercept stack (%d,%d)", obs.x, obs.y);
         targets.push_back(std::move(stack_target));
     }
 
@@ -188,8 +190,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         fog_target.is_water = frontier.is_water;
         fog_target.value = static_cast<float>(frontier.region_unseen_count) * 2.0F +
                            (frontier.on_road ? 6.0F : 0.0F);
-        fog_target.label = Fmt("Explore %s (%d,%d)", frontier.is_water ? "Sea" : "Fog", frontier.x,
-                               frontier.y);
+        fog_target.label = absl::StrFormat("Explore %s (%d,%d)", frontier.is_water ? "Sea" : "Fog",
+                                           frontier.x, frontier.y);
         targets.push_back(std::move(fog_target));
     }
 
@@ -315,8 +317,9 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                                 (scn::RoadAt(*game.map, fog_x, fog_y) % 0x20 != 0);
                                     fog_target.value =
                                             static_cast<float>(adj_u) * 2.0F + (road ? 6.0F : 0.0F);
-                                    fog_target.label = Fmt("Explore %s (%d,%d)",
-                                                           is_w ? "Sea" : "Fog", fog_x, fog_y);
+                                    fog_target.label =
+                                            absl::StrFormat("Explore %s (%d,%d)",
+                                                            is_w ? "Sea" : "Fog", fog_x, fog_y);
                                     targets.push_back(std::move(fog_target));
                                     reachable_fog_count++;
                                 }
@@ -645,14 +648,16 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                 chosen_opt.tv[8] > 1e-4F ? (1.0F / chosen_opt.tv[8] - 1.0F) : 0.0F;
                         side.ai_thoughts.push_back(AIThought{
                             "Mission",
-                            Fmt("%d-unit stack (%s)", static_cast<int>(current_stack.size()),
-                                current_stack[0]->name.c_str()),
+                            absl::StrFormat("%d-unit stack (%s)",
+                                            static_cast<int>(current_stack.size()),
+                                            current_stack[0]->name),
                             chosen_tgt.label, current_stack[0]->x, current_stack[0]->y,
                             chosen_tgt.x, chosen_tgt.y, chosen_opt.out.utility, chosen_opt.tv[10],
                             stage_near,
-                            Fmt("U=%.2f Win=%.0f%% Turns=%.1f %s", chosen_opt.out.utility,
-                                chosen_opt.tv[10] * 100.0F, inv_disc,
-                                stage_near ? "[STAGE FOR SYNC]" : "[EXECUTE]")});
+                            absl::StrFormat("U=%.2f Win=%.0f%% Turns=%.1f %s",
+                                            chosen_opt.out.utility, chosen_opt.tv[10] * 100.0F,
+                                            inv_disc,
+                                            stage_near ? "[STAGE FOR SYNC]" : "[EXECUTE]")});
                     }
 
                     // Add newly revealed neutral or enemy cities immediately so remaining stacks

@@ -8,6 +8,8 @@
 #include <cmath>
 #include <sstream>
 
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/ai/belief.hpp"
@@ -587,7 +589,7 @@ struct ActionDialog : kit::Modal {
                 int truce_turns = dip::TruceTurns(game, viewer, other);
                 if (truce_turns > 0) {
                     gfx::SetColor(1, 1, 1);
-                    tiny_font.Colours(7, 0).Draw(w2::Fmt("T:%d", truce_turns), x + 8, 177);
+                    tiny_font.Colours(7, 0).Draw(absl::StrFormat("T:%d", truce_turns), x + 8, 177);
                 }
 
                 int theirs = dip::Proposal(game, other, viewer);
@@ -617,7 +619,7 @@ struct ActionDialog : kit::Modal {
                 int gold_offer = dip::GoldOffer(game, viewer, other);
                 if (gold_offer > 0) {
                     gfx::SetColor(1, 1, 1);
-                    tiny_font.Colours(7, 0).Draw(w2::Fmt("+%dg", gold_offer), x + 3, 271);
+                    tiny_font.Colours(7, 0).Draw(absl::StrFormat("+%dg", gold_offer), x + 3, 271);
                 }
             }
         }
@@ -802,19 +804,19 @@ struct ParleyModal : kit::Modal {
 
         int text_x = 128;
         text_x += small_font.Colours(state_colour, 0).Draw("[" + state_name + "]", text_x, 115);
-        std::string mid_meta =
-                w2::Fmt("  Truce:%d  Trust:%+d  Attitude:", truce_turns, attitude.trust_score);
+        std::string mid_meta = absl::StrFormat("  Truce:%d  Trust:%+d  Attitude:", truce_turns,
+                                               attitude.trust_score);
         text_x += small_font.Colours(1, 0).Draw(mid_meta, text_x, 115);
-        std::string attitude_tail =
-                FitText(small_font,
-                        w2::Fmt(" %+d (%s)", attitude.total_score, attitude.stance_summary.c_str()),
-                        std::max(20, 560 - text_x));
+        std::string attitude_tail = FitText(
+                small_font,
+                absl::StrFormat(" %+d (%s)", attitude.total_score, attitude.stance_summary.c_str()),
+                std::max(20, 560 - text_x));
         small_font.Colours(attitude_colour, 0).Draw(attitude_tail, text_x, 115);
 
         // Left Panel: Attitude Ledger (72, 143, 300 x 167)
         int net_colour = attitude.total_score > 0 ? 10 : (attitude.total_score < 0 ? 8 : 7);
         DrawSunkenPanel(72, 143, 300, 167, "ATTITUDE LEDGER",
-                        w2::Fmt("Total: %+d", attitude.total_score), net_colour);
+                        absl::StrFormat("Total: %+d", attitude.total_score), net_colour);
 
         gfx::SetScissor(74, 163, 296, 145);
         if (attitude.factors.empty()) {
@@ -823,7 +825,7 @@ struct ParleyModal : kit::Modal {
             int factor_y = 166;
             for (const auto& factor : attitude.factors) {
                 if (factor_y > 294) break;
-                std::string delta_text = w2::Fmt("%+d", factor.delta);
+                std::string delta_text = absl::StrFormat("%+d", factor.delta);
                 int delta_colour = factor.delta > 0 ? 10 : (factor.delta < 0 ? 8 : 1);
                 kit::Right(small_font.Colours(delta_colour, 0), delta_text, 110, factor_y);
 
@@ -869,16 +871,17 @@ struct ParleyModal : kit::Modal {
         DrawButton(btn_gold_minus.x, btn_gold_minus.y, btn_gold_minus.w, btn_gold_minus.h,
                    "Gift -50g", false, gold_offer <= 0, 13);
         DrawButton(btn_gold_plus.x, btn_gold_plus.y, btn_gold_plus.w, btn_gold_plus.h,
-                   w2::Fmt("Gift +%dg", gold_offer + 50), gold_offer > 0,
+                   absl::StrFormat("Gift +%dg", gold_offer + 50), gold_offer > 0,
                    gold_offer + 50 > my_side.gold, 13);
 
         DrawButton(btn_joint_war.x, btn_joint_war.y, btn_joint_war.w, btn_joint_war.h,
                    "War Target: " + war_target_name, war_target != w2::kNone, false, 9);
 
         // Bottom Panel: Diplomatic Forecast (72, 316, 496 x 72)
-        DrawSunkenPanel(72, 316, 496, 72, "DIPLOMATIC FORECAST",
-                        w2::Fmt("Treasury: %d gp   Gift Offer: %d gp", my_side.gold, gold_offer),
-                        5);
+        DrawSunkenPanel(
+                72, 316, 496, 72, "DIPLOMATIC FORECAST",
+                absl::StrFormat("Treasury: %d gp   Gift Offer: %d gp", my_side.gold, gold_offer),
+                5);
 
         gfx::SetScissor(74, 336, 492, 50);
         auto wrapped = WrapText(small_font, attitude.what_it_takes, 478);
@@ -889,11 +892,11 @@ struct ParleyModal : kit::Modal {
         }
         if (allied && dip::AlliedTargetCity(game, other) != w2::kNone) {
             if (const w2::City* target_city = game.map->City(dip::AlliedTargetCity(game, other))) {
-                std::string target_text =
-                        FitText(small_font,
-                                w2::Fmt("Allied War Target: %s (%d, %d)", target_city->name.c_str(),
+                std::string target_text = FitText(
+                        small_font,
+                        absl::StrFormat("Allied War Target: %s (%d, %d)", target_city->name.c_str(),
                                         target_city->x, target_city->y),
-                                478);
+                        478);
                 small_font.Colours(10, 0).Draw(target_text, 80, 369);
             }
         } else if (forecast_y <= 368) {
@@ -1054,9 +1057,9 @@ struct MissiveModal : kit::Modal {
                                                              ? "Notice: Border Warning / Uneasy"
                                                              : "Declaration"));
         if (m.gold_demand > 0)
-            deal_tag += w2::Fmt("  -  Tribute Demand: %d gp", m.gold_demand);
+            deal_tag += absl::StrFormat("  -  Tribute Demand: %d gp", m.gold_demand);
         else if (m.gold_demand < 0)
-            deal_tag += w2::Fmt("  -  Tribute Gift: +%d gp", -m.gold_demand);
+            deal_tag += absl::StrFormat("  -  Tribute Gift: +%d gp", -m.gold_demand);
         int deal_colour = (m.propose_alliance || m.proposed_state == dip::kPeace)
                                   ? 10
                                   : (m.proposed_state == dip::kIntermediate ? 7 : 8);
@@ -1075,8 +1078,9 @@ struct MissiveModal : kit::Modal {
         gfx::SetScissor();
 
         // Diplomatic Context Box
-        DrawSunkenPanel(100, 260, 440, 78, "DIPLOMATIC CONTEXT",
-                        w2::Fmt("Your Treasury: %d gp", g_app.player ? g_app.player->gold : 0), 5);
+        DrawSunkenPanel(
+                100, 260, 440, 78, "DIPLOMATIC CONTEXT",
+                absl::StrFormat("Your Treasury: %d gp", g_app.player ? g_app.player->gold : 0), 5);
         gfx::SetScissor(102, 280, 436, 56);
         auto context_lines = WrapText(small_font, m.reason_summary, 420);
         int context_y = 283;
@@ -1089,10 +1093,10 @@ struct MissiveModal : kit::Modal {
 
         int my_gold = g_app.player ? g_app.player->gold : 0;
         bool can_afford = (m.gold_demand <= 0 || my_gold >= m.gold_demand);
-        DrawButton(
-                btn_accept.x, btn_accept.y, btn_accept.w, btn_accept.h,
-                m.gold_demand > 0 ? w2::Fmt("Pay %dg + Accept", m.gold_demand) : "Accept Proposal",
-                can_afford, !can_afford, 11);
+        DrawButton(btn_accept.x, btn_accept.y, btn_accept.w, btn_accept.h,
+                   m.gold_demand > 0 ? absl::StrFormat("Pay %dg + Accept", m.gold_demand)
+                                     : "Accept Proposal",
+                   can_afford, !can_afford, 11);
         DrawButton(btn_parley.x, btn_parley.y, btn_parley.w, btn_parley.h, "Open Parley");
         DrawButton(btn_decline.x, btn_decline.y, btn_decline.w, btn_decline.h, "Decline", false,
                    false, 9);
@@ -1220,9 +1224,9 @@ struct BrainInspectorModal : kit::Modal {
         int explored_percent =
                 static_cast<int>(std::round((1.0F - belief.frontier_ratio) * 100.0F));
         std::string evaluation =
-                w2::Fmt("[%s]  V(s):%+.2f  Expl:%d%%  Cit:%d  Gold:%d gp",
-                        profile.archetype.c_str(), side.last_board_value, explored_percent,
-                        static_cast<int>(belief.visible_cities.size()), side.gold);
+                absl::StrFormat("[%s]  V(s):%+.2f  Expl:%d%%  Cit:%d  Gold:%d gp",
+                                profile.archetype.c_str(), side.last_board_value, explored_percent,
+                                static_cast<int>(belief.visible_cities.size()), side.gold);
         int value_colour =
                 side.last_board_value >= 0.05F ? 10 : (side.last_board_value <= -0.05F ? 8 : 7);
         small_font.Colours(value_colour, 0).Draw(FitText(small_font, evaluation, 464), 112, 106);
@@ -1258,10 +1262,11 @@ struct BrainInspectorModal : kit::Modal {
         }
 
         // Right Panel: Fair-Information Belief Summary (276, 130, 308 x 165)
-        DrawSunkenPanel(276, 130, 308, 165, "BELIEF MEMORY",
-                        w2::Fmt("Fog:%d Stacks:%d", static_cast<int>(belief.fog_frontiers.size()),
+        DrawSunkenPanel(
+                276, 130, 308, 165, "BELIEF MEMORY",
+                absl::StrFormat("Fog:%d Stacks:%d", static_cast<int>(belief.fog_frontiers.size()),
                                 static_cast<int>(belief.stacks_by_tile.size())),
-                        5);
+                5);
         gfx::SetScissor(278, 150, 304, 143);
         small_font.Colours(1, 0).Draw("Rival", 284, 151);
         kit::Right(small_font.Colours(1, 0), "Cit", 434, 151);
@@ -1278,11 +1283,12 @@ struct BrainInspectorModal : kit::Modal {
             std::string rival_name = FitText(small_font, game.map->sides[rival].name, 106);
             small_font.Draw(rival_name, 304, rival_y);
             kit::Right(small_font.Colours(7, 0),
-                       w2::Fmt("%d", belief.visible_cities_by_side[rival]), 434, rival_y);
+                       absl::StrFormat("%d", belief.visible_cities_by_side[rival]), 434, rival_y);
             kit::Right(small_font.Colours(5, 0),
-                       w2::Fmt("%.1f", belief.seen_enemy_avg_strength[rival]), 478, rival_y);
-            std::string border = w2::Fmt("%.0f / %.0f", belief.my_border_strength[rival],
-                                         belief.their_border_strength[rival]);
+                       absl::StrFormat("%.1f", belief.seen_enemy_avg_strength[rival]), 478,
+                       rival_y);
+            std::string border = absl::StrFormat("%.0f / %.0f", belief.my_border_strength[rival],
+                                                 belief.their_border_strength[rival]);
             int border_colour =
                     belief.my_border_strength[rival] >= belief.their_border_strength[rival] ? 10
                                                                                             : 8;

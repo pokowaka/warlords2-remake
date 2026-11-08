@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <set>
@@ -31,7 +32,7 @@ struct Game {
     Game();
     ~Game();
     Rng rng;                                       ///< The game's dice.
-    std::string data_dir;                          ///< Where the original's data files are.
+    std::filesystem::path data_dir;                ///< Where the original's data files are.
     Types types;                                   ///< The army types.
     std::unique_ptr<Map> map;                      ///< The map and what is on it.
     std::vector<Army*> armies;                     ///< The armies in the game, in slot order.

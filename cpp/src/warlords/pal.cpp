@@ -1,22 +1,23 @@
 #include "warlords/pal.hpp"
 
 #include <cctype>
-#include <stdexcept>
+#include <string>
+
+#include "absl/status/status.h"
+#include "absl/strings/str_format.h"
 
 #include "util/util.hpp"
 
 namespace w2::pal {
 
-Palette Load(const std::string& path) {
+absl::StatusOr<Palette> Load(const std::filesystem::path& path) {
     auto text = ReadFile(path);
-    if (!text) throw std::runtime_error("cannot open palette: " + path);
+    if (!text.ok()) return text.status();
     // every run of three numbers separated by blanks, as the Lua's pattern
-    std::vector<long> nums;
     Palette out;
     const std::string& contents = *text;
     size_t pos = 0;
     while (pos < contents.size()) {
-        // find three integers separated by whitespace
         if (std::isdigit(static_cast<unsigned char>(contents[pos]))) {
             size_t scan = pos;
             long rgb[3];
@@ -29,14 +30,16 @@ Palette Load(const std::string& path) {
                 }
                 long number = 0;
                 while (scan < contents.size() &&
-                       std::isdigit(static_cast<unsigned char>(contents[scan])))
+                       std::isdigit(static_cast<unsigned char>(contents[scan]))) {
                     number = number * 10 + (contents[scan++] - '0');
+                }
                 rgb[component] = number;
                 if (component < 2) {
                     size_t blank_start = scan;
                     while (scan < contents.size() &&
-                           std::isspace(static_cast<unsigned char>(contents[scan])))
+                           std::isspace(static_cast<unsigned char>(contents[scan]))) {
                         scan++;
+                    }
                     if (scan == blank_start) {
                         matched = false;
                         break;
@@ -48,15 +51,20 @@ Palette Load(const std::string& path) {
                 pos = scan;
                 continue;
             }
-            while (pos < contents.size() && std::isdigit(static_cast<unsigned char>(contents[pos])))
+            while (pos < contents.size() &&
+                   std::isdigit(static_cast<unsigned char>(contents[pos]))) {
                 pos++;
+            }
             continue;
         }
         pos++;
     }
-    if (out.size() != 16)
-        throw std::runtime_error(
-                Fmt("%s: expected 16 entries, got %d", path.c_str(), static_cast<int>(out.size())));
+    if (out.size() != 16) {
+        return absl::InvalidArgumentError(absl::StrFormat(
+                "Failed to parse palette '%s': expected 16 RGB triplets, got %zu; verify the .PAL "
+                "file contains 16 'RR GG BB' entries (0..99).",
+                path.string(), out.size()));
+    }
     return out;
 }
 

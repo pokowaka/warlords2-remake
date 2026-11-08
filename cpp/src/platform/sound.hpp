@@ -4,6 +4,7 @@
 // Ogg Vorbis streams from `pre-rendered-sound/` (see `docs/re/sound.md`).
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -17,7 +18,7 @@ namespace sound {
  * @brief Opens the SDL audio device and loads sound metadata (`FILE.DAT` sample
  * names and `OPTIONS.SND` toggles). Silent when no audio device is available.
  */
-void Init(const std::string& data_dir, const w2::uidata::Strings& files);
+void Init(const std::filesystem::path& data_dir, const w2::uidata::Strings& files);
 /** @brief Closes the audio device and releases active streams and synthesizer state. */
 void Shutdown();
 

@@ -167,8 +167,8 @@ bool Open(const std::string& name, kit::Done after, const kit::Rect* rect) {
     std::string path = name;
     for (auto& character : path)
         if (character == '\\') character = '/';
-    auto text = w2::ReadFile(g_app.data_dir + "/" + path);
-    if (!text) return false;
+    auto text = w2::ReadFile(g_app.data_dir / path);
+    if (!text.ok()) return false;
     auto dialog = std::make_shared<Page>();
     int page = Parse(*text, dialog->steps);
     dialog->rect = rect ? *rect : (page == 1 ? kPopups[1] : kPopups[0]);

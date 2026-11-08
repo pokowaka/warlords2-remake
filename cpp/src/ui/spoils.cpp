@@ -5,6 +5,8 @@
  *
  * Popup 12, (176, 60) 288x300, marble.
  */
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 
@@ -61,7 +63,7 @@ struct Spoils : kit::Modal {
                 gfx::SetColor(1, 1, 1);
                 const w2::ArmyType* type = g_app.g->types.ById(lost[i].first);
                 font.Draw(type ? type->name : "", 248, y + 6);
-                font.Draw(w2::Fmt("%d gp", lost[i].second), 368, y + 6);
+                font.Draw(absl::StrFormat("%d gp", lost[i].second), 368, y + 6);
             }
         }
     }

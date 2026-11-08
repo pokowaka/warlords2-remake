@@ -5,13 +5,15 @@
 #include <algorithm>
 #include <cmath>
 
+#include "absl/strings/str_format.h"
+
 #include "front/internal.hpp"
 #include "front/pckimage.hpp"
 #include "front/prefs.hpp"
+#include "nlohmann/json.hpp"
 #include "platform/display.hpp"
 #include "platform/sound.hpp"
 #include "ui/dialogs.hpp"
-#include "util/json.hpp"
 #include "util/util.hpp"
 #include "warlords/armytype.hpp"
 #include "warlords/diplomacy.hpp"
@@ -35,55 +37,112 @@ namespace game = w2::game;
 namespace slots_mod = w2::slots;
 
 /** @brief Loads every picture, font and the main screen's layout from the data directory. */
-void LoadArt() {
-    g_app.palette = w2::pal::Load(g_app.data_dir + "/TERRAIN0/WAR2.PAL");
+absl::Status LoadArt() {
+    const std::filesystem::path& root = g_app.data_dir;
+    auto loaded_pal = w2::pal::Load(root / "TERRAIN0/WAR2.PAL");
+    if (!loaded_pal.ok()) return loaded_pal.status();
+    g_app.palette = *loaded_pal;
     const auto& palette = g_app.palette;
-    auto img = [&](const std::string& path, int key = pckimage::kNokey) {
-        return pckimage::Load(g_app.data_dir + path, palette, key);
+    auto load_into = [&](gfx::ImageP& dest, const std::string& rel_path,
+                         int key = pckimage::kNokey) -> absl::Status {
+        auto img = pckimage::Load(root / rel_path, palette, key);
+        if (!img.ok()) return img.status();
+        dest = std::move(*img);
+        return absl::OkStatus();
     };
-    for (int i = 0; i < 2; i++)
-        g_app.sheets[i] = img("/TERRAIN0/SCENERY" + std::to_string(i) + ".PCK");
-    g_app.road_img = img("/TERRAIN0/ROAD.PCK", 1);
-    for (int i = 0; i <= 8; i++)
-        g_app.army_img[i] = img("/TERRAIN0/A" + std::to_string(i) + ".PCK", pckimage::kCorner);
-    g_app.shadow_img = img("/TERRAIN0/ASHADOW.PCK", 15);
-    g_app.marble = img("/PICS/MARBLE.PCK");
-    g_app.big_army = img("/PICS/BIGARMY.PCK");
-    g_app.city_pic = img("/PICS/CITY.PCK");
-    g_app.war_pic = img("/PICS/WAR.PCK", 1);
-    g_app.shield_img = img("/TERRAIN0/BSHIELD.PCK", 12);
-    g_app.victory_pic = img("/PICS/VICTORY.PCK");
-    g_app.hero_pic_m = img("/PICS/MHERO.PCK");
-    g_app.hero_pic_f = img("/PICS/FHERO.PCK");
-    g_app.atrans_shields = img("/TERRAIN0/ATRANS2.PCK", 1);
-    g_app.fog_img = img("/PICS/HIDDEN.PCK", 1);
-    g_app.curs_img = pckimage::FromPixels(*w2::pck::Decode(g_app.data_dir + "/PICS/CURS.PCK"),
-                                          palette, {{1, 15}, {4, 0}}, {0});
-    g_app.abits = img("/PICS/ABITS.PCK");
-    g_app.pointer_img = img("/STAND.PCK", 10);
-    g_app.screen = screen::Load(g_app.data_dir, palette, w2::uidata::kMainScreen, 0);
-    try {
-        std::string shortcuts_json = prefs::Get("shortcuts");
-        if (!shortcuts_json.empty()) {
-            auto shortcut_list = w2::Json::Parse(shortcuts_json);
-            for (size_t i = 0; i < shortcut_list.size(); i++)
-                g_app.screen->ui.shortcuts[static_cast<int>(i)] =
-                        static_cast<int>(shortcut_list[i].Integer());
+    for (int i = 0; i < 2; i++) {
+        if (absl::Status status =
+                    load_into(g_app.sheets[i], "TERRAIN0/SCENERY" + std::to_string(i) + ".PCK");
+            !status.ok()) {
+            return status;
         }
-    } catch (...) {
     }
-    g_app.font = Font::Load(g_app.data_dir, "TEXT", palette, 3);
-    g_app.big_font = Font::Load(g_app.data_dir, "CHANCE17", palette, 3);
-    g_app.title_font = Font::Load(g_app.data_dir, "CHANCE36", palette, 3);
-    g_app.shields_img = img("/TERRAIN0/SHIELDS.PCK");
-    g_app.city_back = img("/TERRAIN0/CITYBACK.PCK");
-    g_app.search_pic = img("/PICS/SEARCH.PCK");
-    g_app.temple_pic = img("/PICS/TEMPLE.PCK");
-    for (int i = 2; i <= 4; i++)
-        g_app.level_pic[i] = img("/PICS/LEVEL" + std::to_string(i) + ".PCK");
-    for (int i = 0; i < 4; i++)
-        g_app.medal_pic[i] = img("/PICS/MEDAL" + std::to_string(i) + ".PCK");
-    g_app.scroll_pic = img("/PICS/SCROLL.PCK", 10);
+    if (absl::Status status = load_into(g_app.road_img, "TERRAIN0/ROAD.PCK", 1); !status.ok())
+        return status;
+    for (int i = 0; i <= 8; i++) {
+        if (absl::Status status =
+                    load_into(g_app.army_img[i], "TERRAIN0/A" + std::to_string(i) + ".PCK",
+                              pckimage::kCorner);
+            !status.ok()) {
+            return status;
+        }
+    }
+    if (absl::Status status = load_into(g_app.shadow_img, "TERRAIN0/ASHADOW.PCK", 15); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.marble, "PICS/MARBLE.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.big_army, "PICS/BIGARMY.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.city_pic, "PICS/CITY.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.war_pic, "PICS/WAR.PCK", 1); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.shield_img, "TERRAIN0/BSHIELD.PCK", 12); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.victory_pic, "PICS/VICTORY.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.hero_pic_m, "PICS/MHERO.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.hero_pic_f, "PICS/FHERO.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.atrans_shields, "TERRAIN0/ATRANS2.PCK", 1);
+        !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.fog_img, "PICS/HIDDEN.PCK", 1); !status.ok())
+        return status;
+    auto curs_px = w2::pck::Decode(root / "PICS/CURS.PCK");
+    if (!curs_px.ok()) return curs_px.status();
+    g_app.curs_img = pckimage::FromPixels(**curs_px, palette, {{1, 15}, {4, 0}}, {0});
+    if (absl::Status status = load_into(g_app.abits, "PICS/ABITS.PCK"); !status.ok()) return status;
+    if (absl::Status status = load_into(g_app.pointer_img, "STAND.PCK", 10); !status.ok())
+        return status;
+    auto loaded_screen = screen::Load(root, palette, w2::uidata::kMainScreen, 0);
+    if (!loaded_screen.ok()) return loaded_screen.status();
+    g_app.screen = std::move(*loaded_screen);
+    std::string shortcuts_json = prefs::Get("shortcuts");
+    if (!shortcuts_json.empty()) {
+        auto shortcut_list =
+                nlohmann::ordered_json::parse(shortcuts_json, nullptr, /*allow_exceptions=*/false);
+        if (!shortcut_list.is_discarded() && shortcut_list.is_array()) {
+            for (size_t i = 0; i < shortcut_list.size(); i++) {
+                if (shortcut_list[i].is_number_integer()) {
+                    g_app.screen->ui.shortcuts[static_cast<int>(i)] = shortcut_list[i].get<int>();
+                }
+            }
+        }
+    }
+    auto text_font = Font::Load(root, "TEXT", palette, 3);
+    if (!text_font.ok()) return text_font.status();
+    g_app.font = std::move(*text_font);
+    auto chance17 = Font::Load(root, "CHANCE17", palette, 3);
+    if (!chance17.ok()) return chance17.status();
+    g_app.big_font = std::move(*chance17);
+    auto chance36 = Font::Load(root, "CHANCE36", palette, 3);
+    if (!chance36.ok()) return chance36.status();
+    g_app.title_font = std::move(*chance36);
+    if (absl::Status status = load_into(g_app.shields_img, "TERRAIN0/SHIELDS.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.city_back, "TERRAIN0/CITYBACK.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.search_pic, "PICS/SEARCH.PCK"); !status.ok())
+        return status;
+    if (absl::Status status = load_into(g_app.temple_pic, "PICS/TEMPLE.PCK"); !status.ok())
+        return status;
+    for (int i = 2; i <= 4; i++) {
+        if (absl::Status status =
+                    load_into(g_app.level_pic[i], "PICS/LEVEL" + std::to_string(i) + ".PCK");
+            !status.ok()) {
+            return status;
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        if (absl::Status status =
+                    load_into(g_app.medal_pic[i], "PICS/MEDAL" + std::to_string(i) + ".PCK");
+            !status.ok()) {
+            return status;
+        }
+    }
+    return load_into(g_app.scroll_pic, "PICS/SCROLL.PCK", 10);
 }
 
 // ------------------------------------------------------------------ drawing
@@ -490,7 +549,7 @@ static void DrawTurnStrip() {
     for (Side* side : g_app.g->sides)
         if (side->alive) alive.push_back(side);
     int count = static_cast<int>(alive.size());
-    std::string turn = w2::Fmt("Turn %d", g_app.g->turn);
+    std::string turn = absl::StrFormat("Turn %d", g_app.g->turn);
     const Font& font = g_app.big_font->Colours(0, 15);
     font.Draw(turn, (8 - count) * 16 + 508 - font.Width(turn), 0);
     const Side* active_side = (g_app.ai_side && !HumansLeft()) ? g_app.ai_side : g_app.player;
@@ -594,7 +653,7 @@ static void DrawAbits(int src_x, int src_y, int width, int height, int x, int y)
 
 /** @brief Draws a number in ABITS's own 8x8 digits, always two of them ("%02d"). */
 static void DrawDigits(int number, int x, int y) {
-    std::string text = w2::Fmt("%02d", std::max(0, std::min(99, number)));
+    std::string text = absl::StrFormat("%02d", std::max(0, std::min(99, number)));
     for (size_t i = 0; i < text.size(); i++)
         DrawAbits(64 + (text[i] - '0') * 8, 30, 8, 8, x + static_cast<int>(i) * 8, y);
 }
@@ -727,13 +786,10 @@ static void DrawComputerStatus() {
     if (bar_width > 0) {
         int side_index = side->index;
         if (!g_app.move_bars.count(side_index)) {
-            try {
-                g_app.move_bars[side_index] = pckimage::Load(
-                        g_app.data_dir + "/TERRAIN0/MOVEBAR" + std::to_string(side_index) + ".PCK",
-                        g_app.palette, pckimage::kCorner);
-            } catch (...) {
-                g_app.move_bars[side_index] = nullptr;
-            }
+            auto bar = pckimage::Load(
+                    g_app.data_dir / "TERRAIN0" / ("MOVEBAR" + std::to_string(side_index) + ".PCK"),
+                    g_app.palette, pckimage::kCorner);
+            g_app.move_bars[side_index] = bar.ok() ? std::move(*bar) : nullptr;
         }
         gfx::SetColor(1, 1, 1);
         if (g_app.move_bars[side_index])

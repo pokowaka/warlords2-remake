@@ -2,41 +2,29 @@
 
 #include <algorithm>
 #include <cctype>
-#include <chrono>
-#include <cstdarg>
-#include <cstdio>
+#include <cerrno>
+#include <charconv>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
-#include <map>
-#include <mutex>
-#include <sstream>
+#include <system_error>
+
+#include "absl/base/no_destructor.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/container/flat_hash_map.h"
+#include "absl/flags/parse.h"
+#include "absl/flags/usage.h"
+#include "absl/strings/str_format.h"
+#include "absl/synchronization/mutex.h"
+#include "absl/time/clock.h"
+#include "absl/time/time.h"
 
 namespace fs = std::filesystem;
 
 namespace w2 {
 
-std::string Fmt(const char* fmt_str, ...) {
-    va_list args_primary;
-    va_start(args_primary, fmt_str);
-    char buf[512];
-    va_list args_copy;
-    va_copy(args_copy, args_primary);
-    int len = vsnprintf(buf, sizeof buf, fmt_str, args_primary);
-    va_end(args_primary);
-    std::string out;
-    if (len < static_cast<int>(sizeof buf)) {
-        out.assign(buf, len < 0 ? 0 : len);
-    } else {
-        out.resize(len + 1);
-        vsnprintf(out.data(), len + 1, fmt_str, args_copy);
-        out.resize(len);
-    }
-    va_end(args_copy);
-    return out;
-}
-
-std::string Sfmt(const std::string& fmt_str, const std::vector<FmtArg>& args) {
+std::string Sfmt(std::string_view fmt_str, const std::vector<FmtArg>& args) {
     std::string out;
     size_t arg_index = 0;
     for (size_t i = 0; i < fmt_str.size(); i++) {
@@ -47,20 +35,24 @@ std::string Sfmt(const std::string& fmt_str, const std::vector<FmtArg>& args) {
         }
         size_t pos = i + 1;
         std::string flags;
-        while (pos < fmt_str.size() && strchr("-+ 0#", fmt_str[pos])) flags += fmt_str[pos++];
+        while (pos < fmt_str.size() && std::strchr("-+ 0#", fmt_str[pos]) != nullptr) {
+            flags += fmt_str[pos++];
+        }
         int width = 0;
-        while (pos < fmt_str.size() && isdigit(static_cast<unsigned char>(fmt_str[pos])))
+        while (pos < fmt_str.size() && std::isdigit(static_cast<unsigned char>(fmt_str[pos]))) {
             width = width * 10 + (fmt_str[pos++] - '0');
+        }
         int prec = -1;
         if (pos < fmt_str.size() && fmt_str[pos] == '.') {
             prec = 0;
             pos++;
-            while (pos < fmt_str.size() && isdigit(static_cast<unsigned char>(fmt_str[pos])))
+            while (pos < fmt_str.size() && std::isdigit(static_cast<unsigned char>(fmt_str[pos]))) {
                 prec = prec * 10 + (fmt_str[pos++] - '0');
+            }
         }
         while (pos < fmt_str.size() && (fmt_str[pos] == 'l' || fmt_str[pos] == 'h')) pos++;
         if (pos >= fmt_str.size()) {
-            out += fmt_str.substr(i);
+            out.append(fmt_str.substr(i));
             break;
         }
         char conv = fmt_str[pos];
@@ -76,24 +68,27 @@ std::string Sfmt(const std::string& fmt_str, const std::vector<FmtArg>& args) {
         case 'd':
         case 'i':
         case 'u': {
-            long val = arg.is_str ? (ToInt(arg.str_val) ? *ToInt(arg.str_val) : 0) : arg.num_val;
-            formatted = std::to_string(val < 0 ? -val : val);
-            if (prec >= 0)
+            long val = arg.is_str ? ToInt(arg.str_val).value_or(0) : arg.num_val;
+            unsigned long mag = val < 0 ? 0UL - static_cast<unsigned long>(val)
+                                        : static_cast<unsigned long>(val);
+            formatted = std::to_string(mag);
+            if (prec >= 0) {
                 while (static_cast<int>(formatted.size()) < prec) formatted = "0" + formatted;
+            }
             if (val < 0)
                 formatted = "-" + formatted;
-            else if (flags.find('+') != std::string::npos)
+            else if (flags.contains('+'))
                 formatted = "+" + formatted;
             break;
         }
         case 'x':
-        case 'X': {
-            char buf[32];
-            snprintf(buf, sizeof buf, conv == 'x' ? "%lx" : "%lX",
-                     static_cast<unsigned long>(arg.is_str ? 0 : arg.num_val));
-            formatted = buf;
+            formatted =
+                    std::format("{:x}", static_cast<unsigned long>(arg.is_str ? 0 : arg.num_val));
             break;
-        }
+        case 'X':
+            formatted =
+                    std::format("{:X}", static_cast<unsigned long>(arg.is_str ? 0 : arg.num_val));
+            break;
         case 'c':
             formatted = std::string(
                     1, static_cast<char>(arg.is_str ? (arg.str_val.empty() ? ' ' : arg.str_val[0])
@@ -107,9 +102,9 @@ std::string Sfmt(const std::string& fmt_str, const std::vector<FmtArg>& args) {
             break;
         }
         if (static_cast<int>(formatted.size()) < width) {
-            if (flags.find('-') != std::string::npos) {
+            if (flags.contains('-')) {
                 formatted += std::string(width - formatted.size(), ' ');
-            } else if (flags.find('0') != std::string::npos && conv != 's') {
+            } else if (flags.contains('0') && conv != 's') {
                 bool sign = !formatted.empty() && (formatted[0] == '-' || formatted[0] == '+');
                 std::string body = sign ? formatted.substr(1) : formatted;
                 formatted = (sign ? formatted.substr(0, 1) : "") +
@@ -126,27 +121,56 @@ std::string Sfmt(const std::string& fmt_str, const std::vector<FmtArg>& args) {
 // ------------------------------------------------------------------- files
 
 namespace {
-std::mutex dir_lock;
-std::map<std::string, std::vector<std::string>> dir_cache;
 
-/** @brief Returns the cached filename listing for `dir`. */
-const std::vector<std::string>& Listing(const std::string& dir) {
-    auto found_it = dir_cache.find(dir);
-    if (found_it != dir_cache.end()) return found_it->second;
-    std::vector<std::string> names;
-    std::error_code err_code;
-    for (const auto& entry : fs::directory_iterator(dir.empty() ? "." : dir, err_code))
-        names.push_back(entry.path().filename().string());
-    return dir_cache[dir] = names;
+using DirListingMap = absl::flat_hash_map<std::string, std::vector<std::string>>;
+
+class DirectoryListingCache {
+  public:
+    std::vector<std::string> Listing(const std::string& dir) ABSL_LOCKS_EXCLUDED(dir_cache_mutex_) {
+        absl::MutexLock dir_cache_lock(&dir_cache_mutex_);
+        auto found_it = entries_.find(dir);
+        if (found_it != entries_.end()) return found_it->second;
+        std::vector<std::string> names;
+        std::error_code err_code;
+        for (const auto& entry : fs::directory_iterator(dir.empty() ? "." : dir, err_code)) {
+            names.push_back(entry.path().filename().string());
+        }
+        entries_.emplace(dir, names);
+        return names;
+    }
+
+    void Clear() ABSL_LOCKS_EXCLUDED(dir_cache_mutex_) {
+        absl::MutexLock dir_cache_lock(&dir_cache_mutex_);
+        entries_.clear();
+    }
+
+  private:
+    absl::Mutex dir_cache_mutex_;
+    DirListingMap entries_ ABSL_GUARDED_BY(dir_cache_mutex_);
+};
+
+DirectoryListingCache& GlobalDirCache() {
+    static absl::NoDestructor<DirectoryListingCache> cache;
+    return *cache;
 }
+
+absl::Status OsIoError(std::string_view operation, const fs::path& path, int err_num,
+                       std::string_view hint) {
+    std::string detail = std::strerror(err_num);
+    std::string msg = absl::StrFormat("Failed to %s '%s': %s (errno=%d); %s", operation,
+                                      path.string(), detail, err_num, hint);
+    if (err_num == ENOENT) return absl::NotFoundError(msg);
+    if (err_num == EACCES || err_num == EPERM) return absl::PermissionDeniedError(msg);
+    return absl::InternalError(msg);
+}
+
 }  // namespace
 
-std::string ResolvePath(const std::string& path) {
+fs::path ResolvePath(const fs::path& path) {
     std::error_code err_code;
     if (fs::exists(path, err_code)) return path;
-    std::string norm_path = path;
+    std::string norm_path = path.string();
     std::replace(norm_path.begin(), norm_path.end(), '\\', '/');
-    std::lock_guard<std::mutex> lock(dir_lock);
     std::string cur;
     size_t pos = 0;
     if (!norm_path.empty() && norm_path[0] == '/') {
@@ -162,115 +186,151 @@ std::string ResolvePath(const std::string& path) {
         std::string next = cur.empty() ? part : (cur.back() == '/' ? cur + part : cur + "/" + part);
         if (part != ".." && !fs::exists(next, err_code)) {
             std::string found;
-            for (const auto& name : Listing(cur)) {
-                if (name.size() == part.size() && Upper(name) == Upper(part)) {
+            std::string upper_part = Upper(part);
+            for (const auto& name : GlobalDirCache().Listing(cur)) {
+                if (name.size() == part.size() && Upper(name) == upper_part) {
                     found = name;
                     break;
                 }
             }
-            if (found.empty()) return "";
+            if (found.empty()) return {};
             next = cur.empty() ? found : (cur.back() == '/' ? cur + found : cur + "/" + found);
         }
         cur = next;
     }
-    return cur;
+    return cur.empty() ? fs::path{} : fs::path(cur);
 }
 
-namespace {
-/** @brief Returns the process-wide in-memory file overlay map. */
-std::map<std::string, std::string>& MadeFiles() {
-    static std::map<std::string, std::string> made;
-    return made;
-}
-/** @brief Normalizes `path` into an upper-case forward-slash key for `MadeFiles()`. */
-std::string MadeKey(const std::string& path) {
-    std::string key;
-    for (char chr : path) {
-        char norm = chr == '\\' ? '/'
-                                : static_cast<char>(std::toupper(static_cast<unsigned char>(chr)));
-        if (norm == '/' && !key.empty() && key.back() == '/') continue;
-        key += norm;
+absl::StatusOr<std::vector<uint8_t>> ReadBytes(const fs::path& path) {
+    fs::path real = ResolvePath(path);
+    if (real.empty()) {
+        return absl::NotFoundError(absl::StrFormat(
+                "Failed to read '%s': file does not exist (checked case-insensitively); verify "
+                "the file exists and --data points to a valid Warlords II directory.",
+                path.string()));
     }
-    return key;
-}
-}  // namespace
-
-void InstallFile(const std::string& path, const std::string& bytes) {
-    MadeFiles()[MadeKey(path)] = bytes;
-}
-
-std::optional<std::string> ReadFile(const std::string& path) {
-    auto made = MadeFiles().find(MadeKey(path));
-    if (made != MadeFiles().end()) return made->second;
-    std::string real = ResolvePath(path);
-    if (real.empty()) return std::nullopt;
-    std::ifstream file(real, std::ios::binary);
-    if (!file) return std::nullopt;
-    std::ostringstream stream;
-    stream << file.rdbuf();
-    return stream.str();
-}
-
-std::string MustRead(const std::string& path) {
-    auto content = ReadFile(path);
-    if (!content) throw std::runtime_error("cannot open: " + path);
-    return *content;
+    errno = 0;
+    std::ifstream file(real, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        int err_num = errno != 0 ? errno : EIO;
+        return OsIoError("open file for reading", real, err_num,
+                         "check file permissions and verify the path is a readable file.");
+    }
+    std::streamsize file_size = file.tellg();
+    if (file_size < 0) {
+        int err_num = errno != 0 ? errno : EIO;
+        return OsIoError("determine file size of", real, err_num,
+                         "ensure the path refers to a regular file rather than a directory.");
+    }
+    std::vector<uint8_t> buffer(static_cast<size_t>(file_size));
+    file.seekg(0, std::ios::beg);
+    if (file_size > 0 && !file.read(reinterpret_cast<char*>(buffer.data()), file_size)) {
+        int err_num = errno != 0 ? errno : EIO;
+        return OsIoError("read bytes from", real, err_num,
+                         "check disk health and ensure the file is not truncated concurrently.");
+    }
+    return buffer;
 }
 
-bool FileExists(const std::string& path) {
-    return MadeFiles().count(MadeKey(path)) > 0 || !ResolvePath(path).empty();
+absl::StatusOr<std::string> ReadFile(const fs::path& path) {
+    auto bytes = ReadBytes(path);
+    if (!bytes.ok()) return bytes.status();
+    return std::string(bytes->begin(), bytes->end());
 }
 
-bool WriteFile(const std::string& path, const std::string& bytes) {
-    std::string real = ResolvePath(path);
+bool FileExists(const fs::path& path) {
+    return !ResolvePath(path).empty();
+}
+
+absl::Status WriteBytes(const fs::path& path, absl::Span<const uint8_t> bytes) {
+    fs::path real = ResolvePath(path);
     if (real.empty()) real = path;
-    std::string tmp = real + ".tmp";
+    fs::path tmp = real;
+    tmp += ".tmp";
     {
+        errno = 0;
         std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
-        if (!file) return false;
-        file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        if (!file) return false;
+        if (!file.is_open()) {
+            int err_num = errno != 0 ? errno : EIO;
+            return OsIoError("open temporary file for writing", tmp, err_num,
+                             "ensure the parent directory exists and is writable.");
+        }
+        if (!bytes.empty()) {
+            file.write(reinterpret_cast<const char*>(bytes.data()),
+                       static_cast<std::streamsize>(bytes.size()));
+            if (!file) {
+                int err_num = errno != 0 ? errno : EIO;
+                return OsIoError("write bytes to", tmp, err_num,
+                                 "check available disk space and directory permissions.");
+            }
+        }
     }
     std::error_code err_code;
     fs::rename(tmp, real, err_code);
-    if (err_code) return false;
-    std::lock_guard<std::mutex> lock(dir_lock);
-    dir_cache.clear();
-    return true;
+    if (err_code) {
+        std::error_code cleanup_err;
+        fs::remove(tmp, cleanup_err);
+        return absl::InternalError(absl::StrFormat(
+                "Failed to atomically replace '%s' from '%s': %s; verify write permissions on the "
+                "destination directory.",
+                real.string(), tmp.string(), err_code.message()));
+    }
+    GlobalDirCache().Clear();
+    return absl::OkStatus();
 }
 
-bool RemoveFile(const std::string& path) {
-    std::string real = ResolvePath(path);
-    if (real.empty()) return false;
+absl::Status WriteFile(const fs::path& path, std::string_view content) {
+    const auto* raw = reinterpret_cast<const uint8_t*>(content.data());
+    return WriteBytes(path, absl::MakeConstSpan(raw, content.size()));
+}
+
+absl::Status RemoveFile(const fs::path& path) {
+    fs::path real = ResolvePath(path);
+    if (real.empty()) {
+        return absl::NotFoundError(absl::StrFormat(
+                "Failed to remove '%s': file does not exist; verify the path before deleting.",
+                path.string()));
+    }
     std::error_code err_code;
     bool removed = fs::remove(real, err_code);
-    std::lock_guard<std::mutex> lock(dir_lock);
-    dir_cache.clear();
-    return removed;
+    GlobalDirCache().Clear();
+    if (err_code || !removed) {
+        return absl::InternalError(absl::StrFormat(
+                "Failed to remove '%s': %s; check directory write permissions.", real.string(),
+                err_code ? err_code.message() : "fs::remove returned false"));
+    }
+    return absl::OkStatus();
 }
 
 // ----------------------------------------------------------------- strings
 
-std::string Upper(std::string str) {
-    for (auto& chr : str) chr = static_cast<char>(std::toupper(static_cast<unsigned char>(chr)));
-    return str;
+std::string Upper(std::string_view str) {
+    std::string out(str);
+    for (char& chr : out) chr = static_cast<char>(std::toupper(static_cast<unsigned char>(chr)));
+    return out;
 }
-std::string Lower(std::string str) {
-    for (auto& chr : str) chr = static_cast<char>(std::tolower(static_cast<unsigned char>(chr)));
-    return str;
+
+std::string Lower(std::string_view str) {
+    std::string out(str);
+    for (char& chr : out) chr = static_cast<char>(std::tolower(static_cast<unsigned char>(chr)));
+    return out;
 }
-std::string TrimRight(const std::string& str) {
+
+std::string TrimRight(std::string_view str) {
     size_t end_pos = str.size();
     while (end_pos > 0 && std::isspace(static_cast<unsigned char>(str[end_pos - 1]))) end_pos--;
-    return str.substr(0, end_pos);
+    return std::string(str.substr(0, end_pos));
 }
-std::string Trim(const std::string& str) {
+
+std::string Trim(std::string_view str) {
     size_t start_pos = 0;
-    while (start_pos < str.size() && std::isspace(static_cast<unsigned char>(str[start_pos])))
+    while (start_pos < str.size() && std::isspace(static_cast<unsigned char>(str[start_pos]))) {
         start_pos++;
+    }
     return TrimRight(str.substr(start_pos));
 }
-std::vector<std::string> SplitLines(const std::string& str) {
+
+std::vector<std::string> SplitLines(std::string_view str) {
     std::vector<std::string> out;
     std::string cur;
     for (char chr : str) {
@@ -284,18 +344,8 @@ std::vector<std::string> SplitLines(const std::string& str) {
     if (!cur.empty()) out.push_back(cur);
     return out;
 }
-bool StartsWith(const std::string& str, const std::string& prefix) {
-    return str.compare(0, prefix.size(), prefix) == 0;
-}
-bool EndsWith(const std::string& str, const std::string& suffix) {
-    return str.size() >= suffix.size() &&
-           str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
-}
-bool Contains(const std::string& str, const std::string& needle) {
-    return str.find(needle) != std::string::npos;
-}
 
-std::string Latin1ToUtf8(const std::string& str) {
+std::string Latin1ToUtf8(std::string_view str) {
     std::string out;
     for (unsigned char byte : str) {
         if (byte < 0x80) {
@@ -307,10 +357,11 @@ std::string Latin1ToUtf8(const std::string& str) {
     }
     return out;
 }
-std::string Utf8ToLatin1(const std::string& str) {
+
+std::string Utf8ToLatin1(std::string_view str) {
     std::string out;
     for (size_t i = 0; i < str.size();) {
-        unsigned char lead = str[i];
+        auto lead = static_cast<unsigned char>(str[i]);
         if (lead < 0x80) {
             out += static_cast<char>(lead);
             i++;
@@ -318,35 +369,87 @@ std::string Utf8ToLatin1(const std::string& str) {
         }
         int seq_len = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : 2;
         unsigned code_point = lead & (0x3f >> (seq_len - 1));
-        for (int offset = 1; offset < seq_len && i + offset < str.size(); offset++)
-            code_point = (code_point << 6) | (str[i + offset] & 0x3f);
+        for (int offset = 1; offset < seq_len && i + offset < str.size(); offset++) {
+            code_point = (code_point << 6) | (static_cast<unsigned char>(str[i + offset]) & 0x3f);
+        }
         out += code_point < 256 ? static_cast<char>(code_point) : '?';
         i += seq_len;
     }
     return out;
 }
-std::optional<long> ToInt(const std::string& str) {
-    std::string trimmed = Trim(str);
-    if (trimmed.empty()) return std::nullopt;
-    size_t pos = 0;
-    bool neg = false;
-    if (trimmed[0] == '-' || trimmed[0] == '+') {
-        neg = trimmed[0] == '-';
-        pos = 1;
+
+std::optional<long> ToInt(std::string_view str) {
+    while (!str.empty() && std::isspace(static_cast<unsigned char>(str.front()))) {
+        str.remove_prefix(1);
     }
-    if (pos >= trimmed.size()) return std::nullopt;
+    while (!str.empty() && std::isspace(static_cast<unsigned char>(str.back()))) {
+        str.remove_suffix(1);
+    }
+    if (str.empty()) return std::nullopt;
+    if (str.front() == '+') {
+        str.remove_prefix(1);
+        if (str.empty() || str.front() == '-' || str.front() == '+') return std::nullopt;
+    }
     long val = 0;
-    for (; pos < trimmed.size(); pos++) {
-        if (!std::isdigit(static_cast<unsigned char>(trimmed[pos]))) return std::nullopt;
-        val = val * 10 + (trimmed[pos] - '0');
-    }
-    return neg ? -val : val;
+    const char* begin = str.data();
+    const char* end = str.data() + str.size();
+    auto [ptr, err_code] = std::from_chars(begin, end, val, 10);
+    if (err_code != std::errc{} || ptr != end) return std::nullopt;
+    return val;
 }
 
 double Now() {
-    using namespace std::chrono;
-    static const auto kStart = steady_clock::now();
-    return duration<double>(steady_clock::now() - kStart).count();
+    static const absl::Time kProcessStart = absl::Now();
+    return absl::ToDoubleSeconds(absl::Now() - kProcessStart);
+}
+
+std::vector<std::string> ParseCliFlags(int argc, char** argv, std::string_view usage_message) {
+    if (!usage_message.empty()) {
+        absl::SetProgramUsageMessage(usage_message);
+    }
+    // Preserve signed numeric positional arguments (such as "-1" in w2aidiag) by
+    // replacing them with a sentinel token during flag parsing and restoring them
+    // into the returned positional list, while normalizing "--kebab-case" flags
+    // to "--snake_case" so existing shell scripts work verbatim.
+    constexpr std::string_view kNegPrefix = "__w2_positional_neg__:";
+    std::vector<std::string> owned_args;
+    owned_args.reserve(static_cast<size_t>(std::max(1, argc)));
+    bool past_double_dash = false;
+    for (int i = 0; i < argc; i++) {
+        std::string arg = argv[i] ? argv[i] : "";
+        if (i > 0 && !past_double_dash) {
+            if (arg == "--") {
+                past_double_dash = true;
+            } else if (arg.starts_with("--")) {
+                size_t eq_pos = arg.find('=');
+                size_t end_pos = eq_pos == std::string::npos ? arg.size() : eq_pos;
+                for (size_t idx = 2; idx < end_pos; idx++) {
+                    if (arg[idx] == '-') arg[idx] = '_';
+                }
+                std::string_view flag_head(arg.data(), end_pos);
+                if (flag_head == "--export") {
+                    arg = "--export_dir" + (eq_pos == std::string::npos ? "" : arg.substr(eq_pos));
+                }
+            } else if (arg.size() >= 2 && arg[0] == '-' &&
+                       std::isdigit(static_cast<unsigned char>(arg[1]))) {
+                arg = std::string(kNegPrefix) + arg;
+            }
+        }
+        owned_args.push_back(std::move(arg));
+    }
+    std::vector<char*> mutable_argv;
+    mutable_argv.reserve(owned_args.size());
+    for (std::string& item : owned_args) mutable_argv.push_back(item.data());
+
+    std::vector<char*> remaining =
+            absl::ParseCommandLine(static_cast<int>(mutable_argv.size()), mutable_argv.data());
+    std::vector<std::string> positional;
+    for (size_t i = 1; i < remaining.size(); i++) {
+        std::string_view token = remaining[i];
+        if (token.starts_with(kNegPrefix)) token.remove_prefix(kNegPrefix.size());
+        positional.emplace_back(token);
+    }
+    return positional;
 }
 
 }  // namespace w2

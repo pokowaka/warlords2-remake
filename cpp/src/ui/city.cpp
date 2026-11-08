@@ -17,6 +17,8 @@
 #include <algorithm>
 #include <cstdlib>
 
+#include "absl/strings/str_format.h"
+
 #include "platform/keys.hpp"
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
@@ -341,7 +343,8 @@ struct CityDialog : kit::Modal {
         kit::Right(font, kit::Text(kTextCurrent, 0), 408, 110);
         const w2::Slot* building = Building(city);
         kit::Army(building ? building->type : kNone, owner, 416, 104, 1);
-        std::string turns_left = w2::game::Producing(*city) ? w2::Fmt("%dt", city->countdown) : "-";
+        std::string turns_left =
+                w2::game::Producing(*city) ? absl::StrFormat("%dt", city->countdown) : "-";
         gfx::SetColor(1, 1, 1);
         if (city->vector_to != kNone) {
             std::string where;
@@ -371,10 +374,10 @@ struct CityDialog : kit::Modal {
             gfx::Draw(g_app.big_army, 320, 182);
             int x = 320 + 136;
             font.Draw(chosen_slot->name, x, 182);
-            font.Draw(w2::Fmt("Time: %d", chosen_slot->time), x, 212);
-            font.Draw(w2::Fmt("Cost: %d", chosen_slot->cost), x, 232);
-            font.Draw(w2::Fmt("Strength: %d", chosen_slot->strength), x, 252);
-            font.Draw(w2::Fmt("Move: %d", chosen_slot->move), x, 272);
+            font.Draw(absl::StrFormat("Time: %d", chosen_slot->time), x, 212);
+            font.Draw(absl::StrFormat("Cost: %d", chosen_slot->cost), x, 232);
+            font.Draw(absl::StrFormat("Strength: %d", chosen_slot->strength), x, 252);
+            font.Draw(absl::StrFormat("Move: %d", chosen_slot->move), x, 272);
         }
     }
 

@@ -195,7 +195,7 @@ std::shared_ptr<Quest> Assign(Game& game, Side& side, Army* hero, bool computer,
 
 std::string Describe(const Quest& quest) {
     const char* text = kDescriptions[quest.type];
-    if (quest.required != kNone) return Fmt(text, quest.required);
+    if (quest.required != kNone) return Format(text, quest.required);
     if (quest.type == kOccupy || quest.type == kRaze)
         return std::string(text) + ": " + (quest.city ? quest.city->name : "");
     if (quest.type == kSlayType)

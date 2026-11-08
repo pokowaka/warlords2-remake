@@ -44,8 +44,9 @@ const std::vector<std::pair<std::string, bool>>& Names(Game& game, const Side& s
     auto cached = game.hero_names.find(side.index);
     if (cached != game.hero_names.end()) return cached->second;
     std::vector<std::pair<std::string, bool>> names;
-    auto text = ReadFile(game.data_dir + "/TERRAIN0/HERONAM" + std::to_string(side.index) + ".DAT");
-    for (auto& line : SplitLines(text ? *text : "")) {
+    auto text = ReadFile(game.data_dir / "TERRAIN0" /
+                         ("HERONAM" + std::to_string(side.index) + ".DAT"));
+    for (auto& line : SplitLines(text.ok() ? *text : "")) {
         // ^#(\d)\s+(.+)$
         if (line.size() >= 3 && line[0] == '#' && line[1] >= '0' && line[1] <= '9' &&
             (line[2] == ' ' || line[2] == '\t')) {

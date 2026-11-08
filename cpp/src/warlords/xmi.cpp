@@ -1,17 +1,25 @@
 #include "warlords/xmi.hpp"
 
 #include <algorithm>
+#include <string_view>
 
 namespace w2::xmi {
 
 namespace {
 
 /** @brief The unsigned big-endian 32-bit word at `offset` (IFF chunk sizes). */
-uint32_t U32be(const std::string& bytes, size_t offset) {
-    return (static_cast<uint32_t>(static_cast<uint8_t>(bytes[offset])) << 24) |
-           (static_cast<uint32_t>(static_cast<uint8_t>(bytes[offset + 1])) << 16) |
-           (static_cast<uint32_t>(static_cast<uint8_t>(bytes[offset + 2])) << 8) |
-           static_cast<uint8_t>(bytes[offset + 3]);
+uint32_t U32be(absl::Span<const uint8_t> bytes, size_t offset) {
+    return (static_cast<uint32_t>(bytes[offset]) << 24) |
+           (static_cast<uint32_t>(bytes[offset + 1]) << 16) |
+           (static_cast<uint32_t>(bytes[offset + 2]) << 8) |
+           static_cast<uint32_t>(bytes[offset + 3]);
+}
+
+bool ChunkIdIs(absl::Span<const uint8_t> bytes, size_t pos, std::string_view expected) {
+    return bytes[pos] == static_cast<uint8_t>(expected[0]) &&
+           bytes[pos + 1] == static_cast<uint8_t>(expected[1]) &&
+           bytes[pos + 2] == static_cast<uint8_t>(expected[2]) &&
+           bytes[pos + 3] == static_cast<uint8_t>(expected[3]);
 }
 
 /**
@@ -24,14 +32,13 @@ uint32_t U32be(const std::string& bytes, size_t offset) {
  * @param len Receives the EVNT chunk's length.
  * @return Whether an EVNT chunk was found.
  */
-bool Walk(const std::string& bytes, size_t from, size_t end, size_t& start, size_t& len) {
+bool Walk(absl::Span<const uint8_t> bytes, size_t from, size_t end, size_t& start, size_t& len) {
     size_t pos = from;
     while (pos + 8 <= end) {
-        std::string chunk_id = bytes.substr(pos, 4);
         size_t size = U32be(bytes, pos + 4);
-        if (chunk_id == "FORM" || chunk_id == "CAT ") {
+        if (ChunkIdIs(bytes, pos, "FORM") || ChunkIdIs(bytes, pos, "CAT ")) {
             if (Walk(bytes, pos + 12, std::min(end, pos + 8 + size), start, len)) return true;
-        } else if (chunk_id == "EVNT") {
+        } else if (ChunkIdIs(bytes, pos, "EVNT")) {
             start = pos + 8;
             len = size;
             return true;
@@ -53,16 +60,17 @@ struct Raw {
 
 }  // namespace
 
-std::optional<Sequence> Parse(const std::string& bytes) {
-    size_t start, len;
+std::optional<Sequence> Parse(absl::Span<const uint8_t> bytes) {
+    size_t start = 0;
+    size_t len = 0;
     if (!Walk(bytes, 0, bytes.size(), start, len)) return std::nullopt;
     size_t stop = std::min(bytes.size(), start + len);
     std::vector<Raw> raw;
     size_t pos = start;
-    int tick = 0, order = 0, finish = 0;
-    auto byte = [&](size_t offset) -> uint8_t {
-        return offset < bytes.size() ? static_cast<uint8_t>(bytes[offset]) : 0;
-    };
+    int tick = 0;
+    int order = 0;
+    int finish = 0;
+    auto byte = [&](size_t offset) -> uint8_t { return offset < bytes.size() ? bytes[offset] : 0; };
     // a MIDI variable-length number: seven bits a byte, high bit set on all but the last
     auto varlen = [&]() {
         int value = 0;

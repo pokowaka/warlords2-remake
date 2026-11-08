@@ -19,9 +19,11 @@
 #pragma once
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
-#include <string>
 #include <vector>
+
+#include "absl/status/statusor.h"
 
 namespace w2::pck {
 
@@ -35,21 +37,24 @@ struct Pixels {
 };
 
 /**
- * @brief Decodes a .PCK file.
+ * @brief Decodes a .PCK file from disk.
  *
- * Decoded sheets are cached by upper-cased path, as they never change.
- * Throws std::runtime_error when the file is missing or malformed.
+ * Decoded sheets are cached thread-safely by upper-cased path, as game art
+ * sheets are immutable assets.
+ * @param path Path to the `.PCK` image file.
+ * @return Shared decoded `Pixels`, or an actionable `absl::Status` when missing or malformed.
  */
-std::shared_ptr<const Pixels> Decode(const std::string& path);
+absl::StatusOr<std::shared_ptr<const Pixels>> Decode(const std::filesystem::path& path);
 
 /**
- * @brief Encodes a sheet as a .PCK.
+ * @brief Encodes a 4-bit paletted sheet into `.PCK` binary bytes.
  *
  * The sheet's width must be a multiple of 8 and its colours 0-15. Each plane
  * is written as literal runs, and a run of one repeated byte as a match one
- * byte back. This is not the original's compressor, but anything Decode()
- * and the game read.
+ * byte back.
+ * @param pixels Source 4bpp pixel sheet.
+ * @return Encoded `.PCK` payload, or `absl::InvalidArgumentError` if `pixels.w % 8 != 0`.
  */
-std::string Encode(const Pixels& pixels);
+absl::StatusOr<std::vector<uint8_t>> Encode(const Pixels& pixels);
 
 }  // namespace w2::pck

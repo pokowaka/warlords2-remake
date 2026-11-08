@@ -212,7 +212,7 @@ void Over(w2::Ending& outcome) {
     for (w2::Side* side : g_app.g->sides)
         if (side->alive && !side->computer && !w2::game::SideCities(*g_app.g, *side).empty())
             humans = true;
-    if (!humans && w2::Contains(outcome.message, "No more players")) {
+    if (!humans && outcome.message.contains("No more players")) {
         search::ShowMessage(GroupLine(0xc, 0), GroupLine(0xc, 1), []() {
             // "return to DOS" -- here, the start screens
             search::ShowMessage(GroupLine(0xc, 2), GroupLine(0xc, 3), []() { front::Quit(); });

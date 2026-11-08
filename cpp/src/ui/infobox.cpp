@@ -17,7 +17,10 @@
  * stands for and the dialog it is on answers through its Info().
  */
 #include <algorithm>
+#include <filesystem>
 #include <map>
+
+#include "absl/strings/str_format.h"
 
 #include "front/pckimage.hpp"
 #include "ui/dialogs.hpp"
@@ -133,7 +136,7 @@ std::map<int, HelpRecord>& HelpFile() {
     // HELP\WARLORD2.HLP (docs/formats/hlp.md): a u16 count, then 104-byte
     // records -- u16 id, u16 sub-id, title and description, 50 bytes each.
     // Only the first record with an id counts.
-    if (auto contents = w2::ReadFile(g_app.data_dir + "/HELP/WARLORD2.HLP")) {
+    if (auto contents = w2::ReadBytes(g_app.data_dir / "HELP/WARLORD2.HLP"); contents.ok()) {
         int count = w2::U16(*contents, 0);
         for (int i = 0; i < count; i++) {
             size_t offset = 2 + static_cast<size_t>(i) * 104;
@@ -156,11 +159,8 @@ std::map<int, HelpRecord>& HelpFile() {
 gfx::ImageP BoardImage(const Board& which) {
     auto cached = boards.find(which.bitmap);
     if (cached != boards.end()) return cached->second;
-    gfx::ImageP image;
-    try {
-        image = pckimage::Load(g_app.data_dir + "/PICS/" + which.file, g_app.palette, which.key);
-    } catch (...) {
-    }
+    auto loaded = pckimage::Load(g_app.data_dir / "PICS" / which.file, g_app.palette, which.key);
+    gfx::ImageP image = loaded.ok() ? std::move(*loaded) : nullptr;
     return boards[which.bitmap] = image;
 }
 
@@ -203,9 +203,10 @@ void Army(int screen_x, int screen_y, const w2::Army* army) {
     int side = g_app.player->index;
     Show(kArmy, screen_x, screen_y, [name, army_copy, side](int x, int y) {
         ArmyBoard(x, y, name, army_copy.type, side, 0);
-        Numbers(x, y, w2::Fmt("Strength: %d", army_copy.strength),
-                w2::Fmt("Movement: %d", army_copy.max_moves),
-                w2::Fmt("Remain: %d", army_copy.moves), w2::Fmt("Upkeep: %d", army_copy.upkeep));
+        Numbers(x, y, absl::StrFormat("Strength: %d", army_copy.strength),
+                absl::StrFormat("Movement: %d", army_copy.max_moves),
+                absl::StrFormat("Remain: %d", army_copy.moves),
+                absl::StrFormat("Upkeep: %d", army_copy.upkeep));
     });
 }
 
@@ -221,9 +222,10 @@ void ArmyType(int screen_x, int screen_y, int type_id, const w2::Slot& slot, int
     w2::Slot slot_copy = slot;
     Show(kArmy, screen_x, screen_y, [name, type_id, shown_side, slot_copy](int x, int y) {
         ArmyBoard(x, y, name, type_id, shown_side, 0);
-        Numbers(x, y, w2::Fmt("Strength: %d", slot_copy.strength),
-                w2::Fmt("Movement: %d", slot_copy.move), w2::Fmt("Time: %d", slot_copy.time),
-                w2::Fmt("Cost: %d", slot_copy.cost));
+        Numbers(x, y, absl::StrFormat("Strength: %d", slot_copy.strength),
+                absl::StrFormat("Movement: %d", slot_copy.move),
+                absl::StrFormat("Time: %d", slot_copy.time),
+                absl::StrFormat("Cost: %d", slot_copy.cost));
     });
 }
 

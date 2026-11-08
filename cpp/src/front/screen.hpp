@@ -9,12 +9,15 @@
 #pragma once
 
 #include <array>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
+
+#include "absl/status/statusor.h"
 
 #include "front/layout.hpp"
 #include "platform/gfx.hpp"
@@ -58,13 +61,13 @@ struct View {
 
 /** @brief The main screen: its layout, art and the live state of its controls. */
 struct Screen {
-    w2::uidata::UI ui;            ///< Every dialog, bitmap and string the game's files hold.
-    w2::uidata::Dialog dialog;    ///< The main screen's controls and regions, placed.
-    w2::uidata::Dialog original;  ///< The same as the files place them, for 640x480.
-    std::string data_dir;         ///< Where the game's DATA folder is.
-    w2::pal::Palette palette;     ///< The palette the art is drawn in.
-    int terrain = 0;              ///< Which TERRAIN<n> folder the art comes from.
-    std::map<int, Art> art;       ///< Control bitmaps by id, loaded as they are asked for.
+    w2::uidata::UI ui;               ///< Every dialog, bitmap and string the game's files hold.
+    w2::uidata::Dialog dialog;       ///< The main screen's controls and regions, placed.
+    w2::uidata::Dialog original;     ///< The same as the files place them, for 640x480.
+    std::filesystem::path data_dir;  ///< Where the game's DATA folder is.
+    w2::pal::Palette palette;        ///< The palette the art is drawn in.
+    int terrain = 0;                 ///< Which TERRAIN<n> folder the art comes from.
+    std::map<int, Art> art;          ///< Control bitmaps by id, loaded as they are asked for.
     std::array<gfx::ImageP, 4> background;  ///< The background's four 320x240 quadrants.
     std::array<std::shared_ptr<const w2::pck::Pixels>, 4> background_px;  ///< Their indices.
     gfx::ImageP bg_image;   ///< The background as one 640x480 image, for a bigger screen.
@@ -88,8 +91,9 @@ struct Screen {
 };
 
 /** @brief Loads the layout and the background the given dialog needs. */
-std::unique_ptr<Screen> Load(const std::string& data_dir, const w2::pal::Palette& palette,
-                             int dialog_id = 0, int terrain = 0);
+absl::StatusOr<std::unique_ptr<Screen>> Load(const std::filesystem::path& data_dir,
+                                             const w2::pal::Palette& palette, int dialog_id = 0,
+                                             int terrain = 0);
 /** @brief Places the main screen's controls and regions for `screen_layout`. */
 void Relayout(Screen& main_screen, const layout::Layout& screen_layout);
 /**

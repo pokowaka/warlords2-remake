@@ -1,22 +1,22 @@
 #include "front/font.hpp"
 
 #include <cmath>
-#include <stdexcept>
+#include <cstdint>
+#include <set>
 
 #include "front/pckimage.hpp"
 #include "util/util.hpp"
 
-std::shared_ptr<Font> Font::Load(const std::string& data_dir, const std::string& name,
-                                 const w2::pal::Palette& palette, int key_index) {
+absl::StatusOr<std::shared_ptr<Font>> Font::Load(const std::filesystem::path& data_dir,
+                                                 const std::string& name,
+                                                 const w2::pal::Palette& palette, int key_index) {
     auto font = std::make_shared<Font>();
-    auto metrics_file = w2::ReadFile(data_dir + "/" + name + ".FIN");
-    if (!metrics_file) throw std::runtime_error("cannot open font metrics: " + name);
+    auto metrics_file = w2::ReadBytes(data_dir / (name + ".FIN"));
+    if (!metrics_file.ok()) return metrics_file.status();
     auto metrics = std::make_shared<Metrics>();
     // a byte of the .FIN, 0 past its end
     auto byte_at = [&](size_t offset) {
-        return offset < metrics_file->size()
-                       ? static_cast<int>(static_cast<uint8_t>((*metrics_file)[offset]))
-                       : 0;
+        return offset < metrics_file->size() ? static_cast<int>((*metrics_file)[offset]) : 0;
     };
     metrics->count = byte_at(0);
     metrics->first = byte_at(1);
@@ -26,17 +26,20 @@ std::shared_ptr<Font> Font::Load(const std::string& data_dir, const std::string&
     // how wide each glyph's art is, then how far the pen moves on
     for (int i = 0; i < metrics->count; i++) {
         int code = (metrics->first + i) & 255;
-        metrics->ink[code] = byte_at(11 + i);
-        metrics->width[code] = byte_at(11 + metrics->count + i);
+        metrics->ink[code] = byte_at(11 + static_cast<size_t>(i));
+        metrics->width[code] = byte_at(11 + static_cast<size_t>(metrics->count + i));
     }
     font->m_ = metrics;
-    font->px_ = w2::pck::Decode(data_dir + "/" + name + ".FNT");
+    auto decoded_px = w2::pck::Decode(data_dir / (name + ".FNT"));
+    if (!decoded_px.ok()) return decoded_px.status();
+    font->px_ = std::move(*decoded_px);
     font->palette_ = palette;
     font->key_ = key_index;
     font->image_ = pckimage::FromPixels(
             *font->px_, palette, {}, key_index >= 0 ? std::set<int>{key_index} : std::set<int>{});
     font->quad_ = std::make_shared<std::map<int, gfx::Quad>>();
-    int x = 0, row = 0;
+    int x = 0;
+    int row = 0;
     for (int i = 0; i <= metrics->count - 2; i++) {  // the last entry has no glyph
         int code = (metrics->first + 1 + i) & 255;
         int glyph_width = metrics->ink[code];
@@ -45,9 +48,10 @@ std::shared_ptr<Font> Font::Load(const std::string& data_dir, const std::string&
             x = 0;
             row++;
         }
-        if (glyph_width > 0)
+        if (glyph_width > 0) {
             (*font->quad_)[code] =
                     gfx::NewQuad(x, row * font->line_height, glyph_width, font->line_height);
+        }
         x += slot;
     }
     font->variants_ = std::make_shared<std::map<int, std::shared_ptr<Font>>>();

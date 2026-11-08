@@ -6,19 +6,22 @@
  * A port of the web port's web/src/warlords/randommap.js, line for line: the
  * engines' dice are the same, so a seed makes the same world in all three.
  * The result is a scenario like any other -- RANDOM.SCN (Erythea's,
- * rewritten), .MAP, .RD, .SGN, .CTY and .SPC -- installed in memory
- * (w2::InstallFile), where scn::Load reads it as it reads the shipped ones.
+ * rewritten), .MAP, .RD, .SGN, .CTY and .SPC -- returned as an in-memory
+ * `ScenarioFiles` bundle read via `MemoryScenarioSource` (`scn::LoadFromFiles`).
  * The shipped RANDOM folder holds the last world the original made, and is
  * left alone.
  */
 #pragma once
 
 #include <array>
-#include <map>
+#include <filesystem>
 #include <memory>
 #include <string>
 
+#include "absl/status/statusor.h"
+
 #include "warlords/rng.hpp"
+#include "warlords/scenario_source.hpp"
 #include "warlords/scengen.hpp"
 
 namespace w2::randommap {
@@ -28,7 +31,7 @@ constexpr const char* kDir = "RANDOM";
 /** @brief File extensions produced by the random map generator. */
 extern const char* const kFiles[6];
 /** @brief Generated scenario file contents keyed by extension. */
-using Files = std::map<std::string, std::string>;
+using Files = ScenarioFiles;
 
 /** @brief Values shown beside each slider in the random map setup menu. */
 extern const int kSliderShows[4][7];
@@ -39,7 +42,7 @@ constexpr int kRandomSlider = 7;
 
 /** @brief Configuration options for generating a random world. */
 struct Options {
-    std::string data_dir;                      ///< Path to the game data directory.
+    std::filesystem::path data_dir;            ///< Path to the game data directory.
     Rng* rng = nullptr;                        ///< Random number generator to draw from.
     std::array<int, 4> sliders{{3, 3, 2, 3}};  ///< Water, Hills, Cities, Forest sliders (0-7).
     bool allies = false;                       ///< Whether cities may produce magical ally armies.
@@ -73,7 +76,9 @@ class Generator;
  */
 class Run {
   public:
-    explicit Run(const Options& opts);
+    /** @brief Creates a phased generator run, loading `RANDOM.DAT`, `ERYTHEA.SCN`, and army types.
+     */
+    static absl::StatusOr<std::unique_ptr<Run>> Create(const Options& opts);
     ~Run();
     /** @brief Executes the next generation phase; returns false once the world is made. */
     bool Step();
@@ -83,20 +88,18 @@ class Run {
     const Files& GetFiles() const { return files_; }
 
   private:
+    explicit Run(std::unique_ptr<Generator> gen);
+
     std::unique_ptr<Generator> gen_;  ///< Underlying generator state machine.
     int pct_ = 0;                     ///< Progress percentage (0-100).
     Files files_;                     ///< Output scenario files once complete.
 };
 
 /** @brief Makes a random world through to its end. */
-Files GenerateNow(const Options& opts);
-/** @brief Installs a random world's files in memory where scn::Load will find them. */
-void Install(const std::string& data_dir, const Files& files);
-/** @brief Reads the installed random world's files, for a save to carry. */
-Files Installed(const std::string& data_dir);
+absl::StatusOr<Files> GenerateNow(const Options& opts);
 /** @brief Returns the terrain set's name, as the start menu shows it (DATA/TERRAIN.DAT). */
-std::string TerrainSetName(const std::string& data_dir, int set);
+std::string TerrainSetName(const std::filesystem::path& data_dir, int set);
 /** @brief Returns how many terrain sets there are in DATA/TERRAIN.DAT. */
-int TerrainSets(const std::string& data_dir);
+int TerrainSets(const std::filesystem::path& data_dir);
 
 }  // namespace w2::randommap

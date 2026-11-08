@@ -12,6 +12,8 @@
  */
 #include <map>
 
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/combat.hpp"
@@ -67,8 +69,8 @@ struct Bonus : kit::Modal {
                 kit::Army(type->id, side->index, 128, y, side->index + 2);
                 gfx::SetColor(1, 1, 1);
                 font.Draw(type->name, 168, y + 5);
-                font.Draw(w2::Fmt("%d", type->strength), 280, y + 5);
-                font.Draw(w2::Fmt("%d", type->move), 328, y + 5);
+                font.Draw(absl::StrFormat("%d", type->strength), 280, y + 5);
+                font.Draw(absl::StrFormat("%d", type->move), 328, y + 5);
                 // The movement icon's x in ABITS: flies, woods and hills, woods, hills.
                 int icon_x = -1;
                 if (type->flies)

@@ -10,8 +10,8 @@
  * settings.
  */
 #include "front/prefs.hpp"
+#include "nlohmann/json.hpp"
 #include "ui/dialogs.hpp"
-#include "util/json.hpp"
 #include "util/util.hpp"
 #include "warlords/bytes.hpp"
 
@@ -43,8 +43,8 @@ struct Entry {
  */
 std::vector<Entry> ReadItems() {
     std::vector<Entry> entries;
-    auto data = w2::ReadFile(g_app.data_dir + "/UDB/UDB.DAT");
-    if (!data) return entries;
+    auto data = w2::ReadBytes(g_app.data_dir / "UDB/UDB.DAT");
+    if (!data.ok()) return entries;
     int count = w2::U16(*data, 0);
     for (int i = 0; i < count; i++) {
         size_t offset = 2 + 68 * static_cast<size_t>(i);
@@ -126,9 +126,11 @@ struct Shortcuts : kit::Modal {
         if (!control) return;
         auto& screen_ui = g_app.screen->ui;
         if (control->id == kOk) {
-            w2::Json json = w2::Json::Array();
-            for (int slot_index = 0; slot_index < 4; slot_index++) json.Push(Shortcut(slot_index));
-            prefs::Set("shortcuts", json.Dump());
+            nlohmann::ordered_json json = nlohmann::ordered_json::array();
+            for (int slot_index = 0; slot_index < 4; slot_index++) {
+                json.push_back(Shortcut(slot_index));
+            }
+            prefs::Set("shortcuts", json.dump());
             kit::Pop(this);
             return;
         }

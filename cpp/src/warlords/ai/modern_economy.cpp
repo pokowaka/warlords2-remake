@@ -8,6 +8,8 @@
 #include <map>
 #include <set>
 
+#include "absl/strings/str_format.h"
+
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
@@ -365,8 +367,8 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 side.ai_thoughts.push_back(
                         AIThought{"Economy", src->name, best_dest->name, src->x, src->y,
                                   best_dest->x, best_dest->y, logits[pick], 1.0F, false,
-                                  Fmt("Vectoring %s from %s -> %s", slot.name.c_str(),
-                                      src->name.c_str(), best_dest->name.c_str())});
+                                  absl::StrFormat("Vectoring %s from %s -> %s", slot.name,
+                                                  src->name, best_dest->name)});
             }
         }
     }

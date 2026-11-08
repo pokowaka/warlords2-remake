@@ -7,6 +7,8 @@
 #include <regex>
 #include <set>
 
+#include "absl/strings/str_format.h"
+
 #include "util/util.hpp"
 #include "warlords/move.hpp"
 #include "warlords/scn.hpp"
@@ -542,9 +544,9 @@ void Fairness(Context& context) {
             if (cost != travel::kUnreached &&
                 static_cast<double>(cost) / travel::kTurn < kCapitalGapTurns)
                 context.AddIssue("capital-gap", capitals[i]->x, capitals[i]->y,
-                                 capitals[i]->name + " and " + capitals[j]->name + " are " +
-                                         Fmt("%.1f", static_cast<double>(cost) / travel::kTurn) +
-                                         " turns apart");
+                                 absl::StrFormat("%s and %s are %.1f turns apart",
+                                                 capitals[i]->name, capitals[j]->name,
+                                                 static_cast<double>(cost) / travel::kTurn));
         }
     }
     // the neutral cities each side reaches first, and those within reach
@@ -894,33 +896,33 @@ Score ScoreAgainst(const Evaluation& evaluation, const Reference& ref) {
     return score;
 }
 
-Json ToJson(const Evaluation& evaluation, const Score* score) {
-    Json json = Json::Object();
-    json.Set("name", evaluation.name);
-    json.Set("passed", evaluation.Passed());
-    Json counts = Json::Object();
-    for (const std::string& check : Checks()) counts.Set(check, evaluation.Count(check));
-    json.Set("checks", counts);
-    Json metrics = Json::Object();
-    for (auto& [key, value] : evaluation.metrics) metrics.Set(key, value);
-    json.Set("metrics", metrics);
-    Json issues = Json::Array();
+nlohmann::ordered_json ToJson(const Evaluation& evaluation, const Score* score) {
+    nlohmann::ordered_json json = nlohmann::ordered_json::object();
+    json["name"] = evaluation.name;
+    json["passed"] = evaluation.Passed();
+    nlohmann::ordered_json counts = nlohmann::ordered_json::object();
+    for (const std::string& check : Checks()) counts[check] = evaluation.Count(check);
+    json["checks"] = std::move(counts);
+    nlohmann::ordered_json metrics = nlohmann::ordered_json::object();
+    for (const auto& [key, value] : evaluation.metrics) metrics[key] = value;
+    json["metrics"] = std::move(metrics);
+    nlohmann::ordered_json issues = nlohmann::ordered_json::array();
     for (const Issue& issue : evaluation.issues) {
-        Json entry = Json::Object();
-        entry.Set("check", issue.check);
-        entry.Set("x", issue.x);
-        entry.Set("y", issue.y);
-        entry.Set("detail", issue.detail);
-        issues.Push(entry);
+        nlohmann::ordered_json entry = nlohmann::ordered_json::object();
+        entry["check"] = issue.check;
+        entry["x"] = issue.x;
+        entry["y"] = issue.y;
+        entry["detail"] = issue.detail;
+        issues.push_back(std::move(entry));
     }
-    json.Set("issues", issues);
+    json["issues"] = std::move(issues);
     if (score) {
-        Json score_json = Json::Object();
-        score_json.Set("penalty", score->penalty);
-        Json deviations = Json::Object();
-        for (auto& [key, value] : score->deviations) deviations.Set(key, value);
-        score_json.Set("deviations", deviations);
-        json.Set("score", score_json);
+        nlohmann::ordered_json score_json = nlohmann::ordered_json::object();
+        score_json["penalty"] = score->penalty;
+        nlohmann::ordered_json deviations = nlohmann::ordered_json::object();
+        for (const auto& [key, value] : score->deviations) deviations[key] = value;
+        score_json["deviations"] = std::move(deviations);
+        json["score"] = std::move(score_json);
     }
     return json;
 }

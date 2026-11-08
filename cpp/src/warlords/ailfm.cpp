@@ -19,15 +19,15 @@ constexpr size_t kAdvPrograms = 0x2203;  ///< The program each channel 1..8 star
 const int kOpreg[9] = {0, 1, 2, 8, 9, 10, 16, 17, 18};
 
 /** @brief The unsigned byte at `offset`, or 0 past the end. */
-int ByteAt(const std::string& bytes, size_t offset) {
-    return offset < bytes.size() ? static_cast<uint8_t>(bytes[offset]) : 0;
+int ByteAt(absl::Span<const uint8_t> bytes, size_t offset) {
+    return offset < bytes.size() ? bytes[offset] : 0;
 }
 /** @brief The unsigned little-endian word at `offset`. */
-int U16(const std::string& bytes, size_t offset) {
+int U16(absl::Span<const uint8_t> bytes, size_t offset) {
     return ByteAt(bytes, offset) + ByteAt(bytes, offset + 1) * 256;
 }
 /** @brief The signed little-endian word at `offset`. */
-int S16(const std::string& bytes, size_t offset) {
+int S16(absl::Span<const uint8_t> bytes, size_t offset) {
     int value = U16(bytes, offset);
     return value >= 0x8000 ? value - 0x10000 : value;
 }
@@ -49,7 +49,7 @@ inline int FloorDiv(int dividend, int divisor) {
 
 }  // namespace
 
-AilFm::AilFm(const std::string& adv, const std::string& library) {
+AilFm::AilFm(absl::Span<const uint8_t> adv, absl::Span<const uint8_t> library) {
     for (int i = 0; i < 192; i++) freq_[i] = S16(adv, kAdvFreq + static_cast<size_t>(i) * 2);
     for (int i = 0; i < 96; i++) {
         octave_[i] = ByteAt(adv, kAdvOctave + i);

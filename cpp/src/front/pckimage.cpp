@@ -1,6 +1,7 @@
 #include "front/pckimage.hpp"
 
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 namespace pckimage {
@@ -12,8 +13,9 @@ gfx::ImageP FromPixels(const w2::pck::Pixels& pixels, const w2::pal::Palette& pa
     for (int i = 0; i < 16; i++) {
         w2::pal::Colour colour =
                 i < static_cast<int>(palette.size()) ? palette[i] : w2::pal::Colour{0, 0, 0};
-        for (int channel = 0; channel < 3; channel++)
+        for (int channel = 0; channel < 3; channel++) {
             rgb_by_index[i][channel] = static_cast<uint8_t>(std::floor(colour[channel] * 255));
+        }
     }
     for (size_t i = 0; i < pixels.px.size(); i++) {
         int colour_index = pixels.px[i];
@@ -29,19 +31,24 @@ gfx::ImageP FromPixels(const w2::pck::Pixels& pixels, const w2::pal::Palette& pa
     return gfx::NewImageRgba(pixels.w, pixels.h, out.data());
 }
 
-gfx::ImageP Load(const std::string& path, const w2::pal::Palette& palette, int key) {
+absl::StatusOr<gfx::ImageP> Load(const std::filesystem::path& path, const w2::pal::Palette& palette,
+                                 int key) {
     auto pixels = w2::pck::Decode(path);
+    if (!pixels.ok()) return pixels.status();
     std::set<int> keys;
-    if (key == kCorner && !pixels->px.empty())
-        keys.insert(pixels->px[0]);
-    else if (key >= 0)
+    if (key == kCorner && !(*pixels)->px.empty()) {
+        keys.insert((*pixels)->px[0]);
+    } else if (key >= 0) {
         keys.insert(key);
-    return FromPixels(*pixels, palette, {}, keys);
+    }
+    return FromPixels(**pixels, palette, {}, keys);
 }
 
-gfx::ImageP Load(const std::string& path, const w2::pal::Palette& palette,
-                 const std::set<int>& keys) {
-    return FromPixels(*w2::pck::Decode(path), palette, {}, keys);
+absl::StatusOr<gfx::ImageP> Load(const std::filesystem::path& path, const w2::pal::Palette& palette,
+                                 const std::set<int>& keys) {
+    auto pixels = w2::pck::Decode(path);
+    if (!pixels.ok()) return pixels.status();
+    return FromPixels(**pixels, palette, {}, keys);
 }
 
 }  // namespace pckimage

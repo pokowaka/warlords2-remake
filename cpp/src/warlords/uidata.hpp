@@ -10,9 +10,12 @@
 #pragma once
 
 #include <array>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
+
+#include "absl/status/statusor.h"
 
 namespace w2::uidata {
 
@@ -23,7 +26,7 @@ using Strings = std::vector<std::vector<std::string>>;
  * @brief Reads a file in STRING.DAT's layout: groups of strings, both from 0
  * (docs/formats/string.md).
  */
-Strings LoadStrings(const std::string& path);
+absl::StatusOr<Strings> LoadStrings(const std::filesystem::path& path);
 
 /** @brief A JOIN.DAT entry: which controls and regions make up one dialog. */
 struct Join {
@@ -78,18 +81,18 @@ struct ShortcutItem {
 };
 
 /** @brief Reads JOIN.DAT: each dialog's control group and region set, by dialog id. */
-std::map<int, Join> Joins(const std::string& path);
+absl::StatusOr<std::map<int, Join>> Joins(const std::filesystem::path& path);
 /** @brief Reads AREA.DAT: the region sets by id. */
-std::map<int, Area> Areas(const std::string& path);
+absl::StatusOr<std::map<int, Area>> Areas(const std::filesystem::path& path);
 /** @brief Reads BUTTON.DAT: the control groups by id. */
-std::map<int, ButtonGroup> Buttons(const std::string& path);
+absl::StatusOr<std::map<int, ButtonGroup>> Buttons(const std::filesystem::path& path);
 /**
  * @brief Reads UDB/UDB.DAT: the menu items that may be put on the four
  * configurable buttons.
  */
-std::map<int, ShortcutItem> ShortcutItems(const std::string& path);
+absl::StatusOr<std::map<int, ShortcutItem>> ShortcutItems(const std::filesystem::path& path);
 /** @brief Reads UDB/UDB.CUR: which menu item sits on each of the four buttons. */
-std::map<int, int> Shortcuts(const std::string& path);
+absl::StatusOr<std::map<int, int>> Shortcuts(const std::filesystem::path& path);
 
 /// The control id of the first of the four configurable buttons; the rest follow.
 constexpr int kShortcutFirst = 179;
@@ -113,7 +116,7 @@ struct UI {
 };
 
 /** @brief Loads every layout file under `data_dir`. */
-UI Load(const std::string& data_dir);
+absl::StatusOr<UI> Load(const std::filesystem::path& data_dir);
 /** @brief One string, numbered as the original numbers them (both from 0); "" if absent. */
 std::string Text(const UI& layout, int group, int index);
 

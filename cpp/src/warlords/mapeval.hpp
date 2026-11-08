@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-#include "util/json.hpp"
+#include "nlohmann/json.hpp"
 #include "warlords/types.hpp"
 
 namespace w2::mapeval {
@@ -96,6 +96,6 @@ struct Score {
 Score ScoreAgainst(const Evaluation& evaluation, const Reference& ref);
 
 /** @brief The evaluation as JSON, with its score when there is a reference. */
-Json ToJson(const Evaluation& evaluation, const Score* score = nullptr);
+nlohmann::ordered_json ToJson(const Evaluation& evaluation, const Score* score = nullptr);
 
 }  // namespace w2::mapeval

@@ -29,6 +29,10 @@
 #include <thread>
 #include <vector>
 
+#include "absl/flags/flag.h"
+#include "absl/log/absl_check.h"
+
+#include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/ml_policy.hpp"
@@ -37,13 +41,17 @@
 #include "warlords/move.hpp"
 #include "warlords/randommap.hpp"
 
+ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
+ABSL_FLAG(int, games, 144, "Number of Classic AI games to record (0 = rewrite weights only).");
+ABSL_FLAG(int, turns, 40, "Maximum turns per recorded Classic AI game.");
+ABSL_FLAG(int, epochs, 6, "Behaviour-cloning epochs over the dataset.");
+ABSL_FLAG(double, lr, 1e-3, "Adam learning rate.");
+
 using namespace w2;
 namespace ml = w2::ai::ml;
 
 namespace {
 
-/** @brief Directory holding the original game data. */
-const std::string kData = "original";
 /** @brief The built-in scenarios the games cycle through. */
 const std::vector<std::string> kScenarios = {"ERYTHEA", "ISLADIA", "DRAGON",
                                              "TUTORIA", "SORCERY", "HADESHA"};
@@ -204,7 +212,8 @@ int LabelSnapshot(Game& game, int my_side, const ai::modern::MissionSnapshot& sn
  * @param files Receives the generated map files of a random-map game; they must
  *        outlive the game.
  */
-std::unique_ptr<Game> NewClassicGame(int game_index, randommap::Files& files) {
+std::unique_ptr<Game> NewClassicGame(int game_index, const std::string& data_dir,
+                                     randommap::Files& files) {
     uint32_t seed = kSeedBase + static_cast<uint32_t>(game_index) * 13U;
     const Preset& preset = kPresets[game_index % 4];
     game::NewGameOptions game_options;
@@ -222,15 +231,22 @@ std::unique_ptr<Game> NewClassicGame(int game_index, randommap::Files& files) {
     if (game_index % 5 == 4) {  // a fifth on random maps, as in training
         Rng map_rng(static_cast<double>(seed ^ 0x5bf03635U));
         randommap::Options map_options;
-        map_options.data_dir = kData;
+        map_options.data_dir = data_dir;
         map_options.rng = &map_rng;
         map_options.sliders = {3, 3, 2, 3};
         map_options.allies = preset.diplomacy != 0;
-        files = randommap::GenerateNow(map_options);
+        auto generated = randommap::GenerateNow(map_options);
+        ABSL_CHECK_OK(generated);
+        files = std::move(*generated);
         game_options.memory_files = &files;
-        return game::NewGame(kData, "RANDOM", game_options);
+        auto created = game::NewGame(data_dir, "RANDOM", game_options);
+        ABSL_CHECK_OK(created);
+        return std::move(*created);
     }
-    return game::NewGame(kData, kScenarios[(game_index / 4) % kScenarios.size()], game_options);
+    auto created =
+            game::NewGame(data_dir, kScenarios[(game_index / 4) % kScenarios.size()], game_options);
+    ABSL_CHECK_OK(created);
+    return std::move(*created);
 }
 
 /**
@@ -281,22 +297,30 @@ double BcAccumulate(const ml::PolicyNetwork& net, const Example& example, ml::Po
  * the current format.
  */
 int main(int argc, char** argv) {
-    if (argc < 3) {
+    auto args =
+            ParseCliFlags(argc, argv, "w2imitate IN.json OUT.json [GAMES] [TURNS] [EPOCHS] [LR]");
+    if (args.size() < 2) {
         std::fprintf(stderr, "usage: w2imitate IN.json OUT.json [GAMES] [TURNS] [EPOCHS] [LR]\n");
         return 2;
     }
+    std::string data_dir = absl::GetFlag(FLAGS_data);
     ml::PolicyNetwork net;
-    if (!net.LoadJson(argv[1])) {
-        std::fprintf(stderr, "w2imitate: cannot load weights '%s'\n", argv[1]);
+    if (absl::Status status = net.LoadJson(args[0]); !status.ok()) {
+        std::fprintf(stderr, "w2imitate: %s\n", std::string(status.message()).c_str());
         return 1;
     }
-    const int games = argc > 3 ? std::atoi(argv[3]) : 144;
-    const int turns = argc > 4 ? std::atoi(argv[4]) : 40;
-    const int epochs = argc > 5 ? std::atoi(argv[5]) : 6;
-    const float learning_rate = argc > 6 ? static_cast<float>(std::atof(argv[6])) : 1e-3F;
+    const int games = args.size() > 2 ? static_cast<int>(ToInt(args[2]).value_or(144))
+                                      : absl::GetFlag(FLAGS_games);
+    const int turns = args.size() > 3 ? static_cast<int>(ToInt(args[3]).value_or(40))
+                                      : absl::GetFlag(FLAGS_turns);
+    const int epochs = args.size() > 4 ? static_cast<int>(ToInt(args[4]).value_or(6))
+                                       : absl::GetFlag(FLAGS_epochs);
+    const float learning_rate = args.size() > 5
+                                        ? static_cast<float>(std::strtod(args[5].c_str(), nullptr))
+                                        : static_cast<float>(absl::GetFlag(FLAGS_lr));
     const unsigned threads = std::max(2U, std::thread::hardware_concurrency());
     if (games == 0) {  // just rewrite the weights in the current format
-        return net.SaveJson(argv[2], 0, 0.0F) ? 0 : 1;
+        return net.SaveJson(args[1], 0, 0.0F).ok() ? 0 : 1;
     }
 
     // ---- data: Classic games, two recorded sides each
@@ -310,7 +334,7 @@ int main(int argc, char** argv) {
         pool.emplace_back([&]() {
             for (int game_index; (game_index = next.fetch_add(1)) < games;) {
                 randommap::Files files;
-                auto game_ptr = NewClassicGame(game_index, files);
+                auto game_ptr = NewClassicGame(game_index, data_dir, files);
                 Game& game = *game_ptr;
                 std::vector<int> in_use;
                 for (int side = 0; side < 8; side++) {
@@ -478,8 +502,8 @@ int main(int argc, char** argv) {
                     epoch, train_loss / std::max<size_t>(1, train.size()), valid_loss,
                     100.0 * valid_accuracy);
         std::fflush(stdout);
-        std::string path = std::string(argv[2]);
-        net.SaveJson(path, epoch, 0.0F);
+        std::string path = args[1];
+        net.SaveJson(path, epoch, 0.0F).IgnoreError();
     }
     kind_histogram("after");
     return 0;

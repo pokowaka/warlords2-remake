@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -191,7 +190,7 @@ class Generator {
     std::vector<uint8_t> roads;   ///< Road overlay bytes (.RD).
     std::string cty;              ///< City description text (.CTY).
     std::string spc;              ///< Site description text (.SPC).
-    std::string sgn;              ///< Signpost binary data (.SGN).
+    std::vector<uint8_t> sgn;     ///< Signpost binary data (.SGN).
     int site_cell = -1;           ///< Current 4x4 grid cell for site placement.
 
     int stage = 0;                               ///< Current progress-bar stage.
@@ -607,7 +606,7 @@ class Generator {
      * @brief Places 41..70 signposts on open plain tiles off the roads, most
      *        pointing to the nearest city and a few bearing fixed messages.
      */
-    std::string Signs();
+    std::vector<uint8_t> Signs();
     /** @brief Packs the generated scenario, tile map, roads, signposts, and texts into `files`. */
     void WriteFiles(Files& files);
     /** @brief Returns a copy of the 112x156 terrain grid. */
@@ -627,7 +626,7 @@ class Generator {
      */
     void ModernRoadShapes();
     /** @brief Places signposts along roads for the modern scenario generator. */
-    std::string ModernSigns();
+    std::vector<uint8_t> ModernSigns();
     /** @brief Runs one stage of the modern scenario generator, returning progress %. */
     std::optional<int> NextModern(Files& files);
     /** @brief Runs one stage of map generation, returning progress % or `std::nullopt` when done.

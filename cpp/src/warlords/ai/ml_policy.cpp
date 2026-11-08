@@ -2,10 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
 #include <sstream>
 
-#include "util/json.hpp"
+#include "absl/base/no_destructor.h"
+#include "absl/strings/str_format.h"
+
+#include "nlohmann/json.hpp"
+#include "util/util.hpp"
 #include "warlords/ai/belief.hpp"
 #include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
@@ -330,10 +333,9 @@ void PolicyNetwork::UnflattenLegacy(const std::vector<float>& params) {
     }
 }
 
-bool PolicyNetwork::SaveJson(const std::filesystem::path& path, int generation,
-                             float selection_city_share) const {
-    std::ofstream out(path);
-    if (!out.is_open()) return false;
+absl::Status PolicyNetwork::SaveJson(const std::filesystem::path& path, int generation,
+                                     float selection_city_share) const {
+    std::ostringstream out;
     auto weights = Flatten();
     out << "{\n";
     out << "  \"version\": 6,\n";
@@ -347,33 +349,53 @@ bool PolicyNetwork::SaveJson(const std::filesystem::path& path, int generation,
         if (i + 1 < weights.size()) out << ", ";
     }
     out << "\n  ]\n}\n";
-    return true;
+    return WriteFile(path, out.str());
 }
 
-bool PolicyNetwork::LoadJson(const std::filesystem::path& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) return false;
-    std::stringstream buf;
-    buf << file.rdbuf();
-    try {
-        Json root = Json::Parse(buf.str());
-        const Json& arr = root["weights"];
-        int param_count = static_cast<int>(arr.size());
-        if (param_count != kTotalParams && param_count != kLegacyV5Params &&
-            param_count != kLegacyV4Params && param_count != kLegacyV3Params)
-            return false;
-        std::vector<float> weights(param_count);
-        for (int i = 0; i < param_count; i++) {
-            weights[i] = static_cast<float>(arr[i].Number());
-        }
-        if (param_count == kTotalParams)
-            Unflatten(weights);
-        else
-            UnflattenLegacy(weights);
-        return true;
-    } catch (...) {
-        return false;
+absl::Status PolicyNetwork::LoadJson(const std::filesystem::path& path) {
+    auto text = ReadFile(path);
+    if (!text.ok()) return text.status();
+    nlohmann::ordered_json root =
+            nlohmann::ordered_json::parse(*text, nullptr, /*allow_exceptions=*/false);
+    if (root.is_discarded() || !root.is_object()) {
+        return absl::InvalidArgumentError(absl::StrFormat(
+                "Failed to parse PolicyNetwork weights '%s': file is not valid JSON. Re-export or "
+                "restore cpp/ai_weights.json.",
+                path.string()));
     }
+    auto weights_it = root.find("weights");
+    if (weights_it == root.end() || !weights_it->is_array()) {
+        return absl::InvalidArgumentError(absl::StrFormat(
+                "Failed to load PolicyNetwork weights '%s': missing JSON array field \"weights\". "
+                "Provide a valid v3..v6 ai_weights.json file.",
+                path.string()));
+    }
+    const auto& arr = *weights_it;
+    int param_count = static_cast<int>(arr.size());
+    if (param_count != kTotalParams && param_count != kLegacyV5Params &&
+        param_count != kLegacyV4Params && param_count != kLegacyV3Params) {
+        return absl::InvalidArgumentError(absl::StrFormat(
+                "Failed to load PolicyNetwork weights '%s': weight count %d does not match v6 (%d) "
+                "or supported legacy counts (%d, %d, %d). Re-train or restore matching weights.",
+                path.string(), param_count, kTotalParams, kLegacyV5Params, kLegacyV4Params,
+                kLegacyV3Params));
+    }
+    std::vector<float> weights(static_cast<size_t>(param_count));
+    for (int i = 0; i < param_count; i++) {
+        if (!arr[static_cast<size_t>(i)].is_number()) {
+            return absl::InvalidArgumentError(absl::StrFormat(
+                    "Failed to load PolicyNetwork weights '%s': weight element %d is not numeric. "
+                    "Re-export or restore cpp/ai_weights.json.",
+                    path.string(), i));
+        }
+        weights[static_cast<size_t>(i)] = arr[static_cast<size_t>(i)].get<float>();
+    }
+    if (param_count == kTotalParams) {
+        Unflatten(weights);
+    } else {
+        UnflattenLegacy(weights);
+    }
+    return absl::OkStatus();
 }
 
 namespace {
@@ -528,14 +550,14 @@ float ComputeEmpireScore(const Game& game, int side_index) {
 }
 
 PolicyNetwork& ActivePolicy() {
-    static PolicyNetwork instance = []() {
+    static absl::NoDestructor<PolicyNetwork> instance([]() {
         PolicyNetwork net;
-        if (!net.LoadJson("cpp/ai_weights.json")) {
-            net.LoadJson("ai_weights.json");
+        if (!net.LoadJson("cpp/ai_weights.json").ok()) {
+            net.LoadJson("ai_weights.json").IgnoreError();
         }
         return net;
-    }();
-    return instance;
+    }());
+    return *instance;
 }
 
 ContextVec BuildContext(const Game& game, const Side& side) {

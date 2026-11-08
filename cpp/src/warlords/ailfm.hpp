@@ -19,8 +19,9 @@
 #include <array>
 #include <cstdint>
 #include <map>
-#include <string>
 #include <vector>
+
+#include "absl/types/span.h"
 
 #include "warlords/opl.hpp"
 #include "warlords/xmi.hpp"
@@ -37,7 +38,7 @@ class AilFm {
      * @param adv The bytes of ADLIB.ADV, for its tables.
      * @param library The bytes of MIDPAK.AD, the Global Timbre Library.
      */
-    AilFm(const std::string& adv, const std::string& library);
+    AilFm(absl::Span<const uint8_t> adv, absl::Span<const uint8_t> library);
     /** @brief Starts a parsed sequence from its beginning; it must outlive the play. */
     void Play(const xmi::Sequence* seq, bool loop);
     /** @brief Stops the sequence and lets every sounding note go. */

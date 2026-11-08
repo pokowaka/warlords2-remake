@@ -508,7 +508,7 @@ void Generator::CityDetails() {
  * @brief Places 41..70 signposts on open plain tiles off the roads, most
  *        pointing to the nearest city and a few bearing fixed messages.
  */
-std::string Generator::Signs() {
+std::vector<uint8_t> Generator::Signs() {
     int count = Dice(1, 30, 40);
     std::vector<uint8_t> out(2 + 104 * count, 0);
     SetI16(out, 0, count);
@@ -550,26 +550,26 @@ std::string Generator::Signs() {
                                         std::string(kCompass[Compass(x, y, city_x, city_y)])));
         }
     }
-    return std::string(out.begin(), out.end());
+    return out;
 }
 
 // --- the whole -------------------------------------------------------------
 
 /** @brief Packs the generated scenario, tile map, roads, signposts, and texts into `files`. */
 void Generator::WriteFiles(Files& files) {
-    std::string map(2UZ * kMapW * kMapH, '\0');
+    std::vector<uint8_t> map(2UZ * kMapW * kMapH, 0);
     for (int i = 0; i < kMapW * kMapH; i++) {
-        map[2UZ * i] = static_cast<char>(tiles[i] & 0xff);
-        map[2 * i + 1] = static_cast<char>(tiles[i] >> 8);
+        map[2UZ * i] = static_cast<uint8_t>(tiles[i] & 0xff);
+        map[2UZ * i + 1] = static_cast<uint8_t>(tiles[i] >> 8);
     }
-    std::string road(static_cast<size_t>(kMapW) * kMapH, '\0');
-    for (int i = 0; i < kMapW * kMapH; i++) road[i] = static_cast<char>(roads[i] & 0x1f);
-    files["SCN"] = std::string(scn.begin(), scn.end());
-    files["MAP"] = map;
-    files["RD"] = road;
+    std::vector<uint8_t> road(static_cast<size_t>(kMapW) * kMapH, 0);
+    for (int i = 0; i < kMapW * kMapH; i++) road[i] = static_cast<uint8_t>(roads[i] & 0x1f);
+    files["SCN"] = scn;
+    files["MAP"] = std::move(map);
+    files["RD"] = std::move(road);
     files["SGN"] = sgn;
-    files["CTY"] = cty;
-    files["SPC"] = spc;
+    files["CTY"] = std::vector<uint8_t>(cty.begin(), cty.end());
+    files["SPC"] = std::vector<uint8_t>(spc.begin(), spc.end());
 }
 
 }  // namespace w2::randommap

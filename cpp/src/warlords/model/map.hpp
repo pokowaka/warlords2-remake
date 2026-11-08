@@ -5,10 +5,13 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "absl/container/flat_hash_map.h"
 
 #include "warlords/model/city.hpp"
 #include "warlords/model/item.hpp"
@@ -17,6 +20,9 @@
 #include "warlords/model/site.hpp"
 
 namespace w2 {
+
+/** @brief In-memory bundle of scenario payloads keyed by upper-case file extension. */
+using ScenarioFiles = absl::flat_hash_map<std::string, std::vector<uint8_t>>;
 
 /// The map's full size in tiles.
 constexpr int kMapW = 112, kMapH = 156;
@@ -42,13 +48,14 @@ struct Map {
     std::vector<std::vector<int>> fight_order;            ///< 9 rows of 29, row 8 neutral.
     int combat_cap = 0;                                   ///< The most a stack's bonus may add.
     std::vector<int> tiles;                               ///< The map words, row by row.
-    std::string roads;                                    ///< The road layer.
-    int width = kMapW;                                    ///< Width in tiles.
-    int height = kMapH;                                   ///< Height in tiles.
-    int active_x0 = 0;          ///< Left column of the part of the map in play.
-    int active_y0 = 0;          ///< Top row of the part in play.
-    int active_x1 = kMapW - 1;  ///< Right column of the part in play.
-    int active_y1 = kMapH - 1;  ///< Bottom row of the part in play.
+    std::vector<uint8_t> roads;                           ///< The road layer.
+    ScenarioFiles source_files;  ///< In-memory scenario bundle for generated maps.
+    int width = kMapW;           ///< Width in tiles.
+    int height = kMapH;          ///< Height in tiles.
+    int active_x0 = 0;           ///< Left column of the part of the map in play.
+    int active_y0 = 0;           ///< Top row of the part in play.
+    int active_x1 = kMapW - 1;   ///< Right column of the part in play.
+    int active_y1 = kMapH - 1;   ///< Bottom row of the part in play.
 
     /** @brief The side with this index, or null. */
     struct Side* Side(int index) { return index >= 0 && index < 8 ? &sides[index] : nullptr; }

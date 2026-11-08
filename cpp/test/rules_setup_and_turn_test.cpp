@@ -32,7 +32,7 @@ using namespace w2::test;
 
 TEST(ProductionTest, CitySlotsNudgeBoundsBestSlotAndCityDefence) {
     Types types;
-    armytype::Load(kData + "/TERRAIN0/ARMYTYPE.DAT", types);
+    ASSERT_TRUE(armytype::Load(kData / "TERRAIN0/ARMYTYPE.DAT", types).ok());
     Rng rng(42);
     auto slots = rules::CitySlots({4, 11, 2}, types, rng);
     ASSERT_EQ(slots.size(), 3U);
@@ -289,7 +289,7 @@ TEST(BuyProductionTest, PurchasingSortingOverwritingAndRenamingPersistence) {
     EXPECT_EQ(city->vector_to, kNone);
 
     game::RenameCity(game, *city, "Newtown");
-    auto loaded = save::Decode(save::Encode(game), kData);
+    auto loaded = *save::Decode(save::Encode(game), kData);
     EXPECT_EQ(loaded->map->cities[city->index].name, "Newtown");
     EXPECT_EQ(loaded->map->cities[city->index].slots.back().type, city->slots.back().type);
 }
@@ -357,11 +357,11 @@ TEST(ReportsAndDisbandTest, ReportFiguresStackDisbandSignpostsAndResignation) {
     EXPECT_EQ(sign->lines[0], "Traveller! Pray excuse the ");
     EXPECT_EQ(sign->lines[1], "sulphur fumes. Keep On!");
     sign->lines[0] = "Hello there";
-    auto reloaded = save::Decode(save::Encode(disband_game), kData);
+    auto reloaded = *save::Decode(save::Encode(disband_game), kData);
     EXPECT_EQ(game::SignAt(*reloaded, 18, 12)->lines[0], "Hello there");
 
     disband_game.map->fight_order[d_side->index][3] = 26;
-    reloaded = save::Decode(save::Encode(disband_game), kData);
+    reloaded = *save::Decode(save::Encode(disband_game), kData);
     EXPECT_EQ(reloaded->map->fight_order[d_side->index][3], 26);
 
     int diplo_before = d_side->diplo_score;
@@ -395,7 +395,7 @@ TEST(HistoryTest, DeedPrioritySlotsRoundRecordsAndHeroStandardTallies) {
     EXPECT_GE(game.history[0].events.size(), 2U);
     EXPECT_TRUE(!game.deeds.count(side->index) || game.deeds[side->index].empty());
 
-    auto reloaded = save::Decode(save::Encode(game), kData);
+    auto reloaded = *save::Decode(save::Encode(game), kData);
     EXPECT_EQ(reloaded->history.size(), game.history.size());
 
     Side* foe = game.sides[1];
@@ -427,7 +427,7 @@ TEST(SetupTest, NewGameOptionsInactiveSidesQuickStartAndSaveFidelity) {
     for (const Side* side : game.sides) EXPECT_NE(side->index, 2);
 
     game.map->sides[0].name = "Ozymandias";
-    auto reloaded = save::Decode(save::Encode(game), kData);
+    auto reloaded = *save::Decode(save::Encode(game), kData);
     EXPECT_TRUE(!reloaded->map->sides[2].in_use && !reloaded->map->sides[2].alive);
     EXPECT_EQ(reloaded->sides.size(), game.sides.size());
     for (const Side* side : reloaded->sides) EXPECT_NE(side->index, 2);
@@ -445,7 +445,7 @@ TEST(SetupTest, NewGameOptionsInactiveSidesQuickStartAndSaveFidelity) {
     auto full = SetupGame("ERYTHEA", full_setup);
     game::Reveal(*full, 0, 50, 80, true);
     full->surrender_offered = true;
-    auto loaded_full = save::Decode(save::Encode(*full), kData);
+    auto loaded_full = *save::Decode(save::Encode(*full), kData);
     EXPECT_TRUE(game::SurrenderPending(*loaded_full));
     for (const auto& [opt_name, opt_val] : options) {
         EXPECT_EQ(*loaded_full->map->options.Field(opt_name), opt_val) << opt_name;

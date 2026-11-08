@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <string>
 
 namespace prefs {
@@ -24,6 +25,6 @@ inline void Set(const std::string& key, int value) {
 /** @brief A setting as a number; `fallback` when it is unset or not a number. */
 int GetInt(const std::string& key, int fallback = 0);
 /** @brief Where a file of the player's own goes: prefs, saves. */
-std::string UserFile(const std::string& name);
+std::filesystem::path UserFile(const std::string& name);
 
 }  // namespace prefs

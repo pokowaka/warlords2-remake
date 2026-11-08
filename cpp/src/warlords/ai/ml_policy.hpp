@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "absl/status/status.h"
+
 #include "warlords/ai/personality.hpp"
 #include "warlords/types.hpp"
 
@@ -257,11 +259,11 @@ class PolicyNetwork {
     void UnflattenLegacy(const std::vector<float>& params);
 
     /** @brief Saves the weights with the training iteration and the held-out selection score. */
-    bool SaveJson(const std::filesystem::path& path, int generation = 0,
-                  float selection_city_share = 0.0F) const;
+    absl::Status SaveJson(const std::filesystem::path& path, int generation = 0,
+                          float selection_city_share = 0.0F) const;
 
-    /** @brief Loads the network weights from a JSON file; false if it is missing or invalid. */
-    bool LoadJson(const std::filesystem::path& path);
+    /** @brief Loads the network weights from a JSON file. */
+    absl::Status LoadJson(const std::filesystem::path& path);
 
     DiploNet diplo_net;             ///< Head 1: diplomacy.
     MissionNet mission_net;         ///< Head 2: stack missions.

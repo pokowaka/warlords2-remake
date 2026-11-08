@@ -15,12 +15,27 @@
 #include <map>
 #include <string>
 
+#include "absl/flags/flag.h"
+#include "absl/log/absl_check.h"
+
 #include "opponents.hpp"
+#include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/ai/modern_ai.hpp"
 #include "warlords/game.hpp"
 #include "warlords/randommap.hpp"
+
+ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
+ABSL_FLAG(std::string, scenario, "ERYTHEA", "Scenario directory name (or RANDOM).");
+ABSL_FLAG(int, seed, 800001, "Random seed.");
+ABSL_FLAG(int, turns, 40, "Maximum turns to play.");
+ABSL_FLAG(int, hidden_map, 0, "Hidden Map option (0 or 1).");
+ABSL_FLAG(int, active_sides, 8, "Number of active sides (2..8).");
+ABSL_FLAG(int, crop_margin, 0, "Crop margin around active capitals (0 = full map).");
+ABSL_FLAG(int, solo_seat, -1, "Solo Modern seat index (-1 = alternating 4v4).");
+ABSL_FLAG(int, diplomacy, 0, "Diplomacy option (0 or 1).");
+ABSL_FLAG(std::string, opponent, "classic", "Opponent personality: classic or raider.");
 
 using namespace w2;
 
@@ -57,31 +72,40 @@ static void PrintSides(Game& game, const bool* modern) {
  * See the file comment for the arguments.
  */
 int main(int argc, char** argv) {
-    if (argc < 2) {
+    auto args = ParseCliFlags(
+            argc, argv,
+            "w2aidiag WEIGHTS [SCENARIO] [SEED] [TURNS] [HIDDEN_MAP 0|1] [ACTIVE_SIDES] "
+            "[CROP_MARGIN] [SOLO_SEAT -1|0..7] [DIPLOMACY 0|1] [OPPONENT classic|raider]");
+    if (args.empty()) {
         std::fprintf(stderr,
                      "usage: w2aidiag WEIGHTS [SCENARIO] [SEED] [TURNS] [HIDDEN_MAP 0|1] "
                      "[ACTIVE_SIDES] [CROP_MARGIN] "
                      "[SOLO_SEAT -1|0..7] [DIPLOMACY 0|1] [OPPONENT classic|raider]\n");
         return 2;
     }
-    std::string weights = argv[1];
-    std::string scenario = argc > 2 ? argv[2] : "ERYTHEA";
-    int seed = argc > 3 ? std::atoi(argv[3]) : 800001;
-    int turns = argc > 4 ? std::atoi(argv[4]) : 40;
-    int hidden = argc > 5 ? std::atoi(argv[5]) : 0;
-    int active_sides = argc > 6 ? std::atoi(argv[6]) : 8;
-    int crop_margin = argc > 7 ? std::atoi(argv[7]) : 0;
-    int solo_seat = argc > 8 ? std::atoi(argv[8]) : -1;
-    int diplo = argc > 9 ? std::atoi(argv[9]) : 0;
-    opponents::Kind opponent = (argc > 10 && std::string(argv[10]) == "raider")
-                                       ? opponents::Kind::kRaider
-                                       : opponents::Kind::kClassic;
+    std::string data_dir = absl::GetFlag(FLAGS_data);
+    std::string weights = args[0];
+    std::string scenario = args.size() > 1 ? args[1] : absl::GetFlag(FLAGS_scenario);
+    int seed = args.size() > 2 ? static_cast<int>(ToInt(args[2]).value_or(800001))
+                               : absl::GetFlag(FLAGS_seed);
+    int turns = args.size() > 3 ? static_cast<int>(ToInt(args[3]).value_or(40))
+                                : absl::GetFlag(FLAGS_turns);
+    int hidden = args.size() > 4 ? static_cast<int>(ToInt(args[4]).value_or(0))
+                                 : absl::GetFlag(FLAGS_hidden_map);
+    int active_sides = args.size() > 5 ? static_cast<int>(ToInt(args[5]).value_or(8))
+                                       : absl::GetFlag(FLAGS_active_sides);
+    int crop_margin = args.size() > 6 ? static_cast<int>(ToInt(args[6]).value_or(0))
+                                      : absl::GetFlag(FLAGS_crop_margin);
+    int solo_seat = args.size() > 7 ? static_cast<int>(ToInt(args[7]).value_or(-1))
+                                    : absl::GetFlag(FLAGS_solo_seat);
+    int diplo = args.size() > 8 ? static_cast<int>(ToInt(args[8]).value_or(0))
+                                : absl::GetFlag(FLAGS_diplomacy);
+    std::string opponent_name = args.size() > 9 ? args[9] : absl::GetFlag(FLAGS_opponent);
+    opponents::Kind opponent =
+            opponent_name == "raider" ? opponents::Kind::kRaider : opponents::Kind::kClassic;
     ai::ml::PolicyNetwork net;
-    if (!net.LoadJson(weights)) {
-        std::fprintf(stderr,
-                     "w2aidiag: cannot load weights '%s' (missing, or trained for different input "
-                     "sizes)\n",
-                     weights.c_str());
+    if (absl::Status status = net.LoadJson(weights); !status.ok()) {
+        std::fprintf(stderr, "w2aidiag: %s\n", std::string(status.message()).c_str());
         return 1;
     }
     game::NewGameOptions game_options;
@@ -102,13 +126,25 @@ int main(int argc, char** argv) {
     if (scenario == "RANDOM") {
         Rng map_rng(static_cast<double>(seed ^ 0x5bf03635U));
         randommap::Options map_options;
-        map_options.data_dir = "original";
+        map_options.data_dir = data_dir;
         map_options.rng = &map_rng;
         map_options.sliders = {3, 3, 2, 3};
-        rfiles = randommap::GenerateNow(map_options);
+        auto generated = randommap::GenerateNow(map_options);
+        if (!generated.ok()) {
+            std::fprintf(stderr, "w2aidiag: %s\n",
+                         std::string(generated.status().message()).c_str());
+            return 1;
+        }
+        rfiles = std::move(*generated);
         game_options.memory_files = &rfiles;
     }
-    auto game_ptr = game::NewGame("original", scenario, game_options);
+    auto created_game = game::NewGame(data_dir, scenario, game_options);
+    if (!created_game.ok()) {
+        std::fprintf(stderr, "w2aidiag: %s\n",
+                     std::string(created_game.status().message()).c_str());
+        return 1;
+    }
+    std::unique_ptr<Game> game_ptr = std::move(*created_game);
     Game& game = *game_ptr;
     std::printf("=== %s seed=%d sides=%d crop=%d cities=%zu box=[%d..%d]x[%d..%d] ===\n",
                 scenario.c_str(), seed, active_sides, crop_margin, game.map->cities.size(),

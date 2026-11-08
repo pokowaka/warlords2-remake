@@ -12,6 +12,8 @@
  */
 #include <set>
 
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/report.hpp"
@@ -111,8 +113,8 @@ void DrawBars(const report::Figures& figures) {
     axis(0, 1);
     const Font& font = kit::GetFont(2);
     gfx::SetColor(1, 1, 1);
-    kit::Right(font, w2::Fmt("%d", figures.max), 556, 172);
-    kit::Centred(font, w2::Fmt("%d", figures.max / 2), 432, 172);
+    kit::Right(font, absl::StrFormat("%d", figures.max), 556, 172);
+    kit::Centred(font, absl::StrFormat("%d", figures.max / 2), 432, 172);
     kit::Centred(font, "0", 308, 172);
 }
 
@@ -153,7 +155,7 @@ struct Reports : kit::Modal {
             const w2::Produced& entry = list[top_row + i];
             int y = 176 + 30 * i;
             gfx::SetColor(1, 1, 1);
-            font.Draw(w2::Fmt("%d", top_row + i + 1), 312, y);
+            font.Draw(absl::StrFormat("%d", top_row + i + 1), 312, y);
             kit::Army(entry.type, g_app.player->index, 328, 170 + 30 * i, 1);
             w2::City* city = entry.city != w2::kNone ? g_app.g->map->City(entry.city) : nullptr;
             std::string name = entry.standard ? "Standard" : (city ? city->name : "");

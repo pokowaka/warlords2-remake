@@ -10,7 +10,8 @@
 
 #include <cstdint>
 #include <string>
-#include <vector>
+
+#include "absl/types/span.h"
 
 #include "warlords/bytes.hpp"
 
@@ -56,7 +57,7 @@ constexpr uint8_t kEmptySlot = 255;       ///< Army type byte value for an unuse
 class SideRecordView {
   public:
     /** @brief Constructs a view for side `side_idx` (0..7) in `scn_bytes`. */
-    SideRecordView(const std::string& scn_bytes, int side_idx)
+    SideRecordView(absl::Span<const uint8_t> scn_bytes, int side_idx)
             : bytes_(scn_bytes), idx_(side_idx), offset_(kSideRecs + kSideRecStride * side_idx) {}
 
     /** @brief The side's display name (20-byte C string at offset 0). */
@@ -87,16 +88,16 @@ class SideRecordView {
     int Card() const { return U16(bytes_, kCards + 2 * idx_); }
 
   private:
-    const std::string& bytes_;  ///< Underlying `.SCN` byte string.
-    int idx_;                   ///< Side index (0..7).
-    int offset_;                ///< Byte offset of this side's 20-byte record.
+    absl::Span<const uint8_t> bytes_;  ///< Underlying `.SCN` byte span.
+    int idx_;                          ///< Side index (0..7).
+    int offset_;                       ///< Byte offset of this side's 20-byte record.
 };
 
 /** @brief Read-only view over a 65-byte city record in a `.SCN` buffer. */
 class CityRecordView {
   public:
     /** @brief Constructs a view for city `city_idx` in `scn_bytes`. */
-    CityRecordView(const std::string& scn_bytes, int city_idx)
+    CityRecordView(absl::Span<const uint8_t> scn_bytes, int city_idx)
             : bytes_(scn_bytes), offset_(kCities + kCityStride * city_idx) {}
 
     /** @brief Column of the city's top-left tile. */
@@ -115,15 +116,15 @@ class CityRecordView {
     int Income() const { return U8(bytes_, offset_ + 42); }
 
   private:
-    const std::string& bytes_;  ///< Underlying `.SCN` byte string.
-    int offset_;                ///< Byte offset of this city's 65-byte record.
+    absl::Span<const uint8_t> bytes_;  ///< Underlying `.SCN` byte span.
+    int offset_;                       ///< Byte offset of this city's 65-byte record.
 };
 
 /** @brief Read-only view over a 31-byte site record in a `.SCN` buffer. */
 class SiteRecordView {
   public:
     /** @brief Constructs a view for site `site_idx` in `scn_bytes`. */
-    SiteRecordView(const std::string& scn_bytes, int site_idx)
+    SiteRecordView(absl::Span<const uint8_t> scn_bytes, int site_idx)
             : bytes_(scn_bytes), offset_(kSites + kSiteStride * site_idx) {}
 
     /** @brief Column coordinate of the site. */
@@ -136,15 +137,15 @@ class SiteRecordView {
     int Type() const { return U16(bytes_, offset_ + 24); }
 
   private:
-    const std::string& bytes_;  ///< Underlying `.SCN` byte string.
-    int offset_;                ///< Byte offset of this site's 31-byte record.
+    absl::Span<const uint8_t> bytes_;  ///< Underlying `.SCN` byte span.
+    int offset_;                       ///< Byte offset of this site's 31-byte record.
 };
 
 /** @brief Read-only view over a 29-byte item record in a `.SCN` buffer. */
 class ItemRecordView {
   public:
     /** @brief Constructs a view for item `item_idx` in `scn_bytes`. */
-    ItemRecordView(const std::string& scn_bytes, int item_idx)
+    ItemRecordView(absl::Span<const uint8_t> scn_bytes, int item_idx)
             : bytes_(scn_bytes), offset_(kItems + kItemStride * item_idx) {}
 
     /** @brief The item's name (20-byte C string at +0). */
@@ -155,8 +156,8 @@ class ItemRecordView {
     int Value() const { return U8(bytes_, offset_ + 21); }
 
   private:
-    const std::string& bytes_;  ///< Underlying `.SCN` byte string.
-    int offset_;                ///< Byte offset of this item's 29-byte record.
+    absl::Span<const uint8_t> bytes_;  ///< Underlying `.SCN` byte span.
+    int offset_;                       ///< Byte offset of this item's 29-byte record.
 };
 
 }  // namespace w2::scn_format

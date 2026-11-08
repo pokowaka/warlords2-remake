@@ -6,13 +6,18 @@
 // Run from the repository root, so that original/ is found.
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <string>
 
+#include "absl/flags/flag.h"
+
+#include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/game.hpp"
 #include "warlords/randommap.hpp"
 #include "warlords/save.hpp"
+
+ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
+ABSL_FLAG(bool, dump, false, "Print every army's coordinates and stats after each turn.");
 
 using namespace w2;
 
@@ -35,10 +40,11 @@ static void Trace(const Game& game, const Side& side) {
                1000000007;
     }
     std::string owners;
-    for (auto& city : game.map->cities)
+    for (const auto& city : game.map->cities) {
         owners += city.razed                  ? 'x'
                   : city.owner_index != kNone ? static_cast<char>('0' + city.owner_index)
                                               : '.';
+    }
     printf("%d %d gold=%d armies=%d rng=%u h=%lld %s\n", game.turn, side.index, side.gold,
            static_cast<int>(game.armies.size()), game.rng.state, hash, owners.c_str());
 }
@@ -48,38 +54,56 @@ static void Trace(const Game& game, const Side& side) {
  *        controlled and prints a trace line after each side's turn.
  */
 int main(int argc, char** argv) {
-    std::string scenario = argc > 1 ? argv[1] : "ERYTHEA";
-    double seed = argc > 2 ? atof(argv[2]) : 1;
-    int turns = argc > 3 ? atoi(argv[3]) : 10;
-    bool hidden = false, round_trip = false, diplo = false;
-    for (int i = 4; i < argc; i++) {
-        if (!strcmp(argv[i], "hidden")) hidden = true;
+    auto args =
+            ParseCliFlags(argc, argv, "w2trace [SCENARIO] [SEED] [TURNS] [hidden] [diplo] [save]");
+    std::string data_dir = absl::GetFlag(FLAGS_data);
+    std::string scenario = !args.empty() ? args[0] : "ERYTHEA";
+    double seed = args.size() > 1 ? std::strtod(args[1].c_str(), nullptr) : 1.0;
+    int turns = args.size() > 2 ? static_cast<int>(ToInt(args[2]).value_or(10)) : 10;
+    bool hidden = false;
+    bool round_trip = false;
+    bool diplo = false;
+    for (size_t i = 3; i < args.size(); i++) {
+        if (args[i] == "hidden") hidden = true;
         // "save": write the game out and read it back after every turn, which
         // must change nothing but the route cache -- a load empties it, as the
         // original's does
-        if (!strcmp(argv[i], "save")) round_trip = true;
+        if (args[i] == "save") round_trip = true;
         // "diplo": with Diplomacy on, so that sides make peace
-        if (!strcmp(argv[i], "diplo")) diplo = true;
+        if (args[i] == "diplo") diplo = true;
     }
     game::NewGameOptions options;
     options.seed = seed;
     if (hidden) options.options.emplace_back("hiddenMap", 1);
     if (diplo) options.options.emplace_back("diplomacy", 1);
+    randommap::Files generated_files;
     // RANDOM: a world made from the seed first, as cpp/test/trace.lua makes it
     if (scenario == randommap::kDir) {
         Rng rng(seed);
         randommap::Options map_options;
-        map_options.data_dir = "original";
+        map_options.data_dir = data_dir;
         map_options.rng = &rng;
-        randommap::Install("original", randommap::GenerateNow(map_options));
+        auto generated = randommap::GenerateNow(map_options);
+        if (!generated.ok()) {
+            fprintf(stderr, "w2trace: %s\n", std::string(generated.status().message()).c_str());
+            return 1;
+        }
+        generated_files = std::move(*generated);
+        options.memory_files = &generated_files;
     }
-    auto game = game::NewGame("original", scenario, options);
+    auto created_game = game::NewGame(data_dir, scenario, options);
+    if (!created_game.ok()) {
+        fprintf(stderr, "w2trace: %s\n", std::string(created_game.status().message()).c_str());
+        return 1;
+    }
+    std::unique_ptr<Game> game = std::move(*created_game);
     for (Side* player : game->sides) player->computer = true;
     Side* side = game::Begin(*game);
+    bool dump_armies = absl::GetFlag(FLAGS_dump) || (std::getenv("DUMP") != nullptr);
     while (side && game->turn <= turns) {
         ai::PlayTurn(*game, *side);
         Trace(*game, *side);
-        if (getenv("DUMP")) {
+        if (dump_armies) {
             int number = 1;
             for (Army* army : game->armies) {
                 auto show = [](int value) {
@@ -92,7 +116,12 @@ int main(int argc, char** argv) {
         }
         side = game::EndTurn(*game);
         if (round_trip && side) {
-            game = save::Decode(save::Encode(*game), "original");
+            auto reloaded = save::Decode(save::Encode(*game), data_dir);
+            if (!reloaded.ok()) {
+                fprintf(stderr, "w2trace: %s\n", std::string(reloaded.status().message()).c_str());
+                return 1;
+            }
+            game = std::move(*reloaded);
             side = game->side;
         }
     }

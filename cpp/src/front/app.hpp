@@ -8,6 +8,7 @@
 #pragma once
 
 #include <array>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
@@ -122,10 +123,10 @@ struct Drag {
 /** @brief Everything the front end keeps: the art, the screen, the game and what is on it. */
 struct App {
     std::vector<std::shared_ptr<kit::Modal>> modals;  ///< The dialogs open, topmost last.
-    int mouse_x = -1;          ///< The pointer, in UI pixels; -1 before it moves.
-    int mouse_y = -1;          ///< The pointer, in UI pixels; -1 before it moves.
-    w2::pal::Palette palette;  ///< The game's palette.
-    std::string data_dir;      ///< Where the game's DATA folder is.
+    int mouse_x = -1;                ///< The pointer, in UI pixels; -1 before it moves.
+    int mouse_y = -1;                ///< The pointer, in UI pixels; -1 before it moves.
+    w2::pal::Palette palette;        ///< The game's palette.
+    std::filesystem::path data_dir;  ///< Where the game's DATA folder is.
 
     // the art
     std::array<gfx::ImageP, 2> sheets;    ///< SCENERY0/1.PCK: the terrain tile sheets.

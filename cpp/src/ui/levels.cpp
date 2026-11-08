@@ -8,6 +8,8 @@
  * its side's colour at the top level, grey below -- its name, its title, its
  * experience, what the next level needs, its strength and its moves.
  */
+#include "absl/strings/str_format.h"
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/armytype.hpp"
@@ -51,11 +53,12 @@ struct Levels : kit::Modal {
             gfx::SetColor(1, 1, 1);
             font.Draw(hero->name, 128, y + 6);
             font.Draw(kit::Text(hero->female ? kTitlesFemale : kTitlesMale, level - 1), 272, y + 6);
-            kit::Centred(font, w2::Fmt("%d", hero->experience), 392, y + 6);
-            kit::Centred(font, Needs(level) != w2::kNone ? w2::Fmt("%d", Needs(level)) : "-", 440,
+            kit::Centred(font, absl::StrFormat("%d", hero->experience), 392, y + 6);
+            kit::Centred(font,
+                         Needs(level) != w2::kNone ? absl::StrFormat("%d", Needs(level)) : "-", 440,
                          y + 6);
-            kit::Centred(font, w2::Fmt("%d", hero->strength), 488, y + 6);
-            kit::Centred(font, w2::Fmt("%d", hero->max_moves), 536, y + 6);
+            kit::Centred(font, absl::StrFormat("%d", hero->strength), 488, y + 6);
+            kit::Centred(font, absl::StrFormat("%d", hero->max_moves), 536, y + 6);
         }
         for (int i = static_cast<int>(rows.size()); i < 6; i++)
             kit::Army(w2::kNone, side->index, 88, 128 + 30 * i, 1);

@@ -126,19 +126,19 @@ TEST(DomainEntitiesTest, CitySideAndArmyQueries) {
 }
 
 TEST(ScnFormatTest, TypedRecordViewsReadErytheaScenario) {
-    auto scn_text = ReadFile("original/ERYTHEA/ERYTHEA.SCN");
-    ASSERT_TRUE(scn_text.has_value());
-    EXPECT_EQ(scn_text->size(), static_cast<size_t>(scn_format::kScnSize));
+    auto scn_bytes = ReadBytes("original/ERYTHEA/ERYTHEA.SCN");
+    ASSERT_TRUE(scn_bytes.ok()) << scn_bytes.status();
+    EXPECT_EQ(scn_bytes->size(), static_cast<size_t>(scn_format::kScnSize));
 
-    scn_format::SideRecordView first_side(*scn_text, 0);
+    scn_format::SideRecordView first_side(*scn_bytes, 0);
     EXPECT_EQ(first_side.Name(), "Sirians");
     EXPECT_GT(first_side.Gold(), 0);
     EXPECT_GE(first_side.CapX(), 0);
     EXPECT_GE(first_side.CapY(), 0);
 
-    int city_count = U16(*scn_text, scn_format::kCitiesCount);
+    int city_count = U16(*scn_bytes, scn_format::kCitiesCount);
     EXPECT_GT(city_count, 20);
-    scn_format::CityRecordView first_city(*scn_text, 0);
+    scn_format::CityRecordView first_city(*scn_bytes, 0);
     EXPECT_FALSE(first_city.Name().empty());
     EXPECT_TRUE(first_city.X() >= 0 && first_city.X() < kMapW);
     EXPECT_TRUE(first_city.Y() >= 0 && first_city.Y() < kMapH);
@@ -147,7 +147,9 @@ TEST(ScnFormatTest, TypedRecordViewsReadErytheaScenario) {
 TEST(GameModelTest, NewGameAndMapQueries) {
     game::NewGameOptions game_opts;
     game_opts.seed = 42;
-    auto game_state = game::NewGame("original", "ERYTHEA", game_opts);
+    auto created_game = game::NewGame("original", "ERYTHEA", game_opts);
+    ASSERT_TRUE(created_game.ok()) << created_game.status();
+    auto& game_state = *created_game;
     ASSERT_NE(game_state, nullptr);
     ASSERT_NE(game_state->map, nullptr);
     EXPECT_EQ(game_state->LivingSideCount(), 8);
