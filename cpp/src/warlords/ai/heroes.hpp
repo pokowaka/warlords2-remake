@@ -7,6 +7,6 @@
 
 namespace w2::ai::heroes {
 
-void phase(Game& g, Side& side);
+void Phase(Game& g, Side& side);
 
 }  // namespace w2::ai::heroes

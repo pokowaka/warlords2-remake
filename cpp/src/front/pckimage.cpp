@@ -5,7 +5,7 @@
 
 namespace pckimage {
 
-gfx::ImageP fromPixels(const w2::pck::Pixels& p, const w2::pal::Palette& palette,
+gfx::ImageP FromPixels(const w2::pck::Pixels& p, const w2::pal::Palette& palette,
                        const std::map<int, int>& map, const std::set<int>& keys) {
     std::vector<uint8_t> out(static_cast<size_t>(p.w) * p.h * 4, 0);
     uint8_t lut[16][3];
@@ -25,22 +25,22 @@ gfx::ImageP fromPixels(const w2::pck::Pixels& p, const w2::pal::Palette& palette
         out[i * 4 + 2] = lut[idx][2];
         out[i * 4 + 3] = 255;
     }
-    return gfx::newImageRGBA(p.w, p.h, out.data());
+    return gfx::NewImageRgba(p.w, p.h, out.data());
 }
 
-gfx::ImageP load(const std::string& path, const w2::pal::Palette& palette, int key) {
-    auto px = w2::pck::decode(path);
+gfx::ImageP Load(const std::string& path, const w2::pal::Palette& palette, int key) {
+    auto px = w2::pck::Decode(path);
     std::set<int> keys;
-    if (key == CORNER && !px->px.empty())
+    if (key == kCorner && !px->px.empty())
         keys.insert(px->px[0]);
     else if (key >= 0)
         keys.insert(key);
-    return fromPixels(*px, palette, {}, keys);
+    return FromPixels(*px, palette, {}, keys);
 }
 
-gfx::ImageP load(const std::string& path, const w2::pal::Palette& palette,
+gfx::ImageP Load(const std::string& path, const w2::pal::Palette& palette,
                  const std::set<int>& keys) {
-    return fromPixels(*w2::pck::decode(path), palette, {}, keys);
+    return FromPixels(*w2::pck::Decode(path), palette, {}, keys);
 }
 
 }  // namespace pckimage

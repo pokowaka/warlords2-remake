@@ -29,63 +29,63 @@ struct Sign : kit::Modal {
             editing.reset();
         }
     }
-    void draw() override {
-        kit::popup(kR);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), "A Signpost!", 320, 94);  // 4125:03eb
-        kit::centred(kit::font(2), "Type the new message for", 320, 140);
-        kit::centred(kit::font(2), "this signpost!", 320, 160);
+    void Draw() override {
+        kit::Popup(kR);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), "A Signpost!", 320, 94);  // 4125:03eb
+        kit::Centred(kit::GetFont(2), "Type the new message for", 320, 140);
+        kit::Centred(kit::GetFont(2), "this signpost!", 320, 160);
         for (int i = 0; i < 2; i++) {
             const std::string& text = (editing && line == i) ? editing->text : sign->lines[i];
-            kit::field(kFieldX[i], kFieldY[i], kFieldW, kFieldH, text, &kit::font(2));
-            if (editing && line == i) editing->drawCursor(kFieldX[i], kFieldY[i]);
+            kit::Field(kFieldX[i], kFieldY[i], kFieldW, kFieldH, text, &kit::GetFont(2));
+            if (editing && line == i) editing->DrawCursor(kFieldX[i], kFieldY[i]);
         }
         std::set<int> h{kLinE1, kLinE2};
-        kit::drawControls(v, h);
+        kit::DrawControls(v, h);
     }
-    void mousepressed(int x, int y, int) override {
+    void Mousepressed(int x, int y, int) override {
         Keep();
-        auto c = kit::controlAt(v, x, y);
+        auto c = kit::ControlAt(v, x, y);
         if (!c) return;
         if (c->id == kDone) {
-            kit::pop(this);
+            kit::Pop(this);
         } else if (c->id == kLinE1 || c->id == kLinE2) {
             line = c->id - kLinE1;
             editing = input::Editor();
-            editing->maxChars = kMaxChars;
-            editing->maxWidth = kMaxWidth;
+            editing->max_chars = kMaxChars;
+            editing->max_width = kMaxWidth;
         }
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (editing) {
-            std::string r = editing->key(key);
+            std::string r = editing->Key(key);
             if (r == "keep")
                 Keep();
             else if (r == "undo")
                 editing.reset();
             return;
         }
-        if (key == "return" || key == "kpenter" || key == "escape") kit::pop(this);
+        if (key == "return" || key == "kpenter" || key == "escape") kit::Pop(this);
     }
-    void textinput(const std::string& t) override {
-        if (editing) editing->input(t);
+    void Textinput(const std::string& t) override {
+        if (editing) editing->Input(t);
     }
-    bool typing() const override { return editing.has_value(); }
+    bool Typing() const override { return editing.has_value(); }
 };
 }  // namespace
 
-void open(const std::vector<w2::Army*>& stack) {
+void Open(const std::vector<w2::Army*>& stack) {
     if (stack.empty()) return;
     w2::Army* a = stack[0];
-    if (w2::scn::terrainAt(*G.g->map, a->x, a->y) != w2::move::TOWER) return;
-    w2::Sign* sign = w2::game::signAt(*G.g, a->x, a->y);
+    if (w2::scn::TerrainAt(*G.g->map, a->x, a->y) != w2::move::kTower) return;
+    w2::Sign* sign = w2::game::SignAt(*G.g, a->x, a->y);
     if (!sign) return;
     auto d = std::make_shared<Sign>();
     d->sign = sign;
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
-    for (int id : {kDone, kLinE1, kLinE2}) d->v.state[id] = w2::uidata::NORMAL;
-    kit::push(d);
+    for (int id : {kDone, kLinE1, kLinE2}) d->v.state[id] = w2::uidata::kNormal;
+    kit::Push(d);
 }
 
 }  // namespace signpost

@@ -43,8 +43,8 @@ struct Walk {
     double at = 0;
     w2::Army* top = nullptr;
     bool computer = false;
-    bool seaBefore = false;          // at sea as it set off: shown so to the walk's end
-    std::vector<w2::Army*> putDown;  // out of moves: put down once the walk has played out
+    bool sea_before = false;          // at sea as it set off: shown so to the walk's end
+    std::vector<w2::Army*> put_down;  // out of moves: put down once the walk has played out
 };
 
 struct Banner {
@@ -60,13 +60,13 @@ struct Assault {
     int x = 0, y = 0;
     w2::Battle result;
     std::vector<w2::Army*> def, atk;
-    std::vector<std::pair<int, int>> defSlots, atkSlots;
-    int defSide = 8, atkSide = 8;
+    std::vector<std::pair<int, int>> def_slots, atk_slots;
+    int def_side = 8, atk_side = 8;
     size_t step = 0;
-    int defDown = 0, atkDown = 0;
-    std::vector<Fell> defFell, atkFell;
+    int def_down = 0, atk_down = 0;
+    std::vector<Fell> def_fell, atk_fell;
     std::string phase = "cloud";
-    double at = 0, cloudTime = 0, closeAt = 0;
+    double at = 0, cloud_time = 0, close_at = 0;
     bool fast = false, computer = false, window = false;
     std::string victor, outcome;
     std::vector<std::string> message;
@@ -91,34 +91,34 @@ struct Drag {
 
 struct App {
     std::vector<std::shared_ptr<kit::Modal>> modals;
-    int mouseX = -1, mouseY = -1;
+    int mouse_x = -1, mouse_y = -1;
     w2::pal::Palette palette;
-    std::string dataDir;
+    std::string data_dir;
 
     // the art
     std::array<gfx::ImageP, 2> sheets;
-    gfx::ImageP roadImg, shadowImg, marble, bigArmy, cityPic, warPic, shieldImg, victoryPic,
-            heroPicM, heroPicF;
-    std::array<gfx::ImageP, 9> armyImg;
-    gfx::ImageP atransShields, fogImg, cursImg, abits, pointerImg;
-    gfx::ImageP shieldsImg, cityBack, searchPic, templePic, scrollPic;
+    gfx::ImageP road_img, shadow_img, marble, big_army, city_pic, war_pic, shield_img, victory_pic,
+            hero_pic_m, hero_pic_f;
+    std::array<gfx::ImageP, 9> army_img;
+    gfx::ImageP atrans_shields, fog_img, curs_img, abits, pointer_img;
+    gfx::ImageP shields_img, city_back, search_pic, temple_pic, scroll_pic;
     // a promotion's (popups 16-18, by level) and a medal's (popups 24-27) pictures
-    std::map<int, gfx::ImageP> levelPic;
-    std::array<gfx::ImageP, 4> medalPic;
-    std::map<int, gfx::ImageP> moveBars;
+    std::map<int, gfx::ImageP> level_pic;
+    std::array<gfx::ImageP, 4> medal_pic;
+    std::map<int, gfx::ImageP> move_bars;
     std::unique_ptr<screen::Screen> screen;
-    FontP font, bigFont, titleFont;
+    FontP font, big_font, title_font;
 
     // the screen
-    int openMenu = -1;
+    int open_menu = -1;
     layout::Layout layout;
-    bool haveLayout = false;
-    layout::Rect mapRect, stratRect, barRect, menuRect, panelRect;
-    menu::Layout menuLayout;
+    bool have_layout = false;
+    layout::Rect map_rect, strat_rect, bar_rect, menu_rect, panel_rect;
+    menu::Layout menu_layout;
     int zoom = 1;
     double cx = 0, cy = 0;
     std::array<int, 4> view{};  // the tiles drawn this frame: x0, y0, x1, y1
-    gfx::ImageP stratImage;
+    gfx::ImageP strat_image;
 
     // the game
     bool starting = false;
@@ -134,76 +134,76 @@ struct App {
     // the turn's openings
     std::optional<Banner> banner;
     std::shared_ptr<w2::HeroOffer> offer;
-    bool offerFemale = false;
-    std::string offerName;
-    std::optional<screen::View> heroView;
-    bool mapAfterBanner = false;
+    bool offer_female = false;
+    std::string offer_name;
+    std::optional<screen::View> hero_view;
+    bool map_after_banner = false;
 
     // battles
     std::optional<Assault> assault;
-    std::optional<Victory> victory, victoryUnder;
+    std::optional<Victory> victory, victory_under;
     w2::Army* medal = nullptr;  // what the assault just closed gave a medal to
-    std::optional<screen::View> victoryView;
+    std::optional<screen::View> victory_view;
 
     // the computer's turn
-    std::unique_ptr<Coroutine> aiRun;
-    bool aiWait = false, aiSkip = false, aiModsHeld = false;
-    w2::Side* aiSide = nullptr;
-    std::optional<AiStatus> aiStatus;
-    double aiResumeAt = 0;
+    std::unique_ptr<Coroutine> ai_run;
+    bool ai_wait = false, ai_skip = false, ai_mods_held = false;
+    w2::Side* ai_side = nullptr;
+    std::optional<AiStatus> ai_status;
+    double ai_resume_at = 0;
 
     bool over = false;
     std::optional<Drag> drag;
-    int pressed = w2::NONE;
+    int pressed = w2::kNone;
     struct MoveAll {
         std::set<w2::Army*> seen;
         int moved = 0;
     };
-    std::optional<MoveAll> moveAll;
-    double lastSelectClick = -1;  // when the select pointer was last clicked (1b62:0405)
-    std::vector<std::string> keyBuffer;
+    std::optional<MoveAll> move_all;
+    double last_select_click = -1;  // when the select pointer was last clicked (1b62:0405)
+    std::vector<std::string> key_buffer;
     std::string status;
-    bool modernUi = false;
-    bool quitRequested = false;
+    bool modern_ui = false;
+    bool quit_requested = false;
 };
 extern App G;
 
 // What the dialogs ask of the main screen.
 namespace front {
-constexpr int NONE = w2::NONE;
-void stratDirty();
+constexpr int kNone = w2::kNone;
+void StratDirty();
 /** The strategic map as the original paints it anywhere it appears, every
  *  city it can see as an 8x8 shield (834b:0ed7). `mark` gets a white box;
  *  `owners` is who held each city, for History (834b:12d3). Only `rows` of
  *  it show, from `scroll` rows down (the main screen's, on a short screen). */
-void drawStrategicMap(int x, int y, const w2::City* mark = nullptr, bool noCities = false,
+void DrawStrategicMap(int x, int y, const w2::City* mark = nullptr, bool no_cities = false,
                       const std::vector<int>* owners = nullptr, int scroll = 0, int rows = 312);
 /** Every site shown to the side, marked on a strategic map (834b:05e4). */
-void drawSiteMarkers(int x, int y, const w2::Site* highlight = nullptr);
+void DrawSiteMarkers(int x, int y, const w2::Site* highlight = nullptr);
 /** The map as the city dialog's Vector mode shows it. `filter` hides the
  *  cities that could take no more vectors (NONE for no filter). */
-void drawVectorMap(int x, int y, w2::City* city, int filter, bool seeAll);
+void DrawVectorMap(int x, int y, w2::City* city, int filter, bool see_all);
 /** A hero's figure on the strategic map (834b:1f5f). */
-void drawHeroFigure(int x, int y, int tx, int ty, bool dark = false);
-void drawStrategicPanel(int x, int y, const w2::City* city);
-void openCity(w2::City* city);
-void openQuest();
-void quit();
-void openStart();
-void takeLoaded(std::unique_ptr<w2::Game> g);
-void startAssault(int x, int y, const w2::Battle& result);
-void closeAssault();
-void presentVictory(w2::City* city, const std::string& victor);
-void centreOn(int x, int y);
-void setZoom(int z);
-void selectAt(int x, int y);
-void afterSlotChange();
-std::pair<int, int> viewCentre();
-std::pair<double, double> mapToUI(double tx, double ty);
-bool menuEnabled(const std::string& k);
-void playComputer();
-void syncLayout();
-void say(const std::string& s);
+void DrawHeroFigure(int x, int y, int tx, int ty, bool dark = false);
+void DrawStrategicPanel(int x, int y, const w2::City* city);
+void OpenCity(w2::City* city);
+void OpenQuest();
+void Quit();
+void OpenStart();
+void TakeLoaded(std::unique_ptr<w2::Game> g);
+void StartAssault(int x, int y, const w2::Battle& result);
+void CloseAssault();
+void PresentVictory(w2::City* city, const std::string& victor);
+void CentreOn(int x, int y);
+void SetZoom(int z);
+void SelectAt(int x, int y);
+void AfterSlotChange();
+std::pair<int, int> ViewCentre();
+std::pair<double, double> MapToUi(double tx, double ty);
+bool MenuEnabled(const std::string& k);
+void PlayComputer();
+void SyncLayout();
+void Say(const std::string& s);
 /** A random roll for what does not touch the game's dice: 1..n. */
-int roll(int n);
+int Roll(int n);
 }  // namespace front

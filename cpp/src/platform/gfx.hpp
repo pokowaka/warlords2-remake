@@ -34,8 +34,8 @@ struct Image {
     Image(const Image&) = delete;
     Image& operator=(const Image&) = delete;
     ~Image();
-    int width() const { return w; }
-    int height() const { return h; }
+    int Width() const { return w; }
+    int Height() const { return h; }
 };
 using ImageP = std::shared_ptr<Image>;
 
@@ -43,58 +43,58 @@ using ImageP = std::shared_ptr<Image>;
 struct Quad {
     double x = 0, y = 0, w = 0, h = 0;
 };
-inline Quad newQuad(double x, double y, double w, double h) {
+inline Quad NewQuad(double x, double y, double w, double h) {
     return Quad{x, y, w, h};
 }
 
-void init(SDL_Renderer* r);
+void Init(SDL_Renderer* r);
 /** Before the renderer is destroyed: images still held keep their hands off it. */
-void shutdown();
-SDL_Renderer* renderer();
+void Shutdown();
+SDL_Renderer* Renderer();
 
 /** An image from w * h RGBA bytes. */
-ImageP newImageRGBA(int w, int h, const uint8_t* rgba);
+ImageP NewImageRgba(int w, int h, const uint8_t* rgba);
 
 /** Start a frame: no transform, no scissor, white. */
-void begin();
+void Begin();
 /** Fill the whole target with a colour. */
-void clear(float r = 0, float g = 0, float b = 0);
+void Clear(float r = 0, float g = 0, float b = 0);
 
-void push();
-void pop();
-void origin();
-void translate(double x, double y);
-void scale(double s);
-void scale(double sx, double sy);
-void transformPoint(double x, double y, double& ox, double& oy);
-void inverseTransformPoint(double x, double y, double& ox, double& oy);
+void Push();
+void Pop();
+void Origin();
+void Translate(double x, double y);
+void Scale(double s);
+void Scale(double sx, double sy);
+void TransformPoint(double x, double y, double& ox, double& oy);
+void InverseTransformPoint(double x, double y, double& ox, double& oy);
 
-void setColor(float r, float g, float b, float a = 1);
-void setColor(const Color& c);
-Color getColor();
+void SetColor(float r, float g, float b, float a = 1);
+void SetColor(const Color& c);
+Color GetColor();
 
 /** The scissor, in the coordinates of the current transform. */
-void setScissor(double x, double y, double w, double h);
-void setScissor();  // none
+void SetScissor(double x, double y, double w, double h);
+void SetScissor();  // none
 
-enum Mode { FILL, LINE };
+enum Mode { kFill, kLine };
 /** A "line" rectangle is one pixel wide, centred on the rect's edge, as
  *  LÖVE's rough line style draws it. */
-void rectangle(Mode mode, double x, double y, double w, double h);
-void line(double x1, double y1, double x2, double y2);
+void Rectangle(Mode mode, double x, double y, double w, double h);
+void Line(double x1, double y1, double x2, double y2);
 
-void draw(const Image* img, double x, double y);
-void draw(const Image* img, const Quad& q, double x, double y);
-inline void draw(const ImageP& img, double x, double y) {
-    draw(img.get(), x, y);
+void Draw(const Image* img, double x, double y);
+void Draw(const Image* img, const Quad& q, double x, double y);
+inline void Draw(const ImageP& img, double x, double y) {
+    Draw(img.get(), x, y);
 }
-inline void draw(const ImageP& img, const Quad& q, double x, double y) {
-    draw(img.get(), q, x, y);
+inline void Draw(const ImageP& img, const Quad& q, double x, double y) {
+    Draw(img.get(), q, x, y);
 }
 
 /** The frame drawn so far, as RGBA rows: for screenshots. */
-std::vector<uint8_t> readPixels(int& w, int& h);
+std::vector<uint8_t> ReadPixels(int& w, int& h);
 /** Write the frame drawn so far as a .bmp. */
-void saveShot(const std::string& file);
+void SaveShot(const std::string& file);
 
 }  // namespace gfx

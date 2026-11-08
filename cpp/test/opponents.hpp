@@ -20,14 +20,14 @@
 
 namespace w2::opponents {
 
-enum class Kind { Classic, Raider, Frozen };
+enum class Kind { kClassic, kRaider, kFrozen };
 
 /** Plays one turn for a training opponent of the given kind (`frozen` is the
  *  network a Frozen opponent plays; required for that kind). */
-void playTurn(Game& g, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen = nullptr);
+void PlayTurn(Game& g, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen = nullptr);
 
 /** The Raider's pre-phase alone: capture reachable undefended enemy cities.
  *  Returns how many cities it took. */
-int raidEmptyCities(Game& g, Side& side);
+int RaidEmptyCities(Game& g, Side& side);
 
 }  // namespace w2::opponents

@@ -19,51 +19,51 @@
 
 namespace w2::slots {
 
-constexpr int MAX = 8;
+constexpr int kMax = 8;
 
 // The mark under a slot (89e0:17e7): the head of the group that moves takes
 // the tick, the head of every other group the cross.
-constexpr int NOMARK = -1, CROSS = 0, TICK = 1;
+constexpr int kNomark = -1, kCross = 0, kTick = 1;
 
 // Group 0 means "not grouped": each such army is a group of its own.
-constexpr int UNGROUPED = 0;
+constexpr int kUngrouped = 0;
 
 struct Slots {
     int n = 0;
-    int side = NONE;
-    std::array<Army*, MAX> army{};
-    std::array<int, MAX> group{};
-    std::array<bool, MAX> inGroup{};
-    std::array<int, MAX> mark{};
+    int side = kNone;
+    std::array<Army*, kMax> army{};
+    std::array<int, kMax> group{};
+    std::array<bool, kMax> in_group{};
+    std::array<int, kMax> mark{};
     std::optional<int> active;
 };
 
 /** Which armies a click on the tile picks up (8c07:06eb). */
-std::set<Army*> clicked(const Game& g, const std::vector<Army*>& armies, int side,
+std::set<Army*> Clicked(const Game& g, const std::vector<Army*>& armies, int side,
                         Army* anchor = nullptr);
 /** The slots for the armies standing on one tile, at most eight of them.
  *  `selected` is the set of armies that should be moving (none: a click's). */
-Slots build(const Game& g, const std::vector<Army*>& armies, int side,
+Slots Build(const Game& g, const std::vector<Army*>& armies, int side,
             const std::set<Army*>* selected = nullptr);
 /** Click a slot (controls 224-231, 89e0:0963): add that army to the moving
  *  group, or drop it out into a group of its own. */
-void toggle(Slots& s, const Game& g, int i);
+void Toggle(Slots& s, const Game& g, int i);
 /** Click the mark under a slot (controls 232-239, 89e0:0910). */
-void pickGroup(Slots& s, const Game& g, int i);
+void PickGroup(Slots& s, const Game& g, int i);
 /** The Grp button while it is red, and the space bar (control 240). */
-void all(Slots& s, const Game& g);
+void All(Slots& s, const Game& g);
 /** The Grp button while it is green (control 241). */
-void single(Slots& s, const Game& g);
+void Single(Slots& s, const Game& g);
 /** The armies that move. */
-std::vector<Army*> selected(const Slots& s);
+std::vector<Army*> Selected(const Slots& s);
 /** Group Move: the pace of the slowest army in the group (1c8c:0912). */
-int moves(const Slots& s);
+int Moves(const Slots& s);
 /** Whether the Grp button shows green (89e0:0567). */
-bool grouped(const Slots& s);
+bool Grouped(const Slots& s);
 /** Rebuild the slots over a fresh list of armies, keeping whichever of them
  *  were moving. None when none are left. */
-std::optional<Slots> keep(const Slots& s, const Game& g, const std::vector<Army*>& armies);
+std::optional<Slots> Keep(const Slots& s, const Game& g, const std::vector<Army*>& armies);
 /** Write the grouping back into the armies (89e0:000a's tail). */
-void commit(Slots& s, Game& g);
+void Commit(Slots& s, Game& g);
 
 }  // namespace w2::slots

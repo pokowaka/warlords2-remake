@@ -40,12 +40,12 @@ int ItemColour(const w2::Item* it) {
 // What an item does, as the dialog abbreviates it (4125:0d7c-0d9c).
 std::string Effect(const w2::Item* it) {
     int t = it->type, v = it->value;
-    if (t == rules::ITEM_STANDARD) return "com +1";
-    if (t == rules::ITEM_COMMAND) return w2::fmt("com +%d", v);
-    if (t == rules::ITEM_BATTLE) return w2::fmt("bat +%d", v);
-    if (t == rules::ITEM_FLIGHT) return "fly";
-    if (t == rules::ITEM_DOUBLE_MOVE) return "move";
-    if (t == rules::ITEM_GOLD_PER_CITY) return w2::fmt("gld +%d", v);
+    if (t == rules::kItemStandard) return "com +1";
+    if (t == rules::kItemCommand) return w2::Fmt("com +%d", v);
+    if (t == rules::kItemBattle) return w2::Fmt("bat +%d", v);
+    if (t == rules::kItemFlight) return "fly";
+    if (t == rules::kItemDoubleMove) return "move";
+    if (t == rules::kItemGoldPerCity) return w2::Fmt("gld +%d", v);
     return "";
 }
 
@@ -53,7 +53,7 @@ int ItemSum(const w2::Army* h, int t) {
     int n = 0;
     for (w2::Item* it : h->items) {
         if (it->type == t) n += it->value;
-        if (t == rules::ITEM_COMMAND && it->type == rules::ITEM_STANDARD) n++;
+        if (t == rules::kItemCommand && it->type == rules::kItemStandard) n++;
     }
     return n;
 }
@@ -62,25 +62,25 @@ struct HeroInfo : kit::Modal {
     screen::View v;
     std::vector<w2::Army*> heroes;
     int cur = 0;
-    int item = w2::NONE;
+    int item = w2::kNone;
     bool ground = false;
 
-    std::vector<w2::Item*> List() { return w2::hero::itemsHere(*G.g, heroes[cur]); }
+    std::vector<w2::Item*> List() { return w2::hero::ItemsHere(*G.g, heroes[cur]); }
 
     // choose item i of the list, from 0 (or none)
     void Choose(int i) {
         auto items = List();
-        item = (i != w2::NONE && i >= 0 && i < static_cast<int>(items.size())) ? i : w2::NONE;
-        ground = item != w2::NONE && items[item]->status == 1;
+        item = (i != w2::kNone && i >= 0 && i < static_cast<int>(items.size())) ? i : w2::kNone;
+        ground = item != w2::kNone && items[item]->status == 1;
         auto& st = v.state;
-        st[kDone] = w2::uidata::NORMAL;
-        st[kNext] = heroes.size() > 1 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        st[kDone] = w2::uidata::kNormal;
+        st[kNext] = heroes.size() > 1 ? w2::uidata::kNormal : w2::uidata::kDisabled;
         st[kPrev] = st[kNext];
-        st[kUp] = (item != w2::NONE && item > 0) ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        st[kDown] = (item != w2::NONE && item < static_cast<int>(items.size()) - 1)
-                            ? w2::uidata::NORMAL
-                            : w2::uidata::DISABLED;
-        st[kDrop] = item != w2::NONE ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        st[kUp] = (item != w2::kNone && item > 0) ? w2::uidata::kNormal : w2::uidata::kDisabled;
+        st[kDown] = (item != w2::kNone && item < static_cast<int>(items.size()) - 1)
+                            ? w2::uidata::kNormal
+                            : w2::uidata::kDisabled;
+        st[kDrop] = item != w2::kNone ? w2::uidata::kNormal : w2::uidata::kDisabled;
         st[kTake] = st[kDrop];
         hidden = {ground ? kDrop : kTake};
     }
@@ -88,7 +88,7 @@ struct HeroInfo : kit::Modal {
     void ShowHero(int i) {
         int n = static_cast<int>(heroes.size());
         cur = ((i % n) + n) % n;
-        Choose(!List().empty() ? 0 : w2::NONE);
+        Choose(!List().empty() ? 0 : w2::kNone);
     }
 
     // the first item of a kind: 3 carried, 1 on the ground (6c1b:0fc2, 1037)
@@ -102,90 +102,90 @@ struct HeroInfo : kit::Modal {
     }
 
     void Close() {
-        kit::pop(this);
-        w2::quest::event(*G.g, *G.player, "item");
+        kit::Pop(this);
+        w2::quest::Notify(*G.g, *G.player, "item");
     }
 
-    void draw() override {
+    void Draw() override {
         w2::Army* h = heroes[cur];
-        const Font& f = kit::font(2);
-        kit::popup(kR);
-        front::drawStrategicMap(kMapX, kMapY, nullptr, true);
+        const Font& f = kit::GetFont(2);
+        kit::Popup(kR);
+        front::DrawStrategicMap(kMapX, kMapY, nullptr, true);
         for (size_t i = 0; i < heroes.size(); i++)
             if (static_cast<int>(i) != cur)
-                front::drawHeroFigure(kMapX, kMapY, heroes[i]->x, heroes[i]->y, true);
-        front::drawHeroFigure(kMapX, kMapY, h->x, h->y);
-        kit::setPal(0);
-        kit::outline(308, 206, 248, 129);
-        kit::bevel(307, 205, 250, 131, 4, 2);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), h->name, 432, 62);
-        kit::army(w2::armytype::HERO, G.player->index, 304, 110, 1);
+                front::DrawHeroFigure(kMapX, kMapY, heroes[i]->x, heroes[i]->y, true);
+        front::DrawHeroFigure(kMapX, kMapY, h->x, h->y);
+        kit::SetPal(0);
+        kit::Outline(308, 206, 248, 129);
+        kit::Bevel(307, 205, 250, 131, 4, 2);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), h->name, 432, 62);
+        kit::Army(w2::armytype::kHero, G.player->index, 304, 110, 1);
         int k = 1;
-        for (w2::Army* a : w2::game::armiesAt(*G.g, h->x, h->y)) {
+        for (w2::Army* a : w2::game::ArmiesAt(*G.g, h->x, h->y)) {
             if (a != h && k < 8) {
-                kit::army(a->type, a->owner, 304 + k * 32, 110, 1);
+                kit::Army(a->type, a->owner, 304 + k * 32, 110, 1);
                 k++;
             }
         }
-        for (int j = k; j <= 7; j++) kit::army(w2::NONE, G.player->index, 304 + j * 32, 110, 1);
-        w2::City* in_city = w2::game::cityAt(*G.g, h->x, h->y);
+        for (int j = k; j <= 7; j++) kit::Army(w2::kNone, G.player->index, 304 + j * 32, 110, 1);
+        w2::City* in_city = w2::game::CityAt(*G.g, h->x, h->y);
         w2::City* near = nullptr;
-        int near_d = w2::NONE;
-        int viewer = w2::game::viewerSide(*G.g, G.player);
+        int near_d = w2::kNone;
+        int viewer = w2::game::ViewerSide(*G.g, G.player);
         for (auto& c : G.g->map->cities) {
-            if (w2::game::seen(*G.g, viewer, c.x, c.y)) {
+            if (w2::game::Seen(*G.g, viewer, c.x, c.y)) {
                 int dd = std::max(std::abs(c.x - h->x), std::abs(c.y - h->y));
-                if (near_d == w2::NONE || dd < near_d) {
+                if (near_d == w2::kNone || dd < near_d) {
                     near = &c;
                     near_d = dd;
                 }
             }
         }
-        int battle = ItemSum(h, rules::ITEM_BATTLE);
-        int command = w2::combat::HERO_TABLE[std::max(0, std::min(9, h->strength + battle))] +
-                      ItemSum(h, rules::ITEM_COMMAND);
-        gfx::setColor(1, 1, 1);
-        kit::right(f, kit::text(kS, in_city ? 1 : 0), 384, 145);
-        kit::right(f, kit::text(kS, 2), 384, 165);
-        kit::right(f, kit::text(kS, 3), 384, 185);
-        kit::right(f, kit::text(kS, 4), 528, 165);
-        kit::right(f, kit::text(kS, 5), 528, 185);
-        f.draw(near ? near->name : "", 392, 145);
-        f.draw(w2::fmt("+%d", battle), 392, 165);
-        f.draw(w2::fmt("+%d", command), 392, 185);
-        f.draw(w2::fmt("%d", h->level ? h->level : 1), 536, 165);
-        f.draw(w2::fmt("%d", h->experience), 536, 185);
-        f.draw(w2::format(kit::text(kS, 6), cur + 1, static_cast<int>(heroes.size())), 312, 347);
+        int battle = ItemSum(h, rules::kItemBattle);
+        int command = w2::combat::kHeroTable[std::max(0, std::min(9, h->strength + battle))] +
+                      ItemSum(h, rules::kItemCommand);
+        gfx::SetColor(1, 1, 1);
+        kit::Right(f, kit::Text(kS, in_city ? 1 : 0), 384, 145);
+        kit::Right(f, kit::Text(kS, 2), 384, 165);
+        kit::Right(f, kit::Text(kS, 3), 384, 185);
+        kit::Right(f, kit::Text(kS, 4), 528, 165);
+        kit::Right(f, kit::Text(kS, 5), 528, 185);
+        f.Draw(near ? near->name : "", 392, 145);
+        f.Draw(w2::Fmt("+%d", battle), 392, 165);
+        f.Draw(w2::Fmt("+%d", command), 392, 185);
+        f.Draw(w2::Fmt("%d", h->level ? h->level : 1), 536, 165);
+        f.Draw(w2::Fmt("%d", h->experience), 536, 185);
+        f.Draw(w2::Format(kit::Text(kS, 6), cur + 1, static_cast<int>(heroes.size())), 312, 347);
         auto items = List();
-        kit::setPal(3);
-        gfx::rectangle(gfx::FILL, 367, 236, 184, 66);
-        kit::bevel(367, 236, 184, 66, 4, 2);
-        kit::bevel(369, 258, 180, 21, 2, 4);
-        gfx::setColor(1, 1, 1);
-        kit::centred(f, kit::text(kS, ground ? 7 : 8), 432, 211);
-        if (item != w2::NONE) {
+        kit::SetPal(3);
+        gfx::Rectangle(gfx::kFill, 367, 236, 184, 66);
+        kit::Bevel(367, 236, 184, 66, 4, 2);
+        kit::Bevel(369, 258, 180, 21, 2, 4);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(f, kit::Text(kS, ground ? 7 : 8), 432, 211);
+        if (item != w2::kNone) {
             for (int row = 0; row <= 2; row++) {
                 int i = item - 1 + row;
                 if (i >= 0 && i < static_cast<int>(items.size()))
-                    f.colours(ItemColour(items[i]), 0).draw(items[i]->name, 376, 238 + 22 * row);
+                    f.Colours(ItemColour(items[i]), 0).Draw(items[i]->name, 376, 238 + 22 * row);
             }
             w2::Item* it = items[item];
-            kit::centred(f.colours(ItemColour(it), 0), Effect(it), 340, 260);
+            kit::Centred(f.Colours(ItemColour(it), 0), Effect(it), 340, 260);
         }
         auto box = [](const int* src, int x) {
-            gfx::setColor(1, 1, 1);
-            gfx::draw(G.abits, gfx::newQuad(src[0], src[1], 24, 20), x, 311);
+            gfx::SetColor(1, 1, 1);
+            gfx::Draw(G.abits, gfx::NewQuad(src[0], src[1], 24, 20), x, 311);
         };
         box(ground ? kClear : kChecked, 312);
         box(ground ? kChecked : kClear, 400);
-        f.colours(7, 0).draw("Carried", 336, 313);
-        f.colours(10, 0).draw("Ground", 424, 313);
-        kit::drawControls(v, hidden);
+        f.Colours(7, 0).Draw("Carried", 336, 313);
+        f.Colours(10, 0).Draw("Ground", 424, 313);
+        kit::DrawControls(v, hidden);
     }
 
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y, hidden);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y, hidden);
         if (!c) return;
         auto items = List();
         if (c->id == kDone)
@@ -198,14 +198,14 @@ struct HeroInfo : kit::Modal {
             Choose(item - 1);
         else if (c->id == kDown)
             Choose(item + 1);
-        else if (c->id == kDrop && item != w2::NONE) {
+        else if (c->id == kDrop && item != w2::kNone) {
             w2::Item* it = items[item];
-            w2::hero::dropItem(*G.g, heroes[cur], it);
+            w2::hero::DropItem(*G.g, heroes[cur], it);
             // 7563:0943: dropped at sea it is gone, with a splash
-            if (it->status == 0) sound::effect("splash");
+            if (it->status == 0) sound::Effect("splash");
             Choose(std::min(item, static_cast<int>(List().size()) - 1));
-        } else if (c->id == kTake && item != w2::NONE) {
-            w2::hero::takeItem(*G.g, heroes[cur], items[item]);
+        } else if (c->id == kTake && item != w2::kNone) {
+            w2::hero::TakeItem(*G.g, heroes[cur], items[item]);
             Choose(std::min(item, static_cast<int>(List().size()) - 1));
         } else if (c->id == kGround) {
             FirstOf(1);
@@ -214,33 +214,33 @@ struct HeroInfo : kit::Modal {
         }
     }
 
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "escape" || key == "return" || key == "kpenter") Close();
     }
 };
 }  // namespace
 
-void open() {
+void Open() {
     auto d = std::make_shared<HeroInfo>();
     for (int i = static_cast<int>(G.g->armies.size()) - 1; i >= 0; i--) {
         w2::Army* a = G.g->armies[i];
-        if (a->hero() && a->owner == G.player->index && !a->transit && a->x != w2::NONE)
+        if (a->Hero() && a->owner == G.player->index && !a->transit && a->x != w2::kNone)
             d->heroes.push_back(a);
     }
     if (d->heroes.empty()) return;
-    auto [cx, cy] = front::viewCentre();
-    int cur = 0, best = w2::NONE;
+    auto [cx, cy] = front::ViewCentre();
+    int cur = 0, best = w2::kNone;
     for (size_t i = 0; i < d->heroes.size(); i++) {
         int dd = std::max(std::abs(d->heroes[i]->x - cx), std::abs(d->heroes[i]->y - cy));
-        if (best == w2::NONE || dd < best) {
+        if (best == w2::kNone || dd < best) {
             cur = static_cast<int>(i);
             best = dd;
         }
     }
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
     d->ShowHero(cur);
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace heroinfo

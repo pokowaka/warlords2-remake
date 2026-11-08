@@ -34,7 +34,7 @@ void Stick(SDL_GameController* c, SDL_GameControllerAxis ax, SDL_GameControllerA
 }
 }  // namespace
 
-void hints() {
+void Hints() {
     // SDL's own Steam Deck driver turns the trackpads' mouse ("lizard mode")
     // off, and reports no trackpads: with Steam running, Steam has the Deck's
     // controls anyway and hands the game a virtual pad, and without it the
@@ -46,7 +46,7 @@ void hints() {
     SDL_SetHint(SDL_HINT_RETURN_KEY_HIDES_IME, "1");
 }
 
-bool event(const SDL_Event& e, int& button, bool& down) {
+bool TranslateEvent(const SDL_Event& e, int& button, bool& down) {
     switch (e.type) {
     case SDL_CONTROLLERDEVICEADDED: {
         SDL_GameController* c = SDL_GameControllerOpen(e.cdevice.which);
@@ -70,7 +70,7 @@ bool event(const SDL_Event& e, int& button, bool& down) {
     return false;
 }
 
-bool trigger(int& button, bool& down) {
+bool Trigger(int& button, bool& down) {
     for (auto& [id, p] : pads) {
         for (int t = 0; t < 2; t++) {
             bool& was = t == 0 ? p.lt : p.rt;
@@ -79,7 +79,7 @@ bool trigger(int& button, bool& down) {
                        32767.0;
             if (was ? v < kLetGo : v > kPull) {
                 was = !was;
-                button = t == 0 ? LEFT_TRIGGER : RIGHT_TRIGGER;
+                button = t == 0 ? kLeftTrigger : kRightTrigger;
                 down = was;
                 return true;
             }
@@ -88,7 +88,7 @@ bool trigger(int& button, bool& down) {
     return false;
 }
 
-Sticks sticks() {
+Sticks ReadSticks() {
     if (scripted) return *scripted;
     Sticks s;
     for (auto& [id, p] : pads) {
@@ -102,16 +102,16 @@ Sticks sticks() {
     return s;
 }
 
-void script(const Sticks& s) {
+void Script(const Sticks& s) {
     if (s.lx == 0 && s.ly == 0 && s.rx == 0 && s.ry == 0)
         scripted.reset();
     else
         scripted = s;
 }
 
-int fromName(const std::string& name) {
-    if (name == "lefttrigger") return LEFT_TRIGGER;
-    if (name == "righttrigger") return RIGHT_TRIGGER;
+int FromName(const std::string& name) {
+    if (name == "lefttrigger") return kLeftTrigger;
+    if (name == "righttrigger") return kRightTrigger;
     return SDL_GameControllerGetButtonFromString(name.c_str());
 }
 

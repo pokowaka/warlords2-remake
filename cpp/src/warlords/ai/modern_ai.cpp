@@ -41,9 +41,9 @@ enum class TargetKind : int {
 // Same rule the actuator enforces: no declaration needed, or DiploNet is no
 // longer proposing peace to that side (so the attack declares war).
 bool Attackable(const Game& g, int me, int owner, const City* city) {
-    if (owner == NONE) return true;
-    return !diplomacy::mustDeclare(g, me, owner, city) ||
-           diplomacy::proposal(g, me, owner) != diplomacy::PEACE;
+    if (owner == kNone) return true;
+    return !diplomacy::MustDeclare(g, me, owner, city) ||
+           diplomacy::Proposal(g, me, owner) != diplomacy::kPeace;
 }
 
 struct CandidateTarget {
@@ -52,7 +52,7 @@ struct CandidateTarget {
     City* city = nullptr;
     Site* site = nullptr;
     Item* item = nullptr;
-    int owner = NONE;
+    int owner = kNone;
     float value = 0.0F;
     bool is_quest_or_own_cap = false;
     bool is_enemy_capital = false;
@@ -76,8 +76,8 @@ ml::StackVec BuildStackFeatures(const Game& g, const std::vector<Army*>& stack, 
         min_move = std::min(min_move, a->moves);
         total_upkeep += a->upkeep;
         if (!a->blessings.empty()) blessed++;
-        if (a->hero()) has_hero = true;
-        const ArmyType* at = g.types.byId(a->type);
+        if (a->Hero()) has_hero = true;
+        const ArmyType* at = g.types.ById(a->type);
         if (at) {
             if (at->flies)
                 has_flier = true;
@@ -90,7 +90,7 @@ ml::StackVec BuildStackFeatures(const Game& g, const std::vector<Army*>& stack, 
         }
     }
     if (min_move == 99) min_move = 0;
-    int hero_cmd = combat::heroBonus(g, stack);
+    int hero_cmd = combat::HeroBonus(g, stack);
     float speed_drop = (prev_min_move > 0 && min_move < prev_min_move)
                                ? static_cast<float>(prev_min_move - min_move) / 20.0F
                                : 0.0F;
@@ -117,19 +117,19 @@ ml::StackVec BuildStackFeatures(const Game& g, const std::vector<Army*>& stack, 
 int TargetPathCost(const Game& g, const core::Flood& flood, const CandidateTarget& tgt) {
     if (tgt.kind == TargetKind::kHoldGarrison) return 0;
     if (tgt.city) {
-        int best = core::UNREACHED;
+        int best = core::kUnreached;
         for (int dy = -1; dy <= 2; dy++) {
             for (int dx = -1; dx <= 2; dx++) {
                 int tx = tgt.city->x + dx, ty = tgt.city->y + dy;
                 if (tx >= 0 && ty >= 0 && tx < g.map->width && ty < g.map->height) {
-                    int d = core::floodAt(flood, tx, ty);
+                    int d = core::FloodAt(flood, tx, ty);
                     if (d < best) best = d;
                 }
             }
         }
         return best;
     }
-    return core::floodAt(flood, tgt.x, tgt.y);
+    return core::FloodAt(flood, tgt.x, tgt.y);
 }
 
 ml::TargetVec BuildTargetFeatures(Game& g, const Side& side, const std::vector<Army*>& stack,
@@ -139,8 +139,8 @@ ml::TargetVec BuildTargetFeatures(Game& g, const Side& side, const std::vector<A
     t[static_cast<int>(tgt.kind)] = 1.0F;
 
     int sx = stack[0]->x, sy = stack[0]->y;
-    int min_move = std::max(2, move::stackMoves(stack));
-    int eff_cost = path_cost >= 0 ? path_cost : (move::distance(sx, sy, tgt.x, tgt.y) * 2);
+    int min_move = std::max(2, move::StackMoves(stack));
+    int eff_cost = path_cost >= 0 ? path_cost : (move::Distance(sx, sy, tgt.x, tgt.y) * 2);
     float turns_to_reach = static_cast<float>(eff_cost) / static_cast<float>(std::max(4, min_move));
 
     float win_now = 0.0F, win_converged = 0.0F, surv_ratio = 0.0F;
@@ -148,31 +148,31 @@ ml::TargetVec BuildTargetFeatures(Game& g, const Side& side, const std::vector<A
     bool is_combat = (tgt.kind == TargetKind::kNeutralCity || tgt.kind == TargetKind::kEnemyCity ||
                       tgt.kind == TargetKind::kEnemyStack);
     if (is_combat) {
-        auto est = belief::estimateCombat(g, side, stack, tgt.x, tgt.y, caution_bias);
-        win_now = est.winProb;
-        surv_ratio = est.expectedSurvivors / static_cast<float>(std::max<size_t>(1, stack.size()));
-        seen_fraction = est.seenTileFraction;
+        auto est = belief::EstimateCombat(g, side, stack, tgt.x, tgt.y, caution_bias);
+        win_now = est.win_prob;
+        surv_ratio = est.expected_survivors / static_cast<float>(std::max<size_t>(1, stack.size()));
+        seen_fraction = est.seen_tile_fraction;
 
         float my_str = 0.0F;
         for (Army* a : stack) my_str += static_cast<float>(a->strength);
-        int free_slots = std::max(0, rules::MAX_STACK - static_cast<int>(stack.size()));
+        int free_slots = std::max(0, rules::kMaxStack - static_cast<int>(stack.size()));
         float add_str = std::min(nearby_friendly_str + tgt.assigned_strength,
                                  static_cast<float>(free_slots) * 5.0F);
-        if (add_str > 0.5F && est.estimatedDefenderStrength > 0.0F) {
+        if (add_str > 0.5F && est.estimated_defender_strength > 0.0F) {
             float combined_ratio =
-                    (my_str + add_str) / (my_str + add_str + est.estimatedDefenderStrength);
+                    (my_str + add_str) / (my_str + add_str + est.estimated_defender_strength);
             win_converged = std::clamp(std::max(win_now, combined_ratio), 0.0F, 1.0F);
         } else {
             win_converged = win_now;
         }
     }
 
-    bool flies = (move::modeOf(g, stack) == move::FLYING);
+    bool flies = (move::ModeOf(g, stack) == move::kFlying);
     bool at_sea = false;
     for (Army* a : stack) {
-        if (a->atSea) at_sea = true;
+        if (a->at_sea) at_sea = true;
     }
-    int tile_dist = std::max(1, move::distance(sx, sy, tgt.x, tgt.y));
+    int tile_dist = std::max(1, move::Distance(sx, sy, tgt.x, tgt.y));
     bool requires_boat_embark =
             !flies && !at_sea && (tgt.is_water || (eff_cost >= tile_dist * 2 + 24));
 
@@ -197,27 +197,27 @@ void RunDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
                        std::array<bool, 8>& decided) {
     if (g.map->options.diplomacy == 0) return;
     int me = side.index;
-    const SideBelief& b = belief::ensure(side);
-    const auto& prof = personality::forSide(side);
+    const SideBelief& b = belief::Ensure(side);
+    const auto& prof = personality::ForSide(side);
 
-    int total_vis_cities = 0, max_vis_cities = 0, leader_side = NONE;
+    int total_vis_cities = 0, max_vis_cities = 0, leader_side = kNone;
     for (int s = 0; s < 8; s++) {
-        total_vis_cities += b.visibleCitiesBySide[s];
-        if (b.visibleCitiesBySide[s] > max_vis_cities) {
-            max_vis_cities = b.visibleCitiesBySide[s];
+        total_vis_cities += b.visible_cities_by_side[s];
+        if (b.visible_cities_by_side[s] > max_vis_cities) {
+            max_vis_cities = b.visible_cities_by_side[s];
             leader_side = s;
         }
     }
 
     int active_wars = 0;
-    int primary_enemy = NONE;
+    int primary_enemy = kNone;
     for (int s = 0; s < 8; s++) {
-        if (s != me && g.map->sides[s].inUse && g.map->sides[s].alive &&
-            (diplomacy::state(g, me, s) == diplomacy::WAR ||
-             (decided[s] && diplomacy::proposal(g, me, s) != diplomacy::PEACE))) {
+        if (s != me && g.map->sides[s].in_use && g.map->sides[s].alive &&
+            (diplomacy::State(g, me, s) == diplomacy::kWar ||
+             (decided[s] && diplomacy::Proposal(g, me, s) != diplomacy::kPeace))) {
             active_wars++;
-            if (primary_enemy == NONE && (diplomacy::state(g, me, s) == diplomacy::WAR ||
-                                          diplomacy::proposal(g, me, s) == diplomacy::WAR)) {
+            if (primary_enemy == kNone && (diplomacy::State(g, me, s) == diplomacy::kWar ||
+                                           diplomacy::Proposal(g, me, s) == diplomacy::kWar)) {
                 primary_enemy = s;
             }
         }
@@ -225,26 +225,26 @@ void RunDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
 
     float total_my_mobile_str = 0.0F;
     for (Army* a : g.armies) {
-        if (a->owner == me && a->x != NONE && !a->transit)
+        if (a->owner == me && a->x != kNone && !a->transit)
             total_my_mobile_str += static_cast<float>(a->strength);
     }
 
-    auto my_cities_list = game::sideCities(g, side);
+    auto my_cities_list = game::SideCities(g, side);
     std::array<float, 8> rival_min_dist;
     rival_min_dist.fill(120.0F);
-    int closest_rival = NONE;
+    int closest_rival = kNone;
     float closest_rival_dist = 999.0F;
     for (int other_idx = 0; other_idx < 8; other_idx++) {
         Side& other = g.map->sides[other_idx];
-        if (other_idx == me || !other.inUse || !other.alive) continue;
-        if (b.visibleCitiesBySide[other_idx] == 0 && b.theirBorderStrength[other_idx] == 0.0F)
+        if (other_idx == me || !other.in_use || !other.alive) continue;
+        if (b.visible_cities_by_side[other_idx] == 0 && b.their_border_strength[other_idx] == 0.0F)
             continue;
         float md = 120.0F;
         for (City* mc : my_cities_list) {
-            for (City* vc : b.visibleCities) {
-                if (vc->ownerIndex == other_idx) {
+            for (City* vc : b.visible_cities) {
+                if (vc->owner_index == other_idx) {
                     md = std::min(md,
-                                  static_cast<float>(move::distance(mc->x, mc->y, vc->x, vc->y)));
+                                  static_cast<float>(move::Distance(mc->x, mc->y, vc->x, vc->y)));
                 }
             }
         }
@@ -259,165 +259,166 @@ void RunDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
 
     for (int other_idx = 0; other_idx < 8; other_idx++) {
         Side& other = g.map->sides[other_idx];
-        if (other_idx == me || !other.inUse || !other.alive || decided[other_idx]) continue;
-        int cur_st = diplomacy::state(g, me, other_idx);
-        if (g.map->options.hiddenMap != 0 && b.visibleCitiesBySide[other_idx] == 0 &&
-            b.theirBorderStrength[other_idx] == 0.0F && cur_st != diplomacy::WAR) {
+        if (other_idx == me || !other.in_use || !other.alive || decided[other_idx]) continue;
+        int cur_st = diplomacy::State(g, me, other_idx);
+        if (g.map->options.hidden_map != 0 && b.visible_cities_by_side[other_idx] == 0 &&
+            b.their_border_strength[other_idx] == 0.0F && cur_st != diplomacy::kWar) {
             continue;
         }
         decided[other_idx] = true;
 
-        auto att = diplomacy::computeAttitude(g, me, other_idx);
-        bool cur_allied = diplomacy::isAllied(g, me, other_idx);
+        auto att = diplomacy::ComputeAttitude(g, me, other_idx);
+        bool cur_allied = diplomacy::IsAllied(g, me, other_idx);
         float min_dist = rival_min_dist[other_idx];
 
         int shared_wars = 0;
         for (int s = 0; s < 8; s++) {
             if (s != me && s != other_idx && g.map->sides[s].alive &&
-                diplomacy::state(g, me, s) == diplomacy::WAR &&
-                diplomacy::state(g, other_idx, s) == diplomacy::WAR) {
+                diplomacy::State(g, me, s) == diplomacy::kWar &&
+                diplomacy::State(g, other_idx, s) == diplomacy::kWar) {
                 shared_wars++;
             }
         }
 
         int grudge = 0;
         if (side.ai) {
-            grudge = side.ai->citiesLost[other_idx] * 8 + side.ai->heroesKilled[other_idx] * 6 +
+            grudge = side.ai->cities_lost[other_idx] * 8 + side.ai->heroes_killed[other_idx] * 6 +
                      side.ai->lost[other_idx] * 2;
         }
 
-        int other_wars = wars_committed - (cur_st == diplomacy::WAR ? 1 : 0);
+        int other_wars = wars_committed - (cur_st == diplomacy::kWar ? 1 : 0);
         float eff_my_str =
-                std::max(b.myBorderStrength[other_idx],
+                std::max(b.my_border_strength[other_idx],
                          total_my_mobile_str * std::clamp(1.1F - min_dist / 45.0F, 0.0F, 0.8F));
         bool is_leader_or_closest = (leader_side == other_idx &&
-                                     b.visibleCitiesBySide[other_idx] * 3 >= total_vis_cities) ||
+                                     b.visible_cities_by_side[other_idx] * 3 >= total_vis_cities) ||
                                     (other_idx == closest_rival);
 
         ml::RivalVec rv{};
         rv[0] = cur_allied ? 1.0F : 0.0F;
-        rv[1] = (!cur_allied && cur_st == diplomacy::PEACE) ? 1.0F : 0.0F;
-        rv[2] = (cur_st == diplomacy::INTERMEDIATE) ? 1.0F : 0.0F;
-        rv[3] = (cur_st == diplomacy::WAR) ? 1.0F : 0.0F;
-        rv[4] = static_cast<float>(diplomacy::truceTurns(g, me, other_idx)) / 15.0F;
-        rv[5] = static_cast<float>(att.trustScore) / 100.0F;
-        rv[6] = static_cast<float>(att.totalScore) / 100.0F;
+        rv[1] = (!cur_allied && cur_st == diplomacy::kPeace) ? 1.0F : 0.0F;
+        rv[2] = (cur_st == diplomacy::kIntermediate) ? 1.0F : 0.0F;
+        rv[3] = (cur_st == diplomacy::kWar) ? 1.0F : 0.0F;
+        rv[4] = static_cast<float>(diplomacy::TruceTurns(g, me, other_idx)) / 15.0F;
+        rv[5] = static_cast<float>(att.trust_score) / 100.0F;
+        rv[6] = static_cast<float>(att.total_score) / 100.0F;
         rv[7] = std::tanh(eff_my_str / 35.0F);
-        rv[8] = std::tanh(b.theirBorderStrength[other_idx] / 35.0F);
-        rv[9] = std::tanh((eff_my_str - b.theirBorderStrength[other_idx]) / 20.0F);
-        rv[10] = static_cast<float>(b.visibleCitiesBySide[other_idx]) /
+        rv[8] = std::tanh(b.their_border_strength[other_idx] / 35.0F);
+        rv[9] = std::tanh((eff_my_str - b.their_border_strength[other_idx]) / 20.0F);
+        rv[10] = static_cast<float>(b.visible_cities_by_side[other_idx]) /
                  static_cast<float>(std::max(1, total_vis_cities));
         rv[11] = is_leader_or_closest ? 1.0F : 0.0F;
         rv[12] = std::min(1.0F, static_cast<float>(shared_wars) / 2.0F);
         rv[13] = std::tanh(static_cast<float>(grudge) / 30.0F);
-        rv[14] = (side.capital && side.capital->ownerIndex == other_idx) ? 1.0F : 0.0F;
-        rv[15] = std::tanh(static_cast<float>(diplomacy::goldOffer(g, other_idx, me)) / 200.0F);
+        rv[14] = (side.capital && side.capital->owner_index == other_idx) ? 1.0F : 0.0F;
+        rv[15] = std::tanh(static_cast<float>(diplomacy::GoldOffer(g, other_idx, me)) / 200.0F);
         rv[16] = std::tanh(min_dist / 45.0F);
         rv[17] = std::tanh(static_cast<float>(other_wars) / 3.0F);
 
-        ml::DiploInVec d_in = ml::packDiploInput(ctx, rv);
-        auto raw = policy.diploNet.Forward(d_in);
+        ml::DiploInVec d_in = ml::PackDiploInput(ctx, rv);
+        auto raw = policy.diplo_net.Forward(d_in);
         std::vector<float> stance_vec = {raw[0], raw[1], raw[2], raw[3]};
         ml::DiploStepRecord rec;
         rec.input = d_in;
-        int best_choice = ml::selectFromLogits(stance_vec, sampler, &rec.oldStanceLogProb);
-        rec.chosenStance = best_choice;
+        int best_choice = ml::SelectFromLogits(stance_vec, sampler, &rec.old_stance_log_prob);
+        rec.chosen_stance = best_choice;
         float best_logit = stance_vec[best_choice];
 
         if (best_choice == 0) {
-            diplomacy::propose(g, me, other_idx, diplomacy::PEACE);
-            diplomacy::proposeAlliance(g, me, other_idx, true);
+            diplomacy::Propose(g, me, other_idx, diplomacy::kPeace);
+            diplomacy::ProposeAlliance(g, me, other_idx, true);
         } else if (best_choice == 1) {
-            diplomacy::propose(g, me, other_idx, diplomacy::PEACE);
-            diplomacy::proposeAlliance(g, me, other_idx, false);
+            diplomacy::Propose(g, me, other_idx, diplomacy::kPeace);
+            diplomacy::ProposeAlliance(g, me, other_idx, false);
         } else if (best_choice == 2) {
-            diplomacy::propose(g, me, other_idx, diplomacy::INTERMEDIATE);
-            if (cur_st != diplomacy::WAR) wars_committed++;
+            diplomacy::Propose(g, me, other_idx, diplomacy::kIntermediate);
+            if (cur_st != diplomacy::kWar) wars_committed++;
         } else {
-            diplomacy::propose(g, me, other_idx, diplomacy::WAR);
-            if (cur_st != diplomacy::WAR) wars_committed++;
-            if (primary_enemy == NONE) primary_enemy = other_idx;
+            diplomacy::Propose(g, me, other_idx, diplomacy::kWar);
+            if (cur_st != diplomacy::kWar) wars_committed++;
+            if (primary_enemy == kNone) primary_enemy = other_idx;
         }
 
         // Binary sub-decision (output 4): sweeten a peace offer to a side we are at war with
         bool friendly = (best_choice == 0 || best_choice == 1);
-        diplomacy::setGoldOffer(g, me, other_idx, 0);
-        if (friendly && cur_st == diplomacy::WAR && side.gold >= 100) {
-            rec.hasTribute = true;
-            rec.tributeChosen = ml::selectBinary(raw[4], sampler, &rec.oldTributeLogProb);
-            if (rec.tributeChosen) {
+        diplomacy::SetGoldOffer(g, me, other_idx, 0);
+        if (friendly && cur_st == diplomacy::kWar && side.gold >= 100) {
+            rec.has_tribute = true;
+            rec.tribute_chosen = ml::SelectBinary(raw[4], sampler, &rec.old_tribute_log_prob);
+            if (rec.tribute_chosen) {
                 int offer = std::clamp(side.gold / 4 / 25 * 25, 50, std::min(300, side.gold / 2));
-                diplomacy::setGoldOffer(g, me, other_idx, offer);
+                diplomacy::SetGoldOffer(g, me, other_idx, offer);
             }
         }
 
         // Binary sub-decision (output 5): ask a friendly side to join our war
-        diplomacy::setWarTarget(g, me, other_idx, NONE);
-        if (friendly && primary_enemy != NONE && primary_enemy != other_idx) {
-            rec.hasJointWar = true;
-            rec.jointWarChosen = ml::selectBinary(raw[5], sampler, &rec.oldJointWarLogProb);
-            if (rec.jointWarChosen) diplomacy::setWarTarget(g, me, other_idx, primary_enemy);
+        diplomacy::SetWarTarget(g, me, other_idx, kNone);
+        if (friendly && primary_enemy != kNone && primary_enemy != other_idx) {
+            rec.has_joint_war = true;
+            rec.joint_war_chosen = ml::SelectBinary(raw[5], sampler, &rec.old_joint_war_log_prob);
+            if (rec.joint_war_chosen) diplomacy::SetWarTarget(g, me, other_idx, primary_enemy);
         }
 
-        if (sampler && sampler->currentTurn) {
-            sampler->currentTurn->diploSteps.push_back(rec);
+        if (sampler && sampler->current_turn) {
+            sampler->current_turn->diplo_steps.push_back(rec);
         }
 
         const char* stance_names[4] = {"ALLIED", "PEACE", "UNEASY", "WAR"};
-        side.aiThoughts.push_back(AIThought{
-            "Diplomacy", side.name, other.name, side.capX, side.capY, other.capX, other.capY,
+        side.ai_thoughts.push_back(AIThought{
+            "Diplomacy", side.name, other.name, side.cap_x, side.cap_y, other.cap_x, other.cap_y,
             best_logit, 0.0F, false,
-            fmt("Stance -> %s (Attitude %+d, Trust %+d): %s", stance_names[best_choice],
-                att.totalScore, att.trustScore, att.stanceSummary.c_str())});
+            Fmt("Stance -> %s (Attitude %+d, Trust %+d): %s", stance_names[best_choice],
+                att.total_score, att.trust_score, att.stance_summary.c_str())});
 
         if (!other.computer && other.missives.empty() && g.turn > 1 &&
-            g.turn - other.lastMissiveTurn[me] >= 4) {
+            g.turn - other.last_missive_turn[me] >= 4) {
             bool send_missive = false;
             DiplomaticMissive m;
-            m.fromSide = me;
-            m.toSide = other_idx;
-            m.reasonSummary = att.whatItTakes;
+            m.from_side = me;
+            m.to_side = other_idx;
+            m.reason_summary = att.what_it_takes;
 
             if (best_choice == 0 && !cur_allied) {
                 send_missive = true;
-                m.proposedState = diplomacy::PEACE;
-                m.proposeAlliance = true;
-                m.jointWarTarget = diplomacy::warTarget(g, me, other_idx);
-                m.headline = fmt("Envoy from %s (%s)", side.name.c_str(), prof.name.c_str());
-                m.body = fmt("\"%s\" We propose a full Military Alliance with shared vision!",
+                m.proposed_state = diplomacy::kPeace;
+                m.propose_alliance = true;
+                m.joint_war_target = diplomacy::WarTarget(g, me, other_idx);
+                m.headline = Fmt("Envoy from %s (%s)", side.name.c_str(), prof.name.c_str());
+                m.body = Fmt("\"%s\" We propose a full Military Alliance with shared vision!",
                              prof.motto.c_str());
-            } else if (best_choice == 2 && cur_st == diplomacy::PEACE &&
-                       b.theirBorderStrength[other_idx] > 6.0F) {
+            } else if (best_choice == 2 && cur_st == diplomacy::kPeace &&
+                       b.their_border_strength[other_idx] > 6.0F) {
                 send_missive = true;
-                m.proposedState = diplomacy::INTERMEDIATE;
+                m.proposed_state = diplomacy::kIntermediate;
                 m.headline =
-                        fmt("Border Warning from %s (%s)", side.name.c_str(), prof.name.c_str());
+                        Fmt("Border Warning from %s (%s)", side.name.c_str(), prof.name.c_str());
                 m.body = "Your armies mass along our frontier. Withdraw them or our peace shall "
                          "end!";
-            } else if (best_choice == 2 && cur_st == diplomacy::PEACE && rv[9] > 0.35F) {
+            } else if (best_choice == 2 && cur_st == diplomacy::kPeace && rv[9] > 0.35F) {
                 // Human-only flavour (never reached in all-AI training): demand tribute
                 // when our border forces clearly outmatch theirs.
                 send_missive = true;
-                m.proposedState = diplomacy::PEACE;
-                m.goldDemand = std::max(75, att.peaceGoldNeeded > 0 ? att.peaceGoldNeeded : 100);
+                m.proposed_state = diplomacy::kPeace;
+                m.gold_demand =
+                        std::max(75, att.peace_gold_needed > 0 ? att.peace_gold_needed : 100);
                 m.headline =
-                        fmt("Tribute Demand from %s (%s)", side.name.c_str(), prof.name.c_str());
-                m.body = fmt("\"%s\" Pay %d gold in tribute to preserve the peace between us!",
-                             prof.motto.c_str(), m.goldDemand);
-            } else if (best_choice == 1 && cur_st == diplomacy::WAR) {
+                        Fmt("Tribute Demand from %s (%s)", side.name.c_str(), prof.name.c_str());
+                m.body = Fmt("\"%s\" Pay %d gold in tribute to preserve the peace between us!",
+                             prof.motto.c_str(), m.gold_demand);
+            } else if (best_choice == 1 && cur_st == diplomacy::kWar) {
                 send_missive = true;
-                m.proposedState = diplomacy::PEACE;
-                int offered = diplomacy::goldOffer(g, me, other_idx);
-                m.goldDemand = -offered;
-                m.headline = fmt("Peace Envoy from %s (%s)", side.name.c_str(), prof.name.c_str());
-                m.body = offered > 0 ? fmt("We offer %d gold and a 10-turn truce to end this war.",
+                m.proposed_state = diplomacy::kPeace;
+                int offered = diplomacy::GoldOffer(g, me, other_idx);
+                m.gold_demand = -offered;
+                m.headline = Fmt("Peace Envoy from %s (%s)", side.name.c_str(), prof.name.c_str());
+                m.body = offered > 0 ? Fmt("We offer %d gold and a 10-turn truce to end this war.",
                                            offered)
                                      : "Let us lay down arms and sign a 10-turn truce.";
             }
 
             if (send_missive) {
                 other.missives.push_back(std::move(m));
-                other.lastMissiveTurn[me] = g.turn;
+                other.last_missive_turn[me] = g.turn;
             }
         }
     }
@@ -426,19 +427,19 @@ void RunDiplomacyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
 void DecideCaptureSpoils(Game& g, Side& side, City& city, const std::vector<Army*>& attackers,
                          const ml::PolicyNetwork& policy, const ml::ContextVec& ctx,
                          ml::RolloutSampler* sampler) {
-    if (city.razed || city.ownerIndex != side.index) return;
-    if (ai::questCapture(g, side, city, attackers)) return;
+    if (city.razed || city.owner_index != side.index) return;
+    if (ai::QuestCapture(g, side, city, attackers)) return;
 
-    const SideBelief& b = belief::ensure(side);
-    float local_threat = city.index < static_cast<int>(b.cityThreat1Turn.size())
-                                 ? b.cityThreat1Turn[city.index]
+    const SideBelief& b = belief::Ensure(side);
+    float local_threat = city.index < static_cast<int>(b.city_threat1_turn.size())
+                                 ? b.city_threat1_turn[city.index]
                                  : 0.0F;
-    float dist_enemy = city.index < static_cast<int>(b.cityNearestEnemyDist.size())
-                               ? b.cityNearestEnemyDist[city.index]
+    float dist_enemy = city.index < static_cast<int>(b.city_nearest_enemy_dist.size())
+                               ? b.city_nearest_enemy_dist[city.index]
                                : 60.0F;
-    int sack_gold = ai::groups::sackValue(g, city);
+    int sack_gold = ai::groups::SackValue(g, city);
     int pillage_gold =
-            city.slots.size() >= 2 ? std::abs(g.types.byId(city.slots.back().type)->price) / 2 : 0;
+            city.slots.size() >= 2 ? std::abs(g.types.ById(city.slots.back().type)->price) / 2 : 0;
 
     auto make_spoil_in = [&](float ongoing_income, float instant_gold, float diplo_pen) {
         ml::EconVec e{};
@@ -448,7 +449,7 @@ void DecideCaptureSpoils(Game& g, Side& side, City& city, const std::vector<Army
         e[15] = std::tanh(dist_enemy / 50.0F);
         e[18] = std::tanh(instant_gold / 250.0F);
         e[19] = diplo_pen / 40.0F;
-        return ml::packEconInput(ctx, e);
+        return ml::PackEconInput(ctx, e);
     };
 
     bool is_any_capital = false;
@@ -476,27 +477,27 @@ void DecideCaptureSpoils(Game& g, Side& side, City& city, const std::vector<Army
 
     std::vector<float> scores(cand_inputs.size());
     for (size_t i = 0; i < cand_inputs.size(); i++) {
-        scores[i] = policy.econNet.Forward(cand_inputs[i])[0];
+        scores[i] = policy.econ_net.Forward(cand_inputs[i])[0];
     }
     float log_prob = 0.0F;
-    int pick = ml::selectFromLogits(scores, sampler, &log_prob);
-    if (sampler && sampler->currentTurn && cand_inputs.size() > 1) {
-        sampler->currentTurn->econSteps.push_back(
+    int pick = ml::SelectFromLogits(scores, sampler, &log_prob);
+    if (sampler && sampler->current_turn && cand_inputs.size() > 1) {
+        sampler->current_turn->econ_steps.push_back(
                 ml::EconStepRecord{std::move(cand_inputs), {}, pick, log_prob});
     }
 
     int best_mode = modes[pick];
     if (best_mode == 1) {
-        game::pillage(g, side, city, attackers);
-        if (ai::hooks.onSpoils) ai::hooks.onSpoils(g, side, city, "pillaged");
+        game::Pillage(g, side, city, attackers);
+        if (ai::hooks.on_spoils) ai::hooks.on_spoils(g, side, city, "pillaged");
     } else if (best_mode == 2) {
-        game::sack(g, side, city, attackers);
-        if (ai::hooks.onSpoils) ai::hooks.onSpoils(g, side, city, "sacked");
+        game::Sack(g, side, city, attackers);
+        if (ai::hooks.on_spoils) ai::hooks.on_spoils(g, side, city, "sacked");
     } else if (best_mode == 3) {
-        game::raze(g, side, city, attackers);
-        if (ai::hooks.onSpoils) ai::hooks.onSpoils(g, side, city, "razed");
+        game::Raze(g, side, city, attackers);
+        if (ai::hooks.on_spoils) ai::hooks.on_spoils(g, side, city, "razed");
     } else {
-        game::occupy(g, side, city, attackers);
+        game::Occupy(g, side, city, attackers);
     }
 }
 
@@ -504,12 +505,12 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
                          bool stage_near, const ml::PolicyNetwork& policy,
                          const ml::ContextVec& ctx, ml::RolloutSampler* sampler) {
     stack.erase(std::remove_if(stack.begin(), stack.end(),
-                               [&](Army* a) { return !g.alive(a) || a->moves <= 0; }),
+                               [&](Army* a) { return !g.Alive(a) || a->moves <= 0; }),
                 stack.end());
     if (stack.empty()) return false;
 
     if (tgt.kind == TargetKind::kHoldGarrison) {
-        for (Army* a : stack) a->aiMoved = true;
+        for (Army* a : stack) a->ai_moved = true;
         return true;
     }
 
@@ -523,19 +524,19 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
     // and remain free for later waves.
     {
         int lx = stack[0]->x, ly = stack[0]->y;
-        int on_leader_tile = static_cast<int>(game::armiesAt(g, lx, ly).size());
+        int on_leader_tile = static_cast<int>(game::ArmiesAt(g, lx, ly).size());
         std::vector<Army*> joined;
         for (Army* a : stack) {
             if (a->x == lx && a->y == ly) {
                 joined.push_back(a);
                 continue;
             }
-            if (on_leader_tile + 1 > rules::MAX_STACK) continue;
-            auto path = move::findPath(g, {a}, a->x, a->y, lx, ly);
+            if (on_leader_tile + 1 > rules::kMaxStack) continue;
+            auto path = move::FindPath(g, {a}, a->x, a->y, lx, ly);
             if (!path || path->empty()) continue;
-            move::WalkResult jr = move::walk(g, {a}, *path);
-            if (g.alive(a) && a->x == lx && a->y == ly && jr.steps > 0) {
-                ai::walked(g, {a}, jr);
+            move::WalkResult jr = move::Walk(g, {a}, *path);
+            if (g.Alive(a) && a->x == lx && a->y == ly && jr.steps > 0) {
+                ai::Walked(g, {a}, jr);
                 joined.push_back(a);
                 on_leader_tile++;
             }
@@ -549,12 +550,12 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
 
     int dest_x = tgt.x, dest_y = tgt.y;
     if (tgt.city && !stage_near) {
-        if (tgt.city->ownerIndex == me) {
+        if (tgt.city->owner_index == me) {
             for (int oy = 0; oy <= 1; oy++) {
                 for (int ox = 0; ox <= 1; ox++) {
                     int tx = tgt.city->x + ox, ty = tgt.city->y + oy;
-                    if (static_cast<int>(game::armiesAt(g, tx, ty).size() + stack.size()) <=
-                        rules::MAX_STACK) {
+                    if (static_cast<int>(game::ArmiesAt(g, tx, ty).size() + stack.size()) <=
+                        rules::kMaxStack) {
                         dest_x = tx;
                         dest_y = ty;
                         break;
@@ -578,17 +579,18 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
                 if (rad < 1 || rad > 2) continue;
                 int nx = tgt.x + dx, ny = tgt.y + dy;
                 if (nx < 0 || ny < 0 || nx >= g.map->width || ny >= g.map->height) continue;
-                if (tgt.city && game::cityAt(g, nx, ny) == tgt.city) continue;
-                if (!belief::isTileVisible(g, me, nx, ny)) continue;
-                int terr = g.map->terrainType[g.map->tiles[ny * g.map->width + nx] & 0xff];
-                if (terr == move::WATER || terr == move::SHORE || terr == move::MOUNTAINS) continue;
-                auto occ = game::armiesAt(g, nx, ny);
+                if (tgt.city && game::CityAt(g, nx, ny) == tgt.city) continue;
+                if (!belief::IsTileVisible(g, me, nx, ny)) continue;
+                int terr = g.map->terrain_type[g.map->tiles[ny * g.map->width + nx] & 0xff];
+                if (terr == move::kWater || terr == move::kShore || terr == move::kMountains)
+                    continue;
+                auto occ = game::ArmiesAt(g, nx, ny);
                 if (!occ.empty() &&
                     (occ[0]->owner != me ||
-                     static_cast<int>(occ.size() + stack.size()) > rules::MAX_STACK)) {
+                     static_cast<int>(occ.size() + stack.size()) > rules::kMaxStack)) {
                     continue;
                 }
-                int d = move::distance(sx0, sy0, nx, ny) - (!occ.empty() ? 15 : 0);
+                int d = move::Distance(sx0, sy0, nx, ny) - (!occ.empty() ? 15 : 0);
                 if (d < best_dist) {
                     best_dist = d;
                     best_sx = nx;
@@ -600,21 +602,21 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
         dest_y = best_sy;
     }
 
-    core::Sel sel = core::select(g, stack);
+    core::Sel sel = core::Select(g, stack);
     if (sel.armies.empty() || !sel.leader) return false;
 
     bool is_fog_mission = (tgt.kind == TargetKind::kFogFrontier);
     bool made_progress = false;
     bool completed_objective = false;
 
-    for (int pass = 0; pass < 24 && !sel.armies.empty() && sel.minMoves > 0; pass++) {
+    for (int pass = 0; pass < 24 && !sel.armies.empty() && sel.min_moves > 0; pass++) {
         int lx = sel.leader->x, ly = sel.leader->y;
         if (lx == dest_x && ly == dest_y) {
             if (is_fog_mission) completed_objective = true;
             break;
         }
 
-        auto path = move::findPath(g, sel.armies, lx, ly, dest_x, dest_y);
+        auto path = move::FindPath(g, sel.armies, lx, ly, dest_x, dest_y);
         if (!path || path->empty()) break;
 
         std::vector<move::Step> walk_steps = *path;
@@ -623,27 +625,27 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
         }
 
         int seen_box_before = 0;
-        if (is_fog_mission && g.map->options.hiddenMap != 0) {
+        if (is_fog_mission && g.map->options.hidden_map != 0) {
             for (int oy = -7; oy <= 7; oy++) {
                 for (int ox = -7; ox <= 7; ox++) {
                     int ux = lx + ox, uy = ly + oy;
                     if (ux >= 0 && uy >= 0 && ux < g.map->width && uy < g.map->height &&
-                        belief::isTileVisible(g, me, ux, uy)) {
+                        belief::IsTileVisible(g, me, ux, uy)) {
                         seen_box_before++;
                     }
                 }
             }
         }
 
-        move::WalkResult r = move::walk(g, sel.armies, walk_steps);
+        move::WalkResult r = move::Walk(g, sel.armies, walk_steps);
         if (r.steps > 0) {
             made_progress = true;
-            ai::walked(g, sel.armies, r);
+            ai::Walked(g, sel.armies, r);
         }
-        core::refresh(g, sel);
-        core::pickUp(g, sel);
+        core::Refresh(g, sel);
+        core::PickUp(g, sel);
 
-        int ax = NONE, ay = NONE;
+        int ax = kNone, ay = kNone;
         City* att_city = nullptr;
         if (r.stopped == "attack" && r.attack && !stage_near) {
             ax = r.attack->x;
@@ -654,34 +656,34 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
             const move::Step& ahead = walk_steps[r.steps];
             ax = ahead.x;
             ay = ahead.y;
-            att_city = game::cityAt(g, ax, ay);
+            att_city = game::CityAt(g, ax, ay);
         }
 
-        if (ax != NONE && ay != NONE) {
-            auto def_armies = game::armiesAt(g, ax, ay);
-            int def_owner = def_armies.empty() ? (att_city ? att_city->ownerIndex : NONE)
+        if (ax != kNone && ay != kNone) {
+            auto def_armies = game::ArmiesAt(g, ax, ay);
+            int def_owner = def_armies.empty() ? (att_city ? att_city->owner_index : kNone)
                                                : def_armies[0]->owner;
 
             // Breaking a treaty is DiploNet's call, not the mission's: an attack that
             // needs a declaration (the game's own mustDeclare rule) only goes ahead
             // when this side is no longer proposing peace to the defender.
-            if (diplomacy::mustDeclare(g, me, def_owner, att_city)) {
-                if (diplomacy::proposal(g, me, def_owner) == diplomacy::PEACE) break;
-                diplomacy::attackAnyway(g, me, def_owner);
+            if (diplomacy::MustDeclare(g, me, def_owner, att_city)) {
+                if (diplomacy::Proposal(g, me, def_owner) == diplomacy::kPeace) break;
+                diplomacy::AttackAnyway(g, me, def_owner);
             }
 
             // Gather friendly units on the launching tile so converged allies fight as one combined
             // force
             std::vector<Army*> combined_here =
-                    core::collect(g, me, sel.leader->x, sel.leader->y, 1);
+                    core::Collect(g, me, sel.leader->x, sel.leader->y, 1);
             if (combined_here.empty()) combined_here = sel.armies;
 
-            core::Sel comb_sel = core::select(g, combined_here);
-            int prev_owner = att_city ? att_city->ownerIndex : NONE;
-            Battle b_res = core::fight(g, comb_sel, ax, ay);
+            core::Sel comb_sel = core::Select(g, combined_here);
+            int prev_owner = att_city ? att_city->owner_index : kNone;
+            Battle b_res = core::Fight(g, comb_sel, ax, ay);
             made_progress = true;
-            belief::recordBattleObservation(g, me, ax, ay);
-            if (att_city && att_city->ownerIndex == me && prev_owner != me &&
+            belief::RecordBattleObservation(g, me, ax, ay);
+            if (att_city && att_city->owner_index == me && prev_owner != me &&
                 !comb_sel.armies.empty()) {
                 DecideCaptureSpoils(g, side, *att_city, comb_sel.armies, policy, ctx, sampler);
             }
@@ -690,7 +692,7 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
             if (!b_res.won || sel.armies.empty()) {
                 break;
             }
-            if (tgt.city && tgt.city->ownerIndex == me) {
+            if (tgt.city && tgt.city->owner_index == me) {
                 completed_objective = true;
                 break;
             }
@@ -703,13 +705,13 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
             continue;
         }
 
-        if (is_fog_mission && r.steps > 0 && g.map->options.hiddenMap != 0) {
+        if (is_fog_mission && r.steps > 0 && g.map->options.hidden_map != 0) {
             int seen_box_after = 0;
             for (int oy = -7; oy <= 7; oy++) {
                 for (int ox = -7; ox <= 7; ox++) {
                     int ux = lx + ox, uy = ly + oy;
                     if (ux >= 0 && uy >= 0 && ux < g.map->width && uy < g.map->height &&
-                        belief::isTileVisible(g, me, ux, uy)) {
+                        belief::IsTileVisible(g, me, ux, uy)) {
                         seen_box_after++;
                     }
                 }
@@ -734,37 +736,37 @@ bool ExecuteStackMission(Game& g, Side& side, std::vector<Army*>& stack, Candida
     }
 
     // Interact with open temple or ruin/sage if standing on one with moves left
-    if (!sel.armies.empty() && sel.leader && sel.minMoves > 0) {
+    if (!sel.armies.empty() && sel.leader && sel.min_moves > 0) {
         int fx = sel.leader->x, fy = sel.leader->y;
-        Site* s = core::siteAt(g, fx, fy);
-        if (s && core::siteOpen(*s)) {
-            if (s->content == site::TEMPLE) {
-                site::search(g, sel.armies, fx, fy, false);
+        Site* s = core::SiteAt(g, fx, fy);
+        if (s && core::SiteOpen(*s)) {
+            if (s->content == site::kTemple) {
+                site::Search(g, sel.armies, fx, fy, false);
                 made_progress = true;
                 completed_objective = true;
                 if (g.map->options.quests != 0 && sel.hero &&
-                    (!side.quest || !side.quest->hasTarget())) {
-                    quest::assign(g, side, sel.hero, true, core::flies(g, sel.hero));
+                    (!side.quest || !side.quest->HasTarget())) {
+                    quest::Assign(g, side, sel.hero, true, core::Flies(g, sel.hero));
                 }
-            } else if (sel.hero && g.alive(sel.hero)) {
-                site::search(g, sel.armies, fx, fy, false);
+            } else if (sel.hero && g.Alive(sel.hero)) {
+                site::Search(g, sel.armies, fx, fy, false);
                 made_progress = true;
                 completed_objective = true;
             }
         }
-        core::pickUp(g, sel);
+        core::PickUp(g, sel);
     }
 
     for (Army* a : sel.armies) {
-        if (!g.alive(a)) continue;
+        if (!g.Alive(a)) continue;
         auto it = start_moves.find(a);
         bool spent_moves = (it != start_moves.end() && a->moves < it->second);
         if (completed_objective && spent_moves && a->moves >= 2 && !stage_near &&
             tgt.kind != TargetKind::kReinforceCity) {
             // Allow remaining movement points to be dispatched in the next wave of this turn
-            a->aiMoved = false;
+            a->ai_moved = false;
         } else {
-            a->aiMoved = made_progress;
+            a->ai_moved = made_progress;
         }
     }
     return made_progress;
@@ -786,10 +788,10 @@ std::vector<size_t> BuildCoalitionSizes(const Game& g, Army* seed,
         add_unique(escorts.size() + 1);
 
         // Also include fast/flying-matching prefix size if distinct
-        bool seed_flies = core::flies(g, seed);
+        bool seed_flies = core::Flies(g, seed);
         size_t fast_count = 1;
         for (Army* e : escorts) {
-            if (seed_flies ? core::flies(g, e) : (e->moves >= 12)) {
+            if (seed_flies ? core::Flies(g, e) : (e->moves >= 12)) {
                 fast_count++;
             } else {
                 break;
@@ -805,16 +807,16 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                                     ml::RolloutSampler* sampler,
                                     std::vector<MissionSnapshot>* snapshots = nullptr) {
     int me = side.index;
-    SideBelief& b = belief::ensure(side);
+    SideBelief& b = belief::Ensure(side);
     float caution = 0.0F;
 
     std::vector<CandidateTarget> targets;
     targets.reserve(80);
 
-    for (City* c : b.visibleCities) {
+    for (City* c : b.visible_cities) {
         if (c->razed) continue;
-        float threat = c->index < static_cast<int>(b.cityThreat2Turn.size())
-                               ? b.cityThreat2Turn[c->index]
+        float threat = c->index < static_cast<int>(b.city_threat2_turn.size())
+                               ? b.city_threat2_turn[c->index]
                                : 0.0F;
         bool is_quest_or_own = (side.capital == c) || (side.quest && side.quest->city == c);
         bool is_enemy_cap = false;
@@ -822,17 +824,17 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
             if (s != me && g.map->sides[s].capital == c) is_enemy_cap = true;
         }
 
-        if (c->ownerIndex == me) {
+        if (c->owner_index == me) {
             float existing_garrison_str = 0.0F;
             float stationary_garrison_str = 0.0F;
             int existing_count = 0;
             for (int dy = 0; dy <= 1; dy++) {
                 for (int dx = 0; dx <= 1; dx++) {
-                    for (Army* a : game::armiesAt(g, c->x + dx, c->y + dy)) {
+                    for (Army* a : game::ArmiesAt(g, c->x + dx, c->y + dy)) {
                         if (a->owner == me) {
                             existing_garrison_str += static_cast<float>(a->strength);
                             existing_count++;
-                            if (a->moves <= 0 || a->aiMoved) {
+                            if (a->moves <= 0 || a->ai_moved) {
                                 stationary_garrison_str += static_cast<float>(a->strength);
                             }
                         }
@@ -866,28 +868,28 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                 reinf.label = "Reinforce " + c->name;
                 targets.push_back(std::move(reinf));
             }
-        } else if (c->ownerIndex == NONE) {
+        } else if (c->owner_index == kNone) {
             CandidateTarget neut;
             neut.kind = TargetKind::kNeutralCity;
             neut.x = c->x;
             neut.y = c->y;
             neut.city = c;
-            neut.owner = NONE;
+            neut.owner = kNone;
             neut.value = static_cast<float>(c->income) + static_cast<float>(c->slots.size()) * 5.0F;
             neut.is_quest_or_own_cap = is_quest_or_own;
             neut.is_enemy_capital = is_enemy_cap;
             neut.enemy_threat = threat;
             neut.label = "Capture Neutral " + c->name;
             targets.push_back(std::move(neut));
-        } else if (Attackable(g, me, c->ownerIndex, c)) {
+        } else if (Attackable(g, me, c->owner_index, c)) {
             CandidateTarget enem;
             enem.kind = TargetKind::kEnemyCity;
             enem.x = c->x;
             enem.y = c->y;
             enem.city = c;
-            enem.owner = c->ownerIndex;
+            enem.owner = c->owner_index;
             enem.value = static_cast<float>(c->income) + static_cast<float>(c->defence) * 6.0F;
-            if (diplomacy::alliedTargetCity(g, c->ownerIndex) == c->index) enem.value += 10.0F;
+            if (diplomacy::AlliedTargetCity(g, c->owner_index) == c->index) enem.value += 10.0F;
             enem.is_quest_or_own_cap = is_quest_or_own;
             enem.is_enemy_capital = is_enemy_cap;
             enem.enemy_threat = threat;
@@ -896,29 +898,29 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         }
     }
 
-    for (const auto& [tile_key, obs] : b.stacksByTile) {
-        if (obs.owner == me || obs.owner == NONE) continue;
-        if (game::cityAt(g, obs.x, obs.y)) continue;
+    for (const auto& [tile_key, obs] : b.stacks_by_tile) {
+        if (obs.owner == me || obs.owner == kNone) continue;
+        if (game::CityAt(g, obs.x, obs.y)) continue;
         if (!Attackable(g, me, obs.owner, nullptr)) continue;
         CandidateTarget st;
         st.kind = TargetKind::kEnemyStack;
         st.x = obs.x;
         st.y = obs.y;
         st.owner = obs.owner;
-        st.value = static_cast<float>(obs.visibleCount) * 4.0F;
+        st.value = static_cast<float>(obs.visible_count) * 4.0F;
         st.is_quest_or_own_cap =
                 (side.quest && side.quest->side && side.quest->side->index == obs.owner);
-        st.label = fmt("Intercept stack (%d,%d)", obs.x, obs.y);
+        st.label = Fmt("Intercept stack (%d,%d)", obs.x, obs.y);
         targets.push_back(std::move(st));
     }
 
-    for (Site* s : b.visibleSites) {
-        if (!core::siteOpen(*s)) continue;
+    for (Site* s : b.visible_sites) {
+        if (!core::SiteOpen(*s)) continue;
         CandidateTarget st;
         st.x = s->x;
         st.y = s->y;
         st.site = s;
-        if (s->content == site::TEMPLE) {
+        if (s->content == site::kTemple) {
             st.kind = TargetKind::kTempleOrItem;
             st.value = 18.0F;
             st.label = "Bless at " + s->name;
@@ -930,7 +932,7 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         targets.push_back(std::move(st));
     }
 
-    for (Item* it : b.visibleGroundItems) {
+    for (Item* it : b.visible_ground_items) {
         CandidateTarget gt;
         gt.kind = TargetKind::kTempleOrItem;
         gt.x = it->x;
@@ -942,14 +944,14 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         targets.push_back(std::move(gt));
     }
 
-    for (const auto& fc : b.fogFrontiers) {
+    for (const auto& fc : b.fog_frontiers) {
         CandidateTarget ft;
         ft.kind = TargetKind::kFogFrontier;
         ft.x = fc.x;
         ft.y = fc.y;
-        ft.is_water = fc.isWater;
-        ft.value = static_cast<float>(fc.regionUnseenCount) * 2.0F + (fc.onRoad ? 6.0F : 0.0F);
-        ft.label = fmt("Explore %s (%d,%d)", fc.isWater ? "Sea" : "Fog", fc.x, fc.y);
+        ft.is_water = fc.is_water;
+        ft.value = static_cast<float>(fc.region_unseen_count) * 2.0F + (fc.on_road ? 6.0F : 0.0F);
+        ft.label = Fmt("Explore %s (%d,%d)", fc.is_water ? "Sea" : "Fog", fc.x, fc.y);
         targets.push_back(std::move(ft));
     }
 
@@ -960,8 +962,8 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
             t.kind == TargetKind::kEnemyStack) {
             float near_str = 0.0F;
             for (Army* a : g.armies) {
-                if (a->owner == me && a->x != NONE && !a->transit && a->moves > 0 &&
-                    move::distance(a->x, a->y, t.x, t.y) <= 14) {
+                if (a->owner == me && a->x != kNone && !a->transit && a->moves > 0 &&
+                    move::Distance(a->x, a->y, t.x, t.y) <= 14) {
                     near_str += static_cast<float>(a->strength);
                 }
             }
@@ -976,8 +978,8 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
     };
     std::map<int, LocGroup> groups_by_loc;
     for (Army* a : g.armies) {
-        if (a->owner != me || a->x == NONE || a->transit || a->moves <= 0 || a->aiMoved) continue;
-        City* c = game::cityAt(g, a->x, a->y);
+        if (a->owner != me || a->x == kNone || a->transit || a->moves <= 0 || a->ai_moved) continue;
+        City* c = game::CityAt(g, a->x, a->y);
         int key = c ? -(c->index + 1) : (a->y * g.map->width + a->x);
         auto& lg = groups_by_loc[key];
         lg.x = a->x;
@@ -986,38 +988,39 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         lg.units.push_back(a);
     }
 
-    int best_enemy_city_target = NONE;
+    int best_enemy_city_target = kNone;
     float best_enemy_city_score = -1e9F;
 
     for (auto& [loc_key, lg] : groups_by_loc) {
         std::vector<Army*> pool = lg.units;
         std::sort(pool.begin(), pool.end(), [&](Army* a, Army* b2) {
-            if (a->hero() != b2->hero()) return a->hero() > b2->hero();
-            bool af = core::flies(g, a), bf = core::flies(g, b2);
+            if (a->Hero() != b2->Hero()) return a->Hero() > b2->Hero();
+            bool af = core::Flies(g, a), bf = core::Flies(g, b2);
             if (af != bf) return af > bf;
-            int sa = a->strength * 2 + a->maxMoves;
-            int sb = b2->strength * 2 + b2->maxMoves;
+            int sa = a->strength * 2 + a->max_moves;
+            int sb = b2->strength * 2 + b2->max_moves;
             if (sa != sb) return sa > sb;
             return a->moves > b2->moves;
         });
 
-        core::Flood land_flood = core::floodFrom(g, me, lg.x, lg.y, 72, move::LAND, me);
+        core::Flood land_flood = core::FloodFrom(g, me, lg.x, lg.y, 72, move::kLand, me);
         // The flying flood only matters to a coalition that can fly; skipping it
         // for flightless groups also keeps land stacks off fog only fliers can reach
         bool any_flier = false;
-        for (Army* a : pool) any_flier = any_flier || core::flies(g, a);
-        core::Flood fly_flood = any_flier ? core::floodFrom(g, me, lg.x, lg.y, 72, move::FLYING, me)
-                                          : core::Flood{};
+        for (Army* a : pool) any_flier = any_flier || core::Flies(g, a);
+        core::Flood fly_flood = any_flier
+                                        ? core::FloodFrom(g, me, lg.x, lg.y, 72, move::kFlying, me)
+                                        : core::Flood{};
         auto fly_dist = [&](int x, int y) {
-            return any_flier ? core::floodAt(fly_flood, x, y) : core::UNREACHED;
+            return any_flier ? core::FloodAt(fly_flood, x, y) : core::kUnreached;
         };
 
         // Ensure local reachable fog frontiers (land or coastal sea) are included near this stack
-        if (g.map->options.hiddenMap != 0) {
+        if (g.map->options.hidden_map != 0) {
             int reachable_fog_count = 0;
             for (const auto& t : targets) {
                 if (t.kind == TargetKind::kFogFrontier &&
-                    core::floodAt(land_flood, t.x, t.y) < core::UNREACHED) {
+                    core::FloodAt(land_flood, t.x, t.y) < core::kUnreached) {
                     reachable_fog_count++;
                 }
             }
@@ -1029,25 +1032,25 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                             if (std::max(std::abs(dx), std::abs(dy)) != r) continue;
                             int fx = lg.x + dx, fy = lg.y + dy;
                             if (fx < 0 || fy < 0 || fx >= w || fy >= h) continue;
-                            int fterr = g.map->terrainType[g.map->tiles[fy * w + fx] & 0xff];
-                            if (fterr == move::MOUNTAINS) continue;
-                            if (core::floodAt(land_flood, fx, fy) >= core::UNREACHED) continue;
+                            int fterr = g.map->terrain_type[g.map->tiles[fy * w + fx] & 0xff];
+                            if (fterr == move::kMountains) continue;
+                            if (core::FloodAt(land_flood, fx, fy) >= core::kUnreached) continue;
                             int adj_u = 0;
                             for (int oy = -1; oy <= 1; oy++) {
                                 for (int ox = -1; ox <= 1; ox++) {
                                     int ux = fx + ox, uy = fy + oy;
                                     if (ux >= 0 && uy >= 0 && ux < w && uy < h &&
-                                        !belief::isTileVisible(g, me, ux, uy)) {
+                                        !belief::IsTileVisible(g, me, ux, uy)) {
                                         adj_u++;
                                     }
                                 }
                             }
                             if (adj_u >= 1) {
-                                bool is_w = (fterr == move::WATER || fterr == move::SHORE);
+                                bool is_w = (fterr == move::kWater || fterr == move::kShore);
                                 bool dup = false;
                                 for (const auto& t : targets) {
                                     if (t.kind == TargetKind::kFogFrontier && t.is_water == is_w &&
-                                        move::distance(fx, fy, t.x, t.y) < 3) {
+                                        move::Distance(fx, fy, t.x, t.y) < 3) {
                                         dup = true;
                                         break;
                                     }
@@ -1058,11 +1061,11 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                                     ft.x = fx;
                                     ft.y = fy;
                                     ft.is_water = is_w;
-                                    bool road = !is_w && (scn::roadAt(*g.map, fx, fy) % 0x20 != 0);
+                                    bool road = !is_w && (scn::RoadAt(*g.map, fx, fy) % 0x20 != 0);
                                     ft.value =
                                             static_cast<float>(adj_u) * 2.0F + (road ? 6.0F : 0.0F);
                                     ft.label =
-                                            fmt("Explore %s (%d,%d)", is_w ? "Sea" : "Fog", fx, fy);
+                                            Fmt("Explore %s (%d,%d)", is_w ? "Sea" : "Fog", fx, fy);
                                     targets.push_back(std::move(ft));
                                     reachable_fog_count++;
                                 }
@@ -1076,14 +1079,14 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         // Select up to 6 closest reachable land fog frontiers + 4 closest sea frontiers for this
         // stack
         std::set<size_t> local_fog_indices;
-        if (g.map->options.hiddenMap != 0) {
+        if (g.map->options.hidden_map != 0) {
             std::vector<std::pair<int, size_t>> land_fogs, sea_fogs;
             for (size_t ti = 0; ti < targets.size(); ti++) {
                 if (targets[ti].kind != TargetKind::kFogFrontier) continue;
-                int d_land = core::floodAt(land_flood, targets[ti].x, targets[ti].y);
+                int d_land = core::FloodAt(land_flood, targets[ti].x, targets[ti].y);
                 int d_fly = fly_dist(targets[ti].x, targets[ti].y);
                 int best_d = std::min(d_land, d_fly);
-                if (best_d >= core::UNREACHED) continue;
+                if (best_d >= core::kUnreached) continue;
                 if (targets[ti].is_water)
                     sea_fogs.emplace_back(best_d, ti);
                 else
@@ -1104,16 +1107,16 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
         while (!pool.empty()) {
             Army* seed = pool.front();
             pool.erase(pool.begin());
-            if (!g.alive(seed) || seed->moves <= 0 || seed->aiMoved) continue;
+            if (!g.Alive(seed) || seed->moves <= 0 || seed->ai_moved) continue;
 
             std::vector<Army*> eligible_escorts;
             for (auto it = pool.begin(); it != pool.end();) {
                 Army* cand = *it;
-                if (!g.alive(cand) || cand->moves <= 0 || cand->aiMoved) {
+                if (!g.Alive(cand) || cand->moves <= 0 || cand->ai_moved) {
                     it = pool.erase(it);
                     continue;
                 }
-                if (eligible_escorts.size() + 1 < rules::MAX_STACK) {
+                if (eligible_escorts.size() + 1 < rules::kMaxStack) {
                     eligible_escorts.push_back(cand);
                 }
                 ++it;
@@ -1124,14 +1127,14 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
 
             float committed_city_guard_str = 0.0F;
             float origin_threat = 0.0F;
-            if (lg.city && lg.city->ownerIndex == me) {
-                if (lg.city->index < static_cast<int>(b.cityThreat2Turn.size())) {
-                    origin_threat = b.cityThreat2Turn[lg.city->index];
+            if (lg.city && lg.city->owner_index == me) {
+                if (lg.city->index < static_cast<int>(b.city_threat2_turn.size())) {
+                    origin_threat = b.city_threat2_turn[lg.city->index];
                 }
                 for (int dy = 0; dy <= 1; dy++) {
                     for (int dx = 0; dx <= 1; dx++) {
-                        for (Army* a : game::armiesAt(g, lg.city->x + dx, lg.city->y + dy)) {
-                            if (a->owner == me && (a->moves <= 0 || a->aiMoved)) {
+                        for (Army* a : game::ArmiesAt(g, lg.city->x + dx, lg.city->y + dy)) {
+                            if (a->owner == me && (a->moves <= 0 || a->ai_moved)) {
                                 committed_city_guard_str += static_cast<float>(a->strength);
                             }
                         }
@@ -1158,13 +1161,13 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                     ps.units.push_back(eligible_escorts[i]);
                 }
                 for (Army* a : ps.units) ps.str += static_cast<float>(a->strength);
-                float rem_guard_after_leave = (lg.city && lg.city->ownerIndex == me)
+                float rem_guard_after_leave = (lg.city && lg.city->owner_index == me)
                                                       ? (committed_city_guard_str +
                                                          std::max(0.0F, rem_group_str - ps.str))
                                                       : 20.0F;
                 ps.sv = BuildStackFeatures(g, ps.units, seed->moves, rem_guard_after_leave,
                                            origin_threat);
-                ps.flies = (move::modeOf(g, ps.units) == move::FLYING);
+                ps.flies = (move::ModeOf(g, ps.units) == move::kFlying);
                 pre_stacks.push_back(std::move(ps));
             }
 
@@ -1189,24 +1192,24 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
 
                     if ((tgt.kind == TargetKind::kNeutralCity ||
                          tgt.kind == TargetKind::kEnemyCity) &&
-                        tgt.city && (tgt.city->ownerIndex == me || tgt.city->razed)) {
+                        tgt.city && (tgt.city->owner_index == me || tgt.city->razed)) {
                         continue;
                     }
                     if (tgt.kind == TargetKind::kEnemyStack &&
-                        belief::isTileVisible(g, me, tgt.x, tgt.y)) {
+                        belief::IsTileVisible(g, me, tgt.x, tgt.y)) {
                         // Only re-check stacks still in view; one that walked into fog stays a
                         // belief
-                        auto cur_at = belief::armiesAt(g, tgt.x, tgt.y);
+                        auto cur_at = belief::ArmiesAt(g, tgt.x, tgt.y);
                         if (cur_at.empty() || cur_at[0]->owner == me) continue;
                     }
                     if (tgt.kind == TargetKind::kRuinOrSage && tgt.site &&
-                        !core::siteOpen(*tgt.site))
+                        !core::SiteOpen(*tgt.site))
                         continue;
                     if (tgt.kind == TargetKind::kTempleOrItem && tgt.item &&
-                        (tgt.item->status != 1 || tgt.item->x == NONE)) {
+                        (tgt.item->status != 1 || tgt.item->x == kNone)) {
                         continue;
                     }
-                    if (tgt.kind == TargetKind::kFogFrontier && g.map->options.hiddenMap != 0) {
+                    if (tgt.kind == TargetKind::kFogFrontier && g.map->options.hidden_map != 0) {
                         if (tgt.assigned_stacks >= 1) continue;
                         if (!local_fog_indices.empty() && !local_fog_indices.count(ti)) continue;
                         bool still_has_unseen = false;
@@ -1214,7 +1217,7 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                             for (int ox = -1; ox <= 1 && !still_has_unseen; ox++) {
                                 int ux = tgt.x + ox, uy = tgt.y + oy;
                                 if (ux >= 0 && uy >= 0 && ux < g.map->width && uy < g.map->height &&
-                                    !belief::isTileVisible(g, me, ux, uy)) {
+                                    !belief::IsTileVisible(g, me, ux, uy)) {
                                     still_has_unseen = true;
                                 }
                             }
@@ -1224,11 +1227,11 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
 
                     if (tgt.kind == TargetKind::kHoldGarrison && tgt.city != lg.city) continue;
                     if (tgt.kind == TargetKind::kReinforceCity && tgt.city == lg.city) continue;
-                    if (tgt.kind == TargetKind::kRuinOrSage && !seed->hero()) continue;
-                    if (tgt.kind == TargetKind::kTempleOrItem && tgt.item && !seed->hero())
+                    if (tgt.kind == TargetKind::kRuinOrSage && !seed->Hero()) continue;
+                    if (tgt.kind == TargetKind::kTempleOrItem && tgt.item && !seed->Hero())
                         continue;
                     if (tgt.kind == TargetKind::kTempleOrItem && tgt.site &&
-                        !seed->blessings.empty() && !seed->hero()) {
+                        !seed->blessings.empty() && !seed->Hero()) {
                         continue;
                     }
                     if (tgt.kind == TargetKind::kTempleOrItem && tgt.assigned_stacks >= 1) continue;
@@ -1241,7 +1244,7 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                         const PrebuiltStack& ps = pre_stacks[si];
                         const core::Flood& active_flood = ps.flies ? fly_flood : land_flood;
                         int p_cost = TargetPathCost(g, active_flood, tgt);
-                        if (p_cost >= core::UNREACHED) continue;
+                        if (p_cost >= core::kUnreached) continue;
 
                         float near_str = 0.0F;
                         ml::StackVec opt_sv = ps.sv;
@@ -1254,8 +1257,8 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
 
                         ml::TargetVec tv = BuildTargetFeatures(g, side, ps.units, tgt, near_str,
                                                                caution, p_cost);
-                        ml::MissionInVec m_in = ml::packMissionInput(ctx, opt_sv, tv);
-                        auto raw = policy.missionNet.Forward(m_in);
+                        ml::MissionInVec m_in = ml::PackMissionInput(ctx, opt_sv, tv);
+                        auto raw = policy.mission_net.Forward(m_in);
                         options.push_back(
                                 JointOption{ti, si, m_in, tv, ml::MissionOutput{raw[0], raw[1]}});
                     }
@@ -1263,7 +1266,7 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
             }  // scoringIndex
 
             if (options.empty()) {
-                seed->aiMoved = true;
+                seed->ai_moved = true;
                 continue;
             }
 
@@ -1287,23 +1290,23 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                     const CandidateTarget& t = targets[op.target_idx];
                     snap.candidates.push_back(op.in_vec);
                     snap.kind.push_back(static_cast<int>(t.kind));
-                    snap.cityIndex.push_back(t.city ? t.city->index : NONE);
+                    snap.city_index.push_back(t.city ? t.city->index : kNone);
                     snap.tx.push_back(t.x);
                     snap.ty.push_back(t.y);
-                    snap.stackSize.push_back(
+                    snap.stack_size.push_back(
                             static_cast<int>(pre_stacks[op.stack_opt_idx].units.size()));
                 }
-                snap.logMult = log_mult;
+                snap.log_mult = log_mult;
                 snap.seed = reinterpret_cast<std::uintptr_t>(seed);
                 for (Army* a : lg.units) snap.group.push_back(reinterpret_cast<std::uintptr_t>(a));
-                snap.startX = lg.x;
-                snap.startY = lg.y;
-                snap.startCity = (lg.city && lg.city->ownerIndex == me) ? lg.city->index : NONE;
+                snap.start_x = lg.x;
+                snap.start_y = lg.y;
+                snap.start_city = (lg.city && lg.city->owner_index == me) ? lg.city->index : kNone;
                 snapshots->push_back(std::move(snap));
                 break;
             }
             float chosen_log_prob = 0.0F;
-            int chosen_opt_idx = ml::selectFromLogits(logits, sampler, &chosen_log_prob, &log_mult);
+            int chosen_opt_idx = ml::SelectFromLogits(logits, sampler, &chosen_log_prob, &log_mult);
             const JointOption& chosen_opt = options[chosen_opt_idx];
             CandidateTarget& chosen_tgt = targets[chosen_opt.target_idx];
             std::vector<Army*> current_stack = pre_stacks[chosen_opt.stack_opt_idx].units;
@@ -1311,16 +1314,16 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
 
             // The per-stack critic only matters while recording a training rollout;
             // it reuses the privileged features computed as the turn began.
-            const bool recording = sampler && sampler->currentTurn;
+            const bool recording = sampler && sampler->current_turn;
             ml::StackValueInVec pre_group_state =
-                    recording ? ml::packStackValueInput(ctx, pre_stacks.back().sv,
-                                                        sampler->currentTurn->startCritic)
+                    recording ? ml::PackStackValueInput(ctx, pre_stacks.back().sv,
+                                                        sampler->current_turn->start_critic)
                               : ml::StackValueInVec{};
-            float pre_group_value = recording ? policy.evaluateStackValue(pre_group_state) : 0.0F;
+            float pre_group_value = recording ? policy.EvaluateStackValue(pre_group_state) : 0.0F;
 
             std::vector<std::uintptr_t> chosen_unit_ids;
             std::vector<std::uintptr_t> pool_unit_ids;
-            if (sampler && sampler->currentTurn) {
+            if (sampler && sampler->current_turn) {
                 chosen_unit_ids.reserve(current_stack.size());
                 for (Army* a : current_stack)
                     chosen_unit_ids.push_back(reinterpret_cast<std::uintptr_t>(a));
@@ -1342,14 +1345,14 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
             float stage_log_prob = 0.0F;
             if (is_combat_target) {
                 stage_near =
-                        ml::selectBinary(chosen_opt.out.stageNearLogit, sampler, &stage_log_prob);
+                        ml::SelectBinary(chosen_opt.out.stage_near_logit, sampler, &stage_log_prob);
             }
 
             float score_before =
-                    (sampler && sampler->currentTurn) ? ml::computeEmpireScore(g, me) : 0.0F;
+                    (sampler && sampler->current_turn) ? ml::ComputeEmpireScore(g, me) : 0.0F;
 
             if (chosen_tgt.kind == TargetKind::kHoldGarrison) {
-                for (Army* a : current_stack) a->aiMoved = true;
+                for (Army* a : current_stack) a->ai_moved = true;
                 chosen_tgt.assigned_stacks++;
                 chosen_tgt.assigned_strength += stack_str;
             } else {
@@ -1370,20 +1373,20 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                     chosen_tgt.assigned_strength =
                             std::max(0.0F, chosen_tgt.assigned_strength - stack_str);
                     for (Army* a : current_stack) {
-                        if (g.alive(a) && a->moves > 0) a->aiMoved = true;
+                        if (g.Alive(a) && a->moves > 0) a->ai_moved = true;
                     }
                 } else {
-                    if (!current_stack.empty() && g.alive(current_stack[0])) {
+                    if (!current_stack.empty() && g.Alive(current_stack[0])) {
                         float inv_disc =
                                 chosen_opt.tv[8] > 1e-4F ? (1.0F / chosen_opt.tv[8] - 1.0F) : 0.0F;
-                        side.aiThoughts.push_back(AIThought{
+                        side.ai_thoughts.push_back(AIThought{
                             "Mission",
-                            fmt("%d-unit stack (%s)", static_cast<int>(current_stack.size()),
+                            Fmt("%d-unit stack (%s)", static_cast<int>(current_stack.size()),
                                 current_stack[0]->name.c_str()),
                             chosen_tgt.label, current_stack[0]->x, current_stack[0]->y,
                             chosen_tgt.x, chosen_tgt.y, chosen_opt.out.utility, chosen_opt.tv[10],
                             stage_near,
-                            fmt("U=%.2f Win=%.0f%% Turns=%.1f %s", chosen_opt.out.utility,
+                            Fmt("U=%.2f Win=%.0f%% Turns=%.1f %s", chosen_opt.out.utility,
                                 chosen_opt.tv[10] * 100.0F, inv_disc,
                                 stage_near ? "[STAGE FOR SYNC]" : "[EXECUTE]")});
                     }
@@ -1391,7 +1394,7 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                     // Add newly revealed neutral or enemy cities immediately so remaining stacks
                     // can act on them
                     for (auto& c : g.map->cities) {
-                        if (c.razed || c.ownerIndex == me || !belief::isCityVisible(g, me, c))
+                        if (c.razed || c.owner_index == me || !belief::IsCityVisible(g, me, c))
                             continue;
                         bool exists = false;
                         for (const auto& t : targets) {
@@ -1405,25 +1408,25 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                             for (int s = 0; s < 8; s++) {
                                 if (s != me && g.map->sides[s].capital == &c) is_enemy_cap = true;
                             }
-                            if (c.ownerIndex == NONE) {
+                            if (c.owner_index == kNone) {
                                 CandidateTarget neut;
                                 neut.kind = TargetKind::kNeutralCity;
                                 neut.x = c.x;
                                 neut.y = c.y;
                                 neut.city = &c;
-                                neut.owner = NONE;
+                                neut.owner = kNone;
                                 neut.value = static_cast<float>(c.income) +
                                              static_cast<float>(c.slots.size()) * 5.0F;
                                 neut.is_enemy_capital = is_enemy_cap;
                                 neut.label = "Capture Neutral " + c.name;
                                 targets.push_back(std::move(neut));
-                            } else if (Attackable(g, me, c.ownerIndex, &c)) {
+                            } else if (Attackable(g, me, c.owner_index, &c)) {
                                 CandidateTarget enem;
                                 enem.kind = TargetKind::kEnemyCity;
                                 enem.x = c.x;
                                 enem.y = c.y;
                                 enem.city = &c;
-                                enem.owner = c.ownerIndex;
+                                enem.owner = c.owner_index;
                                 enem.value = static_cast<float>(c.income) +
                                              static_cast<float>(c.defence) * 6.0F;
                                 enem.is_enemy_capital = is_enemy_cap;
@@ -1436,13 +1439,13 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
             }
 
             // Departure credit (training only): did this move leave its own city empty?
-            int vacated_city = NONE;
-            if (recording && lg.city && lg.city->ownerIndex == me &&
+            int vacated_city = kNone;
+            if (recording && lg.city && lg.city->owner_index == me &&
                 chosen_tgt.kind != TargetKind::kHoldGarrison) {
                 bool any_left = false;
                 for (int dy = 0; dy <= 1 && !any_left; dy++) {
                     for (int dx = 0; dx <= 1 && !any_left; dx++) {
-                        for (Army* a : game::armiesAt(g, lg.city->x + dx, lg.city->y + dy)) {
+                        for (Army* a : game::ArmiesAt(g, lg.city->x + dx, lg.city->y + dy)) {
                             if (a->owner == me) {
                                 any_left = true;
                                 break;
@@ -1453,142 +1456,142 @@ void RunMilitaryAndExplorationPhase(Game& g, Side& side, const ml::PolicyNetwork
                 if (!any_left) vacated_city = lg.city->index;
             }
 
-            if (sampler && sampler->currentTurn && (options.size() > 1 || is_combat_target)) {
-                float score_after = ml::computeEmpireScore(g, me);
+            if (sampler && sampler->current_turn && (options.size() > 1 || is_combat_target)) {
+                float score_after = ml::ComputeEmpireScore(g, me);
                 ml::MissionStepRecord rec;
                 rec.candidates.reserve(options.size());
                 for (const auto& op : options) rec.candidates.push_back(op.in_vec);
-                rec.logMult = std::move(log_mult);
-                rec.chosenIdx = chosen_opt_idx;
-                rec.oldLogProb = chosen_log_prob;
-                rec.hasStageChoice = is_combat_target;
-                rec.stageChosen = stage_near;
-                rec.oldStageLogProb = stage_log_prob;
-                rec.immediateDeltaScore = score_after - score_before;
-                rec.stackValueIn = pre_group_state;
-                rec.stackValuePred = pre_group_value;
-                rec.unitIds = std::move(chosen_unit_ids);
-                rec.poolUnitIds = std::move(pool_unit_ids);
-                rec.vacatedCity = vacated_city;
-                sampler->currentTurn->missionSteps.push_back(std::move(rec));
+                rec.log_mult = std::move(log_mult);
+                rec.chosen_idx = chosen_opt_idx;
+                rec.old_log_prob = chosen_log_prob;
+                rec.has_stage_choice = is_combat_target;
+                rec.stage_chosen = stage_near;
+                rec.old_stage_log_prob = stage_log_prob;
+                rec.immediate_delta_score = score_after - score_before;
+                rec.stack_value_in = pre_group_state;
+                rec.stack_value_pred = pre_group_value;
+                rec.unit_ids = std::move(chosen_unit_ids);
+                rec.pool_unit_ids = std::move(pool_unit_ids);
+                rec.vacated_city = vacated_city;
+                sampler->current_turn->mission_steps.push_back(std::move(rec));
             }
         }
     }
 
     if (snapshots) return;
-    diplomacy::setAlliedTargetCity(g, me, best_enemy_city_target);
+    diplomacy::SetAlliedTargetCity(g, me, best_enemy_city_target);
     if (pause) pause("missions");
 }
 
 void RunEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
                      const ml::ContextVec& ctx, ml::RolloutSampler* sampler) {
     int me = side.index;
-    const SideBelief& b = belief::ensure(side);
+    const SideBelief& b = belief::Ensure(side);
 
     auto make_hold_gold_in = [&](const ml::ContextVec& cur_ctx) {
         ml::EconVec e{};
         e[0] = 1.0F;
-        e[10] = std::tanh(static_cast<float>(game::upkeep(g, side) - game::income(g, side)) /
+        e[10] = std::tanh(static_cast<float>(game::Upkeep(g, side) - game::Income(g, side)) /
                           40.0F);
-        return ml::packEconInput(cur_ctx, e);
+        return ml::PackEconInput(cur_ctx, e);
     };
 
     // Army retention vs disbanding: only offered when upkeep exceeds income, the
     // one situation where the rules make disbanding worth anything. Keeping an
     // irreversible action off the table otherwise stops an untrained policy from
     // dissolving its own army during early training.
-    std::vector<Army*> my_armies = game::sideArmies(g, side);
-    bool over_budget = game::upkeep(g, side) > game::income(g, side);
+    std::vector<Army*> my_armies = game::SideArmies(g, side);
+    bool over_budget = game::Upkeep(g, side) > game::Income(g, side);
     if (over_budget && my_armies.size() > 3) {
         for (Army* a : my_armies) {
-            if (!g.alive(a) || a->hero() || a->transit || a->x == NONE) continue;
-            City* c = game::cityAt(g, a->x, a->y);
-            if (!c || c->ownerIndex != me) continue;
+            if (!g.Alive(a) || a->Hero() || a->transit || a->x == kNone) continue;
+            City* c = game::CityAt(g, a->x, a->y);
+            if (!c || c->owner_index != me) continue;
             int city_armies = 0;
             for (int dy = 0; dy <= 1; dy++) {
                 for (int dx = 0; dx <= 1; dx++) {
-                    city_armies += static_cast<int>(game::armiesAt(g, c->x + dx, c->y + dy).size());
+                    city_armies += static_cast<int>(game::ArmiesAt(g, c->x + dx, c->y + dy).size());
                 }
             }
             if (city_armies <= 2) continue;
 
-            const ArmyType* at = g.types.byId(a->type);
-            float threat = (c->index < static_cast<int>(b.cityThreat2Turn.size()))
-                                   ? b.cityThreat2Turn[c->index]
+            const ArmyType* at = g.types.ById(a->type);
+            float threat = (c->index < static_cast<int>(b.city_threat2_turn.size()))
+                                   ? b.city_threat2_turn[c->index]
                                    : 0.0F;
-            float dist_e = (c->index < static_cast<int>(b.cityNearestEnemyDist.size()))
-                                   ? b.cityNearestEnemyDist[c->index]
+            float dist_e = (c->index < static_cast<int>(b.city_nearest_enemy_dist.size()))
+                                   ? b.city_nearest_enemy_dist[c->index]
                                    : 100.0F;
 
-            ml::ContextVec cur_ctx = ml::buildContext(g, side);
+            ml::ContextVec cur_ctx = ml::BuildContext(g, side);
 
             ml::EconVec e{};
             e[5] = 1.0F;
             e[7] = static_cast<float>(a->strength) / 9.0F;
-            e[8] = static_cast<float>(a->maxMoves) / 24.0F;
+            e[8] = static_cast<float>(a->max_moves) / 24.0F;
             e[10] = static_cast<float>(a->upkeep) / 15.0F;
             e[11] = (at && at->flies) ? 1.0F : 0.0F;
             e[12] = (at && (at->siege || at->bonus[48] != 0)) ? 1.0F : 0.0F;
-            e[13] = (a->maxMoves >= 14 && (!at || !at->flies)) ? 1.0F : 0.0F;
+            e[13] = (a->max_moves >= 14 && (!at || !at->flies)) ? 1.0F : 0.0F;
             e[14] = std::tanh(threat / 25.0F);
             e[15] = std::tanh(dist_e / 60.0F);
-            e[ml::ECON_CURRENT] = 1.0F;  // keeping the army is the status quo
-            ml::EconInVec keep_in = ml::packEconInput(cur_ctx, e);
+            e[ml::kEconCurrent] = 1.0F;  // keeping the army is the status quo
+            ml::EconInVec keep_in = ml::PackEconInput(cur_ctx, e);
 
             ml::EconVec disband_vec = e;
             disband_vec[10] = -e[10];
-            disband_vec[ml::ECON_CURRENT] = 0.0F;
-            ml::EconInVec disband_in = ml::packEconInput(cur_ctx, disband_vec);
+            disband_vec[ml::kEconCurrent] = 0.0F;
+            ml::EconInVec disband_in = ml::PackEconInput(cur_ctx, disband_vec);
 
             std::vector<ml::EconInVec> cands = {keep_in, disband_in};
-            std::vector<float> logits = {policy.econNet.Forward(keep_in)[0],
-                                         policy.econNet.Forward(disband_in)[0]};
+            std::vector<float> logits = {policy.econ_net.Forward(keep_in)[0],
+                                         policy.econ_net.Forward(disband_in)[0]};
             float lp = 0.0F;
-            int pick = ml::selectFromLogits(logits, sampler, &lp);
-            if (sampler && sampler->currentTurn) {
-                sampler->currentTurn->econSteps.push_back(
+            int pick = ml::SelectFromLogits(logits, sampler, &lp);
+            if (sampler && sampler->current_turn) {
+                sampler->current_turn->econ_steps.push_back(
                         ml::EconStepRecord{std::move(cands), {}, pick, lp});
             }
             if (pick == 1) {
-                game::disband(g, side, {a});
+                game::Disband(g, side, {a});
             }
         }
     }
 
-    std::vector<City*> own_cities = game::sideCities(g, side);
+    std::vector<City*> own_cities = game::SideCities(g, side);
 
     // Empire-wide slot upgrade rounds (up to 3 purchases/turn): each round asks EconNet
     // to compare HoldGold against every legal (city, unit) upgrade, stopping immediately
     // as soon as EconNet chooses HoldGold so multi-city empires neither hoard 10k gold
     // nor suffer 1 - p^N treasury-draining coin-flip cascades across N cities.
-    auto menu = game::buyableTypes(g);
+    auto menu = game::BuyableTypes(g);
     for (int buy_round = 0; buy_round < 3 && !own_cities.empty() && side.gold >= 250; buy_round++) {
         struct BuyOption {
             City* city = nullptr;
-            int type_id = NONE;
+            int type_id = kNone;
             ml::EconInVec in_vec{};
         };
-        ml::ContextVec buy_ctx = ml::buildContext(g, side);
+        ml::ContextVec buy_ctx = ml::BuildContext(g, side);
         std::vector<BuyOption> buy_opts;
-        buy_opts.push_back(BuyOption{nullptr, NONE, make_hold_gold_in(buy_ctx)});
+        buy_opts.push_back(BuyOption{nullptr, kNone, make_hold_gold_in(buy_ctx)});
 
         for (City* c : own_cities) {
-            bool full_slots = static_cast<int>(c->slots.size()) >= rules::PRODUCTION_SLOTS;
+            bool full_slots = static_cast<int>(c->slots.size()) >= rules::kProductionSlots;
             int replace_price = (!c->slots.empty()) ? c->slots[0].price : 0;
             int best_existing_str = 0;
             for (const auto& sl : c->slots)
                 best_existing_str = std::max(best_existing_str, sl.strength);
-            float threat = c->index < static_cast<int>(b.cityThreat2Turn.size())
-                                   ? b.cityThreat2Turn[c->index]
+            float threat = c->index < static_cast<int>(b.city_threat2_turn.size())
+                                   ? b.city_threat2_turn[c->index]
                                    : 0.0F;
-            float dist_e = c->index < static_cast<int>(b.cityNearestEnemyDist.size())
-                                   ? b.cityNearestEnemyDist[c->index]
+            float dist_e = c->index < static_cast<int>(b.city_nearest_enemy_dist.size())
+                                   ? b.city_nearest_enemy_dist[c->index]
                                    : 100.0F;
             for (const ArmyType* at : menu) {
                 int price = std::abs(at->price);
                 if (price <= 0 || price + 100 > side.gold) continue;
                 if (full_slots && price <= replace_price) continue;
-                if (!game::cannotBuy(g, side, *c, *at).empty()) continue;
+                if (!game::CannotBuy(g, side, *c, *at).empty()) continue;
 
                 ml::EconVec e{};
                 e[3] = 1.0F;
@@ -1603,11 +1606,11 @@ void RunEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
                 e[14] = std::tanh(threat / 25.0F);
                 e[15] = std::tanh(dist_e / 60.0F);
                 e[16] = static_cast<float>(c->slots.size()) /
-                        static_cast<float>(rules::PRODUCTION_SLOTS);
+                        static_cast<float>(rules::kProductionSlots);
                 e[17] = static_cast<float>(at->strength - best_existing_str) / 9.0F;
                 e[18] = static_cast<float>(at->strength * at->strength) /
                         static_cast<float>(std::max(1, at->time * 16));
-                buy_opts.push_back(BuyOption{c, at->id, ml::packEconInput(buy_ctx, e)});
+                buy_opts.push_back(BuyOption{c, at->id, ml::PackEconInput(buy_ctx, e)});
             }
         }
 
@@ -1615,29 +1618,29 @@ void RunEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
         std::vector<float> logits(buy_opts.size());
         std::vector<float> log_mult(buy_opts.size(), 0.0F);
         for (size_t i = 0; i < buy_opts.size(); i++) {
-            logits[i] = policy.econNet.Forward(buy_opts[i].in_vec)[0];
+            logits[i] = policy.econ_net.Forward(buy_opts[i].in_vec)[0];
             if (i > 0 && buy_opts.size() > 2)
                 log_mult[i] = std::log(static_cast<float>(buy_opts.size() - 1));
         }
         float lp = 0.0F;
-        int pick = ml::selectFromLogits(logits, sampler, &lp, &log_mult);
-        if (sampler && sampler->currentTurn) {
+        int pick = ml::SelectFromLogits(logits, sampler, &lp, &log_mult);
+        if (sampler && sampler->current_turn) {
             std::vector<ml::EconInVec> cands;
             cands.reserve(buy_opts.size());
             for (const auto& bo : buy_opts) cands.push_back(bo.in_vec);
-            sampler->currentTurn->econSteps.push_back(
+            sampler->current_turn->econ_steps.push_back(
                     ml::EconStepRecord{std::move(cands), std::move(log_mult), pick, lp});
         }
         if (pick == 0 || !buy_opts[pick].city) break;
 
         City* best_buy_city = buy_opts[pick].city;
         int bought_type = buy_opts[pick].type_id;
-        int slot_idx = game::buySlot(*best_buy_city);
-        game::buyProduction(g, side, *best_buy_city, slot_idx, bought_type);
-        game::sortProduction(*best_buy_city);
+        int slot_idx = game::BuySlot(*best_buy_city);
+        game::BuyProduction(g, side, *best_buy_city, slot_idx, bought_type);
+        game::SortProduction(*best_buy_city);
         for (int si = 0; si < static_cast<int>(best_buy_city->slots.size()); si++) {
             if (best_buy_city->slots[si].type == bought_type) {
-                game::setProduction(g, *best_buy_city, si);
+                game::SetProduction(g, *best_buy_city, si);
                 break;
             }
         }
@@ -1647,39 +1650,39 @@ void RunEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
     // or has just completed a build (`c->countdown == slot.time`, matching
     // game.cpp:1331), so multi-turn unit builds complete without mid-countdown
     // cancellation while cities remain free to switch units after each build.
-    ml::ContextVec prod_ctx = ml::buildContext(g, side);
+    ml::ContextVec prod_ctx = ml::BuildContext(g, side);
     for (City* c : own_cities) {
         bool mid_countdown =
                 (c->producing >= 0 && c->producing < static_cast<int>(c->slots.size()) &&
                  c->countdown > 0 && c->countdown < c->slots[c->producing].time);
         if (c->slots.empty() || mid_countdown) continue;
-        float threat = c->index < static_cast<int>(b.cityThreat2Turn.size())
-                               ? b.cityThreat2Turn[c->index]
+        float threat = c->index < static_cast<int>(b.city_threat2_turn.size())
+                               ? b.city_threat2_turn[c->index]
                                : 0.0F;
-        float dist_e = c->index < static_cast<int>(b.cityNearestEnemyDist.size())
-                               ? b.cityNearestEnemyDist[c->index]
+        float dist_e = c->index < static_cast<int>(b.city_nearest_enemy_dist.size())
+                               ? b.city_nearest_enemy_dist[c->index]
                                : 100.0F;
         int gar_count = 0;
         for (int dy = 0; dy <= 1; dy++) {
             for (int dx = 0; dx <= 1; dx++) {
-                gar_count += static_cast<int>(game::armiesAt(g, c->x + dx, c->y + dy).size());
+                gar_count += static_cast<int>(game::ArmiesAt(g, c->x + dx, c->y + dy).size());
             }
         }
 
         ml::EconVec stop_vec{};
         stop_vec[2] = 1.0F;
-        stop_vec[10] = std::tanh(static_cast<float>(game::upkeep(g, side) - game::income(g, side)) /
+        stop_vec[10] = std::tanh(static_cast<float>(game::Upkeep(g, side) - game::Income(g, side)) /
                                  30.0F);
         stop_vec[14] = std::tanh(threat / 25.0F);
         stop_vec[15] = std::tanh(dist_e / 60.0F);
         stop_vec[16] = std::tanh(static_cast<float>(gar_count) / 6.0F);
-        stop_vec[ml::ECON_CURRENT] = (c->producing == NONE) ? 1.0F : 0.0F;
+        stop_vec[ml::kEconCurrent] = (c->producing == kNone) ? 1.0F : 0.0F;
 
-        std::vector<int> slot_indices = {NONE};
-        std::vector<ml::EconInVec> cands = {ml::packEconInput(prod_ctx, stop_vec)};
+        std::vector<int> slot_indices = {kNone};
+        std::vector<ml::EconInVec> cands = {ml::PackEconInput(prod_ctx, stop_vec)};
         for (size_t si = 0; si < c->slots.size(); si++) {
             const Slot& sl = c->slots[si];
-            const ArmyType* at = g.types.byId(sl.type);
+            const ArmyType* at = g.types.ById(sl.type);
             bool is_flier = at && at->flies;
             bool is_siege_or_spec = at && (at->siege || at->bonus[48] != 0 || at->bonus[52] != 0);
             bool is_cav = sl.move >= 14 && !is_flier;
@@ -1698,51 +1701,51 @@ void RunEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
             e[16] = std::tanh(static_cast<float>(gar_count) / 6.0F);
             e[18] = static_cast<float>(sl.strength * sl.strength) /
                     static_cast<float>(std::max(1, sl.time * 16));
-            e[ml::ECON_CURRENT] = (c->producing == static_cast<int>(si)) ? 1.0F : 0.0F;
+            e[ml::kEconCurrent] = (c->producing == static_cast<int>(si)) ? 1.0F : 0.0F;
             slot_indices.push_back(static_cast<int>(si));
-            cands.push_back(ml::packEconInput(prod_ctx, e));
+            cands.push_back(ml::PackEconInput(prod_ctx, e));
         }
 
         if (cands.size() == 1) {
-            game::setProduction(g, *c, NONE);
+            game::SetProduction(g, *c, kNone);
             continue;
         }
 
         std::vector<float> logits(cands.size());
         std::vector<float> log_mult(cands.size(), 0.0F);
         for (size_t i = 0; i < cands.size(); i++) {
-            logits[i] = policy.econNet.Forward(cands[i])[0];
+            logits[i] = policy.econ_net.Forward(cands[i])[0];
             if (i > 0 && cands.size() > 2)
                 log_mult[i] = std::log(static_cast<float>(cands.size() - 1));
         }
         float lp = 0.0F;
-        int pick = ml::selectFromLogits(logits, sampler, &lp, &log_mult);
-        if (sampler && sampler->currentTurn) {
-            sampler->currentTurn->econSteps.push_back(
+        int pick = ml::SelectFromLogits(logits, sampler, &lp, &log_mult);
+        if (sampler && sampler->current_turn) {
+            sampler->current_turn->econ_steps.push_back(
                     ml::EconStepRecord{std::move(cands), std::move(log_mult), pick, lp});
         }
 
         if (pick == 0) {
-            game::setProduction(g, *c, NONE);
-        } else if (c->producing != slot_indices[pick] || !game::producing(*c)) {
-            game::setProduction(g, *c, slot_indices[pick]);
+            game::SetProduction(g, *c, kNone);
+        } else if (c->producing != slot_indices[pick] || !game::Producing(*c)) {
+            game::SetProduction(g, *c, slot_indices[pick]);
         }
     }
 
     // City vectoring: re-evaluated each turn, but the vector already set is a
     // flagged candidate (ECON_CURRENT) rather than wiped, so keeping it is a choice
     for (City* src : own_cities) {
-        if (!game::producing(*src) || src->producing < 0 ||
+        if (!game::Producing(*src) || src->producing < 0 ||
             src->producing >= static_cast<int>(src->slots.size())) {
-            src->vectorTo = NONE;
+            src->vector_to = kNone;
             continue;
         }
         const Slot& sl = src->slots[src->producing];
-        float src_threat = src->index < static_cast<int>(b.cityThreat2Turn.size())
-                                   ? b.cityThreat2Turn[src->index]
+        float src_threat = src->index < static_cast<int>(b.city_threat2_turn.size())
+                                   ? b.city_threat2_turn[src->index]
                                    : 0.0F;
-        float src_dist_e = src->index < static_cast<int>(b.cityNearestEnemyDist.size())
-                                   ? b.cityNearestEnemyDist[src->index]
+        float src_dist_e = src->index < static_cast<int>(b.city_nearest_enemy_dist.size())
+                                   ? b.city_nearest_enemy_dist[src->index]
                                    : 100.0F;
 
         ml::EconVec keep_here{};
@@ -1750,24 +1753,24 @@ void RunEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
         keep_here[14] = std::tanh(src_threat / 25.0F);
         keep_here[15] = std::tanh(src_dist_e / 60.0F);
         keep_here[17] = 0.0F;
-        keep_here[ml::ECON_CURRENT] = src->vectorTo == NONE ? 1.0F : 0.0F;
+        keep_here[ml::kEconCurrent] = src->vector_to == kNone ? 1.0F : 0.0F;
 
         std::vector<City*> dest_cities = {nullptr};
-        std::vector<ml::EconInVec> cands = {ml::packEconInput(prod_ctx, keep_here)};
+        std::vector<ml::EconInVec> cands = {ml::PackEconInput(prod_ctx, keep_here)};
 
         for (City* dst : own_cities) {
             if (dst == src) continue;
-            bool is_current = (src->vectorTo == dst->index);
+            bool is_current = (src->vector_to == dst->index);
             if (!is_current &&
-                static_cast<int>(game::vectoredTo(g, dst).size()) >= game::MAX_VECTORED_TO)
+                static_cast<int>(game::VectoredTo(g, dst).size()) >= game::kMaxVectoredTo)
                 continue;
-            int v_turns = std::max(1, move::distance(src->x, src->y, dst->x, dst->y) / 14 + 1);
+            int v_turns = std::max(1, move::Distance(src->x, src->y, dst->x, dst->y) / 14 + 1);
             if (v_turns > 4) continue;
-            float dst_threat = dst->index < static_cast<int>(b.cityThreat2Turn.size())
-                                       ? b.cityThreat2Turn[dst->index]
+            float dst_threat = dst->index < static_cast<int>(b.city_threat2_turn.size())
+                                       ? b.city_threat2_turn[dst->index]
                                        : 0.0F;
-            float dst_dist_e = dst->index < static_cast<int>(b.cityNearestEnemyDist.size())
-                                       ? b.cityNearestEnemyDist[dst->index]
+            float dst_dist_e = dst->index < static_cast<int>(b.city_nearest_enemy_dist.size())
+                                       ? b.city_nearest_enemy_dist[dst->index]
                                        : 100.0F;
             float threat_gain =
                     (dst_threat - src_threat) / 25.0F + (src_dist_e - dst_dist_e) / 45.0F;
@@ -1780,32 +1783,32 @@ void RunEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
             v[14] = std::tanh(dst_threat / 25.0F);
             v[15] = std::tanh(dst_dist_e / 60.0F);
             v[17] = std::tanh(threat_gain);
-            v[ml::ECON_CURRENT] = is_current ? 1.0F : 0.0F;
+            v[ml::kEconCurrent] = is_current ? 1.0F : 0.0F;
             dest_cities.push_back(dst);
-            cands.push_back(ml::packEconInput(prod_ctx, v));
+            cands.push_back(ml::PackEconInput(prod_ctx, v));
         }
 
         if (cands.size() > 1) {
             std::vector<float> logits(cands.size());
             std::vector<float> log_mult(cands.size(), 0.0F);
             for (size_t i = 0; i < cands.size(); i++) {
-                logits[i] = policy.econNet.Forward(cands[i])[0];
+                logits[i] = policy.econ_net.Forward(cands[i])[0];
                 if (i > 0 && cands.size() > 2)
                     log_mult[i] = std::log(static_cast<float>(cands.size() - 1));
             }
             float lp = 0.0F;
-            int pick = ml::selectFromLogits(logits, sampler, &lp, &log_mult);
-            if (sampler && sampler->currentTurn) {
-                sampler->currentTurn->econSteps.push_back(
+            int pick = ml::SelectFromLogits(logits, sampler, &lp, &log_mult);
+            if (sampler && sampler->current_turn) {
+                sampler->current_turn->econ_steps.push_back(
                         ml::EconStepRecord{std::move(cands), std::move(log_mult), pick, lp});
             }
             City* best_dest = dest_cities[pick];
-            game::vector(g, *src, best_dest);
+            game::Vector(g, *src, best_dest);
             if (best_dest) {
-                side.aiThoughts.push_back(
+                side.ai_thoughts.push_back(
                         AIThought{"Economy", src->name, best_dest->name, src->x, src->y,
                                   best_dest->x, best_dest->y, logits[pick], 1.0F, false,
-                                  fmt("Vectoring %s from %s -> %s", sl.name.c_str(),
+                                  Fmt("Vectoring %s from %s -> %s", sl.name.c_str(),
                                       src->name.c_str(), best_dest->name.c_str())});
             }
         }
@@ -1814,9 +1817,9 @@ void RunEconomyPhase(Game& g, Side& side, const ml::PolicyNetwork& policy,
 
 }  // namespace
 
-void playTurn(Game& g, Side& side, const PauseCallback& pause,
+void PlayTurn(Game& g, Side& side, const PauseCallback& pause,
               const ml::PolicyNetwork* custom_policy, ml::RolloutSampler* sampler) {
-    const ml::PolicyNetwork& policy = custom_policy ? *custom_policy : ml::activePolicy();
+    const ml::PolicyNetwork& policy = custom_policy ? *custom_policy : ml::ActivePolicy();
     // Outside training the policy is still sampled, as in training, but at the
     // deployment temperature and from a generator seeded by the game state (never
     // advancing the game's own dice), so play stays reproducible. Taking the single
@@ -1824,30 +1827,30 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
     // trained: for a spread-out distribution its mode is not its typical behaviour.
     ml::RolloutSampler deploy_sampler;
     if (!sampler) {
-        deploy_sampler.temperature = ml::deployTemperature();
-        deploy_sampler.rngState = (g.rng.state * 2654435761U) ^
-                                  static_cast<uint32_t>(g.turn * 40503U) ^
-                                  static_cast<uint32_t>((side.index + 1) * 2246822519U);
+        deploy_sampler.temperature = ml::DeployTemperature();
+        deploy_sampler.rng_state = (g.rng.state * 2654435761U) ^
+                                   static_cast<uint32_t>(g.turn * 40503U) ^
+                                   static_cast<uint32_t>((side.index + 1) * 2246822519U);
         sampler = &deploy_sampler;
     }
     for (Army* a : g.armies) {
-        if (a->owner == side.index) a->aiMoved = false;
+        if (a->owner == side.index) a->ai_moved = false;
     }
-    side.aiThoughts.clear();
+    side.ai_thoughts.clear();
 
     std::array<bool, 8> diplo_decided{};
     for (int wave = 0; wave < 6; wave++) {
-        belief::update(g, side);
-        ml::ContextVec wave_ctx = ml::buildContext(g, side);
+        belief::Update(g, side);
+        ml::ContextVec wave_ctx = ml::BuildContext(g, side);
         if (wave == 0) {
-            ml::CriticVec critic = ml::buildCriticFeatures(g, side);
-            float v = policy.evaluateValue(wave_ctx, critic);
-            side.lastBoardValue = v;
-            if (sampler && sampler->currentTurn) {
-                sampler->currentTurn->startCtx = wave_ctx;
-                sampler->currentTurn->startCritic = critic;
-                sampler->currentTurn->valuePred = v;
-                sampler->currentTurn->startScore = ml::computeEmpireScore(g, side.index);
+            ml::CriticVec critic = ml::BuildCriticFeatures(g, side);
+            float v = policy.EvaluateValue(wave_ctx, critic);
+            side.last_board_value = v;
+            if (sampler && sampler->current_turn) {
+                sampler->current_turn->start_ctx = wave_ctx;
+                sampler->current_turn->start_critic = critic;
+                sampler->current_turn->value_pred = v;
+                sampler->current_turn->start_score = ml::ComputeEmpireScore(g, side.index);
             }
         }
         RunDiplomacyPhase(g, side, policy, wave_ctx, sampler, diplo_decided);
@@ -1856,7 +1859,7 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
                                        sampler);
         bool any_left = false;
         for (Army* a : g.armies) {
-            if (a->owner == side.index && a->x != NONE && !a->transit && !a->aiMoved &&
+            if (a->owner == side.index && a->x != kNone && !a->transit && !a->ai_moved &&
                 a->moves >= 2) {
                 any_left = true;
                 break;
@@ -1866,16 +1869,17 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
     }
 
     // A city emptied by one move but re-garrisoned by a later one was not left open
-    if (sampler && sampler->currentTurn) {
-        for (auto& ms : sampler->currentTurn->missionSteps) {
-            if (ms.vacatedCity == NONE || ms.vacatedCity >= static_cast<int>(g.map->cities.size()))
+    if (sampler && sampler->current_turn) {
+        for (auto& ms : sampler->current_turn->mission_steps) {
+            if (ms.vacated_city == kNone ||
+                ms.vacated_city >= static_cast<int>(g.map->cities.size()))
                 continue;
-            const City& vc = g.map->cities[ms.vacatedCity];
-            for (int dy = 0; dy <= 1 && ms.vacatedCity != NONE; dy++) {
-                for (int dx = 0; dx <= 1 && ms.vacatedCity != NONE; dx++) {
-                    for (Army* a : game::armiesAt(g, vc.x + dx, vc.y + dy)) {
+            const City& vc = g.map->cities[ms.vacated_city];
+            for (int dy = 0; dy <= 1 && ms.vacated_city != kNone; dy++) {
+                for (int dx = 0; dx <= 1 && ms.vacated_city != kNone; dx++) {
+                    for (Army* a : game::ArmiesAt(g, vc.x + dx, vc.y + dy)) {
                         if (a->owner == side.index) {
-                            ms.vacatedCity = NONE;
+                            ms.vacated_city = kNone;
                             break;
                         }
                     }
@@ -1884,42 +1888,42 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause,
         }
     }
 
-    belief::update(g, side);
-    ml::ContextVec ctx = ml::buildContext(g, side);
-    side.lastBoardValue = policy.evaluateValue(ctx, ml::buildCriticFeatures(g, side));
+    belief::Update(g, side);
+    ml::ContextVec ctx = ml::BuildContext(g, side);
+    side.last_board_value = policy.EvaluateValue(ctx, ml::BuildCriticFeatures(g, side));
 
     RunEconomyPhase(g, side, policy, ctx, sampler);
     if (pause) pause("economy");
 }
 
-std::vector<MissionSnapshot> snapshotMissions(Game& g, Side& side,
+std::vector<MissionSnapshot> SnapshotMissions(Game& g, Side& side,
                                               const ml::PolicyNetwork& policy) {
     std::vector<MissionSnapshot> out;
     std::vector<bool> moved_before;
-    for (Army* a : g.armies) moved_before.push_back(a->aiMoved);
+    for (Army* a : g.armies) moved_before.push_back(a->ai_moved);
     for (Army* a : g.armies) {
-        if (a->owner == side.index) a->aiMoved = false;
+        if (a->owner == side.index) a->ai_moved = false;
     }
-    belief::update(g, side);
-    ml::ContextVec ctx = ml::buildContext(g, side);
+    belief::Update(g, side);
+    ml::ContextVec ctx = ml::BuildContext(g, side);
     RunMilitaryAndExplorationPhase(g, side, policy, ctx, nullptr, nullptr, &out);
     for (size_t i = 0; i < g.armies.size() && i < moved_before.size(); i++)
-        g.armies[i]->aiMoved = moved_before[i];
+        g.armies[i]->ai_moved = moved_before[i];
     return out;
 }
 
-City* selectHeroCity(Game& g, Side& side, City* dflt, const ml::PolicyNetwork* custom_policy) {
+City* SelectHeroCity(Game& g, Side& side, City* dflt, const ml::PolicyNetwork* custom_policy) {
     // No policy head is trained for where a new hero appears, so this is an
     // explicit rule rather than an untrained proxy: the own city under the
     // highest visible threat, else the game's default (the capital).
     (void)custom_policy;
-    belief::update(g, side);
-    const SideBelief& b = belief::ensure(side);
+    belief::Update(g, side);
+    const SideBelief& b = belief::Ensure(side);
     City* best = dflt;
     float best_threat = 0.0F;
-    for (City* c : game::sideCities(g, side)) {
-        float threat = c->index < static_cast<int>(b.cityThreat2Turn.size())
-                               ? b.cityThreat2Turn[c->index]
+    for (City* c : game::SideCities(g, side)) {
+        float threat = c->index < static_cast<int>(b.city_threat2_turn.size())
+                               ? b.city_threat2_turn[c->index]
                                : 0.0F;
         if (threat > best_threat) {
             best_threat = threat;

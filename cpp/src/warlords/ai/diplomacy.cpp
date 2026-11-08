@@ -9,30 +9,30 @@ namespace w2::ai::diplo {
 
 using namespace core;
 
-bool canAttack(Game& g, Side& side, const City& c) {
-    int own = owner(c);
-    if (own == NEUTRAL) return true;
-    AIData& d = data(g, side);
-    int wars = 0, last = NONE;
+bool CanAttack(Game& g, Side& side, const City& c) {
+    int own = Owner(c);
+    if (own == kNeutral) return true;
+    AIData& d = Data(g, side);
+    int wars = 0, last = kNone;
     for (int s = 7; s >= 0; s--) {
-        if (inPlay(g, s) && state(g, side.index, s) == 2) {
+        if (InPlay(g, s) && State(g, side.index, s) == 2) {
             wars++;
             last = s;
         }
     }
-    int st = state(g, side.index, own);
+    int st = State(g, side.index, own);
     if (st == 2) return true;
     if (st == 0 && wars != 0 && (wars != 1 || last != own)) return false;
     if (st > 2) return false;
     return d.bold;
 }
 
-bool spared(Game& g, Side& side, int other) {
-    AIData& d = data(g, side);
+bool Spared(Game& g, Side& side, int other) {
+    AIData& d = Data(g, side);
     if (g.map->options.diplomacy == 0 || d.solidarity == 0 || !side.computer) return false;
     for (int h = 7; h >= 0; h--) {
         const Side& hs = g.map->sides[h];
-        if (inPlay(g, h) && !hs.computer && state(g, other, h) == 2 && hs.aiSolidarity != 0)
+        if (InPlay(g, h) && !hs.computer && State(g, other, h) == 2 && hs.ai_solidarity != 0)
             return true;
     }
     return false;
@@ -43,13 +43,13 @@ static void Claim(Game& g, Side& side) {
     City* cap = side.capital;
     if (!cap) return;
     City* best = nullptr;
-    int best_d = NONE;
+    int best_d = kNone;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
-        int cl = c.claim != NONE ? c.claim : NEUTRAL;
-        if (standing(c) && cl != side.index && (cl == NEUTRAL || !inPlay(g, cl))) {
-            int dd = dist(c.x, c.y, cap->x, cap->y);
-            if (dd < 40 && (best_d == NONE || dd < best_d)) {
+        int cl = c.claim != kNone ? c.claim : kNeutral;
+        if (Standing(c) && cl != side.index && (cl == kNeutral || !InPlay(g, cl))) {
+            int dd = Dist(c.x, c.y, cap->x, cap->y);
+            if (dd < 40 && (best_d == kNone || dd < best_d)) {
                 best = &c;
                 best_d = dd;
             }
@@ -58,18 +58,18 @@ static void Claim(Game& g, Side& side) {
     if (best) best->claim = side.index;
 }
 
-void phase(Game& g, Side& side) {
-    AIData& d = data(g, side);
+void Phase(Game& g, Side& side) {
+    AIData& d = Data(g, side);
     int me = side.index;
     bool human = !side.computer;
     Claim(g, side);
     if (g.map->options.diplomacy == 0) return;
-    int enemy = groups::pickEnemy(g, side);
+    int enemy = groups::PickEnemy(g, side);
 
     int swapped[16] = {0}, total[16] = {0}, seen[16] = {0}, they_war[8] = {0}, they_peace[8] = {0};
     for (int b = 7; b >= 0; b--) {
-        propose(g, me, b, 0);
-        int p = proposal(g, b, me);
+        Propose(g, me, b, 0);
+        int p = Proposal(g, b, me);
         if (p == 2)
             they_war[b] = 1;
         else if (p == 0)
@@ -78,14 +78,14 @@ void phase(Game& g, Side& side) {
     int tiles = 0;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
-        if (standing(c)) tiles++;
-        int o = c.ownerIndex;
-        if (o != NONE) {
+        if (Standing(c)) tiles++;
+        int o = c.owner_index;
+        if (o != kNone) {
             total[o]++;
-            if (!cflag(d, c, CF_UNSEEN)) seen[o]++;
-            int cl = c.claim != NONE ? c.claim : NEUTRAL;
+            if (!Cflag(d, c, kCfUnseen)) seen[o]++;
+            int cl = c.claim != kNone ? c.claim : kNeutral;
             if (o == me) {
-                if (cl != NEUTRAL && cl >= 0 && cl < 16) swapped[cl]++;
+                if (cl != kNeutral && cl >= 0 && cl < 16) swapped[cl]++;
             } else if (cl == me) {
                 swapped[o]++;
             }
@@ -93,70 +93,70 @@ void phase(Game& g, Side& side) {
     }
     // the grudge tests; each has a war branch that can never run (docs/re/ai.md)
     for (int b = 7; b >= 0; b--) {
-        if (b != me && inPlay(g, b)) {
+        if (b != me && InPlay(g, b)) {
             int grudge = (they_peace[b] - they_war[b]) * 2;
-            if (swapped[b] >= grudge + 4) propose(g, me, b, 1);
+            if (swapped[b] >= grudge + 4) Propose(g, me, b, 1);
         }
     }
     for (int b = 7; b >= 0; b--) {
-        if (b != me && inPlay(g, b)) {
+        if (b != me && InPlay(g, b)) {
             int grudge = (they_peace[b] - they_war[b]) * 2;
-            int threat = d.lost[b] + d.citiesLost[b] * 4 + d.heroesKilled[b] * 2;
-            if (threat >= grudge + 5) propose(g, me, b, std::max(1, proposal(g, me, b)));
+            int threat = d.lost[b] + d.cities_lost[b] * 4 + d.heroes_killed[b] * 2;
+            if (threat >= grudge + 5) Propose(g, me, b, std::max(1, Proposal(g, me, b)));
         }
     }
-    if (enemy != NONE) propose(g, me, enemy, 2);
-    for (int gi = MAX_GROUPS; gi >= 1; gi--) {
+    if (enemy != kNone) Propose(g, me, enemy, 2);
+    for (int gi = kMaxGroups; gi >= 1; gi--) {
         auto grp = d.groups[gi];
-        if (grp->active != 0 && grp->target != NONE) propose(g, me, grp->target, 2);
+        if (grp->active != 0 && grp->target != kNone) Propose(g, me, grp->target, 2);
     }
     // whoever holds too much of the world
-    int leader = NONE, most = 0;
+    int leader = kNone, most = 0;
     for (int s = 7; s >= 0; s--) {
-        if (inPlay(g, s)) {
+        if (InPlay(g, s)) {
             int share = total[s] * 100 / std::max(1, tiles);
-            int limit = isComputer(g, s) ? 50 : d.humanShare;
+            int limit = IsComputer(g, s) ? 50 : d.human_share;
             if (most < total[s] && limit < share) {
                 leader = s;
                 most = total[s];
             }
         }
     }
-    if (leader != NONE && leader != me) {
+    if (leader != kNone && leader != me) {
         for (int s = 7; s >= 0; s--) {
-            if (inPlay(g, s)) propose(g, me, s, (s == leader || s == enemy) ? 2 : 0);
+            if (InPlay(g, s)) Propose(g, me, s, (s == leader || s == enemy) ? 2 : 0);
         }
     }
     if (!human && d.solidarity != 0) {
         for (int s = 7; s >= 0; s--) {
-            if (inPlay(g, s) && isComputer(g, s) && s != me && proposal(g, me, s) != 0 &&
-                spared(g, side, s)) {
-                propose(g, me, s, 0);
+            if (InPlay(g, s) && IsComputer(g, s) && s != me && Proposal(g, me, s) != 0 &&
+                Spared(g, side, s)) {
+                Propose(g, me, s, 0);
             }
         }
         bool at_war_with_human = false;
         for (int s = 7; s >= 0; s--) {
-            if (inPlay(g, s) && !isComputer(g, s) && state(g, me, s) == 2) at_war_with_human = true;
+            if (InPlay(g, s) && !IsComputer(g, s) && State(g, me, s) == 2) at_war_with_human = true;
         }
         if (at_war_with_human) {
             for (int s = 7; s >= 0; s--) {
-                if (inPlay(g, s) && isComputer(g, s) && g.map->sides[s].aiSolidarity != 0)
-                    propose(g, me, s, 0);
+                if (InPlay(g, s) && IsComputer(g, s) && g.map->sides[s].ai_solidarity != 0)
+                    Propose(g, me, s, 0);
             }
         }
     }
     if (!human && g.greatest) {
-        auto fights = groups::fightingHumans(g);
+        auto fights = groups::FightingHumans(g);
         for (int s = 7; s >= 0; s--) {
-            if (inPlay(g, s) && isComputer(g, s) && (fights[me] || fights[s])) propose(g, me, s, 0);
+            if (InPlay(g, s) && IsComputer(g, s) && (fights[me] || fights[s])) Propose(g, me, s, 0);
         }
     }
     for (int b = 7; b >= 0; b--)
-        if (seen[b] == 0) propose(g, me, b, 0);
-    for (int gi = MAX_GROUPS; gi >= 1; gi--) {
+        if (seen[b] == 0) Propose(g, me, b, 0);
+    for (int gi = kMaxGroups; gi >= 1; gi--) {
         auto grp = d.groups[gi];
-        if (grp->active != 0 && grp->target != NONE && proposal(g, me, grp->target) == 0)
-            groups::cancel(g, side, gi);
+        if (grp->active != 0 && grp->target != kNone && Proposal(g, me, grp->target) == 0)
+            groups::Cancel(g, side, gi);
     }
 }
 

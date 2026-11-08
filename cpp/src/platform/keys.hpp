@@ -8,14 +8,14 @@
 
 namespace keys {
 
-void press(const std::string& name);
-void release(const std::string& name);
-void clear();
+void Press(const std::string& name);
+void Release(const std::string& name);
+void Clear();
 /** Is any of the named keys down? */
-bool isDown(std::initializer_list<const char*> names);
-bool isDown(const std::string& name);
+bool IsDown(std::initializer_list<const char*> names);
+bool IsDown(const std::string& name);
 
 /** An SDL keycode as LÖVE names the key, or "" for none it knows. */
-std::string loveName(int sdlKeycode);
+std::string LoveName(int sdl_keycode);
 
 }  // namespace keys

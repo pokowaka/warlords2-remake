@@ -116,10 +116,10 @@ std::string Encode(const Canvas& cv, const std::vector<std::array<uint8_t, 3>>& 
 
 Canvas Draw(const Map& map, const std::string& data_dir, int scale);
 
-std::string png(const Map& map, const std::string& data_dir, int scale) {
+std::string Png(const Map& map, const std::string& data_dir, int scale) {
     Canvas cv = Draw(map, data_dir, scale);
     std::vector<std::array<uint8_t, 3>> palette;
-    for (auto& c : pal::load(data_dir + "/TERRAIN0/WAR2.PAL"))
+    for (auto& c : pal::Load(data_dir + "/TERRAIN0/WAR2.PAL"))
         palette.push_back({static_cast<uint8_t>(c[0] * 255 + 0.5),
                            static_cast<uint8_t>(c[1] * 255 + 0.5),
                            static_cast<uint8_t>(c[2] * 255 + 0.5)});
@@ -129,7 +129,7 @@ std::string png(const Map& map, const std::string& data_dir, int scale) {
     return Encode(cv, palette);
 }
 
-pck::Pixels menuPicture(const Map& map, const std::string& data_dir) {
+pck::Pixels MenuPicture(const Map& map, const std::string& data_dir) {
     constexpr int kMw = 264, kMh = 225;
     constexpr uint8_t kSea = 5, kDarkRoad = 14;  // WAR2.PAL: light blue, dark brown
     Canvas big = Draw(map, data_dir, 2);
@@ -155,28 +155,28 @@ Canvas Draw(const Map& map, const std::string& data_dir, int scale) {
     scale = std::clamp(scale, 1, kCell);
     const int step = std::max(1, kCell / scale);
     std::string terrain = data_dir + "/TERRAIN0/";
-    auto sheet0 = pck::decode(terrain + "SCENERY0.PCK"),
-         sheet1 = pck::decode(terrain + "SCENERY1.PCK");
-    auto roads = pck::decode(terrain + "ROAD.PCK");
+    auto sheet0 = pck::Decode(terrain + "SCENERY0.PCK"),
+         sheet1 = pck::Decode(terrain + "SCENERY1.PCK");
+    auto roads = pck::Decode(terrain + "ROAD.PCK");
     if (!sheet0 || !sheet1 || !roads)
         throw std::runtime_error("cannot read the tile sheets in " + terrain);
     int map_width = map.width, map_height = map.height;
     Canvas cv(map_width * scale, map_height * scale);
-    uint8_t key = roads->at(0, 0);  // ROAD.PCK is colour-keyed on its corner
+    uint8_t key = roads->At(0, 0);  // ROAD.PCK is colour-keyed on its corner
     for (int ty = 0; ty < map_height; ty++)
         for (int tx = 0; tx < map_width; tx++) {
-            int idx = scn::tileAt(map, tx, ty) & scn::TILE_MASK;
+            int idx = scn::TileAt(map, tx, ty) & scn::kTileMask;
             const pck::Pixels& sh = idx / kSheetTiles == 0 ? *sheet0 : *sheet1;
             int cell = idx % kSheetTiles, sx = (cell % kSheetCols) * kCell,
                 sy = (cell / kSheetCols) * kCell;
-            int piece = scn::roadAt(map, tx, ty) % 32;
+            int piece = scn::RoadAt(map, tx, ty) % 32;
             int rx = (piece - 1) % kRoadCols * kRoadStride, ry = (piece - 1) / kRoadCols * kCell;
             for (int y = 0; y < scale; y++)
                 for (int x = 0; x < scale; x++) {
                     int px = x * step, py = y * step;
-                    uint8_t c = sx + px < sh.w && sy + py < sh.h ? sh.at(sx + px, sy + py) : kBack;
+                    uint8_t c = sx + px < sh.w && sy + py < sh.h ? sh.At(sx + px, sy + py) : kBack;
                     if (piece > 0 && piece <= 17 && rx + px < roads->w && ry + py < roads->h) {
-                        uint8_t r = roads->at(rx + px, ry + py);
+                        uint8_t r = roads->At(rx + px, ry + py);
                         if (r != key) c = r;
                     }
                     cv.px[static_cast<size_t>(ty * scale + y) * cv.w +
@@ -187,7 +187,7 @@ Canvas Draw(const Map& map, const std::string& data_dir, int scale) {
     int s = scale, mid = scale / 2, t = std::max(1, scale / 3);
     for (int ty = 0; ty < map_height; ty++)
         for (int tx = 0; tx < map_width; tx++) {
-            int piece = scn::roadAt(map, tx, ty) % 32;
+            int piece = scn::RoadAt(map, tx, ty) % 32;
             if (piece <= 0 || piece > 17) continue;
             int shape = kRoadShape[piece], cx = tx * s + mid, cy = ty * s + mid;
             cv.Rect(cx - t / 2, cy - t / 2, t, t, kRoad);

@@ -13,11 +13,11 @@
 
 namespace w2::save {
 
-constexpr int VERSION = 1;
+constexpr int kVersion = 1;
 
 /** A game as a string. */
-std::string encode(const Game& g);
+std::string Encode(const Game& g);
 /** Rebuild a game from a saved string; throws std::runtime_error. */
-std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir);
+std::unique_ptr<Game> Decode(const std::string& text, const std::string& data_dir);
 
 }  // namespace w2::save

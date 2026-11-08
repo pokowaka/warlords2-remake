@@ -34,7 +34,7 @@ std::array<float, OutDim> ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Forward(
     std::array<float, OutDim> out{};
     for (int i = 0; i < OutDim; i++) {
         float s = b3[i];
-        const float* skip_row = &wSkip[i * InDim];
+        const float* skip_row = &w_skip[i * InDim];
         for (int j = 0; j < InDim; j++) s += skip_row[j] * x[j];
         const float* row3 = &w3[i * H2Dim];
         for (int j = 0; j < H2Dim; j++) s += row3[j] * h2[j];
@@ -67,7 +67,7 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Backward(const std::array<float, 
         float g_out = d_out[k];
         if (g_out == 0.0F) continue;
         grad_accum.b3[k] += g_out;
-        float* g_skip = &grad_accum.wSkip[k * InDim];
+        float* g_skip = &grad_accum.w_skip[k * InDim];
         for (int j = 0; j < InDim; j++) g_skip[j] += g_out * x[j];
         float* g_w3 = &grad_accum.w3[k * H2Dim];
         for (int j = 0; j < H2Dim; j++) g_w3[j] += g_out * h2[j];
@@ -96,7 +96,7 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Backward(const std::array<float, 
 
 template <int InDim, int H1Dim, int H2Dim, int OutDim>
 void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Zero() {
-    wSkip.fill(0.0F);
+    w_skip.fill(0.0F);
     w1.fill(0.0F);
     b1.fill(0.0F);
     w2.fill(0.0F);
@@ -107,7 +107,7 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Zero() {
 
 template <int InDim, int H1Dim, int H2Dim, int OutDim>
 void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::ToFlat(std::vector<float>& out) const {
-    out.insert(out.end(), wSkip.begin(), wSkip.end());
+    out.insert(out.end(), w_skip.begin(), w_skip.end());
     out.insert(out.end(), w1.begin(), w1.end());
     out.insert(out.end(), b1.begin(), b1.end());
     out.insert(out.end(), w2.begin(), w2.end());
@@ -124,7 +124,7 @@ size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::FromFlat(const std::vector<floa
             arr[i] = in[offset++];
         }
     };
-    copy_slice(wSkip);
+    copy_slice(w_skip);
     copy_slice(w1);
     copy_slice(b1);
     copy_slice(w2);
@@ -153,7 +153,7 @@ size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::FromFlatWidenInput(const std::v
     auto copy_slice = [&](auto& arr) {
         for (float& v : arr) v = next();
     };
-    copy_matrix(wSkip, OutDim);
+    copy_matrix(w_skip, OutDim);
     copy_matrix(w1, H1Dim);
     copy_slice(b1);
     copy_slice(w2);
@@ -163,17 +163,17 @@ size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::FromFlatWidenInput(const std::v
     return offset;
 }
 
-template struct ResidualMLP<DIPLO_IN_DIM, 24, 12, DIPLO_OUT_DIM>;
-template struct ResidualMLP<MISSION_IN_DIM, 32, 16, MISSION_OUT_DIM>;
-template struct ResidualMLP<ECON_IN_DIM, 24, 12, ECON_OUT_DIM>;
-template struct ResidualMLP<VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
-template struct ResidualMLP<STACK_VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
+template struct ResidualMLP<kDiploInDim, 24, 12, kDiploOutDim>;
+template struct ResidualMLP<kMissionInDim, 32, 16, kMissionOutDim>;
+template struct ResidualMLP<kEconInDim, 24, 12, kEconOutDim>;
+template struct ResidualMLP<kValueInDim, 24, 12, kValueOutDim>;
+template struct ResidualMLP<kStackValueInDim, 24, 12, kValueOutDim>;
 
 PolicyNetwork::PolicyNetwork() {
-    initRandomWeights(42);
+    InitRandomWeights(42);
 }
 
-void PolicyNetwork::initRandomWeights(uint32_t seed) {
+void PolicyNetwork::InitRandomWeights(uint32_t seed) {
     uint32_t state = seed ? seed : 1U;
     auto next_sym = [&]() -> float {
         state ^= state << 13;
@@ -191,143 +191,144 @@ void PolicyNetwork::initRandomWeights(uint32_t seed) {
 
     auto init_mlp = [&](auto& mlp) {
         using MlpT = std::decay_t<decltype(mlp)>;
-        init_arr(mlp.wSkip, 0.04F);
-        init_arr(mlp.w1, 1.0F / std::sqrt(static_cast<float>(MlpT::IN_DIM)));
+        init_arr(mlp.w_skip, 0.04F);
+        init_arr(mlp.w1, 1.0F / std::sqrt(static_cast<float>(MlpT::kInDim)));
         mlp.b1.fill(0.0F);
-        init_arr(mlp.w2, 1.0F / std::sqrt(static_cast<float>(MlpT::H1_DIM)));
+        init_arr(mlp.w2, 1.0F / std::sqrt(static_cast<float>(MlpT::kH1Dim)));
         mlp.b2.fill(0.0F);
-        init_arr(mlp.w3, 0.2F / std::sqrt(static_cast<float>(MlpT::H2_DIM)));
+        init_arr(mlp.w3, 0.2F / std::sqrt(static_cast<float>(MlpT::kH2Dim)));
         mlp.b3.fill(0.0F);
     };
 
-    init_mlp(diploNet);
-    init_mlp(missionNet);
-    init_mlp(econNet);
-    init_mlp(valueNet);
-    init_mlp(stackValueNet);
+    init_mlp(diplo_net);
+    init_mlp(mission_net);
+    init_mlp(econ_net);
+    init_mlp(value_net);
+    init_mlp(stack_value_net);
 }
 
-void PolicyNetwork::zero() {
-    diploNet.Zero();
-    missionNet.Zero();
-    econNet.Zero();
-    valueNet.Zero();
-    stackValueNet.Zero();
+void PolicyNetwork::Zero() {
+    diplo_net.Zero();
+    mission_net.Zero();
+    econ_net.Zero();
+    value_net.Zero();
+    stack_value_net.Zero();
 }
 
-DiploInVec packDiploInput(const ContextVec& ctx, const RivalVec& rival) {
+DiploInVec PackDiploInput(const ContextVec& ctx, const RivalVec& rival) {
     DiploInVec x{};
     std::copy(ctx.begin(), ctx.end(), x.begin());
-    std::copy(rival.begin(), rival.end(), x.begin() + CONTEXT_DIM);
+    std::copy(rival.begin(), rival.end(), x.begin() + kContextDim);
     return x;
 }
 
-MissionInVec packMissionInput(const ContextVec& ctx, const StackVec& stack,
+MissionInVec PackMissionInput(const ContextVec& ctx, const StackVec& stack,
                               const TargetVec& target) {
     MissionInVec x{};
     std::copy(ctx.begin(), ctx.end(), x.begin());
-    std::copy(stack.begin(), stack.end(), x.begin() + CONTEXT_DIM);
-    std::copy(target.begin(), target.end(), x.begin() + CONTEXT_DIM + STACK_DIM);
+    std::copy(stack.begin(), stack.end(), x.begin() + kContextDim);
+    std::copy(target.begin(), target.end(), x.begin() + kContextDim + kStackDim);
     return x;
 }
 
-EconInVec packEconInput(const ContextVec& ctx, const EconVec& econ) {
+EconInVec PackEconInput(const ContextVec& ctx, const EconVec& econ) {
     EconInVec x{};
     std::copy(ctx.begin(), ctx.end(), x.begin());
-    std::copy(econ.begin(), econ.end(), x.begin() + CONTEXT_DIM);
+    std::copy(econ.begin(), econ.end(), x.begin() + kContextDim);
     return x;
 }
 
-ValueInVec packValueInput(const ContextVec& ctx, const CriticVec& critic) {
+ValueInVec PackValueInput(const ContextVec& ctx, const CriticVec& critic) {
     ValueInVec x{};
     std::copy(ctx.begin(), ctx.end(), x.begin());
-    std::copy(critic.begin(), critic.end(), x.begin() + CONTEXT_DIM);
+    std::copy(critic.begin(), critic.end(), x.begin() + kContextDim);
     return x;
 }
 
-StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack,
+StackValueInVec PackStackValueInput(const ContextVec& ctx, const StackVec& stack,
                                     const CriticVec& critic) {
     StackValueInVec x{};
     std::copy(ctx.begin(), ctx.end(), x.begin());
-    std::copy(stack.begin(), stack.end(), x.begin() + CONTEXT_DIM);
-    std::copy(critic.begin(), critic.end(), x.begin() + CONTEXT_DIM + STACK_DIM);
+    std::copy(stack.begin(), stack.end(), x.begin() + kContextDim);
+    std::copy(critic.begin(), critic.end(), x.begin() + kContextDim + kStackDim);
     return x;
 }
 
-DiploOutput PolicyNetwork::scoreDiplomacy(const ContextVec& ctx, const RivalVec& rival) const {
-    auto raw = diploNet.Forward(packDiploInput(ctx, rival));
+DiploOutput PolicyNetwork::ScoreDiplomacy(const ContextVec& ctx, const RivalVec& rival) const {
+    auto raw = diplo_net.Forward(PackDiploInput(ctx, rival));
     DiploOutput out;
-    out.stanceLogits = {raw[0], raw[1], raw[2], raw[3]};
-    out.tributeLogit = raw[4];
-    out.jointWarLogit = raw[5];
+    out.stance_logits = {raw[0], raw[1], raw[2], raw[3]};
+    out.tribute_logit = raw[4];
+    out.joint_war_logit = raw[5];
     return out;
 }
 
-MissionOutput PolicyNetwork::scoreMission(const ContextVec& ctx, const StackVec& stack,
+MissionOutput PolicyNetwork::ScoreMission(const ContextVec& ctx, const StackVec& stack,
                                           const TargetVec& target) const {
-    auto raw = missionNet.Forward(packMissionInput(ctx, stack, target));
+    auto raw = mission_net.Forward(PackMissionInput(ctx, stack, target));
     return MissionOutput{raw[0], raw[1]};
 }
 
-float PolicyNetwork::scoreEconomy(const ContextVec& ctx, const EconVec& econ) const {
-    return econNet.Forward(packEconInput(ctx, econ))[0];
+float PolicyNetwork::ScoreEconomy(const ContextVec& ctx, const EconVec& econ) const {
+    return econ_net.Forward(PackEconInput(ctx, econ))[0];
 }
 
-float PolicyNetwork::evaluateValue(const ContextVec& ctx, const CriticVec& critic) const {
+float PolicyNetwork::EvaluateValue(const ContextVec& ctx, const CriticVec& critic) const {
     // Linear: the critic predicts discounted return in empire-score units, which
     // is not bounded to [-1, 1]
-    return valueNet.Forward(packValueInput(ctx, critic))[0];
+    return value_net.Forward(PackValueInput(ctx, critic))[0];
 }
 
-float PolicyNetwork::evaluateStackValue(const StackValueInVec& stack_state) const {
-    return stackValueNet.Forward(stack_state)[0];
+float PolicyNetwork::EvaluateStackValue(const StackValueInVec& stack_state) const {
+    return stack_value_net.Forward(stack_state)[0];
 }
 
-std::vector<float> PolicyNetwork::flatten() const {
+std::vector<float> PolicyNetwork::Flatten() const {
     std::vector<float> out;
-    out.reserve(TOTAL_PARAMS);
-    diploNet.ToFlat(out);
-    missionNet.ToFlat(out);
-    econNet.ToFlat(out);
-    valueNet.ToFlat(out);
-    stackValueNet.ToFlat(out);
+    out.reserve(kTotalParams);
+    diplo_net.ToFlat(out);
+    mission_net.ToFlat(out);
+    econ_net.ToFlat(out);
+    value_net.ToFlat(out);
+    stack_value_net.ToFlat(out);
     return out;
 }
 
-void PolicyNetwork::unflatten(const std::vector<float>& params) {
+void PolicyNetwork::Unflatten(const std::vector<float>& params) {
     size_t off = 0;
-    off = diploNet.FromFlat(params, off);
-    off = missionNet.FromFlat(params, off);
-    off = econNet.FromFlat(params, off);
-    off = valueNet.FromFlat(params, off);
-    stackValueNet.FromFlat(params, off);
+    off = diplo_net.FromFlat(params, off);
+    off = mission_net.FromFlat(params, off);
+    off = econ_net.FromFlat(params, off);
+    off = value_net.FromFlat(params, off);
+    stack_value_net.FromFlat(params, off);
 }
 
-void PolicyNetwork::unflattenLegacy(const std::vector<float>& params) {
+void PolicyNetwork::UnflattenLegacy(const std::vector<float>& params) {
     // Legacy files lack the 6 added context features (inserted after the 14
     // original ones); v3/v4 also lack the critics' privileged inputs (at the
     // end); v3 has no StackValueNet. Missing columns start at zero.
-    const bool v5 = params.size() == static_cast<size_t>(LEGACY_V5_PARAMS);
-    const bool v3 = params.size() == static_cast<size_t>(LEGACY_V3_PARAMS);
-    const int at = LEGACY_GLOBAL_DIM, add = ADDED_GLOBAL_DIM;
-    const int critic_drop = v5 ? V5_DROPPED : V4_CRITIC_DROPPED;
+    const bool v5 = params.size() == static_cast<size_t>(kLegacyV5Params);
+    const bool v3 = params.size() == static_cast<size_t>(kLegacyV3Params);
+    const int at = kLegacyGlobalDim, add = kAddedGlobalDim;
+    const int critic_drop = v5 ? kV5Dropped : kV4CriticDropped;
     size_t off = 0;
-    off = diploNet.FromFlatWidenInput(params, off, DiploNet::IN_DIM - V5_DROPPED, at, add);
-    off = missionNet.FromFlatWidenInput(params, off, MissionNet::IN_DIM - V5_DROPPED, at, add);
-    off = econNet.FromFlatWidenInput(params, off, EconNet::IN_DIM - V5_DROPPED, at, add);
-    off = valueNet.FromFlatWidenInput(params, off, ValueNet::IN_DIM - critic_drop, at, add);
+    off = diplo_net.FromFlatWidenInput(params, off, DiploNet::kInDim - kV5Dropped, at, add);
+    off = mission_net.FromFlatWidenInput(params, off, MissionNet::kInDim - kV5Dropped, at, add);
+    off = econ_net.FromFlatWidenInput(params, off, EconNet::kInDim - kV5Dropped, at, add);
+    off = value_net.FromFlatWidenInput(params, off, ValueNet::kInDim - critic_drop, at, add);
     if (v3) {
-        stackValueNet.Zero();
+        stack_value_net.Zero();
     } else {
-        stackValueNet.FromFlatWidenInput(params, off, StackValueNet::IN_DIM - critic_drop, at, add);
+        stack_value_net.FromFlatWidenInput(params, off, StackValueNet::kInDim - critic_drop, at,
+                                           add);
     }
 }
 
-bool PolicyNetwork::saveJson(const std::filesystem::path& path, int generation,
+bool PolicyNetwork::SaveJson(const std::filesystem::path& path, int generation,
                              float selection_city_share) const {
     std::ofstream out(path);
     if (!out.is_open()) return false;
-    auto weights = flatten();
+    auto weights = Flatten();
     out << "{\n";
     out << "  \"version\": 6,\n";
     out << "  \"generation\": " << generation << ",\n";
@@ -343,26 +344,26 @@ bool PolicyNetwork::saveJson(const std::filesystem::path& path, int generation,
     return true;
 }
 
-bool PolicyNetwork::loadJson(const std::filesystem::path& path) {
+bool PolicyNetwork::LoadJson(const std::filesystem::path& path) {
     std::ifstream in(path);
     if (!in.is_open()) return false;
     std::stringstream buf;
     buf << in.rdbuf();
     try {
-        Json root = Json::parse(buf.str());
+        Json root = Json::Parse(buf.str());
         const Json& arr = root["weights"];
         int n = static_cast<int>(arr.size());
-        if (n != TOTAL_PARAMS && n != LEGACY_V5_PARAMS && n != LEGACY_V4_PARAMS &&
-            n != LEGACY_V3_PARAMS)
+        if (n != kTotalParams && n != kLegacyV5Params && n != kLegacyV4Params &&
+            n != kLegacyV3Params)
             return false;
         std::vector<float> weights(n);
         for (int i = 0; i < n; i++) {
-            weights[i] = static_cast<float>(arr[i].number());
+            weights[i] = static_cast<float>(arr[i].Number());
         }
-        if (n == TOTAL_PARAMS)
-            unflatten(weights);
+        if (n == kTotalParams)
+            Unflatten(weights);
         else
-            unflattenLegacy(weights);
+            UnflattenLegacy(weights);
         return true;
     } catch (...) {
         return false;
@@ -370,26 +371,26 @@ bool PolicyNetwork::loadJson(const std::filesystem::path& path) {
 }
 
 namespace {
-float g_deploy_temperature = DEPLOY_TEMPERATURE;
+float g_deploy_temperature = kDeployTemperature;
 }  // namespace
 
-float deployTemperature() {
+float DeployTemperature() {
     return g_deploy_temperature;
 }
 
-void setDeployTemperature(float t) {
+void SetDeployTemperature(float t) {
     g_deploy_temperature = std::max(0.01F, t);
 }
 
-float RolloutSampler::nextUniform01() {
-    if (rngState == 0) rngState = 0x9e3779b9U;
-    rngState ^= rngState << 13;
-    rngState ^= rngState >> 17;
-    rngState ^= rngState << 5;
-    return static_cast<float>(rngState & 0x00ffffffU) / static_cast<float>(0x01000000U);
+float RolloutSampler::NextUniform01() {
+    if (rng_state == 0) rng_state = 0x9e3779b9U;
+    rng_state ^= rng_state << 13;
+    rng_state ^= rng_state >> 17;
+    rng_state ^= rng_state << 5;
+    return static_cast<float>(rng_state & 0x00ffffffU) / static_cast<float>(0x01000000U);
 }
 
-int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, float* out_log_prob,
+int SelectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, float* out_log_prob,
                      const std::vector<float>* log_mult) {
     if (logits.empty()) {
         if (out_log_prob) *out_log_prob = 0.0F;
@@ -403,7 +404,7 @@ int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, 
         return (log_mult && i < log_mult->size()) ? (*log_mult)[i] : 0.0F;
     };
     if (!sampler || logits.size() == 1) {
-        float deploy_inv_t = 1.0F / deployTemperature();
+        float deploy_inv_t = 1.0F / DeployTemperature();
         int best = 0;
         for (size_t i = 1; i < logits.size(); i++) {
             if (logits[i] * deploy_inv_t - lm_of(i) > logits[best] * deploy_inv_t - lm_of(best))
@@ -428,7 +429,7 @@ int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, 
     }
     for (float& p : probs) p /= std::max(1e-12F, sum_exp);
 
-    float u = sampler->nextUniform01();
+    float u = sampler->NextUniform01();
     float acc = 0.0F;
     int chosen = static_cast<int>(logits.size()) - 1;
     for (size_t i = 0; i < probs.size(); i++) {
@@ -444,7 +445,7 @@ int selectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, 
     return chosen;
 }
 
-bool selectBinary(float logit, RolloutSampler* sampler, float* out_log_prob) {
+bool SelectBinary(float logit, RolloutSampler* sampler, float* out_log_prob) {
     if (!sampler) {
         if (out_log_prob) *out_log_prob = 0.0F;
         return logit > 0.0F;
@@ -452,12 +453,12 @@ bool selectBinary(float logit, RolloutSampler* sampler, float* out_log_prob) {
     float inv_t = 1.0F / std::max(0.05F, sampler->temperature);
     float z = std::clamp(logit * inv_t, -15.0F, 15.0F);
     float p = 1.0F / (1.0F + std::exp(-z));
-    bool yes = sampler->nextUniform01() < p;
+    bool yes = sampler->NextUniform01() < p;
     if (out_log_prob) *out_log_prob = std::log(std::max(1e-12F, yes ? p : 1.0F - p));
     return yes;
 }
 
-float computeEmpireScore(const Game& g, int side_index) {
+float ComputeEmpireScore(const Game& g, int side_index) {
     if (side_index < 0 || side_index >= 8 || !g.map->sides[side_index].alive) {
         return 0.0F;
     }
@@ -468,10 +469,10 @@ float computeEmpireScore(const Game& g, int side_index) {
         if (c.razed) continue;
         total_standing++;
         total_income += std::max(1, c.income);
-        if (ai::belief::isCityVisible(g, side_index, c)) {
+        if (ai::belief::IsCityVisible(g, side_index, c)) {
             revealed_cities++;
         }
-        if (c.ownerIndex == side_index) {
+        if (c.owner_index == side_index) {
             my_cities++;
             my_income += std::max(1, c.income);
         }
@@ -481,16 +482,16 @@ float computeEmpireScore(const Game& g, int side_index) {
 
     // Reconnaissance only counts under Hidden Map, and stays small next to cities
     float recon_term = 0.0F;
-    if (g.map->options.hiddenMap != 0) {
+    if (g.map->options.hidden_map != 0) {
         int sampled = 0, seen_sampled = 0;
-        const int x0 = std::max(0, g.map->activeX0),
-                  x1 = std::min(g.map->width - 1, g.map->activeX1);
-        const int y0 = std::max(0, g.map->activeY0),
-                  y1 = std::min(g.map->height - 1, g.map->activeY1);
+        const int x0 = std::max(0, g.map->active_x0),
+                  x1 = std::min(g.map->width - 1, g.map->active_x1);
+        const int y0 = std::max(0, g.map->active_y0),
+                  y1 = std::min(g.map->height - 1, g.map->active_y1);
         for (int y = y0; y <= y1; y += 2) {
             for (int x = x0; x <= x1; x += 2) {
                 sampled++;
-                if (game::seen(g, side_index, x, y)) seen_sampled++;
+                if (game::Seen(g, side_index, x, y)) seen_sampled++;
             }
         }
         float seen_tile_frac =
@@ -504,7 +505,7 @@ float computeEmpireScore(const Game& g, int side_index) {
     // vectored units in transit) as a zero-sum share of all sides' forces.
     float my_army_str = 0.0F, all_army_str = 0.0F;
     for (const Army* a : g.armies) {
-        if (a->disbanded || (a->x == NONE && !a->transit) || a->owner < 0 || a->owner >= 8)
+        if (a->disbanded || (a->x == kNone && !a->transit) || a->owner < 0 || a->owner >= 8)
             continue;
         float power = static_cast<float>(a->strength * a->strength);
         all_army_str += power;
@@ -517,36 +518,36 @@ float computeEmpireScore(const Game& g, int side_index) {
     return 2.0F * city_share + 0.5F * inc_share + 0.25F * army_share + recon_term;
 }
 
-PolicyNetwork& activePolicy() {
+PolicyNetwork& ActivePolicy() {
     static PolicyNetwork instance = []() {
         PolicyNetwork net;
-        if (!net.loadJson("cpp/ai_weights.json")) {
-            net.loadJson("ai_weights.json");
+        if (!net.LoadJson("cpp/ai_weights.json")) {
+            net.LoadJson("ai_weights.json");
         }
         return net;
     }();
     return instance;
 }
 
-ContextVec buildContext(const Game& g, const Side& side) {
+ContextVec BuildContext(const Game& g, const Side& side) {
     ContextVec c{};
     int me = side.index;
-    const SideBelief& b = ai::belief::ensure(const_cast<Side&>(side));
+    const SideBelief& b = ai::belief::Ensure(const_cast<Side&>(side));
 
     int my_cities = 0, total_vis_cities = 0, max_cities = 0;
     int vis_neutral_cities = 0, vis_enemy_cities = 0;
     std::array<int, 8> side_cities{};
-    for (City* city : b.visibleCities) {
+    for (City* city : b.visible_cities) {
         if (city->razed) continue;
         total_vis_cities++;
-        if (city->ownerIndex == NONE) {
+        if (city->owner_index == kNone) {
             vis_neutral_cities++;
-        } else if (city->ownerIndex >= 0 && city->ownerIndex < 8) {
-            side_cities[city->ownerIndex]++;
-            max_cities = std::max(max_cities, side_cities[city->ownerIndex]);
-            if (city->ownerIndex == me) {
+        } else if (city->owner_index >= 0 && city->owner_index < 8) {
+            side_cities[city->owner_index]++;
+            max_cities = std::max(max_cities, side_cities[city->owner_index]);
+            if (city->owner_index == me) {
                 my_cities++;
-            } else if (!diplomacy::isAllied(g, me, city->ownerIndex)) {
+            } else if (!diplomacy::IsAllied(g, me, city->owner_index)) {
                 vis_enemy_cities++;
             }
         }
@@ -554,10 +555,10 @@ ContextVec buildContext(const Game& g, const Side& side) {
 
     int my_armies = 0, my_heroes = 0, my_strength = 0;
     for (Army* a : g.armies) {
-        if (a->owner == me && !a->disbanded && (a->x != NONE || a->transit)) {
+        if (a->owner == me && !a->disbanded && (a->x != kNone || a->transit)) {
             my_armies++;
             my_strength += a->strength;
-            if (a->hero()) my_heroes++;
+            if (a->Hero()) my_heroes++;
         }
     }
 
@@ -565,22 +566,22 @@ ContextVec buildContext(const Game& g, const Side& side) {
     // hostile stack could reach within a turn (belief threat map: fair information)
     std::vector<char> garrisoned(g.map->cities.size(), 0);
     for (Army* a : g.armies) {
-        if (a->owner != me || a->disbanded || a->transit || a->x == NONE) continue;
-        if (City* in = game::cityAt(g, a->x, a->y)) {
+        if (a->owner != me || a->disbanded || a->transit || a->x == kNone) continue;
+        if (City* in = game::CityAt(g, a->x, a->y)) {
             if (in->index >= 0 && in->index < static_cast<int>(garrisoned.size()))
                 garrisoned[in->index] = 1;
         }
     }
     int own_cities = 0, empty_cities = 0, exposed_cities = 0;
     for (const auto& city : g.map->cities) {
-        if (city.razed || city.ownerIndex != me) continue;
+        if (city.razed || city.owner_index != me) continue;
         own_cities++;
         if (city.index >= 0 && city.index < static_cast<int>(garrisoned.size()) &&
             garrisoned[city.index])
             continue;
         empty_cities++;
-        if (city.index < static_cast<int>(b.cityThreat1Turn.size()) &&
-            b.cityThreat1Turn[city.index] > 0.0F)
+        if (city.index < static_cast<int>(b.city_threat1_turn.size()) &&
+            b.city_threat1_turn[city.index] > 0.0F)
             exposed_cities++;
     }
 
@@ -588,20 +589,20 @@ ContextVec buildContext(const Game& g, const Side& side) {
     for (int s = 0; s < 8; s++) {
         if (s != me && g.map->sides[s].alive) {
             alive_rivals++;
-            if (diplomacy::state(g, me, s) == diplomacy::WAR) wars++;
-            if (diplomacy::isAllied(g, me, s)) allies++;
+            if (diplomacy::State(g, me, s) == diplomacy::kWar) wars++;
+            if (diplomacy::IsAllied(g, me, s)) allies++;
         }
     }
     float rival_denom = static_cast<float>(std::max(1, alive_rivals));
 
     float cap_threat = 0.0F;
-    if (side.capital && side.capital->ownerIndex == me &&
-        side.capital->index < static_cast<int>(b.cityThreat1Turn.size())) {
-        cap_threat = std::tanh(b.cityThreat1Turn[side.capital->index] / 20.0F);
+    if (side.capital && side.capital->owner_index == me &&
+        side.capital->index < static_cast<int>(b.city_threat1_turn.size())) {
+        cap_threat = std::tanh(b.city_threat1_turn[side.capital->index] / 20.0F);
     }
 
-    int inc = game::income(g, side);
-    int upk = game::upkeep(g, side);
+    int inc = game::Income(g, side);
+    int upk = game::Upkeep(g, side);
 
     c[0] = std::tanh(static_cast<float>(g.turn) / 30.0F) * 2.0F - 1.0F;
     c[1] = static_cast<float>(my_cities) / static_cast<float>(std::max(1, total_vis_cities));
@@ -613,9 +614,9 @@ ContextVec buildContext(const Game& g, const Side& side) {
     c[7] = static_cast<float>(wars) / rival_denom;
     c[8] = static_cast<float>(allies) / rival_denom;
     c[9] = static_cast<float>(max_cities) / static_cast<float>(std::max(1, total_vis_cities));
-    c[10] = b.frontierRatio;
+    c[10] = b.frontier_ratio;
     c[11] = cap_threat;
-    c[12] = (side.quest && side.quest->hasTarget()) ? 1.0F : 0.0F;
+    c[12] = (side.quest && side.quest->HasTarget()) ? 1.0F : 0.0F;
     c[13] = std::min(1.0F, static_cast<float>(my_heroes) / 3.0F);
     // v6 additions: non-saturating scales and empty-city exposure
     c[14] = 0.5F * std::log1p(static_cast<float>(std::max(0, side.gold)) / 1000.0F);
@@ -630,8 +631,8 @@ ContextVec buildContext(const Game& g, const Side& side) {
 
     // Keep the 10D personality conditioning channels neutral (0.0f) for the base tabula-rasa
     // policy so no hand-authored trait biases fragment hidden-layer activations across sides.
-    for (int i = 0; i < personality::TRAIT_DIM; i++) {
-        c[GLOBAL_DIM + i] = 0.0F;
+    for (int i = 0; i < personality::kTraitDim; i++) {
+        c[kGlobalDim + i] = 0.0F;
     }
     return c;
 }
@@ -640,7 +641,7 @@ ContextVec buildContext(const Game& g, const Side& side) {
 
 namespace w2::ai::ml {
 
-CriticVec buildCriticFeatures(const Game& g, const Side& side) {
+CriticVec BuildCriticFeatures(const Game& g, const Side& side) {
     CriticVec f{};
     const int me = side.index;
     std::array<int, 8> cities{}, income{};
@@ -650,16 +651,16 @@ CriticVec buildCriticFeatures(const Game& g, const Side& side) {
         if (c.razed) continue;
         standing++;
         total_income += std::max(1, c.income);
-        if (c.ownerIndex == NONE)
+        if (c.owner_index == kNone)
             neutral++;
-        else if (c.ownerIndex >= 0 && c.ownerIndex < 8) {
-            cities[c.ownerIndex]++;
-            income[c.ownerIndex] += std::max(1, c.income);
+        else if (c.owner_index >= 0 && c.owner_index < 8) {
+            cities[c.owner_index]++;
+            income[c.owner_index] += std::max(1, c.income);
         }
     }
     float all_power = 0.0F;
     for (const Army* a : g.armies) {
-        if (a->disbanded || (a->x == NONE && !a->transit) || a->owner < 0 || a->owner >= 8)
+        if (a->disbanded || (a->x == kNone && !a->transit) || a->owner < 0 || a->owner >= 8)
             continue;
         float p = static_cast<float>(a->strength * a->strength);
         power[a->owner] += p;
@@ -670,12 +671,12 @@ CriticVec buildCriticFeatures(const Game& g, const Side& side) {
     float max_rival_power = 0.0F;
     for (int s = 0; s < 8; s++) {
         const Side& o = g.map->sides[s];
-        if (o.inUse) in_use++;
+        if (o.in_use) in_use++;
         if (!o.alive) continue;
         alive++;
         if (s == me) continue;
         rivals++;
-        if (o.classicAi) classic_rivals++;
+        if (o.classic_ai) classic_rivals++;
         if (cities[s] > cities[me]) richer_rivals++;
         max_rival_cities = std::max(max_rival_cities, cities[s]);
         max_rival_power = std::max(max_rival_power, power[s]);
@@ -685,15 +686,15 @@ CriticVec buildCriticFeatures(const Game& g, const Side& side) {
     constexpr int kThreatRadius = 6, kGuardRadius = 2;
     int my_cities = 0, threatened = 0;
     for (const auto& c : g.map->cities) {
-        if (c.razed || c.ownerIndex != me) continue;
+        if (c.razed || c.owner_index != me) continue;
         my_cities++;
         float hostile = 0.0F, guard = 0.0F;
         for (const Army* a : g.armies) {
-            if (a->disbanded || a->x == NONE || a->owner < 0 || a->owner >= 8) continue;
+            if (a->disbanded || a->x == kNone || a->owner < 0 || a->owner >= 8) continue;
             int d = std::max(std::abs(a->x - c.x), std::abs(a->y - c.y));
             if (a->owner == me) {
                 if (d <= kGuardRadius) guard += static_cast<float>(a->strength);
-            } else if (d <= kThreatRadius && !diplomacy::isAllied(g, me, a->owner)) {
+            } else if (d <= kThreatRadius && !diplomacy::IsAllied(g, me, a->owner)) {
                 hostile += static_cast<float>(a->strength);
             }
         }
@@ -710,11 +711,11 @@ CriticVec buildCriticFeatures(const Game& g, const Side& side) {
     f[6] = static_cast<float>(in_use) / 8.0F;
     f[7] = static_cast<float>(standing) / 80.0F;
     f[8] = static_cast<float>(max_rival_cities) / st;
-    f[9] = g.map->options.hiddenMap != 0 ? 1.0F : 0.0F;
+    f[9] = g.map->options.hidden_map != 0 ? 1.0F : 0.0F;
     f[10] = g.map->options.diplomacy != 0 ? 1.0F : 0.0F;
     f[11] = rivals > 0 ? static_cast<float>(classic_rivals) / static_cast<float>(rivals) : 0.0F;
     f[12] = my_cities > 0 ? static_cast<float>(threatened) / static_cast<float>(my_cities) : 0.0F;
-    f[13] = 0.5F * computeEmpireScore(g, me);
+    f[13] = 0.5F * ComputeEmpireScore(g, me);
     f[14] = rivals > 0 ? static_cast<float>(richer_rivals) / static_cast<float>(rivals) : 0.0F;
     f[15] = all_power > 0.0F ? max_rival_power / all_power : 0.0F;
     return f;

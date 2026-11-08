@@ -10,7 +10,7 @@ namespace w2::slots {
 
 namespace {
 const std::vector<int>& Row(const Game& g, int side) {
-    return g.map->fightOrder[side == NONE ? 8 : side];
+    return g.map->fight_order[side == kNone ? 8 : side];
 }
 
 int Rank(const Game& g, const Slots& s, int i) {
@@ -20,7 +20,7 @@ int Rank(const Game& g, const Slots& s, int i) {
 void Swap(Slots& s, int i, int j) {
     std::swap(s.army[i], s.army[j]);
     std::swap(s.group[i], s.group[j]);
-    std::swap(s.inGroup[i], s.inGroup[j]);
+    std::swap(s.in_group[i], s.in_group[j]);
 }
 
 // Insertion-sort the slots so each group is contiguous: by group, then by
@@ -39,19 +39,19 @@ void Order(Slots& s, const Game& g) {
 // Work out the marks, and which group is the one that moves.
 void Remark(Slots& s) {
     for (int i = 0; i < s.n; i++)
-        s.mark[i] = (i > 0 && s.group[i] == s.group[i - 1]) ? NOMARK : CROSS;
+        s.mark[i] = (i > 0 && s.group[i] == s.group[i - 1]) ? kNomark : kCross;
     s.active.reset();
     int head = -1;
     for (int i = 0; i < s.n; i++)
-        if (s.inGroup[i]) {
+        if (s.in_group[i]) {
             head = i;
             break;
         }
     if (head < 0) return;
     for (int i = 0; i < s.n; i++) {
-        if (s.inGroup[i] != (s.group[i] == s.group[head])) return;
+        if (s.in_group[i] != (s.group[i] == s.group[head])) return;
     }
-    s.mark[head] = TICK;
+    s.mark[head] = kTick;
     s.active = s.group[head];
 }
 
@@ -61,7 +61,7 @@ void Refresh(Slots& s, const Game& g, bool resort = false) {
 }
 }  // namespace
 
-std::set<Army*> clicked(const Game& g, const std::vector<Army*>& armies, int side, Army* anchor) {
+std::set<Army*> Clicked(const Game& g, const std::vector<Army*>& armies, int side, Army* anchor) {
     const auto& r = Row(g, side);
     if (!anchor) {
         for (Army* a : armies) {
@@ -71,27 +71,27 @@ std::set<Army*> clicked(const Game& g, const std::vector<Army*>& armies, int sid
     if (!anchor) return {};
     int key = anchor->group;
     std::set<Army*> out = {anchor};
-    if (key != UNGROUPED) {
+    if (key != kUngrouped) {
         for (Army* a : armies)
             if (a->group == key) out.insert(a);
     }
     return out;
 }
 
-Slots build(const Game& g, const std::vector<Army*>& armies, int side,
+Slots Build(const Game& g, const std::vector<Army*>& armies, int side,
             const std::set<Army*>* selected_in) {
     Slots s;
-    s.n = std::min(static_cast<int>(armies.size()), MAX);
+    s.n = std::min(static_cast<int>(armies.size()), kMax);
     s.side = side;
     std::vector<Army*> list(armies.begin(), armies.begin() + s.n);
-    std::set<Army*> chosen = selected_in ? *selected_in : clicked(g, list, side);
+    std::set<Army*> chosen = selected_in ? *selected_in : Clicked(g, list, side);
 
     // 1b62:0a03's order: the remembered groups first, and within a group the
     // army highest in the fight order.
     std::map<Army*, int> at;
     for (int i = 0; i < s.n; i++) at[list[i]] = i;
     const auto& row_t = Row(g, side);
-    luaSort(list, [&](Army* p, Army* q) {
+    LuaSort(list, [&](Army* p, Army* q) {
         int gp = p->group, gq = q->group;
         if (gp != gq) return gp > gq;
         int rp = row_t[p->type], rq = row_t[q->type];
@@ -106,9 +106,9 @@ Slots build(const Game& g, const std::vector<Army*>& armies, int side,
     int previous = 0;
     for (int i = 0; i < s.n; i++) {
         int key = s.army[i]->group;
-        if (!(have_prev && key == previous && key != UNGROUPED && n >= 0)) n++;
+        if (!(have_prev && key == previous && key != kUngrouped && n >= 0)) n++;
         s.group[i] = n;
-        s.inGroup[i] = chosen.count(s.army[i]) > 0;
+        s.in_group[i] = chosen.count(s.army[i]) > 0;
         previous = key;
         have_prev = true;
     }
@@ -116,91 +116,91 @@ Slots build(const Game& g, const std::vector<Army*>& armies, int side,
     return s;
 }
 
-void toggle(Slots& s, const Game& g, int i) {
+void Toggle(Slots& s, const Game& g, int i) {
     if (i < 0 || i >= s.n) return;
-    if (!s.inGroup[i]) {
+    if (!s.in_group[i]) {
         for (int j = 0; j < s.n; j++) {
-            if (s.inGroup[j]) {
+            if (s.in_group[j]) {
                 s.group[i] = s.group[j];
                 break;
             }
         }
-        s.inGroup[i] = true;
+        s.in_group[i] = true;
     } else {
         std::map<int, int> members;
         for (int j = 0; j < s.n; j++) members[s.group[j]]++;
         if (members[s.group[i]] != 1) {
             int free = 0;
             while (members.count(free) && members[free]) free++;
-            s.inGroup[i] = false;
+            s.in_group[i] = false;
             s.group[i] = free;
         }
     }
     Refresh(s, g, true);
 }
 
-void pickGroup(Slots& s, const Game& g, int i) {
+void PickGroup(Slots& s, const Game& g, int i) {
     if (i < 0 || i >= s.n) return;
     int want = s.group[i];
-    for (int j = 0; j < s.n; j++) s.inGroup[j] = s.group[j] == want;
+    for (int j = 0; j < s.n; j++) s.in_group[j] = s.group[j] == want;
     Refresh(s, g);
 }
 
-void all(Slots& s, const Game& g) {
+void All(Slots& s, const Game& g) {
     for (int i = 0; i < s.n; i++) {
         s.group[i] = 0;
-        s.inGroup[i] = true;
+        s.in_group[i] = true;
     }
     Refresh(s, g, true);
 }
 
-void single(Slots& s, const Game& g) {
+void Single(Slots& s, const Game& g) {
     for (int i = 0; i < s.n; i++) {
         s.group[i] = i;
-        s.inGroup[i] = false;
+        s.in_group[i] = false;
     }
-    if (s.n > 0) s.inGroup[0] = true;
+    if (s.n > 0) s.in_group[0] = true;
     Refresh(s, g, true);
 }
 
-std::vector<Army*> selected(const Slots& s) {
+std::vector<Army*> Selected(const Slots& s) {
     std::vector<Army*> out;
     for (int i = 0; i < s.n; i++)
-        if (s.inGroup[i]) out.push_back(s.army[i]);
+        if (s.in_group[i]) out.push_back(s.army[i]);
     return out;
 }
 
-int moves(const Slots& s) {
-    int least = NONE;
+int Moves(const Slots& s) {
+    int least = kNone;
     for (int i = 0; i < s.n; i++) {
-        if (s.inGroup[i]) {
+        if (s.in_group[i]) {
             int m = s.army[i]->moves;
-            if (least == NONE || m < least) least = m;
+            if (least == kNone || m < least) least = m;
         }
     }
-    return least == NONE ? 0 : least;
+    return least == kNone ? 0 : least;
 }
 
-bool grouped(const Slots& s) {
+bool Grouped(const Slots& s) {
     if (s.n == 0) return false;
     if (s.n == 1) return true;
     for (int i = 0; i < s.n; i++)
-        if (!s.inGroup[i]) return false;
+        if (!s.in_group[i]) return false;
     return true;
 }
 
-std::optional<Slots> keep(const Slots& s, const Game& g, const std::vector<Army*>& armies) {
+std::optional<Slots> Keep(const Slots& s, const Game& g, const std::vector<Army*>& armies) {
     std::set<Army*> was;
     for (int i = 0; i < s.n; i++)
-        if (s.inGroup[i]) was.insert(s.army[i]);
+        if (s.in_group[i]) was.insert(s.army[i]);
     std::set<Army*> sel;
     for (Army* a : armies)
         if (was.count(a)) sel.insert(a);
     if (armies.empty()) return std::nullopt;
-    return build(g, armies, s.side, sel.empty() ? nullptr : &sel);
+    return Build(g, armies, s.side, sel.empty() ? nullptr : &sel);
 }
 
-void commit(Slots& s, Game& g) {
+void Commit(Slots& s, Game& g) {
     std::map<int, int> members;
     for (int i = 0; i < s.n; i++) members[s.group[i]]++;
 
@@ -231,7 +231,7 @@ void commit(Slots& s, Game& g) {
         int gp = s.group[i];
         if (!id.count(gp)) {
             if (members[gp] == 1)
-                id[gp] = UNGROUPED;
+                id[gp] = kUngrouped;
             else if (s.active && gp == *s.active)
                 id[gp] = claim();
             else

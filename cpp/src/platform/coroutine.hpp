@@ -23,7 +23,7 @@ struct Yield {
     std::string text;  // "fallen": the line to say
     std::vector<w2::Army*> armies;           // "walk": the stack
     std::vector<std::pair<int, int>> tiles;  // "walk": the tiles it covered
-    bool seaBefore = false;                  // "walk": at sea as it set off
+    bool sea_before = false;                 // "walk": at sea as it set off
 };
 
 class Coroutine {
@@ -36,21 +36,21 @@ class Coroutine {
 
     /** Run the body until it yields or ends. False once it has ended. Any
      *  exception it threw is thrown again here. */
-    bool resume();
+    bool Resume();
     /** From inside the body: hand `y` to the front end and wait to be resumed. */
-    void yield(Yield y);
-    bool done() const { return finished_; }
-    const Yield& value() const { return value_; }
+    void YieldValue(Yield y);
+    bool Done() const { return finished_; }
+    const Yield& Value() const { return value_; }
 
   private:
-    static int run(void* self);
+    static int Run(void* self);
     struct Cancelled {};
 
     Body body_;
     SDL_Thread* thread_ = nullptr;
     SDL_mutex* lock_ = nullptr;
     SDL_cond* cond_ = nullptr;
-    bool bodyTurn_ = false;  // whose turn it is to run
+    bool body_turn_ = false;  // whose turn it is to run
     bool started_ = false, finished_ = false, cancel_ = false;
     Yield value_;
     std::exception_ptr error_;

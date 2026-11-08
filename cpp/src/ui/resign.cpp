@@ -14,56 +14,57 @@ const kit::Rect kR{160, 90, 320, 200};  // popup 1
 const int kDialog = 33, kGracious = 487, kResign = 488, kCancel = 489;
 const int kS = 0xa5;
 std::string T(int i) {
-    return kit::text(kS, i);
+    return kit::Text(kS, i);
 }
 
 void Burn(kit::Done after) {
-    w2::game::resign(*G.g, *G.player);
+    w2::game::Resign(*G.g, *G.player);
     G.selection.reset();
-    front::stratDirty();
+    front::StratDirty();
     if (after) after();
 }
 
 struct Resign : kit::Modal {
     screen::View v;
-    void draw() override {
-        kit::popup(kR);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), T(0), 320, 92);
-        for (int i = 1; i <= 3; i++) kit::centred(kit::font(2), T(i), 320, 120 + 20 * i);
-        kit::drawControls(v);
+    void Draw() override {
+        kit::Popup(kR);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), T(0), 320, 92);
+        for (int i = 1; i <= 3; i++) kit::Centred(kit::GetFont(2), T(i), 320, 120 + 20 * i);
+        kit::DrawControls(v);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
         if (!c) return;
         if (c->id == kCancel) {
-            kit::pop(this);
+            kit::Pop(this);
         } else if (c->id == kGracious) {
-            kit::pop(this);
-            search::say(T(6), []() {
-                search::say(T(7), []() {
-                    search::say(T(8),
-                                []() { search::message(T(9), T(10), []() { Burn(nullptr); }); });
+            kit::Pop(this);
+            search::Say(T(6), []() {
+                search::Say(T(7), []() {
+                    search::Say(T(8), []() {
+                        search::ShowMessage(T(9), T(10), []() { Burn(nullptr); });
+                    });
                 });
             });
         } else if (c->id == kResign) {
-            kit::pop(this);
-            Burn([]() { search::message(T(4), T(5)); });
+            kit::Pop(this);
+            Burn([]() { search::ShowMessage(T(4), T(5)); });
         }
     }
-    void keypressed(const std::string& key) override {
-        if (key == "return" || key == "kpenter" || key == "escape") kit::pop(this);
+    void Keypressed(const std::string& key) override {
+        if (key == "return" || key == "kpenter" || key == "escape") kit::Pop(this);
     }
 };
 }  // namespace
 
-void open() {
-    if (w2::game::sideCities(*G.g, *G.player).empty()) return;  // 4125:5dea
+void Open() {
+    if (w2::game::SideCities(*G.g, *G.player).empty()) return;  // 4125:5dea
     auto d = std::make_shared<Resign>();
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
-    for (int id : {kGracious, kResign, kCancel}) d->v.state[id] = w2::uidata::NORMAL;
-    kit::push(d);
+    for (int id : {kGracious, kResign, kCancel}) d->v.state[id] = w2::uidata::kNormal;
+    kit::Push(d);
 }
 
 }  // namespace resign

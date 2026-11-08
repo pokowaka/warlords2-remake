@@ -8,11 +8,11 @@
 
 namespace w2::report {
 
-constexpr int ARMY = 0, CITY = 1, GOLD = 2, PRODUCTION = 3, WINNING = 4;
+constexpr int kArmy = 0, kCity = 1, kGold = 2, kProduction = 3, kWinning = 4;
 
 /** The Winning report's score for a side: (gold + 5 income + upkeep + each
  *  city's income times defence) / 30, within 1..500. */
-int score(const Game& g, const Side& side);
+int Score(const Game& g, const Side& side);
 
 struct Figures {
     std::array<int, 8> value{};
@@ -21,6 +21,6 @@ struct Figures {
     int result = 0;
 };
 /** One report's figures. */
-Figures figures(const Game& g, const Side& side, int n);
+Figures ComputeFigures(const Game& g, const Side& side, int n);
 
 }  // namespace w2::report

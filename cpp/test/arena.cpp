@@ -106,9 +106,9 @@ struct Config {
     float lr_start = 3.0e-3F;
     float lr_end = 3.0e-4F;
     float temp_start = 1.0F;
-    float temp_end = ml::TRAIN_TEMPERATURE_END;
+    float temp_end = ml::kTrainTemperatureEnd;
     float eval_temp =
-            ml::DEPLOY_TEMPERATURE;  // --eval-temp: temperature evaluation games sample at
+            ml::kDeployTemperature;  // --eval-temp: temperature evaluation games sample at
     float clip_eps = 0.2F;
     float ent_coef = 0.01F;
     float value_coef = 0.5F;
@@ -144,14 +144,14 @@ struct Config {
     int search_k = 0;  // --search-k: candidate turns per learner turn (0 = no search training)
     int search_r = 2;  // --search-r: rollouts (dice copies) per candidate
     int search_h = 2;  // --search-h: rounds played on after a candidate turn
-    opponents::Kind eval_opponent = opponents::Kind::Classic;  // --eval-opponent classic|raider
+    opponents::Kind eval_opponent = opponents::Kind::kClassic;  // --eval-opponent classic|raider
 };
 
 game::NewGameOptions GameOptions(const Config& cfg, const TrainingPreset& preset, uint32_t seed) {
     game::NewGameOptions opts;
     opts.seed = static_cast<double>(seed);
-    opts.activeSides = cfg.active_sides;
-    opts.cropMargin = cfg.crop_margin;
+    opts.active_sides = cfg.active_sides;
+    opts.crop_margin = cfg.crop_margin;
     opts.options = {
         {"hiddenMap", preset.hidden_map},
         {"viewEnemies", 0},
@@ -176,16 +176,16 @@ std::unique_ptr<Game> MakeArenaGame(const Config& cfg, const std::string& scenar
     if ((allow_random_map && map_roll < cfg.random_map_frac) || scenario == "RANDOM") {
         Rng map_rng(static_cast<double>(seed ^ 0x5bf03635U));
         randommap::Options ropts;
-        ropts.dataDir = cfg.data_dir;
+        ropts.data_dir = cfg.data_dir;
         ropts.rng = &map_rng;
         ropts.sliders = {3, 3, 2, 3};
         ropts.allies = preset.diplomacy != 0;
-        ropts.terrainSet = 0;
-        auto files = randommap::generateNow(ropts);
-        opts.memoryFiles = &files;
-        return game::newGame(cfg.data_dir, "RANDOM", opts);
+        ropts.terrain_set = 0;
+        auto files = randommap::GenerateNow(ropts);
+        opts.memory_files = &files;
+        return game::NewGame(cfg.data_dir, "RANDOM", opts);
     }
-    return game::newGame(cfg.data_dir, scenario, opts);
+    return game::NewGame(cfg.data_dir, scenario, opts);
 }
 
 // ---------------------------------------------------------------- rollouts
@@ -226,14 +226,14 @@ void MarkDepartures(const Game& g, int side, ml::TurnStepRecord& turn) {
         standing++;
         total_income += std::max(1, c.income);
     }
-    for (auto& ms : turn.missionSteps) {
-        if (ms.vacatedCity == NONE || ms.vacatedCity >= static_cast<int>(g.map->cities.size()))
+    for (auto& ms : turn.mission_steps) {
+        if (ms.vacated_city == kNone || ms.vacated_city >= static_cast<int>(g.map->cities.size()))
             continue;
-        const City& c = g.map->cities[ms.vacatedCity];
-        if (!c.razed && c.ownerIndex == side) continue;
-        ms.vacatedLoss = 2.0F / static_cast<float>(std::max(1, standing)) +
-                         0.5F * static_cast<float>(std::max(1, c.income)) /
-                                 static_cast<float>(std::max(1, total_income));
+        const City& c = g.map->cities[ms.vacated_city];
+        if (!c.razed && c.owner_index == side) continue;
+        ms.vacated_loss = 2.0F / static_cast<float>(std::max(1, standing)) +
+                          0.5F * static_cast<float>(std::max(1, c.income)) /
+                                  static_cast<float>(std::max(1, total_income));
     }
 }
 
@@ -251,7 +251,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     std::array<ml::RolloutSampler, 8> samplers{};
     int active_count = 0;
     for (int s = 0; s < 8; s++) {
-        if (g.map->sides[s].inUse) active_count++;
+        if (g.map->sides[s].in_use) active_count++;
     }
     int solo_seat =
             active_count > 0 ? static_cast<int>(seed % static_cast<uint32_t>(active_count)) : 0;
@@ -264,7 +264,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     int idx = 0;
     for (int s = 0; s < 8; s++) {
         Side& side = g.map->sides[s];
-        if (!side.inUse) continue;
+        if (!side.in_use) continue;
         bool learner_side = solo ? (idx == solo_seat)
                             : mixed_vs_classic
                                     ? ((idx + seed) % 2 == 0)
@@ -273,7 +273,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
         recorded[s] = learner_side;
         classic[s] = (solo || mixed_vs_classic) ? !learner_side
                                                 : ((mode == Opponent::kClassic) && !learner_side);
-        side.classicAi = classic[s];
+        side.classic_ai = classic[s];
         float raid_roll =
                 static_cast<float>(
                         ((seed * 747796405U) ^ static_cast<uint32_t>((s + 1) * 2891336453U)) >> 8) /
@@ -283,17 +283,17 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
                                                8) /
                             static_cast<float>(1U << 24);
         classic_kind[s] =
-                raid_roll < cfg.raider_frac ? opponents::Kind::Raider : opponents::Kind::Classic;
+                raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
         if (classic[s] && g_frozen && frozen_roll < cfg.frozen_frac) {
-            classic_kind[s] = opponents::Kind::Frozen;
-            side.classicAi = false;  // a Modern AI seat, just not a learning one
+            classic_kind[s] = opponents::Kind::kFrozen;
+            side.classic_ai = false;  // a Modern AI seat, just not a learning one
         }
         eps[s].side_index = s;
-        samplers[s].rngState = (seed * 2654435761U) ^ static_cast<uint32_t>((s + 1) * 2246822519U);
+        samplers[s].rng_state = (seed * 2654435761U) ^ static_cast<uint32_t>((s + 1) * 2246822519U);
         samplers[s].temperature = temperature;
     }
 
-    Side* cur = game::begin(g);
+    Side* cur = game::Begin(g);
     int safety = 0;
     while (cur && !g.over && !g.won && g.turn <= cfg.max_turns && safety < cfg.max_turns * 12) {
         safety++;
@@ -302,29 +302,29 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
             if (recorded[s]) {
                 if (!eps[s].turns.empty()) MarkDepartures(g, s, eps[s].turns.back());
                 eps[s].turns.emplace_back();
-                samplers[s].currentTurn = &eps[s].turns.back();
-                ai::modern::playTurn(g, *cur, nullptr, &learner, &samplers[s]);
-                samplers[s].currentTurn = nullptr;
+                samplers[s].current_turn = &eps[s].turns.back();
+                ai::modern::PlayTurn(g, *cur, nullptr, &learner, &samplers[s]);
+                samplers[s].current_turn = nullptr;
             } else if (classic[s]) {
-                opponents::playTurn(g, *cur, classic_kind[s], g_frozen);
+                opponents::PlayTurn(g, *cur, classic_kind[s], g_frozen);
             } else {
                 ml::RolloutSampler opp;
-                opp.rngState = samplers[s].rngState ^ static_cast<uint32_t>(g.turn * 374761393U);
+                opp.rng_state = samplers[s].rng_state ^ static_cast<uint32_t>(g.turn * 374761393U);
                 opp.temperature = temperature;
-                ai::modern::playTurn(g, *cur, nullptr, &snapshot, &opp);
+                ai::modern::PlayTurn(g, *cur, nullptr, &snapshot, &opp);
             }
         }
-        cur = game::endTurn(g);
+        cur = game::EndTurn(g);
     }
 
     RolloutSummary out;
     std::array<int, 8> cities{};
     for (const auto& c : g.map->cities) {
         if (c.razed) continue;
-        if (c.ownerIndex == NONE)
+        if (c.owner_index == kNone)
             out.neutrals_left++;
-        else if (c.ownerIndex >= 0 && c.ownerIndex < 8)
-            cities[c.ownerIndex]++;
+        else if (c.owner_index >= 0 && c.owner_index < 8)
+            cities[c.owner_index]++;
     }
     for (int s = 0; s < 8; s++) {
         if (!recorded[s] || eps[s].turns.empty()) continue;
@@ -332,7 +332,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
         SideEpisode& ep = eps[s];
         MarkDepartures(g, s, ep.turns.back());
         ep.final_cities = cities[s];
-        ep.final_score = ml::computeEmpireScore(g, s);
+        ep.final_score = ml::ComputeEmpireScore(g, s);
         if (!side.alive) {
             ep.terminal = true;
             ep.terminal_reward = cfg.elimination_reward;
@@ -341,9 +341,9 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
             bool won_game = (g.ending.winner && g.ending.winner->index == s);
             ep.terminal_reward = won_game ? cfg.win_reward : 0.0F;
         } else {
-            ai::belief::update(g, side);
-            ep.bootstrap_value = learner.evaluateValue(ml::buildContext(g, side),
-                                                       ml::buildCriticFeatures(g, side));
+            ai::belief::Update(g, side);
+            ep.bootstrap_value = learner.EvaluateValue(ml::BuildContext(g, side),
+                                                       ml::BuildCriticFeatures(g, side));
         }
         out.recorded_cities += cities[s];
         out.recorded_sides++;
@@ -367,7 +367,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
 // on fair information.
 
 std::unique_ptr<Game> CopyGame(const Config& cfg, const Game& g) {
-    return save::decode(save::encode(g), cfg.data_dir);
+    return save::Decode(save::Encode(g), cfg.data_dir);
 }
 
 RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
@@ -376,19 +376,19 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
     auto gp = MakeArenaGame(cfg, scenario, preset, seed, false);
     int active_count = 0;
     for (int s = 0; s < 8; s++) {
-        if (gp->map->sides[s].inUse) active_count++;
+        if (gp->map->sides[s].in_use) active_count++;
     }
     const int solo_seat =
             active_count > 0 ? static_cast<int>(seed % static_cast<uint32_t>(active_count)) : 0;
-    int learner_side = NONE;
+    int learner_side = kNone;
     std::array<opponents::Kind, 8> kind{};
     int idx = 0;
     for (int s = 0; s < 8; s++) {
         Side& side = gp->map->sides[s];
-        if (!side.inUse) continue;
+        if (!side.in_use) continue;
         const bool me = (idx++ == solo_seat);
         if (me) learner_side = s;
-        side.classicAi = !me;
+        side.classic_ai = !me;
         float raid_roll =
                 static_cast<float>(
                         ((seed * 747796405U) ^ static_cast<uint32_t>((s + 1) * 2891336453U)) >> 8) /
@@ -397,36 +397,37 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                                                 static_cast<uint32_t>((s + 1) * 3266489917U)) >>
                                                8) /
                             static_cast<float>(1U << 24);
-        kind[s] = raid_roll < cfg.raider_frac ? opponents::Kind::Raider : opponents::Kind::Classic;
+        kind[s] =
+                raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
         if (!me && g_frozen && frozen_roll < cfg.frozen_frac) {
-            kind[s] = opponents::Kind::Frozen;
-            side.classicAi = false;
+            kind[s] = opponents::Kind::kFrozen;
+            side.classic_ai = false;
         }
     }
 
     // Every side's normal play; the learner plays greedily outside its searched turn
     auto play_side = [&](Game& g, Side& side) {
         if (side.index == learner_side)
-            ai::modern::playTurn(g, side, nullptr, &learner, nullptr);
+            ai::modern::PlayTurn(g, side, nullptr, &learner, nullptr);
         else
-            opponents::playTurn(g, side, kind[side.index], g_frozen);
+            opponents::PlayTurn(g, side, kind[side.index], g_frozen);
     };
     auto rollout_value = [&](Game& g) {
         const int stop_turn = g.turn + cfg.search_h;
-        Side* cur = game::endTurn(g);
+        Side* cur = game::EndTurn(g);
         int safety = 0;
         while (cur && !g.over && !g.won && g.turn < stop_turn && safety++ < cfg.search_h * 12) {
             if (cur->computer && cur->alive) play_side(g, *cur);
-            cur = game::endTurn(g);
+            cur = game::EndTurn(g);
         }
-        return ml::computeEmpireScore(g, learner_side);
+        return ml::ComputeEmpireScore(g, learner_side);
     };
 
     RolloutSummary out;
     SideEpisode search_ep;
     search_ep.side_index = learner_side;
     search_ep.searched = true;
-    Side* cur = game::begin(*gp);
+    Side* cur = game::Begin(*gp);
     int safety = 0;
     while (cur && !gp->over && !gp->won && gp->turn <= cfg.max_turns &&
            safety++ < cfg.max_turns * 12) {
@@ -439,12 +440,12 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                 auto cand = CopyGame(cfg, *gp);
                 ml::RolloutSampler sampler;
                 sampler.temperature = temperature;
-                sampler.rngState = (seed * 2654435761U) ^
-                                   static_cast<uint32_t>((gp->turn + 1) * 40503U) ^
-                                   static_cast<uint32_t>((k + 1) * 2246822519U);
-                sampler.currentTurn = &recs[k];
-                ai::modern::playTurn(*cand, *cand->map->side(s), nullptr, &learner, &sampler);
-                sampler.currentTurn = nullptr;
+                sampler.rng_state = (seed * 2654435761U) ^
+                                    static_cast<uint32_t>((gp->turn + 1) * 40503U) ^
+                                    static_cast<uint32_t>((k + 1) * 2246822519U);
+                sampler.current_turn = &recs[k];
+                ai::modern::PlayTurn(*cand, *cand->map->Side(s), nullptr, &learner, &sampler);
+                sampler.current_turn = nullptr;
                 for (int r = 0; r < cfg.search_r; r++) {
                     auto copy = CopyGame(cfg, *cand);
                     copy->rng.state ^= static_cast<uint32_t>((r + 1) * 0x9e3779b9U);
@@ -461,25 +462,25 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                 if (value[k] > value[best]) best = static_cast<size_t>(k);
                 auto& tr = recs[k];
                 tr.advantage = static_cast<float>(value[k] - mean);
-                tr.returnTarget = std::numeric_limits<float>::quiet_NaN();  // no critic target
-                for (auto& ms : tr.missionSteps) {
+                tr.return_target = std::numeric_limits<float>::quiet_NaN();  // no critic target
+                for (auto& ms : tr.mission_steps) {
                     ms.advantage = tr.advantage;
-                    ms.stackReturnTarget = std::numeric_limits<float>::quiet_NaN();
+                    ms.stack_return_target = std::numeric_limits<float>::quiet_NaN();
                 }
                 search_ep.turns.push_back(std::move(tr));
             }
             gp = std::move(after[best]);
-            cur = gp->map->side(s);
+            cur = gp->map->Side(s);
         } else if (cur->computer && cur->alive) {
             play_side(*gp, *cur);
         }
-        cur = game::endTurn(*gp);
+        cur = game::EndTurn(*gp);
     }
     for (const auto& c : gp->map->cities) {
         if (c.razed) continue;
-        if (c.ownerIndex == NONE)
+        if (c.owner_index == kNone)
             out.neutrals_left++;
-        else if (c.ownerIndex == learner_side)
+        else if (c.owner_index == learner_side)
             out.recorded_cities++;
     }
     out.recorded_sides = 1;
@@ -499,9 +500,9 @@ void ComputeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
     int vac_count = 0;
     for (const auto& ep : episodes) {
         for (const auto& tr : ep.turns) {
-            for (const auto& ms : tr.missionSteps) {
-                if (ms.vacatedCity == NONE) continue;
-                vac_sum += ms.vacatedLoss;
+            for (const auto& ms : tr.mission_steps) {
+                if (ms.vacated_city == kNone) continue;
+                vac_sum += ms.vacated_loss;
                 vac_count++;
             }
         }
@@ -515,35 +516,36 @@ void ComputeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
         for (int t = turn_count - 1; t >= 0; t--) {
             auto& cur = ep.turns[t];
             bool last = (t == turn_count - 1);
-            float next_score = last ? ep.final_score : ep.turns[t + 1].startScore;
+            float next_score = last ? ep.final_score : ep.turns[t + 1].start_score;
             float next_value =
-                    last ? (ep.terminal ? 0.0F : ep.bootstrap_value) : ep.turns[t + 1].valuePred;
-            float reward = (next_score - cur.startScore) + (last ? ep.terminal_reward : 0.0F);
-            float delta = reward + gamma * next_value - cur.valuePred;
+                    last ? (ep.terminal ? 0.0F : ep.bootstrap_value) : ep.turns[t + 1].value_pred;
+            float reward = (next_score - cur.start_score) + (last ? ep.terminal_reward : 0.0F);
+            float delta = reward + gamma * next_value - cur.value_pred;
             gae = delta + gamma * lambda * gae;
             cur.advantage = gae;
-            cur.returnTarget = gae + cur.valuePred;
+            cur.return_target = gae + cur.value_pred;
 
             for (auto& [uid, val] : unit_future_local) val *= kStackGamma;
-            for (int mi = static_cast<int>(cur.missionSteps.size()) - 1; mi >= 0; mi--) {
-                auto& ms = cur.missionSteps[mi];
-                if (!ms.unitIds.empty()) {
-                    float per_unit = ms.immediateDeltaScore / static_cast<float>(ms.unitIds.size());
-                    for (std::uintptr_t uid : ms.unitIds) {
+            for (int mi = static_cast<int>(cur.mission_steps.size()) - 1; mi >= 0; mi--) {
+                auto& ms = cur.mission_steps[mi];
+                if (!ms.unit_ids.empty()) {
+                    float per_unit =
+                            ms.immediate_delta_score / static_cast<float>(ms.unit_ids.size());
+                    for (std::uintptr_t uid : ms.unit_ids) {
                         unit_future_local[uid] += per_unit;
                     }
                 }
-                const auto& eval_ids = ms.poolUnitIds.empty() ? ms.unitIds : ms.poolUnitIds;
+                const auto& eval_ids = ms.pool_unit_ids.empty() ? ms.unit_ids : ms.pool_unit_ids;
                 float group_return = 0.0F;
                 for (std::uintptr_t uid : eval_ids) {
                     auto it = unit_future_local.find(uid);
                     if (it != unit_future_local.end()) group_return += it->second;
                 }
-                ms.stackReturnTarget = group_return;
-                float local_adv = ms.stackReturnTarget - ms.stackValuePred;
+                ms.stack_return_target = group_return;
+                float local_adv = ms.stack_return_target - ms.stack_value_pred;
                 ms.advantage = cur.advantage + local_weight * local_adv;
-                if (ms.vacatedCity != NONE)
-                    ms.advantage -= departure_weight * (ms.vacatedLoss - vac_mean);
+                if (ms.vacated_city != kNone)
+                    ms.advantage -= departure_weight * (ms.vacated_loss - vac_mean);
             }
         }
     }
@@ -672,23 +674,23 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& tr,
                     const Normalizers& nz, float inv_t, const Config& cfg, ml::PolicyNetwork& grad,
                     HeadStats& st, std::vector<float>& u, std::vector<float>& d_u) {
     // Critic: 0.5 (V - G)^2 on a linear head (search-trained turns have no return target)
-    const bool has_critic_target = !std::isnan(tr.returnTarget);
+    const bool has_critic_target = !std::isnan(tr.return_target);
     if (has_critic_target) {
-        const ml::ValueInVec value_in = ml::packValueInput(tr.startCtx, tr.startCritic);
-        float v = net.valueNet.Forward(value_in)[0];
-        float dv = v - tr.returnTarget;
+        const ml::ValueInVec value_in = ml::PackValueInput(tr.start_ctx, tr.start_critic);
+        float v = net.value_net.Forward(value_in)[0];
+        float dv = v - tr.return_target;
         st.value_loss += 0.5 * dv * dv;
         st.turns++;
-        net.valueNet.Backward(value_in, {dv}, grad.valueNet);
+        net.value_net.Backward(value_in, {dv}, grad.value_net);
     }
 
-    for (const auto& ms : tr.missionSteps) {
+    for (const auto& ms : tr.mission_steps) {
         if (has_critic_target) {
-            float sv = net.evaluateStackValue(ms.stackValueIn);
-            float dsv = sv - ms.stackReturnTarget;
+            float sv = net.EvaluateStackValue(ms.stack_value_in);
+            float dsv = sv - ms.stack_return_target;
             st.value_loss += 0.25 * dsv * dsv;
             st.stack_values++;
-            net.stackValueNet.Backward(ms.stackValueIn, {dsv}, grad.stackValueNet);
+            net.stack_value_net.Backward(ms.stack_value_in, {dsv}, grad.stack_value_net);
         }
 
         float adv = nz.mission(ms.advantage);
@@ -696,56 +698,58 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& tr,
         if (candidate_count > 1) {
             u.resize(candidate_count);
             for (size_t k = 0; k < candidate_count; k++)
-                u[k] = net.missionNet.Forward(ms.candidates[k])[0];
-            CategoricalPpo(u, &ms.logMult, ms.chosenIdx, ms.oldLogProb, adv, inv_t, cfg, d_u, st);
+                u[k] = net.mission_net.Forward(ms.candidates[k])[0];
+            CategoricalPpo(u, &ms.log_mult, ms.chosen_idx, ms.old_log_prob, adv, inv_t, cfg, d_u,
+                           st);
             for (size_t k = 0; k < candidate_count; k++) {
                 if (d_u[k] != 0.0F)
-                    net.missionNet.Backward(ms.candidates[k], {d_u[k], 0.0F}, grad.missionNet);
+                    net.mission_net.Backward(ms.candidates[k], {d_u[k], 0.0F}, grad.mission_net);
             }
             st.mission++;
         }
-        if (ms.hasStageChoice && ms.chosenIdx < static_cast<int>(candidate_count)) {
-            float s = net.missionNet.Forward(ms.candidates[ms.chosenIdx])[1];
-            float d = BinaryPpo(s, ms.stageChosen, ms.oldStageLogProb, adv, inv_t, cfg, st);
-            net.missionNet.Backward(ms.candidates[ms.chosenIdx], {0.0F, d}, grad.missionNet);
+        if (ms.has_stage_choice && ms.chosen_idx < static_cast<int>(candidate_count)) {
+            float s = net.mission_net.Forward(ms.candidates[ms.chosen_idx])[1];
+            float d = BinaryPpo(s, ms.stage_chosen, ms.old_stage_log_prob, adv, inv_t, cfg, st);
+            net.mission_net.Backward(ms.candidates[ms.chosen_idx], {0.0F, d}, grad.mission_net);
             st.mission++;
         }
     }
 
     float econ_adv = nz.econ(tr.advantage);
-    for (const auto& es : tr.econSteps) {
+    for (const auto& es : tr.econ_steps) {
         const size_t candidate_count = es.candidates.size();
         if (candidate_count <= 1) continue;
         u.resize(candidate_count);
         for (size_t k = 0; k < candidate_count; k++)
-            u[k] = net.econNet.Forward(es.candidates[k])[0];
-        CategoricalPpo(u, &es.logMult, es.chosenIdx, es.oldLogProb, econ_adv, inv_t, cfg, d_u, st);
+            u[k] = net.econ_net.Forward(es.candidates[k])[0];
+        CategoricalPpo(u, &es.log_mult, es.chosen_idx, es.old_log_prob, econ_adv, inv_t, cfg, d_u,
+                       st);
         for (size_t k = 0; k < candidate_count; k++) {
-            if (d_u[k] != 0.0F) net.econNet.Backward(es.candidates[k], {d_u[k]}, grad.econNet);
+            if (d_u[k] != 0.0F) net.econ_net.Backward(es.candidates[k], {d_u[k]}, grad.econ_net);
         }
         st.econ++;
     }
 
     float diplo_adv = nz.diplo(tr.advantage);
-    for (const auto& ds : tr.diploSteps) {
-        auto raw = net.diploNet.Forward(ds.input);
-        std::array<float, ml::DIPLO_OUT_DIM> d_out{};
+    for (const auto& ds : tr.diplo_steps) {
+        auto raw = net.diplo_net.Forward(ds.input);
+        std::array<float, ml::kDiploOutDim> d_out{};
         u = {raw[0], raw[1], raw[2], raw[3]};
-        CategoricalPpo(u, nullptr, ds.chosenStance, ds.oldStanceLogProb, diplo_adv, inv_t, cfg, d_u,
-                       st);
+        CategoricalPpo(u, nullptr, ds.chosen_stance, ds.old_stance_log_prob, diplo_adv, inv_t, cfg,
+                       d_u, st);
         for (int k = 0; k < 4; k++) d_out[k] = d_u[k];
         st.diplo++;
-        if (ds.hasTribute) {
-            d_out[4] = BinaryPpo(raw[4], ds.tributeChosen, ds.oldTributeLogProb, diplo_adv, inv_t,
-                                 cfg, st);
+        if (ds.has_tribute) {
+            d_out[4] = BinaryPpo(raw[4], ds.tribute_chosen, ds.old_tribute_log_prob, diplo_adv,
+                                 inv_t, cfg, st);
             st.diplo++;
         }
-        if (ds.hasJointWar) {
-            d_out[5] = BinaryPpo(raw[5], ds.jointWarChosen, ds.oldJointWarLogProb, diplo_adv, inv_t,
-                                 cfg, st);
+        if (ds.has_joint_war) {
+            d_out[5] = BinaryPpo(raw[5], ds.joint_war_chosen, ds.old_joint_war_log_prob, diplo_adv,
+                                 inv_t, cfg, st);
             st.diplo++;
         }
-        net.diploNet.Backward(ds.input, d_out, grad.diploNet);
+        net.diplo_net.Backward(ds.input, d_out, grad.diplo_net);
     }
 }
 
@@ -801,7 +805,7 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     Game& g = *gp;
     int active_count = 0;
     for (int s = 0; s < 8; s++) {
-        if (g.map->sides[s].inUse) active_count++;
+        if (g.map->sides[s].in_use) active_count++;
     }
     // Solo: the Modern seat rotates with the seed; the swapped game takes the seat
     // half-way round the table so both games of a seed differ in position.
@@ -814,32 +818,32 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     std::array<bool, 8> modern{};
     int idx = 0;
     for (int s = 0; s < 8; s++) {
-        if (!g.map->sides[s].inUse) continue;
+        if (!g.map->sides[s].in_use) continue;
         modern[s] = solo ? (idx == solo_seat) : ((idx + c.swap) % 2 == 0);
         // Opponent seats are Classic AI sides unless the Frozen Modern checkpoint plays them
-        g.map->sides[s].classicAi = !modern[s] && cfg.eval_opponent != opponents::Kind::Frozen;
+        g.map->sides[s].classic_ai = !modern[s] && cfg.eval_opponent != opponents::Kind::kFrozen;
         if (modern[s]) c.modern_sides++;
         c.sides++;
         idx++;
     }
-    Side* cur = game::begin(g);
+    Side* cur = game::Begin(g);
     int safety = 0;
     while (cur && !g.over && !g.won && g.turn <= turns && safety < turns * 12) {
         safety++;
         if (cur->computer && cur->alive) {
             if (modern[cur->index])
-                ai::modern::playTurn(g, *cur, nullptr, &policy, nullptr);
+                ai::modern::PlayTurn(g, *cur, nullptr, &policy, nullptr);
             else
-                opponents::playTurn(g, *cur, cfg.eval_opponent, g_frozen);
+                opponents::PlayTurn(g, *cur, cfg.eval_opponent, g_frozen);
         }
-        cur = game::endTurn(g);
+        cur = game::EndTurn(g);
     }
     std::array<int, 8> cnt{};
-    int m = 0, k = 0, best = NONE, best_cnt = -1;
+    int m = 0, k = 0, best = kNone, best_cnt = -1;
     for (const auto& city : g.map->cities) {
-        if (city.razed || city.ownerIndex < 0 || city.ownerIndex >= 8) continue;
-        cnt[city.ownerIndex]++;
-        (modern[city.ownerIndex] ? m : k)++;
+        if (city.razed || city.owner_index < 0 || city.owner_index >= 8) continue;
+        cnt[city.owner_index]++;
+        (modern[city.owner_index] ? m : k)++;
     }
     for (int s = 0; s < 8; s++) {
         if (cnt[s] > best_cnt) {
@@ -848,7 +852,7 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
         }
     }
     c.share = (m + k) > 0 ? static_cast<double>(m) / static_cast<double>(m + k) : 0.5;
-    c.top = (best != NONE && modern[best]) ? 1 : 0;
+    c.top = (best != kNone && modern[best]) ? 1 : 0;
     c.modern = m;
     c.classic = k;
 }
@@ -1068,11 +1072,11 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
         else if (a == "--eval-opponent") {
             std::string o = next();
             if (o == "raider")
-                cfg.eval_opponent = opponents::Kind::Raider;
+                cfg.eval_opponent = opponents::Kind::kRaider;
             else if (o == "frozen")
-                cfg.eval_opponent = opponents::Kind::Frozen;
+                cfg.eval_opponent = opponents::Kind::kFrozen;
             else if (o == "classic")
-                cfg.eval_opponent = opponents::Kind::Classic;
+                cfg.eval_opponent = opponents::Kind::kClassic;
             else {
                 std::fprintf(
                         stderr,
@@ -1097,7 +1101,7 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
 int main(int argc, char** argv) {
     Config cfg;
     if (!ParseArgs(argc, argv, cfg)) return 2;
-    if (!fileExists(cfg.data_dir + "/TERRAIN0/ARMYTYPE.DAT")) {
+    if (!FileExists(cfg.data_dir + "/TERRAIN0/ARMYTYPE.DAT")) {
         std::fprintf(stderr,
                      "Cannot find the game data in '%s': run from the repository root or pass "
                      "--data DIR.\n",
@@ -1105,10 +1109,10 @@ int main(int argc, char** argv) {
         return 1;
     }
     unsigned int threads = std::max(2U, std::thread::hardware_concurrency());
-    ml::setDeployTemperature(cfg.eval_temp);
+    ml::SetDeployTemperature(cfg.eval_temp);
     ml::PolicyNetwork frozen;
     if (!cfg.frozen_path.empty()) {
-        if (!frozen.loadJson(cfg.frozen_path)) {
+        if (!frozen.LoadJson(cfg.frozen_path)) {
             std::fprintf(stderr,
                          "Cannot load --frozen-opponent '%s'; check the path and JSON format.\n",
                          cfg.frozen_path.c_str());
@@ -1116,7 +1120,7 @@ int main(int argc, char** argv) {
         }
         g_frozen = &frozen;
     }
-    if (cfg.eval_opponent == opponents::Kind::Frozen && !g_frozen) {
+    if (cfg.eval_opponent == opponents::Kind::kFrozen && !g_frozen) {
         std::fprintf(stderr, "--eval-opponent frozen needs --frozen-opponent PATH.\n");
         return 2;
     }
@@ -1124,10 +1128,10 @@ int main(int argc, char** argv) {
     ml::PolicyNetwork learner;
     bool loaded = false;
     if (!cfg.from_scratch && std::filesystem::exists(cfg.out_path))
-        loaded = learner.loadJson(cfg.out_path);
-    if (!loaded) learner.initRandomWeights(2026);
+        loaded = learner.LoadJson(cfg.out_path);
+    if (!loaded) learner.InitRandomWeights(2026);
     std::printf("=== w2arena: PPO self-play | params %d | threads %u | %s ===\n",
-                ml::PolicyNetwork::TOTAL_PARAMS, threads,
+                ml::PolicyNetwork::kTotalParams, threads,
                 loaded ? ("loaded " + cfg.out_path).c_str() : "random init");
 
     if (cfg.benchmark_only || cfg.iterations == 0 || !cfg.compare_path.empty()) {
@@ -1154,7 +1158,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         ml::PolicyNetwork other;
-        if (!other.loadJson(cfg.compare_path)) {
+        if (!other.LoadJson(cfg.compare_path)) {
             std::fprintf(stderr,
                          "Cannot load --compare checkpoint '%s'; check the path and JSON format.\n",
                          cfg.compare_path.c_str());
@@ -1170,7 +1174,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     std::string mode_label = cfg.solo_learner ? "solo-learner (1 vs K-1 Classic)"
-                                              : fmt("classic-frac %.2f", cfg.classic_frac);
+                                              : Fmt("classic-frac %.2f", cfg.classic_frac);
     std::printf(
             "iters %d | games/iter %d | turns %d | sides %d (crop %d, rand %.2f) | epochs %d x %d "
             "minibatches | "
@@ -1191,13 +1195,13 @@ int main(int argc, char** argv) {
     int best_iter = 0;
     float best_share = -1.0F;
 
-    const size_t param_count = ml::PolicyNetwork::TOTAL_PARAMS;
+    const size_t param_count = ml::PolicyNetwork::kTotalParams;
     const size_t off_diplo = 0;
-    const size_t off_mission = off_diplo + ml::PolicyNetwork::DiploNet::PARAM_COUNT;
-    const size_t off_econ = off_mission + ml::PolicyNetwork::MissionNet::PARAM_COUNT;
-    const size_t off_value = off_econ + ml::PolicyNetwork::EconNet::PARAM_COUNT;
-    const size_t off_stack_value = off_value + ml::PolicyNetwork::ValueNet::PARAM_COUNT;
-    std::vector<float> params = learner.flatten(), adam_m(param_count, 0.0F),
+    const size_t off_mission = off_diplo + ml::PolicyNetwork::DiploNet::kParamCount;
+    const size_t off_econ = off_mission + ml::PolicyNetwork::MissionNet::kParamCount;
+    const size_t off_value = off_econ + ml::PolicyNetwork::EconNet::kParamCount;
+    const size_t off_stack_value = off_value + ml::PolicyNetwork::ValueNet::kParamCount;
+    std::vector<float> params = learner.Flatten(), adam_m(param_count, 0.0F),
                        adam_v(param_count, 0.0F);
     int adam_step = 0;
     std::mt19937 shuffle_rng(12345);
@@ -1252,9 +1256,9 @@ int main(int argc, char** argv) {
         for (const auto& ep : episodes) {
             for (const auto& tr : ep.turns) {
                 turns.push_back(&tr);
-                for (const auto& ms : tr.missionSteps) m_adv.push_back(ms.advantage);
-                if (!tr.econSteps.empty()) e_adv.push_back(tr.advantage);
-                if (!tr.diploSteps.empty()) d_adv.push_back(tr.advantage);
+                for (const auto& ms : tr.mission_steps) m_adv.push_back(ms.advantage);
+                if (!tr.econ_steps.empty()) e_adv.push_back(tr.advantage);
+                if (!tr.diplo_steps.empty()) d_adv.push_back(tr.advantage);
             }
         }
         Normalizers nz{Normalizer::Fit(m_adv), Normalizer::Fit(e_adv), Normalizer::Fit(d_adv)};
@@ -1281,12 +1285,12 @@ int main(int argc, char** argv) {
         };
         std::vector<float> v_target, v_pred, sv_target, sv_pred;
         for (const auto* tr : turns) {
-            if (std::isnan(tr->returnTarget)) continue;
-            v_target.push_back(tr->returnTarget);
-            v_pred.push_back(tr->valuePred);
-            for (const auto& ms : tr->missionSteps) {
-                sv_target.push_back(ms.stackReturnTarget);
-                sv_pred.push_back(ms.stackValuePred);
+            if (std::isnan(tr->return_target)) continue;
+            v_target.push_back(tr->return_target);
+            v_pred.push_back(tr->value_pred);
+            for (const auto& ms : tr->mission_steps) {
+                sv_target.push_back(ms.stack_return_target);
+                sv_pred.push_back(ms.stack_value_pred);
             }
         }
         const double ev_value = explained_variance(v_target, v_pred),
@@ -1294,11 +1298,11 @@ int main(int argc, char** argv) {
         // How often a move empties an own city, and how often that city then falls
         long vacated = 0, vacated_lost = 0, mission_moves = 0;
         for (const auto* tr : turns) {
-            for (const auto& ms : tr->missionSteps) {
+            for (const auto& ms : tr->mission_steps) {
                 mission_moves++;
-                if (ms.vacatedCity == NONE) continue;
+                if (ms.vacated_city == kNone) continue;
                 vacated++;
-                if (ms.vacatedLoss > 0.0F) vacated_lost++;
+                if (ms.vacated_loss > 0.0F) vacated_lost++;
             }
         }
         // Critic warm-up: only the critics learn for the first --critic-warmup iterations
@@ -1320,7 +1324,7 @@ int main(int argc, char** argv) {
                 std::vector<HeadStats> stats(gw);
                 std::vector<std::thread> gpool;
                 for (unsigned int w = 0; w < gw; w++) {
-                    grads[w].zero();
+                    grads[w].Zero();
                     gpool.emplace_back([&, w]() {
                         std::vector<float> u, d_u;
                         for (size_t ti; (ti = next_turn.fetch_add(1)) < mb1;) {
@@ -1334,7 +1338,7 @@ int main(int argc, char** argv) {
                 HeadStats mb_stats;
                 std::vector<float> g(param_count, 0.0F);
                 for (unsigned int w = 0; w < gw; w++) {
-                    auto fg = grads[w].flatten();
+                    auto fg = grads[w].Flatten();
                     for (size_t d = 0; d < param_count; d++) g[d] += fg[d];
                     mb_stats.Add(stats[w]);
                 }
@@ -1362,7 +1366,7 @@ int main(int argc, char** argv) {
                     adam_v[d] = 0.999F * adam_v[d] + 0.001F * gd * gd;
                     params[d] -= lr * (adam_m[d] / bc1) / (std::sqrt(adam_v[d] / bc2) + 1e-8F);
                 }
-                learner.unflatten(params);
+                learner.Unflatten(params);
                 epoch_stats.Add(mb_stats);
             }
             last_epoch = epoch_stats;
@@ -1392,8 +1396,8 @@ int main(int argc, char** argv) {
 
         if (cfg.save_every > 0 && iter % cfg.save_every == 0) {
             std::filesystem::path snap = cfg.out_path;
-            snap.replace_extension(fmt(".iter%d.json", iter));
-            learner.saveJson(snap, iter, 0.0F);
+            snap.replace_extension(Fmt(".iter%d.json", iter));
+            learner.SaveJson(snap, iter, 0.0F);
         }
         if (iter % 10 == 0) {
             if (hall_of_fame.size() < 12)
@@ -1413,7 +1417,7 @@ int main(int argc, char** argv) {
                 best_share = sel_share;
                 best = learner;
                 best_iter = iter;
-                best.saveJson(cfg.out_path, best_iter, best_share);
+                best.SaveJson(cfg.out_path, best_iter, best_share);
             }
         }
         if (logf) {
@@ -1426,11 +1430,11 @@ int main(int argc, char** argv) {
     }
     if (logf) std::fclose(logf);
 
-    best.saveJson(cfg.out_path, best_iter, best_share);
+    best.SaveJson(cfg.out_path, best_iter, best_share);
     {
         std::filesystem::path fin = cfg.out_path;
         fin.replace_extension(".final.json");
-        learner.saveJson(fin, cfg.iterations, 0.0F);
+        learner.SaveJson(fin, cfg.iterations, 0.0F);
     }
     if (cfg.report_seeds > 0) {
         std::printf("Kept iteration %d (selection share %.1f%%) in %s. Held-out report:\n",

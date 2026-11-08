@@ -28,38 +28,38 @@ struct SDL_Window;
 
 namespace display {
 
-constexpr int W = 640, H = 480;  // the original's screen, and the smallest
-constexpr int SHORT_H = 400;     // the fewest rows the main screen fits in (front/layout)
-constexpr int SMOOTH = -1;       // the smooth view, as a chosen scale
+constexpr int kW = 640, kH = 480;  // the original's screen, and the smallest
+constexpr int kShortH = 400;       // the fewest rows the main screen fits in (front/layout)
+constexpr int kSmooth = -1;        // the smooth view, as a chosen scale
 
 struct State {
-    double dpi = 1;          // device pixels to a window point
-    int pw = 640, ph = 480;  // the window, in device pixels
-    double shrink = 1;       // the window's real pixels to a device pixel: under 1 on a canvas
-    int scale = 1;           // device pixels to a UI pixel
-    int maxScale = 1;        // the biggest whole scale that fits
-    int maxShort = 1;        // the biggest that fits the main screen, cut down to SHORT_H rows
-    int minH = H;            // the rows the screen in use needs: H for the start screens
-    double smoothScale = 0;  // the smooth view's size, in real pixels a UI pixel; 0 for none
-    bool smooth = false;     // drawn in the smooth view
-    int chosen = 0;          // picked from the menu: a whole scale, SMOOTH, or 0 for none
-    bool windowed = false;   // in a window on the desktop, not full screen
+    double dpi = 1;           // device pixels to a window point
+    int pw = 640, ph = 480;   // the window, in device pixels
+    double shrink = 1;        // the window's real pixels to a device pixel: under 1 on a canvas
+    int scale = 1;            // device pixels to a UI pixel
+    int max_scale = 1;        // the biggest whole scale that fits
+    int max_short = 1;        // the biggest that fits the main screen, cut down to SHORT_H rows
+    int min_h = kH;           // the rows the screen in use needs: H for the start screens
+    double smooth_scale = 0;  // the smooth view's size, in real pixels a UI pixel; 0 for none
+    bool smooth = false;      // drawn in the smooth view
+    int chosen = 0;           // picked from the menu: a whole scale, SMOOTH, or 0 for none
+    bool windowed = false;    // in a window on the desktop, not full screen
     bool crt = false;  // through an old monitor's tube (View > CRT screen): plain where there is no
                        // canvas
     std::optional<std::pair<int, int>> wanted;  // the frame to keep to: View > 4:3
     int w = 640, h = 480;                       // the frame being drawn, in UI pixels
     int ox = 0, oy = 0;                         // where its (0, 0) sits, in device pixels
-    bool mouseInside = true;                    // over the window at all
+    bool mouse_inside = true;                   // over the window at all
     std::optional<std::pair<int, int>> off;  // over the black round the frame: where, in UI pixels
-    std::string glassShot;  // a .bmp to write the window to as the next frame shows it (a script's
-                            // glass)
+    std::string glass_shot;  // a .bmp to write the window to as the next frame shows it (a script's
+                             // glass)
 };
 extern State d;
 
 /** Open the game's window: full screen on the desktop, or a window. With a
  *  size, a window of exactly that many device pixels (--size). */
-SDL_Window* open(const char* title, bool windowed, int sizeW = 0, int sizeH = 0);
-SDL_Window* window();
+SDL_Window* Open(const char* title, bool windowed, int size_w = 0, int size_h = 0);
+SDL_Window* Window();
 /** Read the window's size, and pick the UI's scale: the one chosen from the
  *  menu, or else the smooth view where there is one, and the biggest whole
  *  number that still fits 640x480 where not. The smooth view is there when
@@ -67,35 +67,35 @@ SDL_Window* window();
  *  bigger than that leaves fewer than 480 rows, and is kept only where the
  *  screen in use needs no more than that (`minH`); elsewhere the scale is
  *  the one there would be with none chosen. */
-void measure();
+void Measure();
 /** Start a frame: on the canvas, when the scale or the CRT needs one. */
-void beginFrame();
+void BeginFrame();
 /** Show the frame, shrinking the canvas onto the window, or through the
  *  CRT's tube. */
-void present();
+void Present();
 /** Draw the UI at `n` device pixels a pixel from now on, as far as it fits,
  *  or in the smooth view (SMOOTH) where there is one. */
-void choose(int n);
+void Choose(int n);
 /** How many UI pixels the game gets. */
-std::pair<int, int> uiSize();
+std::pair<int, int> UiSize();
 /** Draw a frame of w x h UI pixels from here on, centred on the screen. */
-void setFrame(int w, int h);
+void SetFrame(int w, int h);
 /** Draw in UI pixels until the matching gfx::pop. */
-void pushUI();
+void PushUi();
 /** Draw in map pixels until the matching pop, one map pixel to `zoom` device
  *  pixels, slid `camX, camY` device pixels from the UI point (x, y). */
-void pushMap(int x, int y, int camX, int camY, int zoom);
+void PushMap(int x, int y, int cam_x, int cam_y, int zoom);
 /** A window position (in points) as a UI point, held to the frame. */
-std::pair<int, int> toUI(double x, double y);
+std::pair<int, int> ToUi(double x, double y);
 /** Where a UI point shows on the window, in points: toUI's way back, for
  *  putting the mouse where a controller's pointer is. */
-std::pair<double, double> fromUI(double x, double y);
+std::pair<double, double> FromUi(double x, double y);
 /** A window position off the frame as a UI point, not held to it; none
  *  when it is on the frame. */
-std::optional<std::pair<int, int>> offFrame(double x, double y);
+std::optional<std::pair<int, int>> OffFrame(double x, double y);
 /** Full screen or a window (View > Full screen, Window). */
-void setWindowed(bool on);
+void SetWindowed(bool on);
 /** Is the pointer out of the window, so that it draws none? */
-bool pointerAway();
+bool PointerAway();
 
 }  // namespace display

@@ -16,7 +16,7 @@ namespace fs = std::filesystem;
 
 namespace w2 {
 
-std::string fmt(const char* f, ...) {
+std::string Fmt(const char* f, ...) {
     va_list ap;
     va_start(ap, f);
     char buf[512];
@@ -36,7 +36,7 @@ std::string fmt(const char* f, ...) {
     return out;
 }
 
-std::string sfmt(const std::string& f, const std::vector<FmtArg>& args) {
+std::string Sfmt(const std::string& f, const std::vector<FmtArg>& args) {
     std::string out;
     size_t n = 0;
     for (size_t i = 0; i < f.size(); i++) {
@@ -76,7 +76,7 @@ std::string sfmt(const std::string& f, const std::vector<FmtArg>& args) {
         case 'd':
         case 'i':
         case 'u': {
-            long v = a.str ? (toInt(a.s) ? *toInt(a.s) : 0) : a.n;
+            long v = a.str ? (ToInt(a.s) ? *ToInt(a.s) : 0) : a.n;
             s = std::to_string(v < 0 ? -v : v);
             if (prec >= 0)
                 while (static_cast<int>(s.size()) < prec) s = "0" + s;
@@ -136,7 +136,7 @@ const std::vector<std::string>& Listing(const std::string& dir) {
 }
 }  // namespace
 
-std::string resolvePath(const std::string& path) {
+std::string ResolvePath(const std::string& path) {
     std::error_code ec;
     if (fs::exists(path, ec)) return path;
     std::string p = path;
@@ -158,7 +158,7 @@ std::string resolvePath(const std::string& path) {
         if (part != ".." && !fs::exists(next, ec)) {
             std::string found;
             for (auto& n : Listing(cur)) {
-                if (n.size() == part.size() && upper(n) == upper(part)) {
+                if (n.size() == part.size() && Upper(n) == Upper(part)) {
                     found = n;
                     break;
                 }
@@ -187,14 +187,14 @@ std::string MadeKey(const std::string& path) {
 }
 }  // namespace
 
-void installFile(const std::string& path, const std::string& bytes) {
+void InstallFile(const std::string& path, const std::string& bytes) {
     MadeFiles()[MadeKey(path)] = bytes;
 }
 
-std::optional<std::string> readFile(const std::string& path) {
+std::optional<std::string> ReadFile(const std::string& path) {
     auto made = MadeFiles().find(MadeKey(path));
     if (made != MadeFiles().end()) return made->second;
-    std::string real = resolvePath(path);
+    std::string real = ResolvePath(path);
     if (real.empty()) return std::nullopt;
     std::ifstream f(real, std::ios::binary);
     if (!f) return std::nullopt;
@@ -203,18 +203,18 @@ std::optional<std::string> readFile(const std::string& path) {
     return ss.str();
 }
 
-std::string mustRead(const std::string& path) {
-    auto s = readFile(path);
+std::string MustRead(const std::string& path) {
+    auto s = ReadFile(path);
     if (!s) throw std::runtime_error("cannot open: " + path);
     return *s;
 }
 
-bool fileExists(const std::string& path) {
-    return MadeFiles().count(MadeKey(path)) > 0 || !resolvePath(path).empty();
+bool FileExists(const std::string& path) {
+    return MadeFiles().count(MadeKey(path)) > 0 || !ResolvePath(path).empty();
 }
 
-bool writeFile(const std::string& path, const std::string& bytes) {
-    std::string real = resolvePath(path);
+bool WriteFile(const std::string& path, const std::string& bytes) {
+    std::string real = ResolvePath(path);
     if (real.empty()) real = path;
     std::string tmp = real + ".tmp";
     {
@@ -231,8 +231,8 @@ bool writeFile(const std::string& path, const std::string& bytes) {
     return true;
 }
 
-bool removeFile(const std::string& path) {
-    std::string real = resolvePath(path);
+bool RemoveFile(const std::string& path) {
+    std::string real = ResolvePath(path);
     if (real.empty()) return false;
     std::error_code ec;
     bool ok = fs::remove(real, ec);
@@ -243,25 +243,25 @@ bool removeFile(const std::string& path) {
 
 // ----------------------------------------------------------------- strings
 
-std::string upper(std::string s) {
+std::string Upper(std::string s) {
     for (auto& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     return s;
 }
-std::string lower(std::string s) {
+std::string Lower(std::string s) {
     for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
 }
-std::string trimRight(const std::string& s) {
+std::string TrimRight(const std::string& s) {
     size_t e = s.size();
     while (e > 0 && std::isspace(static_cast<unsigned char>(s[e - 1]))) e--;
     return s.substr(0, e);
 }
-std::string trim(const std::string& s) {
+std::string Trim(const std::string& s) {
     size_t b = 0;
     while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) b++;
-    return trimRight(s.substr(b));
+    return TrimRight(s.substr(b));
 }
-std::vector<std::string> splitLines(const std::string& s) {
+std::vector<std::string> SplitLines(const std::string& s) {
     std::vector<std::string> out;
     std::string cur;
     for (char c : s) {
@@ -275,17 +275,17 @@ std::vector<std::string> splitLines(const std::string& s) {
     if (!cur.empty()) out.push_back(cur);
     return out;
 }
-bool startsWith(const std::string& s, const std::string& p) {
+bool StartsWith(const std::string& s, const std::string& p) {
     return s.compare(0, p.size(), p) == 0;
 }
-bool endsWith(const std::string& s, const std::string& p) {
+bool EndsWith(const std::string& s, const std::string& p) {
     return s.size() >= p.size() && s.compare(s.size() - p.size(), p.size(), p) == 0;
 }
-bool contains(const std::string& s, const std::string& p) {
+bool Contains(const std::string& s, const std::string& p) {
     return s.find(p) != std::string::npos;
 }
 
-std::string latin1ToUtf8(const std::string& s) {
+std::string Latin1ToUtf8(const std::string& s) {
     std::string out;
     for (unsigned char c : s) {
         if (c < 0x80)
@@ -297,7 +297,7 @@ std::string latin1ToUtf8(const std::string& s) {
     }
     return out;
 }
-std::string utf8ToLatin1(const std::string& s) {
+std::string Utf8ToLatin1(const std::string& s) {
     std::string out;
     for (size_t i = 0; i < s.size();) {
         unsigned char c = s[i];
@@ -314,8 +314,8 @@ std::string utf8ToLatin1(const std::string& s) {
     }
     return out;
 }
-std::optional<long> toInt(const std::string& s) {
-    std::string t = trim(s);
+std::optional<long> ToInt(const std::string& s) {
+    std::string t = Trim(s);
     if (t.empty()) return std::nullopt;
     size_t i = 0;
     bool neg = false;
@@ -332,7 +332,7 @@ std::optional<long> toInt(const std::string& s) {
     return neg ? -v : v;
 }
 
-double now() {
+double Now() {
     using namespace std::chrono;
     static const auto kStart = steady_clock::now();
     return duration<double>(steady_clock::now() - kStart).count();

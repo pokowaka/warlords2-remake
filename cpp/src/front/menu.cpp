@@ -5,7 +5,7 @@
 
 namespace menu {
 
-const std::vector<Menu> MENUS = {
+const std::vector<Menu> kMenus = {
     {"SSG", {{"About Warlords II", "", "?"}}},
     {"Game",
      {{"Settings", "alt X", ""},
@@ -68,9 +68,9 @@ static std::string ScaleName(double s) {
     return t;
 }
 
-std::vector<Menu> withZooms(int max_ui, int max_map, double smooth_ui, double map_shrink) {
+std::vector<Menu> WithZooms(int max_ui, int max_map, double smooth_ui, double map_shrink) {
     std::vector<Menu> out;
-    for (const Menu& m : MENUS) {
+    for (const Menu& m : kMenus) {
         Menu n{m.title, {}};
         if (m.title == "Game") {
             for (size_t j = 0; j < m.items.size(); j++) {
@@ -123,20 +123,20 @@ static bool Tickable(const std::string& act) {
     return false;
 }
 
-Layout layout(const Font& font, int screen_width, const std::vector<Menu>& menus) {
+Layout MakeLayout(const Font& font, int screen_width, const std::vector<Menu>& menus) {
     Layout out;
-    int x = BAR_X;
-    int lh = font.lineHeight;
+    int x = kBarX;
+    int lh = font.line_height;
     for (const Menu& m : menus) {
-        int tw = (font.width(m.title) + 7) / 8 * 8;
+        int tw = (font.Width(m.title) + 7) / 8 * 8;
         int w = 0, key_col = 0, key_w = 0;
         bool ticked = false;
         for (const Item& it : m.items) {
             if (it.label != "-") {
-                int lw = 12 + font.width(it.label);
+                int lw = 12 + font.Width(it.label);
                 if (!it.key.empty()) {
                     key_col = std::max(key_col, lw + 5);
-                    key_w = std::max(key_w, font.width(it.key));
+                    key_w = std::max(key_w, font.Width(it.key));
                     lw = key_col + key_w;
                 } else if (Tickable(it.act)) {
                     // a setting's tick goes in the key column: keep it clear of the label
@@ -147,7 +147,7 @@ Layout layout(const Font& font, int screen_width, const std::vector<Menu>& menus
             }
         }
         if (ticked) w = std::max(w, key_col + std::max(key_w, kTickW) + 5);
-        int y = BAR_H + 1;
+        int y = kBarH + 1;
         Title t;
         t.title = m.title;
         t.x = x;
@@ -164,22 +164,22 @@ Layout layout(const Font& font, int screen_width, const std::vector<Menu>& menus
         t.drop.y = y;
         t.drop.w = w;
         t.drop.h = at + 1;
-        t.drop.keyCol = key_col;
+        t.drop.key_col = key_col;
         out.push_back(t);
         x += tw + 16;
     }
     return out;
 }
 
-int titleAt(const Layout& lay, int x, int y) {
-    if (y < 0 || y >= BAR_H) return -1;
+int TitleAt(const Layout& lay, int x, int y) {
+    if (y < 0 || y >= kBarH) return -1;
     for (size_t i = 0; i < lay.size(); i++) {
         if (x >= lay[i].x && x < lay[i].x + lay[i].w) return static_cast<int>(i);
     }
     return -1;
 }
 
-const Row* rowAt(const Layout& lay, int index, int x, int y) {
+const Row* RowAt(const Layout& lay, int index, int x, int y) {
     if (index < 0 || index >= static_cast<int>(lay.size())) return nullptr;
     for (const Row& r : lay[index].drop.rows) {
         if (r.label != "-" && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return &r;

@@ -25,7 +25,7 @@
 
 namespace w2::xmi {
 
-constexpr int TICK_RATE = 120;
+constexpr int kTickRate = 120;
 
 struct Event {
     int t;             // the tick
@@ -39,6 +39,6 @@ struct Sequence {
 
 /** The first sequence of an XMI file's bytes, or nothing without an EVNT
  *  chunk. Meta events are dropped. */
-std::optional<Sequence> parse(const std::string& bytes);
+std::optional<Sequence> Parse(const std::string& bytes);
 
 }  // namespace w2::xmi

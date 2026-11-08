@@ -407,7 +407,7 @@ bool ThroughShader(SDL_Renderer* r, SDL_Texture* canvas, const Look& k) {
 
 }  // namespace
 
-std::pair<double, double> unwarp(double x, double y) {
+std::pair<double, double> Unwarp(double x, double y) {
     const auto& d = display::d;
     double fw = d.w * d.scale, fh = d.h * d.scale;
     if (fw <= 0 || fh <= 0) return {x, y};
@@ -416,7 +416,7 @@ std::pair<double, double> unwarp(double x, double y) {
     return {d.ox + (cx + 1) / 2 * fw, d.oy + (cy + 1) / 2 * fh};
 }
 
-void present(SDL_Renderer* r, SDL_Texture* canvas) {
+void Present(SDL_Renderer* r, SDL_Texture* canvas) {
     const auto& d = display::d;
     int fx = d.ox, fy = d.oy, fw = d.w * d.scale, fh = d.h * d.scale;
     SDL_SetTextureBlendMode(canvas, SDL_BLENDMODE_NONE);

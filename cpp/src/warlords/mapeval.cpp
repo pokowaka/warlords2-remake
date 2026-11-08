@@ -81,10 +81,10 @@ struct View {
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 int i = y * w + x;
-                terrain[i] = scn::terrainAt(m, x, y);
-                int r = scn::roadAt(m, x, y) % 32;
+                terrain[i] = scn::TerrainAt(m, x, y);
+                int r = scn::RoadAt(m, x, y) % 32;
                 road[i] = r <= 17 ? r : 0;
-                crossing[i] = scn::isCrossing(m, x, y);
+                crossing[i] = scn::IsCrossing(m, x, y);
             }
         }
         for (const City& c : m.cities) {
@@ -93,7 +93,7 @@ struct View {
                 for (int dx = -1; dx <= 2 && !is_port; dx++) {
                     if (dx >= 0 && dx <= 1 && dy >= 0 && dy <= 1) continue;
                     int t = TerrainOr(c.x + dx, c.y + dy, -1);
-                    is_port = t == BRIDGE || t == WATER || t == SHORE;
+                    is_port = t == kBridge || t == kWater || t == kShore;
                 }
             for (int dy = 0; dy <= 1; dy++)
                 for (int dx = 0; dx <= 1; dx++) {
@@ -108,12 +108,12 @@ struct View {
     }
     bool In(int x, int y) const { return x >= 0 && y >= 0 && x < w && y < h; }
     int TerrainOr(int x, int y, int dflt) const { return In(x, y) ? terrain[y * w + x] : dflt; }
-    bool Sea(int i) const { return terrain[i] == WATER || terrain[i] == SHORE; }
+    bool Sea(int i) const { return terrain[i] == kWater || terrain[i] == kShore; }
     /** Road, or a bridge: what a road network is made of. */
-    bool Roadway(int i) const { return road[i] != 0 || terrain[i] == BRIDGE; }
+    bool Roadway(int i) const { return road[i] != 0 || terrain[i] == kBridge; }
     /** What a road may lead to: a city, a site, a signpost or a crossing. */
     bool Destination(int i) const {
-        return city_of[i] >= 0 || site[i] || terrain[i] == TOWER || crossing[i];
+        return city_of[i] >= 0 || site[i] || terrain[i] == kTower || crossing[i];
     }
     /** Is a destination on this tile or any of its 8 neighbours? */
     bool DestinationNear(int x, int y) const {
@@ -157,10 +157,10 @@ void Cities(Context& cx) {
         for (int dy = 0; dy <= 1; dy++)
             for (int dx = 0; dx <= 1; dx++) {
                 int t = v.TerrainOr(c.x + dx, c.y + dy, -1);
-                if (t != CITY) {
+                if (t != kCity) {
                     cx.AddIssue("city-terrain", c.x + dx, c.y + dy,
                                 c.name + "'s footprint stands on " +
-                                        (t >= 0 ? TERRAIN_NAMES[t] : "the map's edge"));
+                                        (t >= 0 ? kTerrainNames[t] : "the map's edge"));
                 }
             }
         int best = std::numeric_limits<int>::max();
@@ -256,7 +256,7 @@ void Roads(Context& cx) {
                     if (!v.In(x + dx, y + dy)) continue;
                     int j = (y + dy) * w + x + dx;
                     if (v.city_of[j] >= 0) reached.insert(v.city_of[j]);
-                    if (v.site[j] || v.crossing[j] || v.terrain[j] == TOWER) others.insert(j);
+                    if (v.site[j] || v.crossing[j] || v.terrain[j] == kTower) others.insert(j);
                 }
             for (int d = 0; d < 4; d++) {
                 int nx = x + kDX4[d], ny = y + kDY4[d];
@@ -360,9 +360,9 @@ std::vector<bool> Reach(const View& v, int x0, int y0, bool land_only) {
     std::vector<bool> seen(static_cast<size_t>(w) * h, false);
     // a road over mountains is a pass (18a9:0896): any road tile costs 1
     auto open = [&](int i) {
-        return (v.terrain[i] != MOUNTAINS || v.road[i]) && !(land_only && v.Sea(i));
+        return (v.terrain[i] != kMountains || v.road[i]) && !(land_only && v.Sea(i));
     };
-    auto crossing = [&](int i) { return v.crossing[i] || v.port[i] || v.terrain[i] == BRIDGE; };
+    auto crossing = [&](int i) { return v.crossing[i] || v.port[i] || v.terrain[i] == kBridge; };
     int s = y0 * w + x0;
     if (!v.In(x0, y0) || !open(s)) return seen;
     std::deque<int> q{s};
@@ -372,7 +372,7 @@ std::vector<bool> Reach(const View& v, int x0, int y0, bool land_only) {
         q.pop_front();
         int x = i % w, y = i / w;
         for (int d = 0; d < 8; d++) {
-            int nx = x + DIRS[d][0], ny = y + DIRS[d][1];
+            int nx = x + kDirs[d][0], ny = y + kDirs[d][1];
             if (!v.In(nx, ny)) continue;
             int j = ny * w + nx;
             if (seen[j] || !open(j)) continue;
@@ -444,7 +444,7 @@ void Fairness(Context& cx) {
     ground.crossing.resize(n);
     for (int i = 0; i < n; i++) {
         ground.road[i] = v.road[i] != 0;
-        ground.crossing[i] = v.crossing[i] || v.port[i] || v.terrain[i] == BRIDGE;
+        ground.crossing[i] = v.crossing[i] || v.port[i] || v.terrain[i] == kBridge;
     }
     auto footprint = [&](const City& c) {
         std::vector<int> t;
@@ -454,7 +454,7 @@ void Fairness(Context& cx) {
         return t;
     };
     auto cost_to = [&](const std::vector<int>& field, const City& c) {
-        int best = travel::UNREACHED;
+        int best = travel::kUnreached;
         for (int t : footprint(c)) best = std::min(best, field[t]);
         return best;
     };
@@ -464,23 +464,24 @@ void Fairness(Context& cx) {
     int k = static_cast<int>(caps.size());
     if (k < 2) return;
     std::vector<std::vector<int>> field(k);
-    for (int i = 0; i < k; i++) field[i] = travel::costs(ground, footprint(*caps[i]));
+    for (int i = 0; i < k; i++) field[i] = travel::Costs(ground, footprint(*caps[i]));
 
     // the nearest rival capital, in turns
     std::vector<double> gaps;
     for (int i = 0; i < k; i++) {
-        int best = travel::UNREACHED;
+        int best = travel::kUnreached;
         for (int j = 0; j < k; j++)
             if (j != i) best = std::min(best, cost_to(field[i], *caps[j]));
-        if (best == travel::UNREACHED) continue;
-        double turns = static_cast<double>(best) / travel::TURN;
+        if (best == travel::kUnreached) continue;
+        double turns = static_cast<double>(best) / travel::kTurn;
         gaps.push_back(turns);
         for (int j = i + 1; j < k; j++) {
             int c = cost_to(field[i], *caps[j]);
-            if (c != travel::UNREACHED && static_cast<double>(c) / travel::TURN < kCapitalGapTurns)
+            if (c != travel::kUnreached &&
+                static_cast<double>(c) / travel::kTurn < kCapitalGapTurns)
                 cx.AddIssue("capital-gap", caps[i]->x, caps[i]->y,
                             caps[i]->name + " and " + caps[j]->name + " are " +
-                                    fmt("%.1f", static_cast<double>(c) / travel::TURN) +
+                                    Fmt("%.1f", static_cast<double>(c) / travel::kTurn) +
                                     " turns apart");
         }
     }
@@ -490,7 +491,7 @@ void Fairness(Context& cx) {
     for (const City& c : m.cities) {
         if (std::find(caps.begin(), caps.end(), &c) != caps.end()) continue;
         neutral++;
-        int best = travel::UNREACHED, second = travel::UNREACHED, who = -1;
+        int best = travel::kUnreached, second = travel::kUnreached, who = -1;
         for (int i = 0; i < k; i++) {
             int d = cost_to(field[i], c);
             if (d < best) {
@@ -499,17 +500,17 @@ void Fairness(Context& cx) {
                 who = i;
             } else if (d < second)
                 second = d;
-            if (d <= 2 * travel::TURN) near2[i]++;
-            if (d <= 4 * travel::TURN) near4[i]++;
+            if (d <= 2 * travel::kTurn) near2[i]++;
+            if (d <= 4 * travel::kTurn) near4[i]++;
         }
         if (who < 0) continue;
         cities[who]++;
         income[who] += c.income;
-        if (best > kRemoteTurns * travel::TURN) remote++;
+        if (best > kRemoteTurns * travel::kTurn) remote++;
         // a city nobody else can contest: the next side is twice as far, and
         // at least two turns further
-        if (second == travel::UNREACHED ||
-            (second >= 2 * best && second - best >= 2 * travel::TURN))
+        if (second == travel::kUnreached ||
+            (second >= 2 * best && second - best >= 2 * travel::kTurn))
             hinterland[who]++;
     }
     double fair = neutral > 0 ? static_cast<double>(neutral) / k : 1;
@@ -537,8 +538,8 @@ void Terrain(Context& cx) {
         land++;
         int x = i % w, y = i / w;
         for (int d = 0; d < 4; d++) {
-            int t = v.TerrainOr(x + kDX4[d], y + kDY4[d], WATER);
-            if (t == WATER || t == SHORE) {
+            int t = v.TerrainOr(x + kDX4[d], y + kDY4[d], kWater);
+            if (t == kWater || t == kShore) {
                 coast++;
                 break;
             }
@@ -558,10 +559,10 @@ void Terrain(Context& cx) {
             q.pop_front();
             int x = i % w, y = i / w;
             for (int d = 0; d < 8; d++) {
-                int nx = x + DIRS[d][0], ny = y + DIRS[d][1];
+                int nx = x + kDirs[d][0], ny = y + kDirs[d][1];
                 if (!v.In(nx, ny)) continue;
                 int j = ny * w + nx;
-                bool through = !v.Sea(j) || v.terrain[j] == BRIDGE;
+                bool through = !v.Sea(j) || v.terrain[j] == kBridge;
                 if (through && mass[j] < 0) {
                     mass[j] = id;
                     q.push_back(j);
@@ -592,7 +593,7 @@ void Terrain(Context& cx) {
                 size++;
                 int x = i % w, y = i / w;
                 for (int d = 0; d < 8; d++) {
-                    int nx = x + DIRS[d][0], ny = y + DIRS[d][1];
+                    int nx = x + kDirs[d][0], ny = y + kDirs[d][1];
                     if (!v.In(nx, ny)) continue;
                     int j = ny * w + nx;
                     if (v.terrain[j] == type && !seen[j]) {
@@ -609,10 +610,10 @@ void Terrain(Context& cx) {
     };
     int lone = 0, total = 0;
     double forest = 0, hills = 0, mountains = 0, marsh = 0;
-    patches(FOREST, forest, lone, total);
-    patches(HILLS, hills, lone, total);
-    patches(MOUNTAINS, mountains, lone, total);
-    patches(MARSH, marsh, lone, total);
+    patches(kForest, forest, lone, total);
+    patches(kHills, hills, lone, total);
+    patches(kMountains, mountains, lone, total);
+    patches(kMarsh, marsh, lone, total);
 
     cx.Metric("landFrac", static_cast<double>(land) / n);
     cx.Metric("coastComplexity", land ? coast / std::sqrt(static_cast<double>(land)) : 0);
@@ -644,13 +645,13 @@ void SignsAndPorts(Context& cx) {
     static const std::regex kLeagues("^\\s*(\\d+) leagues (\\w+)\\s*$");
     int pointing = 0;
     for (const Sign& s : m.signs) {
-        if (v.TerrainOr(s.x, s.y, -1) != TOWER)
+        if (v.TerrainOr(s.x, s.y, -1) != kTower)
             cx.AddIssue("signpost", s.x, s.y, "the signpost stands on no signpost tile");
         std::smatch g;
         if (!std::regex_match(s.lines[1], g, kLeagues)) continue;
         std::vector<const City*> named;  // names may repeat; any of them will do
         for (const City& c : m.cities)
-            if (trim(s.lines[0]) == c.name) named.push_back(&c);
+            if (Trim(s.lines[0]) == c.name) named.push_back(&c);
         if (named.empty()) {
             cx.AddIssue("signpost", s.x, s.y, "points to \"" + s.lines[0] + "\", which is no city");
             continue;
@@ -681,9 +682,9 @@ void SignsAndPorts(Context& cx) {
             crossings++;
             bool sea = false, land = false;
             for (int d = 0; d < 8; d++) {
-                int t = v.TerrainOr(x + DIRS[d][0], y + DIRS[d][1], -1);
+                int t = v.TerrainOr(x + kDirs[d][0], y + kDirs[d][1], -1);
                 if (t < 0) continue;
-                (t == WATER || t == SHORE ? sea : land) = true;
+                (t == kWater || t == kShore ? sea : land) = true;
             }
             if (!sea || !land)
                 cx.AddIssue("port", x, y, "a crossing that does not join land and sea");
@@ -695,34 +696,34 @@ void SignsAndPorts(Context& cx) {
 
 }  // namespace
 
-double Evaluation::metric(const std::string& key, double dflt) const {
+double Evaluation::Metric(const std::string& key, double dflt) const {
     for (auto& [k, v] : metrics)
         if (k == key) return v;
     return dflt;
 }
 
-int Evaluation::count(const std::string& check) const {
+int Evaluation::Count(const std::string& check) const {
     return static_cast<int>(std::count_if(issues.begin(), issues.end(),
                                           [&](const Issue& i) { return i.check == check; }));
 }
 
-const std::vector<std::string>& checks() {
+const std::vector<std::string>& Checks() {
     static const std::vector<std::string> kC = {
         "city-terrain", "city-gap",    "city-name",   "dead-end", "road-to-nowhere",
         "spur-road",    "unreachable", "capital-gap", "signpost", "port"};
     return kC;
 }
 
-bool isHard(const std::string& check) {
+bool IsHard(const std::string& check) {
     return check != "spur-road";
 }
 
-bool Evaluation::passed() const {
+bool Evaluation::Passed() const {
     return std::none_of(issues.begin(), issues.end(),
-                        [](const Issue& i) { return isHard(i.check); });
+                        [](const Issue& i) { return IsHard(i.check); });
 }
 
-const std::vector<std::string>& scoredMetrics() {
+const std::vector<std::string>& ScoredMetrics() {
     static const std::vector<std::string> kScoredMetrics = {"cityGapMin",
                                                             "cityGapP5",
                                                             "cityGapMedian",
@@ -755,7 +756,7 @@ const std::vector<std::string>& scoredMetrics() {
     return kScoredMetrics;
 }
 
-Evaluation evaluate(const Map& map, const std::string& name) {
+Evaluation Evaluate(const Map& map, const std::string& name) {
     Evaluation e;
     e.name = name;
     View v(map);
@@ -769,31 +770,31 @@ Evaluation evaluate(const Map& map, const std::string& name) {
     return e;
 }
 
-Reference reference(const std::vector<Evaluation>& maps) {
+Reference MakeReference(const std::vector<Evaluation>& maps) {
     Reference ref;
     if (maps.empty()) return ref;
-    for (const std::string& k : scoredMetrics()) {
+    for (const std::string& k : ScoredMetrics()) {
         Range r;
         r.min = std::numeric_limits<double>::max();
         r.max = std::numeric_limits<double>::lowest();
         for (const Evaluation& e : maps) {
-            double x = e.metric(k);
+            double x = e.Metric(k);
             r.min = std::min(r.min, x);
             r.max = std::max(r.max, x);
             r.mean += x;
         }
         r.mean /= static_cast<double>(maps.size());
-        for (const Evaluation& e : maps) r.sd += std::pow(e.metric(k) - r.mean, 2);
+        for (const Evaluation& e : maps) r.sd += std::pow(e.Metric(k) - r.mean, 2);
         r.sd = std::sqrt(r.sd / static_cast<double>(maps.size()));
         ref[k] = r;
     }
     return ref;
 }
 
-Score score(const Evaluation& e, const Reference& ref) {
+Score ScoreAgainst(const Evaluation& e, const Reference& ref) {
     Score s;
     for (auto& [k, r] : ref) {
-        double x = e.metric(k), out = 0;
+        double x = e.Metric(k), out = 0;
         if (x < r.min)
             out = r.min - x;
         else if (x > r.max)
@@ -809,33 +810,33 @@ Score score(const Evaluation& e, const Reference& ref) {
     return s;
 }
 
-Json toJson(const Evaluation& e, const Score* s) {
-    Json j = Json::object();
-    j.set("name", e.name);
-    j.set("passed", e.passed());
-    Json counts = Json::object();
-    for (const std::string& c : checks()) counts.set(c, e.count(c));
-    j.set("checks", counts);
-    Json metrics = Json::object();
-    for (auto& [k, v] : e.metrics) metrics.set(k, v);
-    j.set("metrics", metrics);
-    Json issues = Json::array();
+Json ToJson(const Evaluation& e, const Score* s) {
+    Json j = Json::Object();
+    j.Set("name", e.name);
+    j.Set("passed", e.Passed());
+    Json counts = Json::Object();
+    for (const std::string& c : Checks()) counts.Set(c, e.Count(c));
+    j.Set("checks", counts);
+    Json metrics = Json::Object();
+    for (auto& [k, v] : e.metrics) metrics.Set(k, v);
+    j.Set("metrics", metrics);
+    Json issues = Json::Array();
     for (const Issue& i : e.issues) {
-        Json o = Json::object();
-        o.set("check", i.check);
-        o.set("x", i.x);
-        o.set("y", i.y);
-        o.set("detail", i.detail);
-        issues.push(o);
+        Json o = Json::Object();
+        o.Set("check", i.check);
+        o.Set("x", i.x);
+        o.Set("y", i.y);
+        o.Set("detail", i.detail);
+        issues.Push(o);
     }
-    j.set("issues", issues);
+    j.Set("issues", issues);
     if (s) {
-        Json sc = Json::object();
-        sc.set("penalty", s->penalty);
-        Json dev = Json::object();
-        for (auto& [k, v] : s->deviations) dev.set(k, v);
-        sc.set("deviations", dev);
-        j.set("score", sc);
+        Json sc = Json::Object();
+        sc.Set("penalty", s->penalty);
+        Json dev = Json::Object();
+        for (auto& [k, v] : s->deviations) dev.Set(k, v);
+        sc.Set("deviations", dev);
+        j.Set("score", sc);
     }
     return j;
 }

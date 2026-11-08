@@ -65,9 +65,9 @@ void OpenPicture(const std::string& path) {
 
 /** The preview picture beside a scenario's files; its path. */
 std::string WritePreview(const std::string& data, const std::string& name) {
-    auto map = scn::load(data + "/" + name, name);
+    auto map = scn::Load(data + "/" + name, name);
     std::string path = data + "/" + name + "/" + name + ".png";
-    if (!writeFile(path, preview::png(*map, data)))
+    if (!WriteFile(path, preview::Png(*map, data)))
         throw std::runtime_error("could not write " + path);
     return path;
 }
@@ -76,7 +76,7 @@ std::string WritePreview(const std::string& data, const std::string& name) {
  *  picture, PICS/SCENARIO.PCK (warlords/scenarios). */
 void WriteListing(const std::string& data, const std::string& dir, const std::string& title,
                   const std::string& text) {
-    auto map = scn::load(data + "/" + dir, dir);
+    auto map = scn::Load(data + "/" + dir, dir);
     scenarios::Entry e;
     e.name = title;
     e.text = text;
@@ -85,9 +85,9 @@ void WriteListing(const std::string& data, const std::string& dir, const std::st
     for (auto& sd : map->sides) e.players += sd.capital != nullptr;
     std::string base = data + "/" + dir + "/";
     std::filesystem::create_directories(base + "PICS");
-    if (!writeFile(base + dir + ".INF", scenarios::info(e)) ||
-        !writeFile(base + "PICS/SCENARIO.PCK", pck::encode(preview::menuPicture(*map, data))) ||
-        !scenarios::remember(data, dir))
+    if (!WriteFile(base + dir + ".INF", scenarios::Info(e)) ||
+        !WriteFile(base + "PICS/SCENARIO.PCK", pck::Encode(preview::MenuPicture(*map, data))) ||
+        !scenarios::Remember(data, dir))
         throw std::runtime_error("could not write the listing in " + base);
 }
 
@@ -114,7 +114,7 @@ int main(int argc, char** argv) {
             count = std::max(1, std::stoi(next()));
         else if (a == "--shape") {
             std::string s = next();
-            if (!scengen::parseShape(s, world.shape)) {
+            if (!scengen::ParseShape(s, world.shape)) {
                 fprintf(stderr, "unknown shape '%s': use continents, pangaea or islands\n",
                         s.c_str());
                 return 2;
@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
         else if (a == "--land")
             world.land = std::stod(next());
         else if (a == "--name")
-            name = upper(next());
+            name = Upper(next());
         else if (a == "--data")
             data = next();
         else if (a == "--tries")
@@ -136,7 +136,7 @@ int main(int argc, char** argv) {
         else if (a == "--quiet")
             quiet = true;
         else if (a == "--preview")
-            preview_only = upper(next());
+            preview_only = Upper(next());
         else if (a == "--dump")
             dump_dir = next();
         else {
@@ -146,7 +146,7 @@ int main(int argc, char** argv) {
         }
     }
     if (!preview_only.empty()) {
-        if (!fileExists(data + "/" + preview_only + "/" + preview_only + ".SCN")) {
+        if (!FileExists(data + "/" + preview_only + "/" + preview_only + ".SCN")) {
             fprintf(stderr, "no scenario '%s/%s/%s.SCN'\n", data.c_str(), preview_only.c_str(),
                     preview_only.c_str());
             return 1;
@@ -170,7 +170,7 @@ int main(int argc, char** argv) {
                 "--name names one world; leave it out with --count to get GEN<seed> folders\n");
         return 2;
     }
-    if (!fileExists(data + "/RANDOM/RANDOM.DAT")) {
+    if (!FileExists(data + "/RANDOM/RANDOM.DAT")) {
         fprintf(stderr,
                 "cannot find '%s/RANDOM/RANDOM.DAT': run from the repository root, or pass --data "
                 "DIR\n",
@@ -182,18 +182,18 @@ int main(int argc, char** argv) {
             long s0 = seed + k;
             Rng r(static_cast<double>(s0));
             randommap::Options o;
-            o.dataDir = data;
+            o.data_dir = data;
             o.rng = &r;
             o.scenario = true;
             o.world = world;
-            auto files = randommap::generateNow(o);
+            auto files = randommap::GenerateNow(o);
             std::string dir =
-                    dump_dir + "/" + scengen::shapeName(world.shape) + "-" + std::to_string(s0);
+                    dump_dir + "/" + scengen::ShapeName(world.shape) + "-" + std::to_string(s0);
             std::filesystem::create_directories(dir);
             for (auto& [ext, bytes] : files)
-                writeFile(dir + "/" + randommap::DIR + "." + ext, bytes);
-            auto t = scengen::title(world.shape, s0);
-            writeFile(dir + "/TITLE.TXT", t.name + "\n" + t.text + "\n");
+                WriteFile(dir + "/" + randommap::kDir + "." + ext, bytes);
+            auto t = scengen::MakeTitle(world.shape, s0);
+            WriteFile(dir + "/TITLE.TXT", t.name + "\n" + t.text + "\n");
         }
         return 0;
     }
@@ -206,24 +206,24 @@ int main(int argc, char** argv) {
         for (int t = 0; t < tries; t++, used += count) {
             Rng r(static_cast<double>(used));
             randommap::Options o;
-            o.dataDir = data;
+            o.data_dir = data;
             o.rng = &r;
             o.scenario = true;
             o.world = world;
-            files = randommap::generateNow(o);
-            auto map = scn::loadFromFiles(data + "/" + randommap::DIR, randommap::DIR, files);
-            eval = mapeval::evaluate(*map, "scenario#" + std::to_string(used));
-            if (eval.passed() || keep_failures) break;
+            files = randommap::GenerateNow(o);
+            auto map = scn::LoadFromFiles(data + "/" + randommap::kDir, randommap::kDir, files);
+            eval = mapeval::Evaluate(*map, "scenario#" + std::to_string(used));
+            if (eval.Passed() || keep_failures) break;
             if (!quiet) {
                 for (auto& is : eval.issues)
-                    if (mapeval::isHard(is.check)) {
+                    if (mapeval::IsHard(is.check)) {
                         printf("seed %ld: %s at (%d,%d): %s; trying another seed\n", used,
                                is.check.c_str(), is.x, is.y, is.detail.c_str());
                         break;
                     }
             }
         }
-        if (!eval.passed() && !keep_failures) {
+        if (!eval.Passed() && !keep_failures) {
             fprintf(stderr,
                     "no world from seed %ld on passed the hard rules; --keep-failures writes the "
                     "last anyway\n",
@@ -240,31 +240,31 @@ int main(int argc, char** argv) {
         std::string dir = data + "/" + n;
         std::filesystem::create_directories(dir);
         for (auto& [ext, bytes] : files)
-            if (!writeFile(dir + "/" + n + "." + ext, bytes)) {
+            if (!WriteFile(dir + "/" + n + "." + ext, bytes)) {
                 fprintf(stderr, "could not write %s/%s.%s\n", dir.c_str(), n.c_str(), ext.c_str());
                 return 1;
             }
         // the item pool the random worlds use
-        if (auto itm = readFile(data + "/RANDOM/RANDOM.ITM"))
-            writeFile(dir + "/" + n + ".ITM", *itm);
+        if (auto itm = ReadFile(data + "/RANDOM/RANDOM.ITM"))
+            WriteFile(dir + "/" + n + ".ITM", *itm);
         std::string picture;
         try {
             picture = WritePreview(data, n);
             pictures.push_back(picture);
-            auto fun = scengen::title(world.shape, used);
+            auto fun = scengen::MakeTitle(world.shape, used);
             WriteListing(data, n, name.empty() ? fun.name : n, fun.text);
         } catch (const std::exception& ex) {
             fprintf(stderr, "%s: no preview or listing: %s\n", n.c_str(), ex.what());
         }
         if (!quiet) {
             printf("%s: \"%s\" (seed %ld, %s), %s the hard rules\n", dir.c_str(),
-                   (name.empty() ? scengen::title(world.shape, used).name : n).c_str(), used,
-                   scengen::shapeName(world.shape), eval.passed() ? "passes" : "FAILS");
+                   (name.empty() ? scengen::MakeTitle(world.shape, used).name : n).c_str(), used,
+                   scengen::ShapeName(world.shape), eval.Passed() ? "passes" : "FAILS");
             if (count == 1)
                 for (const char* key :
                      {"cities", "landFrac", "clarkEvansR", "cityRoadCoverage", "capitalGapMinTurns",
                       "expansionGini", "remoteCityFrac", "roadsToNowhere"})
-                    printf("  %-20s %.2f\n", key, eval.metric(key));
+                    printf("  %-20s %.2f\n", key, eval.Metric(key));
             if (!picture.empty()) printf("  preview: %s\n", picture.c_str());
             printf("  play it: cpp/build/warlords2 --window --scenario %s\n", n.c_str());
         }

@@ -77,7 +77,7 @@ struct Settings {
 };
 
 std::unique_ptr<Game> CopyGame(const Game& g) {
-    return save::decode(save::encode(g), kData);
+    return save::Decode(save::Encode(g), kData);
 }
 
 // The side's view of the board: enemy field armies it cannot see are removed
@@ -86,36 +86,36 @@ void RestrictToView(Game& g, int me) {
     std::array<std::vector<Army*>, 8> unseen;
     for (Army* a : g.armies) {
         if (a->owner < 0 || a->owner >= 8 || a->owner == me || a->disbanded) continue;
-        bool hidden = a->transit || a->x == NONE;
-        if (!hidden && !game::cityAt(g, a->x, a->y))
-            hidden = !ai::belief::isTileVisible(g, me, a->x, a->y);
+        bool hidden = a->transit || a->x == kNone;
+        if (!hidden && !game::CityAt(g, a->x, a->y))
+            hidden = !ai::belief::IsTileVisible(g, me, a->x, a->y);
         if (hidden) unseen[a->owner].push_back(a);
     }
     for (int s = 0; s < 8; s++) {
-        if (!unseen[s].empty()) game::disband(g, g.map->sides[s], unseen[s]);
+        if (!unseen[s].empty()) game::Disband(g, g.map->sides[s], unseen[s]);
     }
 }
 
 // Plays `side`'s turn as candidate k: k == 0 is the greedy turn, k > 0 the
 // policy sampled at the candidate temperature with seed k.
 void PlayCandidate(Game& g, int side_index, int k, uint32_t base_seed, const Settings& st) {
-    Side& side = *g.map->side(side_index);
+    Side& side = *g.map->Side(side_index);
     if (k == 0) {
-        ai::modern::playTurn(g, side, nullptr, st.policy, nullptr);
+        ai::modern::PlayTurn(g, side, nullptr, st.policy, nullptr);
         return;
     }
     ml::RolloutSampler sampler;
     sampler.temperature = st.cand_temp;
-    sampler.rngState = base_seed ^ static_cast<uint32_t>(k * 2246822519U);
-    ai::modern::playTurn(g, side, nullptr, st.policy, &sampler);
+    sampler.rng_state = base_seed ^ static_cast<uint32_t>(k * 2246822519U);
+    ai::modern::PlayTurn(g, side, nullptr, st.policy, &sampler);
 }
 
 // Plays the current side's turn with its own kind of AI (Modern: greedy).
 void PlayOwnTurn(Game& g, Side& side, const ml::PolicyNetwork& policy) {
-    if (side.classicAi)
-        ai::playTurn(g, side, nullptr);
+    if (side.classic_ai)
+        ai::PlayTurn(g, side, nullptr);
     else
-        ai::modern::playTurn(g, side, nullptr, &policy, nullptr);
+        ai::modern::PlayTurn(g, side, nullptr, &policy, nullptr);
 }
 
 // From a game in which `side` has just played its turn, plays on for `rounds`
@@ -123,13 +123,13 @@ void PlayOwnTurn(Game& g, Side& side, const ml::PolicyNetwork& policy) {
 // returns `side`'s empire score.
 float Rollout(Game& g, int side_index, int rounds, const ml::PolicyNetwork& policy) {
     const int stop_turn = g.turn + rounds;
-    Side* cur = game::endTurn(g);
+    Side* cur = game::EndTurn(g);
     int safety = 0;
     while (cur && !g.over && !g.won && g.turn < stop_turn && safety++ < rounds * 12) {
         if (cur->computer && cur->alive) PlayOwnTurn(g, *cur, policy);
-        cur = game::endTurn(g);
+        cur = game::EndTurn(g);
     }
-    return ml::computeEmpireScore(g, side_index);
+    return ml::ComputeEmpireScore(g, side_index);
 }
 
 struct CandidateResult {
@@ -194,7 +194,7 @@ std::unique_ptr<Game> NewBenchmarkGame(int case_index, uint32_t seed, int& prese
         o.sides[s].level = 2;
         o.sides[s].card = static_cast<int>((seed + s * 5) % 9);
     }
-    return game::newGame(kData, scen_out, o);
+    return game::NewGame(kData, scen_out, o);
 }
 
 // Modern on alternating seats (swap 0/1), Classic on the rest, as in w2arena.
@@ -203,9 +203,9 @@ std::array<bool, 8> AssignSeats(Game& g, int swap) {
     int idx = 0;
     for (int s = 0; s < 8; s++) {
         Side& side = g.map->sides[s];
-        if (!side.inUse) continue;
+        if (!side.in_use) continue;
         modern[s] = ((idx + swap) % 2 == 0);
-        side.classicAi = !modern[s];
+        side.classic_ai = !modern[s];
         idx++;
     }
     return modern;
@@ -214,8 +214,8 @@ std::array<bool, 8> AssignSeats(Game& g, int swap) {
 double ModernShare(const Game& g, const std::array<bool, 8>& modern) {
     int m = 0, k = 0;
     for (const auto& c : g.map->cities) {
-        if (c.razed || c.ownerIndex < 0 || c.ownerIndex >= 8) continue;
-        (modern[c.ownerIndex] ? m : k)++;
+        if (c.razed || c.owner_index < 0 || c.owner_index >= 8) continue;
+        (modern[c.owner_index] ? m : k)++;
     }
     return (m + k) > 0 ? static_cast<double>(m) / (m + k) : 0.5;
 }
@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     ml::PolicyNetwork policy;
-    if (!policy.loadJson(argv[1])) {
+    if (!policy.LoadJson(argv[1])) {
         std::fprintf(stderr, "w2search: cannot load weights '%s'\n", argv[1]);
         return 1;
     }
@@ -269,7 +269,7 @@ int main(int argc, char** argv) {
                 auto gp = NewBenchmarkGame(ci + 2 * static_cast<int>(seed_offset), seed, preset,
                                            scen);
                 auto modern = AssignSeats(*gp, ci % 2);
-                Side* cur = game::begin(*gp);
+                Side* cur = game::Begin(*gp);
                 int safety = 0;
                 while (cur && !gp->over && !gp->won && gp->turn <= turns && safety++ < turns * 12) {
                     const int s = cur->index;
@@ -305,7 +305,7 @@ int main(int argc, char** argv) {
                                         policy);  // probe only: the game itself goes on unsearched
                         } else if (st.judge == Judge::kPeek) {
                             gp = std::move(cands[best].after);
-                            cur = gp->map->side(s);
+                            cur = gp->map->Side(s);
                         } else {
                             PlayCandidate(*gp, s, cands[best].k, cands[best].base_seed,
                                           st);  // real dice
@@ -313,7 +313,7 @@ int main(int argc, char** argv) {
                     } else if (cur->computer && cur->alive) {
                         PlayOwnTurn(*gp, *cur, policy);
                     }
-                    cur = game::endTurn(*gp);
+                    cur = game::EndTurn(*gp);
                 }
                 double share = ModernShare(*gp, modern);
                 std::lock_guard<std::mutex> lock(mu);

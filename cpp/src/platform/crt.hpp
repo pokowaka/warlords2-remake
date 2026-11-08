@@ -23,9 +23,9 @@ namespace crt {
 
 /** Show the canvas on the window through the tube. Leaves the window as the
  *  target. */
-void present(SDL_Renderer* r, SDL_Texture* canvas);
+void Present(SDL_Renderer* r, SDL_Texture* canvas);
 /** The canvas point that shows at a point on the window, both in device
  *  pixels: the bow undone, so a click lands on what it is over. */
-std::pair<double, double> unwarp(double x, double y);
+std::pair<double, double> Unwarp(double x, double y);
 
 }  // namespace crt

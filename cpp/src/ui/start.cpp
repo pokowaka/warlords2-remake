@@ -54,7 +54,7 @@
 
 namespace start {
 
-using w2::format;
+using w2::Format;
 
 namespace {
 // the ten options, in the order of group 4 and the table at 4125:23b4
@@ -88,10 +88,10 @@ int remembered_options[10] = {0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
 // DATA\OPTIONS.DAT -- the setup screen as it opens, and Recall Options.
 // With no file the table is left as it is.
 void RecallOptions() {
-    auto s = w2::readFile(G.dataDir + "/DATA/OPTIONS.DAT");
+    auto s = w2::ReadFile(G.data_dir + "/DATA/OPTIONS.DAT");
     if (!s) return;
     for (size_t i = 0; i <= 9 && 2 * i + 2 <= s->size(); i++)
-        remembered_options[i] = w2::u16(*s, 2 * i);
+        remembered_options[i] = w2::U16(*s, 2 * i);
 }
 
 // 7bab:2289: keep them for next time, as Begin starts the game.
@@ -101,7 +101,7 @@ void KeepOptions() {
         b += static_cast<char>(remembered_options[i] & 255);
         b += static_cast<char>((remembered_options[i] >> 8) & 255);
     }
-    w2::writeFile(G.dataDir + "/DATA/OPTIONS.DAT", b);
+    w2::WriteFile(G.data_dir + "/DATA/OPTIONS.DAT", b);
 }
 
 struct Scenario {
@@ -113,18 +113,18 @@ struct Scenario {
 // made (not the original's; warlords/scenarios, docs/scengen.md).
 std::vector<Scenario> Scenarios() {
     std::vector<Scenario> out;
-    for (auto& e : w2::scenarios::list(G.dataDir))
+    for (auto& e : w2::scenarios::List(G.data_dir))
         out.push_back(Scenario{e.name, e.dir, e.text, e.cities, e.ruins, e.players});
     return out;
 }
 
 std::map<std::string, gfx::ImageP> art;
-gfx::ImageP Image(const std::string& path, int key = pckimage::NOKEY) {
+gfx::ImageP Image(const std::string& path, int key = pckimage::kNokey) {
     auto it = art.find(path);
     if (it != art.end()) return it->second;
     gfx::ImageP img;
     try {
-        img = pckimage::load(path, G.palette, key);
+        img = pckimage::Load(path, G.palette, key);
     } catch (...) {
     }
     return art[path] = img;
@@ -146,8 +146,8 @@ struct Setup {
 };
 
 std::shared_ptr<Setup> NewSetup(const Scenario& sc) {
-    std::string dir = w2::upper(sc.dir);
-    auto map = w2::scn::load(G.dataDir + "/" + dir, dir);
+    std::string dir = w2::Upper(sc.dir);
+    auto map = w2::scn::Load(G.data_dir + "/" + dir, dir);
     auto st = std::make_shared<Setup>();
     st->sc = sc;
     // 7bab:0000: the tutorial plays with the Beginner options, any other
@@ -158,7 +158,7 @@ std::shared_ptr<Setup> NewSetup(const Scenario& sc) {
         RecallOptions();
     for (auto& s : map->sides) {
         SideSetup& e = st->sides[s.index];
-        e.in_use = s.inUse;
+        e.in_use = s.in_use;
         e.name = s.name;
         e.colour = s.colour;
         e.edge = s.edge;
@@ -197,52 +197,52 @@ struct Options : kit::Modal {
     kit::Done after;
     void Refresh() {
         auto& s = v.state;
-        for (int i = 0; i <= 9; i++) s[159 + i] = w2::uidata::NORMAL;
+        for (int i = 0; i <= 9; i++) s[159 + i] = w2::uidata::kNormal;
         for (int p = 0; p <= 2; p++)
-            s[169 + p] = PresetMatches(*st, p) ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
-        s[172] = w2::uidata::NORMAL;
+            s[169 + p] = PresetMatches(*st, p) ? w2::uidata::kActive : w2::uidata::kNormal;
+        s[172] = w2::uidata::kNormal;
     }
-    void draw() override {
+    void Draw() override {
         const kit::Rect popup_rect{120, 50, 400, 360};  // popup 4
-        kit::popup(popup_rect);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(8, 0), 320, 55);
-        const Font& f = kit::font(2);
+        kit::Popup(popup_rect);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), kit::Text(8, 0), 320, 55);
+        const Font& f = kit::GetFont(2);
         const int ys[2] = {111, 250};
         for (int k = 0; k < 2; k++) {
             int y = ys[k];
-            kit::setPal(15);
-            gfx::rectangle(gfx::FILL, 160, y, 320, 1);
-            kit::setPal(0);
-            gfx::rectangle(gfx::FILL, 161, y + 1, 320, 1);
-            std::string t = kit::text(9 + k, 0);
-            int w = f.width(t);
-            kit::setPal(3);
-            gfx::rectangle(gfx::FILL, 320 - w / 2 - 4, y, w + 8, 2);
-            gfx::setColor(1, 1, 1);
-            kit::centred(f, t, 320, y - 7);
+            kit::SetPal(15);
+            gfx::Rectangle(gfx::kFill, 160, y, 320, 1);
+            kit::SetPal(0);
+            gfx::Rectangle(gfx::kFill, 161, y + 1, 320, 1);
+            std::string t = kit::Text(9 + k, 0);
+            int w = f.Width(t);
+            kit::SetPal(3);
+            gfx::Rectangle(gfx::kFill, 320 - w / 2 - 4, y, w + 8, 2);
+            gfx::SetColor(1, 1, 1);
+            kit::Centred(f, t, 320, y - 7);
         }
         for (int i = 0; i <= 9; i++) {
             int x = i % 2 == 0 ? 128 : 320;
             int y = i < 6 ? 131 + 30 * (i / 2) : 270 + 30 * ((i - 6) / 2);
-            gfx::setColor(1, 1, 1);
-            f.draw(kit::text(4, i), x, y);
+            gfx::SetColor(1, 1, 1);
+            f.Draw(kit::Text(4, i), x, y);
             int val = st->options[i];
             // View Production's word is the other way round (7bab:1567): its flag
             // hides other sides' production, so set it reads "Off"
             bool on = i == 5 ? val == 0 : val != 0;
-            std::string word = i == 0 ? kit::text(5, val) : (on ? "On" : "Off");
-            f.colours(7, 0).draw(word, x + 128, y);
+            std::string word = i == 0 ? kit::Text(5, val) : (on ? "On" : "Off");
+            f.Colours(7, 0).Draw(word, x + 128, y);
         }
-        kit::drawControls(v);
+        kit::DrawControls(v);
     }
     void Finish() {
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
         if (!c) return;
         int id = c->id;
         if (id == 172) return Finish();
@@ -257,7 +257,7 @@ struct Options : kit::Modal {
         }
         Refresh();
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter" || key == "escape") Finish();
     }
 };
@@ -266,10 +266,10 @@ void OpenOptions(std::shared_ptr<Setup> st, kit::Done after) {
     auto d = std::make_shared<Options>();
     d->st = st;
     d->after = after;
-    d->v = kit::view(4);
+    d->v = kit::View(4);
     d->view = &d->v;
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 // SETUPBU.PCK's faces (4125:2408): Knight, Lord, Warlord, Off, the two
@@ -332,7 +332,7 @@ struct SideDialog : kit::Modal {
         saved_name = s.name;
         saved_card = s.card;
         // Off has no deck: its letter is past the end of "KLW"
-        if (s.computer && s.level >= 0 && s.level < 3) deck = w2::aicard::deck(G.dataDir, s.level);
+        if (s.computer && s.level >= 0 && s.level < 3) deck = w2::aicard::Deck(G.data_dir, s.level);
         // the chosen one on the last row when it is past the first five
         for (int r = 0; r < 5; r++) rows[r] = r < N() ? r : -1;
         if (s.card > 4)
@@ -344,12 +344,12 @@ struct SideDialog : kit::Modal {
     void Refresh() {
         auto& vs = v.state;
         for (int r = 0; r < 5; r++)
-            vs[kSideRow + r] = rows[r] < 0 ? w2::uidata::DISABLED : w2::uidata::NORMAL;
-        vs[kSideOk] = vs[kSideCancel] = vs[kSideName] = w2::uidata::NORMAL;
+            vs[kSideRow + r] = rows[r] < 0 ? w2::uidata::kDisabled : w2::uidata::kNormal;
+        vs[kSideOk] = vs[kSideCancel] = vs[kSideName] = w2::uidata::kNormal;
         bool up = Setup().computer && rows[0] >= 1;
         bool down = Setup().computer && rows[4] > 0 && rows[4] < N() - 1;
-        vs[kSideUp] = vs[kSidePageUp] = up ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        vs[kSideDown] = vs[kSidePageDown] = down ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        vs[kSideUp] = vs[kSidePageUp] = up ? w2::uidata::kNormal : w2::uidata::kDisabled;
+        vs[kSideDown] = vs[kSidePageDown] = down ? w2::uidata::kNormal : w2::uidata::kDisabled;
     }
 
     // an empty name is not taken: the setup screen knows a side by its name
@@ -364,89 +364,89 @@ struct SideDialog : kit::Modal {
             Setup().card = saved_card;
         }  // 7bab:1fd7
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
 
-    void draw() override {
+    void Draw() override {
         const kit::Rect popup_rect{120, 50, 400, 360};  // popup 4
         const SideSetup& s = Setup();
-        kit::popup(popup_rect);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), "Setup Side", 320, 55);
+        kit::Popup(popup_rect);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), "Setup Side", 320, 55);
         int c = s.colour, e = s.edge;
-        const Font& f = kit::font(2);
+        const Font& f = kit::GetFont(2);
         // two boxes, each outlined in the side's edge colour and twice more in
         // its colour, a pixel further up and left each time
         const int boxes[2][2] = {{107, 67}, {194, 165}};
         for (auto& b : boxes) {
-            kit::setPal(e);
-            kit::outline(138, b[0], 368, b[1]);
-            kit::setPal(c);
-            kit::outline(137, b[0] - 1, 368, b[1]);
-            kit::outline(136, b[0] - 2, 368, b[1]);
+            kit::SetPal(e);
+            kit::Outline(138, b[0], 368, b[1]);
+            kit::SetPal(c);
+            kit::Outline(137, b[0] - 1, 368, b[1]);
+            kit::Outline(136, b[0] - 2, 368, b[1]);
         }
         const std::pair<const char*, int> tabs[2] = {{"Side Name", 96}, {"Leader", 181}};
         for (auto& t : tabs) {
-            kit::setPal(3);
-            gfx::rectangle(gfx::FILL, 160, t.second, f.width(t.first), 17);
-            gfx::setColor(1, 1, 1);
-            f.colours(c, e).draw(t.first, 160, t.second);
+            kit::SetPal(3);
+            gfx::Rectangle(gfx::kFill, 160, t.second, f.Width(t.first), 17);
+            gfx::SetColor(1, 1, 1);
+            f.Colours(c, e).Draw(t.first, 160, t.second);
         }
-        kit::shield(index, 144, 122);
-        kit::shield(index, 456, 122);
-        kit::shield(index, 144, 202);
-        gfx::setColor(1, 1, 1);
-        kit::centred(f, "Retype the name of this side", 320, 116);
-        kit::field(kNameBox.x, kNameBox.y, kNameBox.w, kNameBox.h, editing ? editing->text : s.name,
+        kit::Shield(index, 144, 122);
+        kit::Shield(index, 456, 122);
+        kit::Shield(index, 144, 202);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(f, "Retype the name of this side", 320, 116);
+        kit::Field(kNameBox.x, kNameBox.y, kNameBox.w, kNameBox.h, editing ? editing->text : s.name,
                    &f);
-        if (editing) editing->drawCursor(kNameBox.x, kNameBox.y);
-        kit::setPal(0);
-        gfx::rectangle(gfx::FILL, 196, 218, 72, 1);
-        gfx::rectangle(gfx::FILL, 384, 218, 96, 1);
-        gfx::setColor(1, 1, 1);
-        f.draw("Name", 196, 203);
-        f.draw("Description", 384, 203);
+        if (editing) editing->DrawCursor(kNameBox.x, kNameBox.y);
+        kit::SetPal(0);
+        gfx::Rectangle(gfx::kFill, 196, 218, 72, 1);
+        gfx::Rectangle(gfx::kFill, 384, 218, 96, 1);
+        gfx::SetColor(1, 1, 1);
+        f.Draw("Name", 196, 203);
+        f.Draw("Description", 384, 203);
         // the list (7bab:1be6): a sunk box, the chosen character in white
-        kit::setPal(3);
-        gfx::rectangle(gfx::FILL, 189, 249, 186, 100);
-        kit::bevel(188, 248, 188, 102, 4, 2);
-        gfx::setColor(1, 1, 1);
+        kit::SetPal(3);
+        gfx::Rectangle(gfx::kFill, 189, 249, 186, 100);
+        kit::Bevel(188, 248, 188, 102, 4, 2);
+        gfx::SetColor(1, 1, 1);
         if (!s.computer) {
-            f.draw("N/A", 196, 224);  // 7bab:1d0f
-            f.draw("N/A", 384, 224);
+            f.Draw("N/A", 196, 224);  // 7bab:1d0f
+            f.Draw("N/A", 384, 224);
         } else {
-            const Font& ink = f.colours(s.level >= 0 && s.level < 3 ? kLevelInk[s.level] : 15, 0);
+            const Font& ink = f.Colours(s.level >= 0 && s.level < 3 ? kLevelInk[s.level] : 15, 0);
             for (int r = 0; r < 5 && rows[r] >= 0; r++) {
                 const std::string& name = rows[r] < N() ? deck[rows[r]] : std::string();
-                (rows[r] == s.card ? f : ink).draw(name, 196, 252 + 19 * r);
+                (rows[r] == s.card ? f : ink).Draw(name, 196, 252 + 19 * r);
             }
             // the name, and the .DSC's next six lines (7bab:20dc)
-            if (s.card >= 0 && s.card < N()) ink.draw(deck[s.card], 192, 224);
+            if (s.card >= 0 && s.card < N()) ink.Draw(deck[s.card], 192, 224);
             if (desc_card != s.card) {
                 desc_card = s.card;
                 desc.clear();
                 if (s.level >= 0 && s.level < 3)
-                    if (auto dd = w2::aicard::describe(G.dataDir, s.level, s.card))
+                    if (auto dd = w2::aicard::Describe(G.data_dir, s.level, s.card))
                         desc = dd->second;
             }
             for (int k = 0; k < 6 && k < static_cast<int>(desc.size()); k++)
-                if (!desc[k].empty()) ink.draw(desc[k], 384, 224 + 20 * k);
+                if (!desc[k].empty()) ink.Draw(desc[k], 384, 224 + 20 * k);
         }
-        kit::drawControls(v);
+        kit::DrawControls(v);
     }
 
-    void mousepressed(int x, int y, int) override {
+    void Mousepressed(int x, int y, int) override {
         if (editing) KeepName();
-        auto ctl = kit::controlAt(v, x, y);
+        auto ctl = kit::ControlAt(v, x, y);
         if (!ctl) return;
         int id = ctl->id;
         if (id == kSideOk) return Close(true);  // 7bab:2024
         if (id == kSideCancel) return Close(false);
         if (id == kSideName) {
             editing = input::Editor{};
-            editing->maxChars = 15;
-            editing->maxWidth = 128;
+            editing->max_chars = 15;
+            editing->max_width = 128;
         } else if (id == kSideUp || id == kSideDown) {
             // 7bab:1ed1: a row up or down, a row run off the deck left empty
             int step = id == kSideUp ? -1 : 1;
@@ -466,9 +466,9 @@ struct SideDialog : kit::Modal {
         Refresh();
     }
 
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (editing) {
-            std::string r = editing->key(key);
+            std::string r = editing->Key(key);
             if (r == "keep")
                 KeepName();
             else if (r == "undo")
@@ -481,10 +481,10 @@ struct SideDialog : kit::Modal {
             Close(false);
     }
 
-    void textinput(const std::string& t) override {
-        if (editing) editing->input(t);
+    void Textinput(const std::string& t) override {
+        if (editing) editing->Input(t);
     }
-    bool typing() const override { return editing.has_value(); }
+    bool Typing() const override { return editing.has_value(); }
 };
 
 void OpenSide(std::shared_ptr<Setup> st, int index, kit::Done after) {
@@ -492,10 +492,10 @@ void OpenSide(std::shared_ptr<Setup> st, int index, kit::Done after) {
     d->st = st;
     d->index = index;
     d->after = after;
-    d->v = kit::view(27);
+    d->v = kit::View(27);
     d->view = &d->v;
     d->Start();
-    kit::push(d);
+    kit::Push(d);
 }
 
 kit::Rect RectFor(int i) {
@@ -510,7 +510,7 @@ const int kQuoteY[5] = {366, 384, 402, 420, 440};
 // by "|" and each closed by one. `roll(count)`, dice(1, count), says which.
 std::vector<std::string> Quote(const std::function<int(int)>& roll) {
     std::vector<std::string> lines;
-    auto s = w2::readFile(G.dataDir + "/DATA/QUOTES.DAT");
+    auto s = w2::ReadFile(G.data_dir + "/DATA/QUOTES.DAT");
     if (!s || s->size() < 2) return lines;
     int count = atoi(s->substr(0, 2).c_str());
     if (count < 1) return lines;
@@ -540,54 +540,54 @@ struct SetupScreen : kit::Modal {
 
     void Refresh() {
         auto& s = v.state;
-        for (int i = 0; i < 8; i++) s[125 + i] = w2::uidata::NORMAL;
+        for (int i = 0; i < 8; i++) s[125 + i] = w2::uidata::kNormal;
         for (int p = 0; p <= 2; p++)
-            s[145 + p] = PresetMatches(*st, p) ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
-        s[141] = s[142] = s[148] = s[143] = s[144] = w2::uidata::NORMAL;
-        s[157] = w2::uidata::NORMAL;
-        s[158] = Computers(*st) > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            s[145 + p] = PresetMatches(*st, p) ? w2::uidata::kActive : w2::uidata::kNormal;
+        s[141] = s[142] = s[148] = s[143] = s[144] = w2::uidata::kNormal;
+        s[157] = w2::uidata::kNormal;
+        s[158] = Computers(*st) > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
         hidden = {st->greatest ? 143 : 144};
     }
     void Blit(int sx, int sy, int w, int h, int x, int y) {
-        auto a = G.screen->artFor(31);  // SETUPBU.PCK
+        auto a = G.screen->ArtFor(31);  // SETUPBU.PCK
         if (!a) return;
-        gfx::setColor(1, 1, 1);
-        gfx::draw(a->image, gfx::newQuad(sx, sy, w, h), x, y);
+        gfx::SetColor(1, 1, 1);
+        gfx::Draw(a->image, gfx::NewQuad(sx, sy, w, h), x, y);
     }
-    void draw() override {
-        screen::drawBackground(*G.screen, layout::compute(640, 480));
-        gfx::setColor(1, 1, 1);
-        gfx::draw(G.marble, gfx::newQuad(0, 0, 360, 360), 16, 30);
-        gfx::draw(G.marble, gfx::newQuad(0, 0, 224, 312), 400, 30);
-        gfx::draw(G.marble, gfx::newQuad(0, 60, 360, 66), 16, 403);
-        gfx::draw(G.marble, gfx::newQuad(0, 0, 224, 114), 400, 355);
-        const Font& f = kit::font(2);
+    void Draw() override {
+        screen::DrawBackground(*G.screen, layout::Compute(640, 480));
+        gfx::SetColor(1, 1, 1);
+        gfx::Draw(G.marble, gfx::NewQuad(0, 0, 360, 360), 16, 30);
+        gfx::Draw(G.marble, gfx::NewQuad(0, 0, 224, 312), 400, 30);
+        gfx::Draw(G.marble, gfx::NewQuad(0, 60, 360, 66), 16, 403);
+        gfx::Draw(G.marble, gfx::NewQuad(0, 0, 224, 114), 400, 355);
+        const Font& f = kit::GetFont(2);
         for (int i = 0; i < 8; i++) {
             const SideSetup& s = st->sides[i];
             kit::Rect slot_rect = RectFor(i);
             if (s.name.empty()) continue;
             int c = s.colour, e = s.edge;
-            kit::setPal(c);
-            kit::outline(slot_rect.x, slot_rect.y, slot_rect.w, slot_rect.h);
-            gfx::rectangle(gfx::FILL, slot_rect.x - 1, slot_rect.y - 1, slot_rect.w + 2, 1);
-            gfx::rectangle(gfx::FILL, slot_rect.x - 1, slot_rect.y - 1, 1, slot_rect.h + 2);
-            gfx::rectangle(gfx::FILL, slot_rect.x + 1, slot_rect.y + slot_rect.h - 2,
+            kit::SetPal(c);
+            kit::Outline(slot_rect.x, slot_rect.y, slot_rect.w, slot_rect.h);
+            gfx::Rectangle(gfx::kFill, slot_rect.x - 1, slot_rect.y - 1, slot_rect.w + 2, 1);
+            gfx::Rectangle(gfx::kFill, slot_rect.x - 1, slot_rect.y - 1, 1, slot_rect.h + 2);
+            gfx::Rectangle(gfx::kFill, slot_rect.x + 1, slot_rect.y + slot_rect.h - 2,
                            slot_rect.w - 2, 1);
-            gfx::rectangle(gfx::FILL, slot_rect.x + slot_rect.w - 2, slot_rect.y + 1, 1,
+            gfx::Rectangle(gfx::kFill, slot_rect.x + slot_rect.w - 2, slot_rect.y + 1, 1,
                            slot_rect.h - 2);
-            kit::setPal(e);
-            gfx::rectangle(gfx::FILL, slot_rect.x + 1, slot_rect.y + 1, slot_rect.w - 2, 1);
-            gfx::rectangle(gfx::FILL, slot_rect.x + 1, slot_rect.y + 1, 1, slot_rect.h - 2);
-            gfx::rectangle(gfx::FILL, slot_rect.x - 1, slot_rect.y + slot_rect.h, slot_rect.w + 2,
+            kit::SetPal(e);
+            gfx::Rectangle(gfx::kFill, slot_rect.x + 1, slot_rect.y + 1, slot_rect.w - 2, 1);
+            gfx::Rectangle(gfx::kFill, slot_rect.x + 1, slot_rect.y + 1, 1, slot_rect.h - 2);
+            gfx::Rectangle(gfx::kFill, slot_rect.x - 1, slot_rect.y + slot_rect.h, slot_rect.w + 2,
                            1);
-            gfx::rectangle(gfx::FILL, slot_rect.x + slot_rect.w, slot_rect.y - 1, 1,
+            gfx::Rectangle(gfx::kFill, slot_rect.x + slot_rect.w, slot_rect.y - 1, 1,
                            slot_rect.h + 2);
             int nx = slot_rect.x + 24, ny = slot_rect.y - 8;
-            int w = f.width(s.name);
-            kit::setPal(3);
-            gfx::rectangle(gfx::FILL, nx - 4, ny, w + 8, 20);
-            gfx::setColor(1, 1, 1);
-            f.colours(c, e).draw(s.name, nx, ny);
+            int w = f.Width(s.name);
+            kit::SetPal(3);
+            gfx::Rectangle(gfx::kFill, nx - 4, ny, w + 8, 20);
+            gfx::SetColor(1, 1, 1);
+            f.Colours(c, e).Draw(s.name, nx, ny);
             // the face (7bab:0634): Off, a human (two faces, turn about), or the
             // computer's level, another face for a character; the button the
             // same, Off and Human mapped in
@@ -598,21 +598,21 @@ struct SetupScreen : kit::Modal {
             Blit(kLevelButton[btn], 0, 80, 25, slot_rect.x + 72, slot_rect.y + 12);
             const int* ck = kCheck[s.card != 0 ? 0 : 1];
             Blit(ck[0], ck[1], 24, 20, slot_rect.x + 64, slot_rect.y + 39);
-            gfx::setColor(1, 1, 1);
-            f.colours(c, e).draw("Character", slot_rect.x + 88, slot_rect.y + 41);  // 4125:258b
+            gfx::SetColor(1, 1, 1);
+            f.Colours(c, e).Draw("Character", slot_rect.x + 88, slot_rect.y + 41);  // 4125:258b
         }
         // 7bab:10c7: the logo's (0, 0, 144, 64) to (440, 277) (4125:2550)
-        gfx::setColor(1, 1, 1);
-        if (auto logo = G.screen->artFor(52))
-            gfx::draw(logo->image, gfx::newQuad(0, 0, 144, 64), 440, 277);  // SSG.PCK
-        kit::centred(f, kit::text(7, 0), 512, 48);
-        kit::centred(f, kit::text(7, 1), 512, 206);
-        kit::centred(f, format(kit::text(6, 0), Rating(*st)), 196, 426);
-        for (size_t i = 0; i < lines.size(); i++) kit::centred(f, lines[i], 512, kQuoteY[i]);
-        kit::drawControls(v, hidden);
+        gfx::SetColor(1, 1, 1);
+        if (auto logo = G.screen->ArtFor(52))
+            gfx::Draw(logo->image, gfx::NewQuad(0, 0, 144, 64), 440, 277);  // SSG.PCK
+        kit::Centred(f, kit::Text(7, 0), 512, 48);
+        kit::Centred(f, kit::Text(7, 1), 512, 206);
+        kit::Centred(f, Format(kit::Text(6, 0), Rating(*st)), 196, 426);
+        for (size_t i = 0; i < lines.size(); i++) kit::Centred(f, lines[i], 512, kQuoteY[i]);
+        kit::DrawControls(v, hidden);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y, hidden);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y, hidden);
         if (!c) return;
         int id = c->id;
         if (id >= 125 && id <= 132) {
@@ -637,12 +637,12 @@ struct SetupScreen : kit::Modal {
             KeepOptions();  // 7bab:0cfe
             auto b = begin;
             auto s = st;
-            kit::pop(this);
+            kit::Pop(this);
             b(s);
             return;
         } else if (id == 142) {
             auto b = back;
-            kit::pop(this);
+            kit::Pop(this);
             b();
             return;
         } else if (id == 143) {
@@ -685,7 +685,7 @@ struct SetupScreen : kit::Modal {
             static std::mt19937 dice{std::random_device{}()};
             for (auto& s : st->sides) {
                 if (s.in_use && s.computer && s.level >= 0 && s.level < 3) {
-                    int n = static_cast<int>(w2::aicard::deck(G.dataDir, s.level).size());
+                    int n = static_cast<int>(w2::aicard::Deck(G.data_dir, s.level).size());
                     s.card =
                             n > 1 ? 1 + static_cast<int>(dice() % static_cast<unsigned>(n - 1)) : 0;
                 }
@@ -701,15 +701,15 @@ void OpenSetup(std::shared_ptr<Setup> st, std::function<void(std::shared_ptr<Set
     d->st = st;
     d->begin = begin;
     d->back = back;
-    d->v = kit::view(3);
+    d->v = kit::View(3);
     d->v.screen = true;  // a screen, not a dialog: Begin has no ring
     d->view = &d->v;
-    d->menuBar = true;  // the menu bar stays live over it (7bab:0034)
+    d->menu_bar = true;  // the menu bar stays live over it (7bab:0034)
     // picked once as the screen is drawn whole; Edit Options draws over it
     static std::mt19937 dice{std::random_device{}()};
     d->lines = Quote([](int n) { return 1 + static_cast<int>(dice() % static_cast<unsigned>(n)); });
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 struct Chooser : kit::Modal {
@@ -719,50 +719,50 @@ struct Chooser : kit::Modal {
     std::function<void(int)> after;
     void Refresh() {
         auto& s = v.state;
-        for (auto& c : v.dialog.controls) s[c.id] = w2::uidata::NORMAL;
-        int up = top_row > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        int down = top_row + 7 < static_cast<int>(list.size()) ? w2::uidata::NORMAL
-                                                               : w2::uidata::DISABLED;
+        for (auto& c : v.dialog.controls) s[c.id] = w2::uidata::kNormal;
+        int up = top_row > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
+        int down = top_row + 7 < static_cast<int>(list.size()) ? w2::uidata::kNormal
+                                                               : w2::uidata::kDisabled;
         s[470] = up;
         s[472] = up;
         s[471] = down;
         s[473] = down;
     }
-    void draw() override {
+    void Draw() override {
         const kit::Rect popup_rect{80, 45, 480, 360};  // popup 19
-        kit::popupFrame(popup_rect);
-        auto pic = Image(G.dataDir + "/PICS/NEWSCEN.PCK");
-        gfx::setColor(1, 1, 1);
-        if (pic) gfx::draw(pic, popup_rect.x, popup_rect.y);
-        kit::setPal(0);
-        gfx::rectangle(gfx::FILL, 112, 153, 136, 140);
-        gfx::setColor(1, 1, 1);
-        const Font& f = kit::font(2);
+        kit::PopupFrame(popup_rect);
+        auto pic = Image(G.data_dir + "/PICS/NEWSCEN.PCK");
+        gfx::SetColor(1, 1, 1);
+        if (pic) gfx::Draw(pic, popup_rect.x, popup_rect.y);
+        kit::SetPal(0);
+        gfx::Rectangle(gfx::kFill, 112, 153, 136, 140);
+        gfx::SetColor(1, 1, 1);
+        const Font& f = kit::GetFont(2);
         for (int i = 0; i <= 6; i++) {
             if (top_row + i < static_cast<int>(list.size()))
-                f.colours(i == cur ? 15 : 5, 0).draw(list[top_row + i].name, 112, 153 + 20 * i);
+                f.Colours(i == cur ? 15 : 5, 0).Draw(list[top_row + i].name, 112, 153 + 20 * i);
         }
         if (top_row + cur < static_cast<int>(list.size())) {
             const Scenario& e = list[top_row + cur];
-            const Font& g5 = f.colours(5, 0);
-            kit::centred(g5, e.name, 416, 101);
-            kit::centred(g5, e.text, 416, 174);
-            kit::right(g5, w2::fmt("%d", e.cities), 368, 234);
-            g5.draw(w2::fmt("%d", e.ruins), 472, 234);
-            kit::centred(g5, w2::fmt("%d", e.players), 416, 254);
+            const Font& g5 = f.Colours(5, 0);
+            kit::Centred(g5, e.name, 416, 101);
+            kit::Centred(g5, e.text, 416, 174);
+            kit::Right(g5, w2::Fmt("%d", e.cities), 368, 234);
+            g5.Draw(w2::Fmt("%d", e.ruins), 472, 234);
+            kit::Centred(g5, w2::Fmt("%d", e.players), 416, 254);
         }
         std::set<int> h = {476, 477, 478, 479, 480, 481, 482};
-        kit::drawControls(v, h);
+        kit::DrawControls(v, h);
     }
     void Take(bool ok) {
-        int pick = ok ? top_row + cur : w2::NONE;
+        int pick = ok ? top_row + cur : w2::kNone;
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         a(pick);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
-        if (!c || v.stateOf(c->id) == w2::uidata::DISABLED) return;
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
+        if (!c || v.StateOf(c->id) == w2::uidata::kDisabled) return;
         int id = c->id;
         if (id == 474) return Take(true);
         if (id == 475) return Take(false);
@@ -776,7 +776,7 @@ struct Chooser : kit::Modal {
         }
         Refresh();
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
             Take(true);
         else if (key == "escape")
@@ -789,38 +789,38 @@ void OpenChooser(const std::vector<Scenario>& list, int current, std::function<v
     d->list = list;
     d->cur = current;
     d->after = after;
-    d->v = kit::view(29);
+    d->v = kit::View(29);
     d->view = &d->v;
     while (d->cur >= 7) {
         d->cur--;
         d->top_row++;
     }
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 const int kSliderX = 384, kSliderW = 120;  // 4125:29ac
 
 // 7f77:0332: the random world's settings, in place of the picture.
 void DrawWorld() {
-    kit::setPal(3);
-    gfx::rectangle(gfx::FILL, 328, 200, 264, 225);  // 4125:2930
-    const Font& f = kit::font(2);
-    auto art = G.screen->artFor(1);  // STARTBU.PCK
+    kit::SetPal(3);
+    gfx::Rectangle(gfx::kFill, 328, 200, 264, 225);  // 4125:2930
+    const Font& f = kit::GetFont(2);
+    auto art = G.screen->ArtFor(1);  // STARTBU.PCK
     for (int i = 0; i < 4; i++) {
         int y = 215 + 30 * i;
-        gfx::setColor(1, 1, 1);
-        kit::right(f, kit::text(2, i), 376, y);
+        gfx::SetColor(1, 1, 1);
+        kit::Right(f, kit::Text(2, i), 376, y);
         // the slider at its place (4125:29cc), or bare for "?" (4125:2a04)
         int sy = world.set[i] ? 80 + 20 * world.sliders[i] : 220;
-        if (art) gfx::draw(art->image, gfx::newQuad(496, sy, kSliderW, 20), kSliderX, y + 1);
-        std::string shows = world.set[i] ? format(w2::randommap::SLIDER_FORMATS[i],
-                                                  w2::randommap::SLIDER_SHOWS[i][world.sliders[i]])
+        if (art) gfx::Draw(art->image, gfx::NewQuad(496, sy, kSliderW, 20), kSliderX, y + 1);
+        std::string shows = world.set[i] ? Format(w2::randommap::kSliderFormats[i],
+                                                  w2::randommap::kSliderShows[i][world.sliders[i]])
                                          : "(?)";
-        f.draw(shows, 504, y);
+        f.Draw(shows, 504, y);
     }
-    f.draw(w2::randommap::terrainSetName(G.dataDir, world.terrain_set), 336, 340);
-    f.draw(kit::text(3, world.allies ? 1 : 0), 336, 365);
+    f.Draw(w2::randommap::TerrainSetName(G.data_dir, world.terrain_set), 336, 340);
+    f.Draw(kit::Text(3, world.allies ? 1 : 0), 336, 365);
 }
 
 // random_map_setup (7bab:10e8): make the world, showing its progress as
@@ -832,31 +832,31 @@ struct MakeWorldDialog : kit::Modal {
     std::unique_ptr<w2::randommap::Run> run;
     kit::Done after;
     gfx::ImageP scroll, bar;
-    void update() override {
+    void Update() override {
         // a phase of the generator a frame, so the bar moves as it works
-        if (run->step()) return;
-        w2::randommap::install(G.dataDir, run->files());
+        if (run->Step()) return;
+        w2::randommap::Install(G.data_dir, run->GetFiles());
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
-    void draw() override {
+    void Draw() override {
         const kit::Rect popup_rect{160, 55, 336, 347};  // popup 23
-        gfx::setColor(1, 1, 1);
+        gfx::SetColor(1, 1, 1);
         if (scroll)
-            gfx::draw(scroll, gfx::newQuad(0, 0, popup_rect.w, popup_rect.h), popup_rect.x,
+            gfx::Draw(scroll, gfx::NewQuad(0, 0, popup_rect.w, popup_rect.h), popup_rect.x,
                       popup_rect.y);
-        const Font& f = kit::font(2).colours(0, 7);
+        const Font& f = kit::GetFont(2).Colours(0, 7);
         const int lines[2] = {2, 3};
-        for (int i = 0; i < 2; i++) kit::centred(f, kit::text(0x88, lines[i]), 328, 181 + 20 * i);
+        for (int i = 0; i < 2; i++) kit::Centred(f, kit::Text(0x88, lines[i]), 328, 181 + 20 * i);
         // 4bed:01b5: a black frame (216d:01fd), the scroll showing through it
-        kit::setPal(0);
-        gfx::rectangle(gfx::LINE, 232.5, 255.5, 191, 24);
-        gfx::setColor(1, 1, 1);
-        int pct = run->progress();
+        kit::SetPal(0);
+        gfx::Rectangle(gfx::kLine, 232.5, 255.5, 191, 24);
+        gfx::SetColor(1, 1, 1);
+        int pct = run->Progress();
         int w = (pct + 10) / 10 * 16 + 16;
-        if (bar) gfx::draw(bar, gfx::newQuad(0, 0, w, 21), 232, 257);
-        kit::centred(f, w2::fmt("%d%%", pct), 328, 237);
+        if (bar) gfx::Draw(bar, gfx::NewQuad(0, 0, w, 21), 232, 257);
+        kit::Centred(f, w2::Fmt("%d%%", pct), 328, 237);
     }
 };
 
@@ -864,17 +864,17 @@ void MakeWorld(kit::Done after) {
     auto d = std::make_shared<MakeWorldDialog>();
     d->rng = w2::Rng(static_cast<double>(time(nullptr) % 1000000007));
     w2::randommap::Options o;
-    o.dataDir = G.dataDir;
+    o.data_dir = G.data_dir;
     o.rng = &d->rng;
     for (int i = 0; i < 4; i++)
-        o.sliders[i] = world.set[i] ? world.sliders[i] : w2::randommap::RANDOM_SLIDER;
+        o.sliders[i] = world.set[i] ? world.sliders[i] : w2::randommap::kRandomSlider;
     o.allies = world.allies;
-    o.terrainSet = world.terrain_set;
+    o.terrain_set = world.terrain_set;
     d->run = std::make_unique<w2::randommap::Run>(o);
     d->after = after;
-    d->scroll = Image(G.dataDir + "/PICS/BSCROLL.PCK", 10);
-    d->bar = Image(G.dataDir + "/PICS/RMAPBAR.PCK", 10);
-    kit::push(d);
+    d->scroll = Image(G.data_dir + "/PICS/BSCROLL.PCK", 10);
+    d->bar = Image(G.data_dir + "/PICS/RMAPBAR.PCK", 10);
+    kit::Push(d);
 }
 
 struct Menu : kit::Modal {
@@ -886,43 +886,43 @@ struct Menu : kit::Modal {
     // 7f77:011e
     void Refresh() {
         auto& s = v.state;
-        s[100] = s[101] = s[103] = w2::uidata::NORMAL;
-        s[102] = world.on ? w2::uidata::DISABLED : w2::uidata::NORMAL;
+        s[100] = s[101] = s[103] = w2::uidata::kNormal;
+        s[102] = world.on ? w2::uidata::kDisabled : w2::uidata::kNormal;
         hidden.clear();
         if (!world.on) {
             for (int id = 104; id <= 113; id++) hidden.insert(id);
             return;
         }
-        s[104] = s[105] = w2::uidata::NORMAL;
+        s[104] = s[105] = w2::uidata::kNormal;
         for (int i = 0; i < 4; i++) {
-            s[106 + i] = w2::uidata::NORMAL;
-            s[110 + i] = world.set[i] ? w2::uidata::NORMAL : w2::uidata::ACTIVE;  // lit while "?"
+            s[106 + i] = w2::uidata::kNormal;
+            s[110 + i] = world.set[i] ? w2::uidata::kNormal : w2::uidata::kActive;  // lit while "?"
         }
     }
-    void draw() override {
-        gfx::setColor(1, 1, 1);
+    void Draw() override {
+        gfx::SetColor(1, 1, 1);
         for (int q = 0; q < 4; q++) {
-            auto img = Image(G.dataDir + "/PICS/STARTUP" + std::to_string(q) + ".PCK");
-            if (img) gfx::draw(img, (q % 2) * 320, (q / 2) * 240);
+            auto img = Image(G.data_dir + "/PICS/STARTUP" + std::to_string(q) + ".PCK");
+            if (img) gfx::Draw(img, (q % 2) * 320, (q / 2) * 240);
         }
         bool have = cur < static_cast<int>(list.size());
         if (world.on) {
             DrawWorld();
         } else if (have) {
-            std::string dir = w2::upper(list[cur].dir);
-            if (auto pic = Image(G.dataDir + "/" + dir + "/PICS/SCENARIO.PCK")) {
-                gfx::setColor(1, 1, 1);
-                gfx::draw(pic, gfx::newQuad(0, 0, 264, 225), 328, 200);
+            std::string dir = w2::Upper(list[cur].dir);
+            if (auto pic = Image(G.data_dir + "/" + dir + "/PICS/SCENARIO.PCK")) {
+                gfx::SetColor(1, 1, 1);
+                gfx::Draw(pic, gfx::NewQuad(0, 0, 264, 225), 328, 200);
             }
         }
         if (world.on || have) {
             // 7f77:02bf: the scenario's name, or "A Random World"
-            kit::setPal(3);
-            gfx::rectangle(gfx::FILL, 336, 166, 248, 28);
-            gfx::setColor(1, 1, 1);
-            kit::centred(kit::font(2), world.on ? kit::text(0, 0) : list[cur].name, 460, 172);
+            kit::SetPal(3);
+            gfx::Rectangle(gfx::kFill, 336, 166, 248, 28);
+            gfx::SetColor(1, 1, 1);
+            kit::Centred(kit::GetFont(2), world.on ? kit::Text(0, 0) : list[cur].name, 460, 172);
         }
-        kit::drawControls(v, hidden);
+        kit::DrawControls(v, hidden);
     }
     void SetUp(const Scenario& sc) {
         auto keep = shared_from_this();
@@ -945,17 +945,17 @@ struct Menu : kit::Modal {
                         o.sides[i] = ss;
                     }
                     o.greatest = s->greatest;
-                    bg(w2::upper(s->sc.dir), o);
+                    bg(w2::Upper(s->sc.dir), o);
                 },
                 [keep]() {
                     auto m = std::static_pointer_cast<Menu>(keep);
                     m->Refresh();
-                    kit::push(keep);
+                    kit::Push(keep);
                 });
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y, hidden);
-        if (!c || v.stateOf(c->id) == w2::uidata::DISABLED) return;
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y, hidden);
+        if (!c || v.StateOf(c->id) == w2::uidata::kDisabled) return;
         int id = c->id;
         std::weak_ptr<Modal> self = weak_from_this();
         Menu* me = this;
@@ -963,7 +963,7 @@ struct Menu : kit::Modal {
             // 7f77:067c: a scenario chosen ends the random world
             OpenChooser(list, cur, [self, me](int i) {
                 if (self.expired()) return;
-                if (i != w2::NONE) {
+                if (i != w2::kNone) {
                     me->cur = i;
                     world.on = false;
                 }
@@ -971,15 +971,15 @@ struct Menu : kit::Modal {
             });
         } else if (id == 101) {
             auto l = loaded;
-            savegame::load([self, l](std::unique_ptr<w2::Game> g) {
-                if (auto s = self.lock()) kit::pop(s.get());
+            savegame::Load([self, l](std::unique_ptr<w2::Game> g) {
+                if (auto s = self.lock()) kit::Pop(s.get());
                 l(std::move(g));
             });
         } else if (id == 102) {
             world.on = true;  // 7f77:05f5
         } else if (id == 104) {
             world.terrain_set =
-                    (world.terrain_set + 1) % w2::randommap::terrainSets(G.dataDir);  // 7f77:063a
+                    (world.terrain_set + 1) % w2::randommap::TerrainSets(G.data_dir);  // 7f77:063a
         } else if (id == 105) {
             world.allies = !world.allies;  // 7f77:0661
         } else if (id >= 106 && id <= 109) {
@@ -994,20 +994,20 @@ struct Menu : kit::Modal {
             world.set[id - 110] = false;  // 7f77:0571
         } else if (id == 103 && world.on) {
             // 7f77:060f: "One moment...", the world, then the sides as for any scenario
-            advisor::say(w2::cues::MOMENT, [self, me]() {
+            advisor::Say(w2::cues::kMoment, [self, me]() {
                 MakeWorld([self, me]() {
                     auto keep = self.lock();
                     if (!keep) return;
-                    kit::pop(me);
+                    kit::Pop(me);
                     Scenario sc;
-                    sc.name = kit::text(0, 0);
-                    sc.dir = w2::randommap::DIR;
+                    sc.name = kit::Text(0, 0);
+                    sc.dir = w2::randommap::kDir;
                     me->SetUp(sc);
                 });
             });
         } else if (id == 103 && cur < static_cast<int>(list.size())) {
             auto keep = shared_from_this();
-            kit::pop(this);
+            kit::Pop(this);
             SetUp(list[cur]);
             return;
         }
@@ -1016,7 +1016,7 @@ struct Menu : kit::Modal {
 };
 }  // namespace
 
-void open(std::function<void(const std::string& dir, const w2::game::NewGameOptions& opts)> begin,
+void Open(std::function<void(const std::string& dir, const w2::game::NewGameOptions& opts)> begin,
           std::function<void(std::unique_ptr<w2::Game>)> loaded) {
     auto d = std::make_shared<Menu>();
     d->list = Scenarios();
@@ -1025,13 +1025,13 @@ void open(std::function<void(const std::string& dir, const w2::game::NewGameOpti
     d->begin_game = begin;
     d->loaded = loaded;
     // back from a random world, the menu is still on one (7f77:0000)
-    if (G.scenario == w2::randommap::DIR) world.on = true;
-    d->v = kit::view(1);
+    if (G.scenario == w2::randommap::kDir) world.on = true;
+    d->v = kit::View(1);
     d->v.screen = true;  // a screen, not a dialog: Begin has no ring
     d->view = &d->v;
-    d->menuBar = true;
+    d->menu_bar = true;
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace start

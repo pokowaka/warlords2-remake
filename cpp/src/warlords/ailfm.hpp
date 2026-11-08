@@ -26,18 +26,18 @@ namespace w2 {
 
 class AilFm {
   public:
-    static constexpr double RATE = Opl::RATE;
+    static constexpr double kRate = Opl::kRate;
 
     AilFm(const std::string& adv, const std::string& ad);
     /** Start a parsed sequence from its beginning; it must outlive the play. */
-    void play(const xmi::Sequence* seq, bool loop);
+    void Play(const xmi::Sequence* seq, bool loop);
     /** Stop the sequence and let every sounding note go. */
-    void stop();
+    void Stop();
     /** Nothing playing and every note faded away. */
-    bool idle() const;
-    bool playing() const { return playing_; }
+    bool Idle() const;
+    bool Playing() const { return playing_; }
     /** The next n samples, stepping the sequence as time passes. */
-    void render(int16_t* out, int n);
+    void Render(int16_t* out, int n);
 
   private:
     using Timbre = std::vector<uint8_t>;  // the bytes after the u16 length
@@ -50,23 +50,23 @@ class AilFm {
         bool active = false, sustained = false;
         int voice = -1, flags = 0, ch = 0, key = 0, note = 0, transpose = 0, vel = 0;
         int keyon = 0, fbc = 0, conn = 0, b0 = 0;
-        int modKsl = 0, modLevel = 0, carKsl = 0, carLevel = 0;
-        int modAvek = 0, modMult = 0, carAvek = 0, carMult = 0;
-        int modAD = 0, modSR = 0, modWS = 0, carAD = 0, carSR = 0, carWS = 0;
-        bool scaleMod = false;
+        int mod_ksl = 0, mod_level = 0, car_ksl = 0, car_level = 0;
+        int mod_avek = 0, mod_mult = 0, car_avek = 0, car_mult = 0;
+        int mod_ad = 0, mod_sr = 0, mod_ws = 0, car_ad = 0, car_sr = 0, car_ws = 0;
+        bool scale_mod = false;
     };
 
-    void program(int ch, int p);
-    void update(Slot& s);
-    int frequency(const Slot& s, const Chan& c);
-    void allocate(Slot& s);
-    void steal();
-    void release(Slot& s);
-    void noteOn(int ch, int key, int vel);
-    void noteOff(int ch, int key);
-    void controller(int ch, int n, int v);
-    void message(int st, int a, int b);
-    void interval();
+    void Program(int ch, int p);
+    void Update(Slot& s);
+    int Frequency(const Slot& s, const Chan& c);
+    void Allocate(Slot& s);
+    void Steal();
+    void Release(Slot& s);
+    void NoteOn(int ch, int key, int vel);
+    void NoteOff(int ch, int key);
+    void Controller(int ch, int n, int v);
+    void Message(int st, int a, int b);
+    void Interval();
 
     // ADLIB.ADV's tables
     int freq_[192], octave_[96], halftone_[96], reset_[0xf6], velocity_[16], programs_[9];
@@ -76,12 +76,12 @@ class AilFm {
     std::map<int, const Timbre*> percussion_;  // channel 10's cache
     Slot slots_[16];
     int owner_[9];  // voice -> channel, or -1 when free
-    int nextVoice_ = 0;
+    int next_voice_ = 0;
     int fw_ = 0, block_ = 0;
     const xmi::Sequence* seq_ = nullptr;
     size_t pos_ = 0;
     int tick_ = 0;
-    double untilTick_ = 0;
+    double until_tick_ = 0;
     bool playing_ = false, loop_ = false;
 };
 

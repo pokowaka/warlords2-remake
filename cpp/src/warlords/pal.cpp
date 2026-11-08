@@ -7,8 +7,8 @@
 
 namespace w2::pal {
 
-Palette load(const std::string& path) {
-    auto text = readFile(path);
+Palette Load(const std::string& path) {
+    auto text = ReadFile(path);
     if (!text) throw std::runtime_error("cannot open palette: " + path);
     // every run of three numbers separated by blanks, as the Lua's pattern
     std::vector<long> nums;
@@ -51,7 +51,7 @@ Palette load(const std::string& path) {
     }
     if (out.size() != 16)
         throw std::runtime_error(
-                fmt("%s: expected 16 entries, got %d", path.c_str(), static_cast<int>(out.size())));
+                Fmt("%s: expected 16 entries, got %d", path.c_str(), static_cast<int>(out.size())));
     return out;
 }
 

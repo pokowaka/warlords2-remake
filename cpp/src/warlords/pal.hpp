@@ -12,6 +12,6 @@ using Colour = std::array<double, 3>;
 using Palette = std::vector<Colour>;
 
 /** The palette as 16 {r, g, b} in 0..1, indexed from 0. */
-Palette load(const std::string& path);
+Palette Load(const std::string& path);
 
 }  // namespace w2::pal

@@ -6,7 +6,7 @@
 
 namespace w2::history {
 
-void deed(Game& g, const Side* side, DeedType type, int v1, int v2, const std::string& name) {
+void RecordDeed(Game& g, const Side* side, DeedType type, int v1, int v2, const std::string& name) {
     if (!side) return;
     auto& d = g.deeds[side->index];
     Deed e{side->index, type, v1, v2, name.substr(0, 15)};
@@ -24,27 +24,27 @@ static void Bump(Game& g, int side, int opp, Loss kind, int n = 1) {
     row[static_cast<int>(kind)] += n;
 }
 
-void tally(Game& g, const Army* army, int killer, bool boat) {
+void Tally(Game& g, const Army* army, int killer, bool boat) {
     int loser = army->owner;
     Loss kind;
-    if (army->type == armytype::HERO)
-        kind = Loss::HEROES;
-    else if (g.types.byId(army->type)->bonus[48] != 0)
-        kind = Loss::CREATURES;
+    if (army->type == armytype::kHero)
+        kind = Loss::kHeroes;
+    else if (g.types.ById(army->type)->bonus[48] != 0)
+        kind = Loss::kCreatures;
     else
-        kind = Loss::ARMIES;
+        kind = Loss::kArmies;
     int std = 0;
     for (Item* it : army->items)
         if (it->index < 8) std++;
     int rows[2][2] = {{loser, loser}, {killer, loser}};
     for (auto& row : rows) {
         Bump(g, row[0], row[1], kind);
-        if (boat) Bump(g, row[0], row[1], Loss::NAVIES);
-        if (std > 0) Bump(g, row[0], row[1], Loss::STANDARDS, std);
+        if (boat) Bump(g, row[0], row[1], Loss::kNavies);
+        if (std > 0) Bump(g, row[0], row[1], Loss::kStandards, std);
     }
 }
 
-int triumph(const Game& g, int me, int opp, Loss kind) {
+int Triumph(const Game& g, int me, int opp, Loss kind) {
     auto a = g.triumphs.find(me);
     if (a == g.triumphs.end()) return 0;
     auto b = a->second.find(opp);
@@ -52,18 +52,18 @@ int triumph(const Game& g, int me, int opp, Loss kind) {
     return b->second[static_cast<int>(kind)];
 }
 
-void record(Game& g) {
-    if (g.turn > LAST_RECORDED_TURN) return;
+void Record(Game& g) {
+    if (g.turn > kLastRecordedTurn) return;
     HistoryRecord r;
-    auto win = report::figures(g, *g.sides[0], report::WINNING);
+    auto win = report::ComputeFigures(g, *g.sides[0], report::kWinning);
     for (int i = 0; i < 8; i++) {
-        Side* s = g.map->side(i);
-        r.gold[i] = (s && s->inUse) ? s->gold : 0;
+        Side* s = g.map->Side(i);
+        r.gold[i] = (s && s->in_use) ? s->gold : 0;
         r.score[i] = win.value[i];
-        r.cities[i] = s ? static_cast<int>(game::sideCities(g, *s).size()) : 0;
+        r.cities[i] = s ? static_cast<int>(game::SideCities(g, *s).size()) : 0;
     }
     for (auto& c : g.map->cities)
-        r.owners.push_back(c.razed ? 0xff : (c.ownerIndex == NONE ? 8 : c.ownerIndex));
+        r.owners.push_back(c.razed ? 0xff : (c.owner_index == kNone ? 8 : c.owner_index));
     int n = 0;
     int take[8] = {0};
     for (int i = 0; i < 8; i++) {
@@ -75,7 +75,7 @@ void record(Game& g) {
     }
     for (int i = 0; i < 8; i++) {
         auto it = g.deeds.find(i);
-        if (it != g.deeds.end() && it->second.size() >= 2 && n < MAX_DEEDS_PER_ROUND) {
+        if (it != g.deeds.end() && it->second.size() >= 2 && n < kMaxDeedsPerRound) {
             take[i] = 2;
             n++;
         }

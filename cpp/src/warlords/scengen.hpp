@@ -35,10 +35,10 @@
 
 namespace w2::scengen {
 
-enum class Shape { Continents, Pangaea, Islands };
+enum class Shape { kContinents, kPangaea, kIslands };
 
 struct Settings {
-    Shape shape = Shape::Continents;
+    Shape shape = Shape::kContinents;
     double land = -1;  // the land share wanted; < 0 picks the shape's own
     int cities = 80;   // at most 100, as the .SCN holds no more
     int sites = 40;    // the .SCN holds exactly 40
@@ -55,11 +55,11 @@ struct Settings {
 struct Title {
     std::string name, text;
 };
-Title title(Shape shape, long seed);
+Title MakeTitle(Shape shape, long seed);
 
 /** Parse "continents", "pangaea" or "islands"; false if it is none. */
-bool parseShape(const std::string& s, Shape& out);
-const char* shapeName(Shape s);
+bool ParseShape(const std::string& s, Shape& out);
+const char* ShapeName(Shape s);
 
 struct World {
     std::vector<uint8_t> terrain;             // W x H terrain type ids (move::WATER ...)
@@ -68,7 +68,7 @@ struct World {
 };
 
 /** Steps 1-6: the ground, the cities and the sites, on a W x H grid. */
-World makeWorld(const Settings& s, Rng& rng, int w, int h);
+World MakeWorld(const Settings& s, Rng& rng, int w, int h);
 
 /** A river crossing a bridge may span: two water tiles in a row with firm
  *  ground beyond both ends. `ew` spans east-west (x, x+1), else north-south. */
@@ -83,7 +83,7 @@ struct Roads {
 };
 
 /** Step 7: the roads between the cities over the finished terrain. */
-Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
+Roads PlanRoads(const std::vector<uint8_t>& terrain, int w, int h,
                 const std::vector<std::pair<int, int>>& cities, const std::vector<Span>& spans,
                 Rng& rng);
 

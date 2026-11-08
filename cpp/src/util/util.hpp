@@ -12,7 +12,7 @@
 namespace w2 {
 
 /** string.format, as printf. */
-std::string fmt(const char* f, ...)
+std::string Fmt(const char* f, ...)
 #if defined(__GNUC__) || defined(__clang__)
         __attribute__((format(printf, 1, 2)))
 #endif
@@ -25,7 +25,7 @@ std::string fmt(const char* f, ...)
  * sorts before b".
  */
 template <class T, class Lt>
-void luaSort(std::vector<T>& v, Lt lt) {
+void LuaSort(std::vector<T>& v, Lt lt) {
     // 1-based, as the original algorithm is written
     auto get = [&](long i) -> T& { return v[i - 1]; };
     auto swap = [&](long i, long j) { std::swap(v[i - 1], v[j - 1]); };
@@ -39,15 +39,15 @@ void luaSort(std::vector<T>& v, Lt lt) {
             else if (lt(get(u), get(i)))
                 swap(i, u);
             if (u - l == 2) break;
-            T P = get(i);
+            T p = get(i);
             swap(i, u - 1);
             i = l;
             long j = u - 1;
             for (;;) {
-                while (lt(get(++i), P)) {
+                while (lt(get(++i), p)) {
                     if (i > u) throw std::runtime_error("invalid order function for sorting");
                 }
-                while (lt(P, get(--j))) {
+                while (lt(p, get(--j))) {
                     if (j < l) throw std::runtime_error("invalid order function for sorting");
                 }
                 if (j < i) break;
@@ -66,11 +66,11 @@ void luaSort(std::vector<T>& v, Lt lt) {
             auxsort(j, i);
         }
     };
-    auxsort(1, (long)v.size());
+    auxsort(1, static_cast<long>(v.size()));
 }
 
 template <class T>
-void luaSort(std::vector<T>& v) {
+void LuaSort(std::vector<T>& v) {
     luaSort(v, [](const T& a, const T& b) { return a < b; });
 }
 
@@ -79,29 +79,29 @@ struct FmtArg {
     bool str = false;
     long n = 0;
     std::string s;
-    FmtArg(int v) : n(v) {}
-    FmtArg(long v) : n(v) {}
-    FmtArg(unsigned v) : n((long)v) {}
-    FmtArg(unsigned long v) : n((long)v) {}
-    FmtArg(long long v) : n((long)v) {}
-    FmtArg(const std::string& v) : str(true), s(v) {}
-    FmtArg(const char* v) : str(true), s(v ? v : "") {}
+    explicit FmtArg(int v) : n(v) {}
+    explicit FmtArg(long v) : n(v) {}
+    explicit FmtArg(unsigned v) : n(static_cast<long>(v)) {}
+    explicit FmtArg(unsigned long v) : n(static_cast<long>(v)) {}
+    explicit FmtArg(long long v) : n(static_cast<long>(v)) {}
+    explicit FmtArg(const std::string& v) : str(true), s(v) {}
+    explicit FmtArg(const char* v) : str(true), s(v ? v : "") {}
 };
 /** string.format for a format string from the game's own files: %d, %s, %x,
  *  %c and %%, with flags and widths, read safely whatever the arguments. */
-std::string sfmt(const std::string& f, const std::vector<FmtArg>& args);
+std::string Sfmt(const std::string& f, const std::vector<FmtArg>& args);
 template <class... A>
-std::string format(const std::string& f, A&&... a) {
-    return sfmt(f, {FmtArg(std::forward<A>(a))...});
+std::string Format(const std::string& f, A&&... a) {
+    return Sfmt(f, {FmtArg(std::forward<A>(a))...});
 }
 
 /** Lua's floor division and modulo, for numbers that may be negative. */
-inline long floorDiv(long a, long b) {
+inline long FloorDiv(long a, long b) {
     long q = a / b;
     if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
     return q;
 }
-inline long luaMod(long a, long b) {
+inline long LuaMod(long a, long b) {
     long m = a % b;
     if (m != 0 && ((m < 0) != (b < 0))) m += b;
     return m;
@@ -111,39 +111,39 @@ inline long luaMod(long a, long b) {
 // did -- the data files' names are written every which way.
 
 /** The real path a DOS-style path resolves to, or "" if there is none. */
-std::string resolvePath(const std::string& path);
+std::string ResolvePath(const std::string& path);
 /** The whole file, or nothing. */
-std::optional<std::string> readFile(const std::string& path);
+std::optional<std::string> ReadFile(const std::string& path);
 /** The whole file, or an exception naming it. */
-std::string mustRead(const std::string& path);
-bool fileExists(const std::string& path);
-bool writeFile(const std::string& path, const std::string& bytes);
+std::string MustRead(const std::string& path);
+bool FileExists(const std::string& path);
+bool WriteFile(const std::string& path, const std::string& bytes);
 /** Put a file in memory, where readFile and fileExists find it before the
  *  disk: a random world's scenario, which would otherwise overwrite the last
  *  one the original made. Matched ignoring case, as on disk. */
-void installFile(const std::string& path, const std::string& bytes);
-bool removeFile(const std::string& path);
+void InstallFile(const std::string& path, const std::string& bytes);
+bool RemoveFile(const std::string& path);
 
 // Strings: bytes, one character a byte, as Lua strings are.
-inline uint8_t byteAt(const std::string& s, size_t i) {
-    return (uint8_t)s[i];
+inline uint8_t ByteAt(const std::string& s, size_t i) {
+    return static_cast<uint8_t>(s[i]);
 }
-std::string upper(std::string s);
-std::string lower(std::string s);
-std::string trimRight(const std::string& s);
-std::string trim(const std::string& s);
+std::string Upper(std::string s);
+std::string Lower(std::string s);
+std::string TrimRight(const std::string& s);
+std::string Trim(const std::string& s);
 /** Split on runs of CR and LF, dropping empty lines. */
-std::vector<std::string> splitLines(const std::string& s);
-bool startsWith(const std::string& s, const std::string& p);
-bool endsWith(const std::string& s, const std::string& p);
-bool contains(const std::string& s, const std::string& p);
+std::vector<std::string> SplitLines(const std::string& s);
+bool StartsWith(const std::string& s, const std::string& p);
+bool EndsWith(const std::string& s, const std::string& p);
+bool Contains(const std::string& s, const std::string& p);
 /** Latin-1 to UTF-8, and back (characters past Latin-1 become '?'). */
-std::string latin1ToUtf8(const std::string& s);
-std::string utf8ToLatin1(const std::string& s);
+std::string Latin1ToUtf8(const std::string& s);
+std::string Utf8ToLatin1(const std::string& s);
 /** Lua's tonumber for a decimal integer, or nothing. */
-std::optional<long> toInt(const std::string& s);
+std::optional<long> ToInt(const std::string& s);
 
 /** Wall time in seconds, for what plays out by the clock. */
-double now();
+double Now();
 
 }  // namespace w2

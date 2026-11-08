@@ -27,14 +27,14 @@ struct Entry {
 
 std::vector<Entry> ReadItems() {
     std::vector<Entry> out;
-    auto s = w2::readFile(G.dataDir + "/UDB/UDB.DAT");
+    auto s = w2::ReadFile(G.data_dir + "/UDB/UDB.DAT");
     if (!s) return out;
-    int n = w2::u16(*s, 0);
+    int n = w2::U16(*s, 0);
     for (int i = 0; i < n; i++) {
         size_t o = 2 + 68 * static_cast<size_t>(i);
         if (o + 68 > s->size()) break;
-        out.push_back(Entry{w2::u16(*s, o), w2::cstr(*s, o + 2, 50), w2::u16(*s, o + 52),
-                            w2::u16(*s, o + 54), w2::u16(*s, o + 56), w2::u16(*s, o + 58)});
+        out.push_back(Entry{w2::U16(*s, o), w2::Cstr(*s, o + 2, 50), w2::U16(*s, o + 52),
+                            w2::U16(*s, o + 54), w2::U16(*s, o + 56), w2::U16(*s, o + 58)});
     }
     return out;
 }
@@ -46,65 +46,65 @@ struct Shortcuts : kit::Modal {
     int ItemIndex(int id) const {
         for (size_t i = 0; i < items.size(); i++)
             if (items[i].id == id) return static_cast<int>(i);
-        return w2::NONE;
+        return w2::kNone;
     }
     int Shortcut(int s) const {
         auto it = G.screen->ui.shortcuts.find(s);
-        return it == G.screen->ui.shortcuts.end() ? w2::NONE : it->second;
+        return it == G.screen->ui.shortcuts.end() ? w2::kNone : it->second;
     }
     void Refresh() {
         auto& st = v.state;
-        st[kOk] = w2::uidata::NORMAL;
-        for (int i = 0; i <= 20; i++) st[kItem + i] = w2::uidata::NORMAL;
-        for (int i = 0; i <= 3; i++) st[kSlot + i] = w2::uidata::NORMAL;
+        st[kOk] = w2::uidata::kNormal;
+        for (int i = 0; i <= 20; i++) st[kItem + i] = w2::uidata::kNormal;
+        for (int i = 0; i <= 3; i++) st[kSlot + i] = w2::uidata::kNormal;
     }
     void Button(int x, int y, int sx, int sy) {
-        auto art = G.screen->artFor(w2::uidata::SHORTCUT_BITMAP);
+        auto art = G.screen->ArtFor(w2::uidata::kShortcutBitmap);
         if (!art) return;
-        gfx::setColor(1, 1, 1);
-        gfx::draw(art->image, gfx::newQuad(sx, sy, 32, 29), x, y);
+        gfx::SetColor(1, 1, 1);
+        gfx::Draw(art->image, gfx::NewQuad(sx, sy, 32, 29), x, y);
     }
-    void draw() override {
-        kit::popup(kR);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), "Menu Shortcuts", 320, 63);  // 4125:055c
-        const Font& f = kit::font(2);
+    void Draw() override {
+        kit::Popup(kR);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), "Menu Shortcuts", 320, 63);  // 4125:055c
+        const Font& f = kit::GetFont(2);
         int current = ItemIndex(Shortcut(slot));
         for (size_t i = 0; i < items.size(); i++) {
             const Entry& it = items[i];
             int x = 96 + 152 * (static_cast<int>(i) % 3);
             int y = 100 + 30 * (static_cast<int>(i) / 3);
             Button(x, y, it.x + (static_cast<int>(i) == current ? it.w / 2 : 0), it.y);
-            gfx::setColor(1, 1, 1);
-            f.draw(it.name, x + 40, y + 5);
+            gfx::SetColor(1, 1, 1);
+            f.Draw(it.name, x + 40, y + 5);
         }
-        kit::centred(f, "Choose 4 buttons for shortcuts", 320, 320);  // 4125:056b
+        kit::Centred(f, "Choose 4 buttons for shortcuts", 320, 320);  // 4125:056b
         for (int s = 0; s <= 3; s++) {
             int x = 96 + 40 * s;
             int k = ItemIndex(Shortcut(s));
-            if (k != w2::NONE)
+            if (k != w2::kNone)
                 Button(x, 342, items[k].x, items[k].y);
             else
                 Button(x, 342, kBlank[0], kBlank[1]);
             if (s == slot) {
-                kit::setPal(9);
-                kit::outline(x, 342, 32, 29);
+                kit::SetPal(9);
+                kit::Outline(x, 342, 32, 29);
             }
         }
         std::set<int> h;
         for (int i = 0; i <= 20; i++) h.insert(kItem + i);
         for (int i = 0; i <= 3; i++) h.insert(kSlot + i);
-        kit::drawControls(v, h);
+        kit::DrawControls(v, h);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
         if (!c) return;
         auto& ui = G.screen->ui;
         if (c->id == kOk) {
-            w2::Json j = w2::Json::array();
-            for (int s = 0; s < 4; s++) j.push(Shortcut(s));
-            prefs::set("shortcuts", j.dump());
-            kit::pop(this);
+            w2::Json j = w2::Json::Array();
+            for (int s = 0; s < 4; s++) j.Push(Shortcut(s));
+            prefs::Set("shortcuts", j.Dump());
+            kit::Pop(this);
             return;
         }
         if (c->id >= kSlot && c->id < kSlot + 4) {
@@ -113,25 +113,25 @@ struct Shortcuts : kit::Modal {
             int k = c->id - kItem;
             if (k < static_cast<int>(items.size())) {
                 ui.shortcuts[slot] = items[k].id;
-                if (!ui.shortcutNames.count(items[k].id))
-                    ui.shortcutNames[items[k].id] = items[k].name;
+                if (!ui.shortcut_names.count(items[k].id))
+                    ui.shortcut_names[items[k].id] = items[k].name;
             }
         }
         Refresh();
     }
-    void keypressed(const std::string& key) override {
-        if (key == "return" || key == "kpenter" || key == "escape") kit::pop(this);
+    void Keypressed(const std::string& key) override {
+        if (key == "return" || key == "kpenter" || key == "escape") kit::Pop(this);
     }
 };
 }  // namespace
 
-void open() {
+void Open() {
     auto d = std::make_shared<Shortcuts>();
     d->items = ReadItems();
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace shortcuts

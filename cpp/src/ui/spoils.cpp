@@ -6,7 +6,7 @@
 
 namespace spoils {
 
-using w2::format;
+using w2::Format;
 
 namespace {
 const kit::Rect kR{176, 60, 288, 300};  // popup 12
@@ -20,45 +20,45 @@ struct Spoils : kit::Modal {
     kit::Done after;
     void Close() {
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
-    void draw() override {
+    void Draw() override {
         int which = sacked ? 1 : 0;
-        kit::popup(kR);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(kTitle, which), 320, 64);
-        const Font& f = kit::font(2);
-        kit::centred(f, format(kit::text(kLine, which), city->name), 320, 115);
-        kit::centred(f, format(kit::text(kGold, 0), gold), 320, 135);
-        kit::centred(
+        kit::Popup(kR);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), kit::Text(kTitle, which), 320, 64);
+        const Font& f = kit::GetFont(2);
+        kit::Centred(f, Format(kit::Text(kLine, which), city->name), 320, 115);
+        kit::Centred(f, Format(kit::Text(kGold, 0), gold), 320, 135);
+        kit::Centred(
                 f,
-                format(kit::text(kLost, lost.size() == 1 ? 0 : 1), static_cast<int>(lost.size())),
+                Format(kit::Text(kLost, lost.size() == 1 ? 0 : 1), static_cast<int>(lost.size())),
                 320, 165);
-        kit::centred(f, format(kit::text(kLeft, left == 1 ? 0 : 1), left), 320, 185);
-        kit::bevel(184, 220, 272, 130, 4, 2);
-        kit::bevel(185, 221, 270, 128, 2, 4);
-        gfx::setColor(1, 1, 1);
-        f.draw(kit::text(kTitle, 2), 192, 230);
-        f.draw(kit::text(kTitle, 3), 368, 230);
+        kit::Centred(f, Format(kit::Text(kLeft, left == 1 ? 0 : 1), left), 320, 185);
+        kit::Bevel(184, 220, 272, 130, 4, 2);
+        kit::Bevel(185, 221, 270, 128, 2, 4);
+        gfx::SetColor(1, 1, 1);
+        f.Draw(kit::Text(kTitle, 2), 192, 230);
+        f.Draw(kit::Text(kTitle, 3), 368, 230);
         for (int i = 0; i <= 2; i++) {
             int y = 250 + 30 * i;
             bool have = i < static_cast<int>(lost.size());
-            kit::army(have ? lost[i].first : w2::NONE, G.player->index, 208, y, 1);
+            kit::Army(have ? lost[i].first : w2::kNone, G.player->index, 208, y, 1);
             if (have) {
-                gfx::setColor(1, 1, 1);
-                const w2::ArmyType* t = G.g->types.byId(lost[i].first);
-                f.draw(t ? t->name : "", 248, y + 6);
-                f.draw(w2::fmt("%d gp", lost[i].second), 368, y + 6);
+                gfx::SetColor(1, 1, 1);
+                const w2::ArmyType* t = G.g->types.ById(lost[i].first);
+                f.Draw(t ? t->name : "", 248, y + 6);
+                f.Draw(w2::Fmt("%d gp", lost[i].second), 368, y + 6);
             }
         }
     }
-    void mousepressed(int, int, int) override { Close(); }
-    void keypressed(const std::string&) override { Close(); }
+    void Mousepressed(int, int, int) override { Close(); }
+    void Keypressed(const std::string&) override { Close(); }
 };
 }  // namespace
 
-void open(bool sacked, w2::City* city, int gold, const std::vector<std::pair<int, int>>& lost,
+void Open(bool sacked, w2::City* city, int gold, const std::vector<std::pair<int, int>>& lost,
           int left, kit::Done after) {
     auto d = std::make_shared<Spoils>();
     d->sacked = sacked;
@@ -67,7 +67,7 @@ void open(bool sacked, w2::City* city, int gold, const std::vector<std::pair<int
     d->lost = lost;
     d->left = left;
     d->after = after;
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace spoils

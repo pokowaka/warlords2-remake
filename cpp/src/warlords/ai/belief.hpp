@@ -16,91 +16,91 @@
 namespace w2 {
 
 struct ObservedStack {
-    int x = NONE, y = NONE;
-    int owner = NONE;
-    int visibleCount = 0;
-    int topType = 0;
-    int lastInspectedTurn = NONE;
-    std::vector<int> knownTypes;
-    std::vector<int> knownStrengths;
+    int x = kNone, y = kNone;
+    int owner = kNone;
+    int visible_count = 0;
+    int top_type = 0;
+    int last_inspected_turn = kNone;
+    std::vector<int> known_types;
+    std::vector<int> known_strengths;
 };
 
 struct FrontierCluster {
     int x = 0, y = 0;
-    int unseenNeighbours = 0;
-    int regionUnseenCount = 0;
-    bool isWater = false;
-    bool onRoad = false;
+    int unseen_neighbours = 0;
+    int region_unseen_count = 0;
+    bool is_water = false;
+    bool on_road = false;
 };
 
 struct SideBelief {
-    int updatedTurn = 0;
-    float frontierRatio = 0.0f;
-    std::map<int, ObservedStack> stacksByTile;
-    std::array<float, 8> seenEnemyAvgStrength{4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f};
-    std::vector<City*> visibleCities;
-    std::vector<Site*> visibleSites;
-    std::vector<Item*> visibleGroundItems;
-    std::vector<FrontierCluster> fogFrontiers;
-    std::vector<float> cityThreat1Turn;
-    std::vector<float> cityThreat2Turn;
-    std::vector<float> cityNearestEnemyDist;
-    std::array<float, 8> myBorderStrength{};
-    std::array<float, 8> theirBorderStrength{};
-    std::array<int, 8> visibleCitiesBySide{};
+    int updated_turn = 0;
+    float frontier_ratio = 0.0F;
+    std::map<int, ObservedStack> stacks_by_tile;
+    std::array<float, 8> seen_enemy_avg_strength{4.0F, 4.0F, 4.0F, 4.0F, 4.0F, 4.0F, 4.0F, 4.0F};
+    std::vector<City*> visible_cities;
+    std::vector<Site*> visible_sites;
+    std::vector<Item*> visible_ground_items;
+    std::vector<FrontierCluster> fog_frontiers;
+    std::vector<float> city_threat1_turn;
+    std::vector<float> city_threat2_turn;
+    std::vector<float> city_nearest_enemy_dist;
+    std::array<float, 8> my_border_strength{};
+    std::array<float, 8> their_border_strength{};
+    std::array<int, 8> visible_cities_by_side{};
 };
 
 namespace ai::belief {
 
 struct CombatEstimate {
-    float winProb = 1.0f;
-    float expectedSurvivors = 0.0f;
-    float expectedEnemyLosses = 0.0f;
-    int estimatedDefenderCount = 0;
-    float estimatedDefenderStrength = 0.0f;
-    float seenTileFraction = 1.0f;
+    float win_prob = 1.0F;
+    float expected_survivors = 0.0F;
+    float expected_enemy_losses = 0.0F;
+    int estimated_defender_count = 0;
+    float estimated_defender_strength = 0.0F;
+    float seen_tile_fraction = 1.0F;
 };
 
 /**
  * Ensures the side has an initialized SideBelief instance and returns it.
  */
-SideBelief& ensure(Side& side);
+SideBelief& Ensure(Side& side);
 
 /**
  * Returns true if tile (x, y) is visible to sideIndex under current game rules
  * (including Allied shared vision when Hidden Map is active).
  */
-bool isTileVisible(const Game& g, int sideIndex, int x, int y);
+bool IsTileVisible(const Game& g, int side_index, int x, int y);
 
 /**
  * Returns true if any of the city's 2x2 footprint tiles are visible to sideIndex,
  * or if the city is the target of sideIndex's active quest.
  */
-bool isCityVisible(const Game& g, int sideIndex, const City& city);
+bool IsCityVisible(const Game& g, int side_index, const City& city);
 
 /**
  * Returns true if the site's tile is visible to sideIndex or revealed by a sage/quest.
  */
-bool isSiteVisible(const Game& g, int sideIndex, const Site& site);
+bool IsSiteVisible(const Game& g, int side_index, const Site& site);
 
 /**
  * Rebuilds the side's fair-information observation state, threat heatmaps,
  * border strength ratios, and fog-of-war frontier clusters for the current turn.
  */
-void update(Game& g, Side& side);
+void Update(Game& g, Side& side);
 
 /**
  * Records the revealed composition of an enemy stack after a battle at (x, y).
  */
-void recordBattleObservation(Game& g, int observerSide, int x, int y);
+void RecordBattleObservation(Game& g, int observer_side, int x, int y);
 
 /**
  * Estimates combat outcome for attacking (tx, ty) using strictly human-visible
  * information (synthetic defender estimation when View Enemies is off) without
  * mutating g.rng.
  */
-CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*>& attackers,
-                              int tx, int ty, float cautionBias = 0.0f);
+CombatEstimate EstimateCombat(Game& g, const Side& side, const std::vector<Army*>& attackers,
+                              int tx, int ty, float caution_bias = 0.0F);
 
 /**
  * While alive, answers belief's per-tile army queries from an index built once
@@ -114,17 +114,17 @@ class ScopedTileIndex {
     ~ScopedTileIndex();
     ScopedTileIndex(const ScopedTileIndex&) = delete;
     ScopedTileIndex& operator=(const ScopedTileIndex&) = delete;
-    const std::vector<Army*>& at(int x, int y) const;
-    const Game& game() const { return g_; }
+    const std::vector<Army*>& At(int x, int y) const;
+    const Game& GetGame() const { return g_; }
 
   private:
     const Game& g_;
-    std::vector<std::vector<Army*>> byTile_;
+    std::vector<std::vector<Army*>> by_tile_;
     const ScopedTileIndex* prev_;
 };
 
 /** game::armiesAt, answered by the innermost ScopedTileIndex for `g` when one is open. */
-std::vector<Army*> armiesAt(const Game& g, int x, int y);
+std::vector<Army*> ArmiesAt(const Game& g, int x, int y);
 
 }  // namespace ai::belief
 }  // namespace w2

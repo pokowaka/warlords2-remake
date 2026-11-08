@@ -9,7 +9,7 @@ namespace w2::rules {
 
 Bugs bugs;
 
-const Purpose& purpose(int p) {
+const Purpose& PurposeOf(int p) {
     static const Purpose kTable[7] = {
         {0, 0, 0},   {10, 4, 1},   // quick and cheap
         {10, 10, 1},               // balanced
@@ -20,42 +20,42 @@ const Purpose& purpose(int p) {
     return kTable[std::clamp(p, 0, 6)];
 }
 
-std::vector<Slot> citySlots(const std::vector<int>& produce_ids, const Types& types, Rng& rng) {
+std::vector<Slot> CitySlots(const std::vector<int>& produce_ids, const Types& types, Rng& rng) {
     std::vector<Slot> slots;
     for (int id : produce_ids) {
-        const ArmyType* a = types.byId(id);
+        const ArmyType* a = types.ById(id);
         int strength = a->strength, time = a->time, cost = a->cost, move = a->move;
-        if (rng.chance(10)) {
-            if (rng.chance(60))
+        if (rng.Chance(10)) {
+            if (rng.Chance(60))
                 strength = std::min(9, strength + 1);
             else
                 strength = std::max(1, strength - 1);
         }
-        if (rng.chance(20)) {
-            int r = rng.dice(1, 100, 0);
+        if (rng.Chance(20)) {
+            int r = rng.Dice(1, 100, 0);
             move += r < 10 ? 4 : r < 60 ? 2 : r < 95 ? -2 : -4;
             move = std::max(2, move);
         }
         move = std::max(6, move);
-        if (rng.chance(10)) {
+        if (rng.Chance(10)) {
             int quarter = cost / 4;
-            cost += rng.chance(60) ? -quarter : quarter;
+            cost += rng.Chance(60) ? -quarter : quarter;
         }
-        if (rng.chance(10)) {
-            time = rng.chance(60) ? std::max(1, time - 1) : time + 1;
+        if (rng.Chance(10)) {
+            time = rng.Chance(60) ? std::max(1, time - 1) : time + 1;
         }
         slots.push_back(Slot{id, a->name, strength, time, cost, move, std::abs(a->price)});
     }
-    luaSort(slots, [](const Slot& p, const Slot& q) { return p.price < q.price; });
+    LuaSort(slots, [](const Slot& p, const Slot& q) { return p.price < q.price; });
     return slots;
 }
 
-int bestSlot(const std::vector<Slot>& slots, int purpose, const Types& types, bool side_bonus) {
-    const Purpose& w = rules::purpose(purpose);
-    int best = NONE, best_score = 0;
+int BestSlot(const std::vector<Slot>& slots, int purpose, const Types& types, bool side_bonus) {
+    const Purpose& w = rules::PurposeOf(purpose);
+    int best = kNone, best_score = 0;
     for (int i = static_cast<int>(slots.size()) - 1; i >= 0; i--) {
         const Slot& slot = slots[i];
-        const ArmyType* a = types.byId(slot.type);
+        const ArmyType* a = types.ById(slot.type);
         if (purpose != 4 || a->flies) {
             int str = std::min(9, slot.strength + (side_bonus ? 2 : 0));
             if (a->siege) str += 2;
@@ -70,18 +70,18 @@ int bestSlot(const std::vector<Slot>& slots, int purpose, const Types& types, bo
     return best;
 }
 
-std::optional<int> garrisonLevel(bool owned, int neutral_cities, Rng& rng) {
+std::optional<int> GarrisonLevel(bool owned, int neutral_cities, Rng& rng) {
     if (owned) return 3;
     if (neutral_cities <= 0) return std::nullopt;
-    return std::min(3, rng.dice(1, 4, 0) + neutral_cities - 2);
+    return std::min(3, rng.Dice(1, 4, 0) + neutral_cities - 2);
 }
 
-Army armyFromSlot(const Slot& slot, bool enhanced) {
+Army ArmyFromSlot(const Slot& slot, bool enhanced) {
     Army a;
     a.type = slot.type;
     a.name = slot.name;
     a.strength = enhanced ? std::min(9, slot.strength + 2) : slot.strength;
-    a.maxMoves = slot.move;
+    a.max_moves = slot.move;
     a.upkeep = slot.cost / 2;
     return a;
 }

@@ -39,7 +39,7 @@ struct Raw {
 
 }  // namespace
 
-std::optional<Sequence> parse(const std::string& s) {
+std::optional<Sequence> Parse(const std::string& s) {
     size_t start, len;
     if (!Walk(s, 0, s.size(), start, len)) return std::nullopt;
     size_t stop = std::min(s.size(), start + len);

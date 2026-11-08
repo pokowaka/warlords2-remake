@@ -29,71 +29,71 @@ struct BuyDialog : kit::Modal {
 
     void Refresh() {
         auto& st = v.state;
-        st[kDone] = w2::uidata::NORMAL;
+        st[kDone] = w2::uidata::kNormal;
         bool full = city->slots.size() >= 4;
         for (int i = 0; i < 4; i++)
-            st[kSlotFirst + i] = full ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kSlotFirst + i] = full ? w2::uidata::kNormal : w2::uidata::kDisabled;
         for (size_t n = 0; n < types.size(); n++)
             st[kTypeFirst + static_cast<int>(n)] =
-                    w2::game::cannotBuy(*G.g, *G.player, *city, *types[n]).empty()
-                            ? w2::uidata::NORMAL
-                            : w2::uidata::DISABLED;
+                    w2::game::CannotBuy(*G.g, *G.player, *city, *types[n]).empty()
+                            ? w2::uidata::kNormal
+                            : w2::uidata::kDisabled;
     }
     void Close() {
-        w2::game::sortProduction(*city);
+        w2::game::SortProduction(*city);
         auto d = done;
-        kit::pop(this);
+        kit::Pop(this);
         if (d) d();
     }
     void Buy(int n) {
         if (n < 0 || n >= static_cast<int>(types.size())) return;
         const w2::ArmyType* a = types[n];
-        if (!w2::game::cannotBuy(*G.g, *G.player, *city, *a).empty()) return;
-        w2::game::buyProduction(*G.g, *G.player, *city, slot, a->id);
+        if (!w2::game::CannotBuy(*G.g, *G.player, *city, *a).empty()) return;
+        w2::game::BuyProduction(*G.g, *G.player, *city, slot, a->id);
         // on to the next empty slot, if there is one (7087:0ee3)
         if (slot < 3 && slot + 1 >= static_cast<int>(city->slots.size())) slot++;
         Refresh();
     }
-    void draw() override {
+    void Draw() override {
         int side = G.player->index;
-        kit::popup(kR);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(kStr, 0), 320, 64);
-        kit::shield(side, 88, 64);
-        kit::shield(side, 512, 64);
-        const Font& body = kit::font(2);
-        gfx::setColor(1, 1, 1);
-        kit::centred(body, w2::format(kit::text(kStr, 1), G.player->name, city->name), 320, 104);
-        kit::centred(body, w2::format(kit::text(kStr, 2), G.player->gold), 352, 365);
-        kit::centred(body, kit::text(kStr, 3), 176, 348);
+        kit::Popup(kR);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), kit::Text(kStr, 0), 320, 64);
+        kit::Shield(side, 88, 64);
+        kit::Shield(side, 512, 64);
+        const Font& body = kit::GetFont(2);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(body, w2::Format(kit::Text(kStr, 1), G.player->name, city->name), 320, 104);
+        kit::Centred(body, w2::Format(kit::Text(kStr, 2), G.player->gold), 352, 365);
+        kit::Centred(body, kit::Text(kStr, 3), 176, 348);
         for (int i = 0; i < 4; i++) {
             bool have = i < static_cast<int>(city->slots.size());
             int x = 104 + i * 40;
-            kit::army(have ? city->slots[i].type : w2::NONE, side, x, 370, have ? side + 2 : 1);
+            kit::Army(have ? city->slots[i].type : w2::kNone, side, x, 370, have ? side + 2 : 1);
             int fx = x - 2, fy = 368;
             if (slot == i) {
-                kit::setPal(0);
-                kit::outline(fx, fy, 37, 35);
-                kit::setPal(9);
-                kit::outline(fx - 1, fy - 1, 37, 35);
+                kit::SetPal(0);
+                kit::Outline(fx, fy, 37, 35);
+                kit::SetPal(9);
+                kit::Outline(fx - 1, fy - 1, 37, 35);
             } else {
-                kit::setPal(3);
-                kit::outline(fx, fy, 37, 35);
-                kit::outline(fx - 1, fy - 1, 37, 35);
+                kit::SetPal(3);
+                kit::Outline(fx, fy, 37, 35);
+                kit::Outline(fx - 1, fy - 1, 37, 35);
             }
         }
         for (size_t n = 0; n < types.size(); n++) {
             int col = static_cast<int>(n) % 4, row = static_cast<int>(n) / 4;
             int x = 88 + col * 120, y = 136 + row * 31;
-            kit::army(types[n]->id, side, x, y, 1,
-                      !w2::game::cannotBuy(*G.g, *G.player, *city, *types[n]).empty());
-            gfx::setColor(1, 1, 1);
-            body.draw(w2::fmt("%d gp", types[n]->price), x + 40, y + 6);
+            kit::Army(types[n]->id, side, x, y, 1,
+                      !w2::game::CannotBuy(*G.g, *G.player, *city, *types[n]).empty());
+            gfx::SetColor(1, 1, 1);
+            body.Draw(w2::Fmt("%d gp", types[n]->price), x + 40, y + 6);
         }
-        kit::drawControls(v);
+        kit::DrawControls(v);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
         if (!c) return;
         if (c->id == kDone)
             Close();
@@ -103,31 +103,31 @@ struct BuyDialog : kit::Modal {
             Buy(c->id - kTypeFirst);
     }
     // the right button on a type for sale (sub-ids 5-24, 7087:11f4)
-    bool info(int sub, int sx, int sy) override {
+    bool Info(int sub, int sx, int sy) override {
         int n = sub - 5;
         if (n < 0 || n >= static_cast<int>(types.size())) return false;
         const w2::ArmyType* a = types[n];
-        infobox::armyType(
+        infobox::ArmyType(
                 sx, sy, a->id,
                 w2::Slot{a->id, a->name, a->strength, a->time, a->cost, a->move, a->price});
         return true;
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter" || key == "escape") Close();
     }
 };
 }  // namespace
 
-void open(w2::City* c, kit::Done after) {
+void Open(w2::City* c, kit::Done after) {
     auto d = std::make_shared<BuyDialog>();
     d->city = c;
     d->done = after;
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
-    d->types = w2::game::buyableTypes(*G.g);
-    d->slot = w2::game::buySlot(*c);
+    d->types = w2::game::BuyableTypes(*G.g);
+    d->slot = w2::game::BuySlot(*c);
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace buyprod

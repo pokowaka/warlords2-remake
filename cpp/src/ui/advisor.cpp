@@ -32,26 +32,26 @@ struct Helmet : kit::Modal {
         waiting = false;
         std::weak_ptr<Modal> self = weak_from_this();
         kit::Done a = after;
-        bool spoke = sound::speak(group, [self, a]() {
-            if (auto s = self.lock()) kit::pop(s.get());
+        bool spoke = sound::Speak(group, [self, a]() {
+            if (auto s = self.lock()) kit::Pop(s.get());
             if (a) a();
         });
         if (!spoke) {
-            kit::pop(this);
+            kit::Pop(this);
             if (a) a();
             return;
         }
-        count = 11 + front::roll(30) - 1;
-        next_tick = kit::now() + kTick;
+        count = 11 + front::Roll(30) - 1;
+        next_tick = kit::Now() + kTick;
         blink_frame = 0;
     }
 
-    void update() override {
+    void Update() override {
         if (waiting) {
-            if (!sound::busy()) Start();
+            if (!sound::Busy()) Start();
             return;
         }
-        double t = kit::now();
+        double t = kit::Now();
         while (next_tick > 0 && t >= next_tick) {
             next_tick += kTick;
             if (blink_frame) {
@@ -72,33 +72,33 @@ struct Helmet : kit::Modal {
         }
     }
 
-    void draw() override {
+    void Draw() override {
         if (waiting) return;
         if (!voice_pic) {
-            voice_pic = pckimage::load(G.dataDir + "/PICS/VOICE.PCK", G.palette, 10);
-            voice_bits = pckimage::load(G.dataDir + "/PICS/VOICEBIT.PCK", G.palette);
+            voice_pic = pckimage::Load(G.data_dir + "/PICS/VOICE.PCK", G.palette, 10);
+            voice_bits = pckimage::Load(G.data_dir + "/PICS/VOICEBIT.PCK", G.palette);
         }
-        gfx::setColor(1, 1, 1);
-        gfx::draw(voice_pic, kAtX, kAtY);
+        gfx::SetColor(1, 1, 1);
+        gfx::Draw(voice_pic, kAtX, kAtY);
         if (blink_frame) {
             int row = kBlink[blink_frame - 1];
-            gfx::draw(voice_bits, gfx::newQuad(0, row * kEyesH, kEyesW, kEyesH), kEyesX, kEyesY);
+            gfx::Draw(voice_bits, gfx::NewQuad(0, row * kEyesH, kEyesW, kEyesH), kEyesX, kEyesY);
         }
     }
     // he holds the game while he speaks: input goes nowhere
 };
 }  // namespace
 
-void say(int group, kit::Done after) {
-    if (group == w2::NONE || !sound::speechOn()) {
+void Say(int group, kit::Done after) {
+    if (group == w2::kNone || !sound::SpeechOn()) {
         if (after) after();
         return;
     }
     auto d = std::make_shared<Helmet>();
     d->group = group;
     d->after = after;
-    kit::push(d);
-    if (!sound::busy()) d->Start();
+    kit::Push(d);
+    if (!sound::Busy()) d->Start();
 }
 
 }  // namespace advisor

@@ -37,25 +37,25 @@ struct Evaluation {
     std::vector<std::pair<std::string, double>> metrics;  // in a fixed order
 
     /** No hard rule broken (soft ones, like a spur road, are only counted). */
-    bool passed() const;
+    bool Passed() const;
     /** The metric's value, or `dflt` when it was not measured. */
-    double metric(const std::string& key, double dflt = 0) const;
+    double Metric(const std::string& key, double dflt = 0) const;
     /** How many issues a check raised. */
-    int count(const std::string& check) const;
+    int Count(const std::string& check) const;
 };
 
 /** Every check, by name, in the order they are reported. */
-const std::vector<std::string>& checks();
+const std::vector<std::string>& Checks();
 /** Is a check a hard rule? The hard ones are those the hand-made scenarios
  *  never break; the soft ones (a spur road to a lone city, say) the
  *  designers did now and then, so they are counted and scored, not failed. */
-bool isHard(const std::string& check);
+bool IsHard(const std::string& check);
 /** The metrics that are scored against a Reference (scale-free ones only:
  *  a count of road tiles says nothing until it is divided by something). */
-const std::vector<std::string>& scoredMetrics();
+const std::vector<std::string>& ScoredMetrics();
 
 /** Evaluate one map. */
-Evaluation evaluate(const Map& map, const std::string& name);
+Evaluation Evaluate(const Map& map, const std::string& name);
 
 /** A metric's spread over the reference maps. */
 struct Range {
@@ -64,7 +64,7 @@ struct Range {
 using Reference = std::map<std::string, Range>;
 
 /** The spread of every scored metric over some maps (the hand-made ones). */
-Reference reference(const std::vector<Evaluation>& maps);
+Reference MakeReference(const std::vector<Evaluation>& maps);
 
 /** How far a map sits outside the reference, metric by metric: 0 inside the
  *  range, else the distance outside it in reference standard deviations. */
@@ -72,9 +72,9 @@ struct Score {
     double penalty = 0;                                      // the sum
     std::vector<std::pair<std::string, double>> deviations;  // the non-zero ones
 };
-Score score(const Evaluation& e, const Reference& ref);
+Score ScoreAgainst(const Evaluation& e, const Reference& ref);
 
 /** The evaluation as JSON, with its score when there is a reference. */
-Json toJson(const Evaluation& e, const Score* s = nullptr);
+Json ToJson(const Evaluation& e, const Score* s = nullptr);
 
 }  // namespace w2::mapeval

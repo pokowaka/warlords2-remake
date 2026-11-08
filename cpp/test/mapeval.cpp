@@ -53,18 +53,18 @@ using Generator = std::function<randommap::Files(const randommap::Options&)>;
 /** The generators to choose from. A new one goes here. */
 const std::map<std::string, Generator>& Generators() {
     static const std::map<std::string, Generator> kG = {
-        {"classic", [](const randommap::Options& o) { return randommap::generateNow(o); }},
+        {"classic", [](const randommap::Options& o) { return randommap::GenerateNow(o); }},
         {"fair",
          [](const randommap::Options& o) {
              auto f = o;
-             f.fairCapitals = true;
-             return randommap::generateNow(f);
+             f.fair_capitals = true;
+             return randommap::GenerateNow(f);
          }},
         {"scenario",
          [](const randommap::Options& o) {
              auto f = o;
              f.scenario = true;
-             return randommap::generateNow(f);
+             return randommap::GenerateNow(f);
          }},
     };
     return kG;
@@ -102,8 +102,8 @@ double Quantile(std::vector<double> v, double q) {
 }
 
 mapeval::Evaluation EvaluateScenario(const std::string& data, const std::string& name) {
-    auto map = scn::load(data + "/" + name, name);
-    return mapeval::evaluate(*map, name);
+    auto map = scn::Load(data + "/" + name, name);
+    return mapeval::Evaluate(*map, name);
 }
 
 /** The maps' hard-rule failures and metric spread, against the reference. */
@@ -114,31 +114,31 @@ void Report(const std::string& title, const std::vector<mapeval::Evaluation>& ma
     int passed = 0;
     std::vector<double> penalties;
     for (auto& e : maps) {
-        passed += e.passed();
-        penalties.push_back(mapeval::score(e, ref).penalty);
+        passed += e.Passed();
+        penalties.push_back(mapeval::ScoreAgainst(e, ref).penalty);
     }
     printf("passed every hard rule: %d of %zu (%.0f%%)\n", passed, maps.size(),
            100.0 * passed / maps.size());
     printf("penalty against the reference: median %.2f, p95 %.2f\n", Quantile(penalties, 0.5),
            Quantile(penalties, 0.95));
     printf("\n%-16s %5s %10s %12s %12s\n", "rule", "kind", "maps hit", "mean issues", "max issues");
-    for (const std::string& c : mapeval::checks()) {
+    for (const std::string& c : mapeval::Checks()) {
         int hit = 0, max = 0;
         double sum = 0;
         for (auto& e : maps) {
-            int n = e.count(c);
+            int n = e.Count(c);
             hit += n > 0;
             sum += n;
             max = std::max(max, n);
         }
-        printf("%-16s %5s %9.0f%% %12.2f %12d\n", c.c_str(), mapeval::isHard(c) ? "hard" : "soft",
+        printf("%-16s %5s %9.0f%% %12.2f %12d\n", c.c_str(), mapeval::IsHard(c) ? "hard" : "soft",
                100.0 * hit / maps.size(), sum / maps.size(), max);
     }
     printf("\n%-26s %19s %10s %10s %10s %8s\n", "metric", "reference", "p5", "median", "p95",
            "outside");
     for (auto& [key, value] : maps[0].metrics) {
         std::vector<double> xs;
-        for (auto& e : maps) xs.push_back(e.metric(key));
+        for (auto& e : maps) xs.push_back(e.Metric(key));
         auto r = ref.find(key);
         char range[32] = "";
         int outside = 0;
@@ -171,7 +171,7 @@ int main(int argc, char** argv) {
     std::vector<int> seeds = ParseSeeds("1-50");
     std::array<int, 4> sliders{{3, 3, 2, 3}};
     bool allies = false;
-    scengen::Shape shape = scengen::Shape::Continents;
+    scengen::Shape shape = scengen::Shape::kContinents;
     int issue_limit = 0;
     int threads = static_cast<int>(std::max(1U, std::thread::hardware_concurrency()));
     for (int i = 1; i < argc; i++) {
@@ -205,7 +205,7 @@ int main(int argc, char** argv) {
             allies = true;
         else if (a == "--shape") {
             std::string sh = next();
-            if (!scengen::parseShape(sh, shape)) {
+            if (!scengen::ParseShape(sh, shape)) {
                 fprintf(stderr, "unknown shape '%s'\n", sh.c_str());
                 return 2;
             }
@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
             return 2;
         }
     }
-    if (!fileExists(data + "/TERRAIN0/ARMYTYPE.DAT")) {
+    if (!FileExists(data + "/TERRAIN0/ARMYTYPE.DAT")) {
         fprintf(stderr,
                 "cannot find the game's files in '%s': run from the repository root, or pass "
                 "--data DIR\n",
@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
     std::vector<mapeval::Evaluation> ref_maps;
     for (const std::string& s : SplitList(reference_list))
         ref_maps.push_back(EvaluateScenario(data, s));
-    auto ref = mapeval::reference(ref_maps);
+    auto ref = mapeval::MakeReference(ref_maps);
     Report("reference (hand-made)", ref_maps, ref);
     for (auto& e : ref_maps) PrintIssues(e, issue_limit);
 
@@ -260,9 +260,9 @@ int main(int argc, char** argv) {
                 try {
                     Rng r(seeds[k]);
                     randommap::Options o;
-                    o.dataDir = data;
+                    o.data_dir = data;
                     o.rng = &r;
-                    o.sliders = randommap::settle(sliders, r);
+                    o.sliders = randommap::Settle(sliders, r);
                     o.allies = allies;
                     o.world.shape = shape;
                     auto files = g->second(o);
@@ -271,13 +271,13 @@ int main(int argc, char** argv) {
                                 export_dir + "/" + generator + "-" + std::to_string(seeds[k]);
                         std::filesystem::create_directories(dir);
                         for (auto& [ext, bytes] : files)
-                            if (!writeFile(dir + "/" + randommap::DIR + "." + ext, bytes))
+                            if (!WriteFile(dir + "/" + randommap::kDir + "." + ext, bytes))
                                 throw std::runtime_error("could not write " + dir);
                     }
                     // straight from memory: nothing is written to the data folder
-                    auto map =
-                            scn::loadFromFiles(data + "/" + randommap::DIR, randommap::DIR, files);
-                    made[k] = mapeval::evaluate(*map, generator + "#" + std::to_string(seeds[k]));
+                    auto map = scn::LoadFromFiles(data + "/" + randommap::kDir, randommap::kDir,
+                                                  files);
+                    made[k] = mapeval::Evaluate(*map, generator + "#" + std::to_string(seeds[k]));
                 } catch (const std::exception& ex) {
                     std::lock_guard<std::mutex> lock(errors);
                     fprintf(stderr, "seed %d: %s\n", seeds[k], ex.what());
@@ -295,25 +295,25 @@ int main(int argc, char** argv) {
     }
 
     if (!json_path.empty()) {
-        Json out = Json::object();
-        Json ref_json = Json::object();
+        Json out = Json::Object();
+        Json ref_json = Json::Object();
         for (auto& [k, r] : ref) {
-            Json o = Json::object();
-            o.set("min", r.min);
-            o.set("max", r.max);
-            o.set("mean", r.mean);
-            o.set("sd", r.sd);
-            ref_json.set(k, o);
+            Json o = Json::Object();
+            o.Set("min", r.min);
+            o.Set("max", r.max);
+            o.Set("mean", r.mean);
+            o.Set("sd", r.sd);
+            ref_json.Set(k, o);
         }
-        out.set("reference", ref_json);
-        Json maps = Json::array();
+        out.Set("reference", ref_json);
+        Json maps = Json::Array();
         for (auto* list : {&ref_maps, &extra, &made})
             for (auto& e : *list) {
-                auto s = mapeval::score(e, ref);
-                maps.push(mapeval::toJson(e, &s));
+                auto s = mapeval::ScoreAgainst(e, ref);
+                maps.Push(mapeval::ToJson(e, &s));
             }
-        out.set("maps", maps);
-        if (!writeFile(json_path, out.dump())) {
+        out.Set("maps", maps);
+        if (!WriteFile(json_path, out.Dump())) {
             fprintf(stderr, "could not write %s\n", json_path.c_str());
             return 1;
         }

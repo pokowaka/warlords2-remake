@@ -20,52 +20,52 @@ struct Grids {
 
 namespace move {
 
-const char* const TERRAIN_NAMES[12] = {"road",      "bridge", "water", "shore", "forest", "hills",
+const char* const kTerrainNames[12] = {"road",      "bridge", "water", "shore", "forest", "hills",
                                        "mountains", "plain",  "marsh", "tower", "city",   "site"};
 
-Mode stackMode(const Game& g, const Stack& stack) {
+Mode StackMode(const Game& g, const Stack& stack) {
     bool at_sea = false, any_boat = false;
     bool all_fly = true, any_fly = false, all_non_hero_fly = true, hero_flight = false;
     bool woods = false, hills = false;
     for (Army* a : stack) {
-        const ArmyType* t = g.types.byId(a->type);
-        if (a->atSea) at_sea = true;
+        const ArmyType* t = g.types.ById(a->type);
+        if (a->at_sea) at_sea = true;
         if (t->boat) any_boat = true;
-        if (t->flies && !a->atSea) any_fly = true;
-        if (!t->flies || a->atSea) {
+        if (t->flies && !a->at_sea) any_fly = true;
+        if (!t->flies || a->at_sea) {
             all_fly = false;
-            if (a->type != armytype::HERO) all_non_hero_fly = false;
+            if (a->type != armytype::kHero) all_non_hero_fly = false;
         }
-        if (a->type == armytype::HERO) {
+        if (a->type == armytype::kHero) {
             for (Item* it : a->items)
-                if (it->type == rules::ITEM_FLIGHT) hero_flight = true;
+                if (it->type == rules::kItemFlight) hero_flight = true;
         }
-        if (t->woodsMove) woods = true;
-        if (t->hillsMove) hills = true;
+        if (t->woods_move) woods = true;
+        if (t->hills_move) hills = true;
     }
-    if (at_sea) return Mode{LAND, false, false, true};
-    if (any_boat) return Mode{BOAT, woods, hills, false};
+    if (at_sea) return Mode{kLand, false, false, true};
+    if (any_boat) return Mode{kBoat, woods, hills, false};
     if (hero_flight || all_fly || (all_non_hero_fly && any_fly))
-        return Mode{FLYING, woods, hills, false};
-    return Mode{LAND, woods, hills, false};
+        return Mode{kFlying, woods, hills, false};
+    return Mode{kLand, woods, hills, false};
 }
 
 // 1555:109d walks round a city from its top left tile in these directions
 static const int kPortTour[12] = {0, 2, 2, 4, 4, 4, 6, 6, 6, 0, 0, 0};
 
-bool isPort(const Game& g, const City& city) {
+bool IsPort(const Game& g, const City& city) {
     int x = city.x, y = city.y;
     for (int d : kPortTour) {
-        x += DIRS[d][0];
-        y += DIRS[d][1];
+        x += kDirs[d][0];
+        y += kDirs[d][1];
         if (x < 0 || y < 0 || x >= g.map->width || y >= g.map->height) return false;
-        int t = scn::terrainAt(*g.map, x, y);
-        if (t == BRIDGE || t == WATER || t == SHORE) return true;
+        int t = scn::TerrainAt(*g.map, x, y);
+        if (t == kBridge || t == kWater || t == kShore) return true;
     }
     return false;
 }
 
-std::vector<int>& grid(Game& g, int side_index) {
+std::vector<int>& Grid(Game& g, int side_index) {
     if (!g.grids) g.grids = std::make_shared<Grids>();
     int key_s = side_index;  // NONE (-1) for nobody, as the Lua's -1
     auto it = g.grids->by_side.find(key_s);
@@ -77,24 +77,24 @@ std::vector<int>& grid(Game& g, int side_index) {
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
             int i = y * w + x;
-            int terrain = scn::terrainAt(m, x, y);
-            int byte = scn::roadAt(m, x, y) % 0x20 != 0 ? 1 : COST[terrain];
-            if (terrain == BRIDGE)
-                byte |= CROSS_F | WATER_F;
-            else if (terrain == WATER || terrain == SHORE)
-                byte |= WATER_F;
-            else if (terrain == FOREST)
-                byte |= FOREST_F;
-            else if (terrain == HILLS)
-                byte |= HILLS_F;
-            if (m.crossing[i]) byte |= CROSS_F;
+            int terrain = scn::TerrainAt(m, x, y);
+            int byte = scn::RoadAt(m, x, y) % 0x20 != 0 ? 1 : kCost[terrain];
+            if (terrain == kBridge)
+                byte |= kCrossF | kWaterF;
+            else if (terrain == kWater || terrain == kShore)
+                byte |= kWaterF;
+            else if (terrain == kForest)
+                byte |= kForestF;
+            else if (terrain == kHills)
+                byte |= kHillsF;
+            if (m.crossing[i]) byte |= kCrossF;
             out[i] = byte;
         }
     }
     for (const City& c : m.cities) {
         // NONE is nobody, as the Lua's -1: no city is its own
-        bool mine = side_index != NONE && c.ownerIndex == side_index && !c.razed;
-        bool port = (mine || c.razed) && isPort(g, c);
+        bool mine = side_index != kNone && c.owner_index == side_index && !c.razed;
+        bool port = (mine || c.razed) && IsPort(g, c);
         for (int dx = 0; dx <= 1; dx++) {
             for (int dy = 0; dy <= 1; dy++) {
                 int x = c.x + dx, y = c.y + dy;
@@ -102,11 +102,11 @@ std::vector<int>& grid(Game& g, int side_index) {
                     int i = y * w + x;
                     int byte = out[i];
                     if (c.razed) {
-                        if (port) byte |= CROSS_F | WATER_F;
+                        if (port) byte |= kCrossF | kWaterF;
                     } else {
-                        byte |= CITY_F;
+                        byte |= kCityF;
                         if (mine) {
-                            if (port) byte |= CROSS_F | WATER_F;
+                            if (port) byte |= kCrossF | kWaterF;
                         } else {
                             byte = byte - (byte % 8);  // cost 0: impassable
                         }
@@ -119,67 +119,67 @@ std::vector<int>& grid(Game& g, int side_index) {
     return g.grids->by_side[key_s] = std::move(out);
 }
 
-void invalidate(Game& g) {
+void Invalidate(Game& g) {
     g.grids.reset();
 }
 
-std::optional<int> stepCost(int from_byte, int to_byte, int mode, bool woods, bool hills,
+std::optional<int> StepCost(int from_byte, int to_byte, int mode, bool woods, bool hills,
                             int penalty) {
     int cost = to_byte % 8;
-    bool to_water = has(to_byte, WATER_F), from_water = has(from_byte, WATER_F);
-    bool to_cross = has(to_byte, CROSS_F);
-    if (mode == FLYING) {
-        if (cost == 0 && has(to_byte, CITY_F)) return std::nullopt;
+    bool to_water = Has(to_byte, kWaterF), from_water = Has(from_byte, kWaterF);
+    bool to_cross = Has(to_byte, kCrossF);
+    if (mode == kFlying) {
+        if (cost == 0 && Has(to_byte, kCityF)) return std::nullopt;
         if (to_water && !to_cross) return 2;
         if (cost == 0 || cost > 2) return 2;
         return cost;
     }
-    if (mode == BOAT) {
-        if (!to_water && !has(to_byte, CITY_F)) return std::nullopt;
+    if (mode == kBoat) {
+        if (!to_water && !Has(to_byte, kCityF)) return std::nullopt;
         if (cost == 0) return std::nullopt;
         return cost;
     }
     if (cost == 0) return std::nullopt;
-    if (to_water != from_water && !to_cross && !has(from_byte, CROSS_F)) return std::nullopt;
+    if (to_water != from_water && !to_cross && !Has(from_byte, kCrossF)) return std::nullopt;
     if (cost > 2) {
-        if (woods && has(to_byte, FOREST_F)) cost = 2;
-        if (hills && has(to_byte, HILLS_F)) cost = 2;
+        if (woods && Has(to_byte, kForestF)) cost = 2;
+        if (hills && Has(to_byte, kHillsF)) cost = 2;
     }
-    if ((!from_water || has(from_byte, CROSS_F)) && to_water && !to_cross) cost += penalty;
+    if ((!from_water || Has(from_byte, kCrossF)) && to_water && !to_cross) cost += penalty;
     return cost;
 }
 
-int walkCost(int byte, int mode, bool woods, bool hills) {
+int WalkCost(int byte, int mode, bool woods, bool hills) {
     int cost = byte % 8;
-    if (mode == FLYING) {
-        if (has(byte, WATER_F) && !has(byte, CROSS_F)) return 2;
+    if (mode == kFlying) {
+        if (Has(byte, kWaterF) && !Has(byte, kCrossF)) return 2;
         if (cost == 0 || cost > 2) return 2;
         return cost;
     }
-    if (mode == LAND && cost > 2) {
-        if (woods && has(byte, FOREST_F)) cost = 2;
-        if (hills && has(byte, HILLS_F)) cost = 2;
+    if (mode == kLand && cost > 2) {
+        if (woods && Has(byte, kForestF)) cost = 2;
+        if (hills && Has(byte, kHillsF)) cost = 2;
     }
     return cost;
 }
 
-bool crossesShore(int byte, bool at_sea) {
-    if (has(byte, CROSS_F)) return false;
-    return has(byte, WATER_F) != at_sea;
+bool CrossesShore(int byte, bool at_sea) {
+    if (Has(byte, kCrossF)) return false;
+    return Has(byte, kWaterF) != at_sea;
 }
 
-int stackMoves(const Stack& stack) {
+int StackMoves(const Stack& stack) {
     if (stack.empty()) return 0;
     int least = INT_MAX;
     for (Army* a : stack) least = std::min(least, a->moves);
     return least;
 }
 
-std::optional<Preview> preview(Game& g, const Stack& stack, int x, int y) {
+std::optional<Preview> PreviewRoute(Game& g, const Stack& stack, int x, int y) {
     if (stack.empty()) return std::nullopt;
-    auto path = findPath(g, stack, stack[0]->x, stack[0]->y, x, y);
+    auto path = FindPath(g, stack, stack[0]->x, stack[0]->y, x, y);
     if (!path || path->empty()) return std::nullopt;
-    int left = stackMoves(stack), reach = 0;
+    int left = StackMoves(stack), reach = 0;
     for (size_t i = 0; i < path->size(); i++) {
         const Step& step = (*path)[i];
         if (step.cost > left) break;
@@ -209,7 +209,7 @@ static const int kNbDy[] = {-1,  -1, -1,  0,  1,   1, 1,   0,  -10, 0,  1,   1, 
 // the order path_trace tries the neighbours in (4125:0212)
 static const int kTraceOrder[8] = {0, 7, 1, 6, 2, 5, 3, 4};
 
-int direction(int x1, int y1, int x2, int y2) {
+int Direction(int x1, int y1, int x2, int y2) {
     if (x1 == x2 && y1 == y2) return -1;
     if (x1 == x2) return y2 < y1 ? 0 : 4;
     if (y1 == y2) return x2 < x1 ? 6 : 2;
@@ -217,23 +217,23 @@ int direction(int x1, int y1, int x2, int y2) {
     return y2 < y1 ? 7 : 5;
 }
 
-int distance(int x1, int y1, int x2, int y2) {
+int Distance(int x1, int y1, int x2, int y2) {
     double ax = x1 - x2, ay = y1 - y2;
     return static_cast<int>(std::floor(std::sqrt(ax * ax + ay * ay)));
 }
 
-std::vector<int> prepare(Game& g, const std::vector<int>& grid, int side_index, int mode, int dx,
+std::vector<int> Prepare(Game& g, const std::vector<int>& grid, int side_index, int mode, int dx,
                          int dy) {
     int w = g.map->width, h = g.map->height;
-    Side* side = g.map->side(side_index);
-    bool fog = g.map->options.hiddenMap != 0 && side && (!side->computer || !side->classicAi);
+    Side* side = g.map->Side(side_index);
+    bool fog = g.map->options.hidden_map != 0 && side && (!side->computer || !side->classic_ai);
     City* dest_city =
-            (dx >= 0 && dy >= 0 && dx < w && dy < h) ? g.map->cityTile[dy * w + dx] : nullptr;
+            (dx >= 0 && dy >= 0 && dx < w && dy < h) ? g.map->city_tile[dy * w + dx] : nullptr;
     bool dest_city_seen = false;
-    if (dest_city && fog && side && side->computer && !side->classicAi) {
+    if (dest_city && fog && side && side->computer && !side->classic_ai) {
         for (int oy = 0; oy <= 1; oy++)
             for (int ox = 0; ox <= 1; ox++)
-                if (game::seen(g, side_index, dest_city->x + ox, dest_city->y + oy))
+                if (game::Seen(g, side_index, dest_city->x + ox, dest_city->y + oy))
                     dest_city_seen = true;
     }
     std::vector<int> dist(static_cast<size_t>(w) * h);
@@ -241,16 +241,16 @@ std::vector<int> prepare(Game& g, const std::vector<int>& grid, int side_index, 
         for (int x = 0; x < w; x++) {
             int k = y * w + x;
             int b = grid[k];
-            bool is_dest_city_tile = dest_city_seen && g.map->cityTile[k] == dest_city;
-            bool hidden = fog && !is_dest_city_tile && !game::seen(g, side_index, x, y);
+            bool is_dest_city_tile = dest_city_seen && g.map->city_tile[k] == dest_city;
+            bool hidden = fog && !is_dest_city_tile && !game::Seen(g, side_index, x, y);
             bool shut;
-            if (mode == LAND)
+            if (mode == kLand)
                 shut = b % 8 == 0 || (hidden && !(x == dx && y == dy));
-            else if (mode == BOAT)
-                shut = !has(b, WATER_F) || (hidden && x != dx && y != dy);
+            else if (mode == kBoat)
+                shut = !Has(b, kWaterF) || (hidden && x != dx && y != dy);
             else
-                shut = (b % 8 == 0 && has(b, CITY_F)) || (hidden && x != dx && y != dy);
-            dist[k] = shut ? SHUT : kUnreached;
+                shut = (b % 8 == 0 && Has(b, kCityF)) || (hidden && x != dx && y != dy);
+            dist[k] = shut ? kShut : kUnreached;
         }
     }
     return dist;
@@ -268,7 +268,7 @@ struct Query {
     // the road builder (roadRoute): straight spreading, its own trace
     bool roads = false;
     std::function<bool(int, int)> is_bridge;
-    int flood = NONE;  // a flood's range (flag 0x10), NONE for a route
+    int flood = kNone;  // a flood's range (flag 0x10), NONE for a route
 };
 
 // path_wavefront (1555:0373): sweeps squares ever wider round the
@@ -280,8 +280,8 @@ int Wavefront(Query& q, int pass) {
     const std::vector<int>& grid = *q.grid;
     int mode = q.mode;
     // a flood (flag 0x10) spreads as far as its range, and as many rounds
-    int margin = q.flood != NONE ? q.flood : (pass == 0 ? 6 : 50);
-    if (pass == 0 || q.flood != NONE) q.ring = 0;
+    int margin = q.flood != kNone ? q.flood : (pass == 0 ? 6 : 50);
+    if (pass == 0 || q.flood != kNone) q.ring = 0;
     int lox = std::min(sx, dx), loy = std::min(sy, dy);
     int hix = std::max(sx, dx), hiy = std::max(sy, dy);
     int bx0 = lox < margin ? 0 : lox - margin;
@@ -291,7 +291,7 @@ int Wavefront(Query& q, int pass) {
     int found = 1;
     bool going = true;
     while (going) {
-        if (q.flood != NONE && q.ring == q.flood) break;
+        if (q.flood != kNone && q.ring == q.flood) break;
         bool any = false;
         int r = q.ring;
         int x0 = std::max({dx - r, 0, bx0}), x1 = std::min({dx + r, w - 1, bx1});
@@ -305,7 +305,7 @@ int Wavefront(Query& q, int pass) {
                     int cur = grid[k];
                     int nd = -v;
                     dist[k] = nd;
-                    bool cur_water = has(cur, WATER_F), cur_cross = has(cur, CROSS_F);
+                    bool cur_water = Has(cur, kWaterF), cur_cross = Has(cur, kCrossF);
                     // the road builder spreads straight only (4125:00e2, class 9)
                     int cls = q.roads ? 9 : 0;
                     if (y == 0)
@@ -322,32 +322,32 @@ int Wavefront(Query& q, int pass) {
                         i++;
                         int nk = ny * w + nx;
                         int nv = dist[nk];
-                        if (nv != SHUT) {
+                        if (nv != kShut) {
                             int nb = grid[nk];
                             int c = nb % 8;
                             bool ok = true;
-                            bool n_water = has(nb, WATER_F), n_cross = has(nb, CROSS_F);
+                            bool n_water = Has(nb, kWaterF), n_cross = Has(nb, kCrossF);
                             if (nx == sx && ny == sy) {
-                                if (mode == LAND && !cur_cross && !n_cross && n_water != cur_water)
+                                if (mode == kLand && !cur_cross && !n_cross && n_water != cur_water)
                                     ok = false;
                                 c = 1;
-                            } else if (mode == FLYING) {
+                            } else if (mode == kFlying) {
                                 if ((!n_water || n_cross) && c != 0 && c < 3) {
                                     // as dear as the tile, where that is 1 or 2
                                 } else {
                                     c = 2;
                                 }
-                            } else if (mode == BOAT) {
-                                if (!n_water && !has(nb, CITY_F)) {
-                                    dist[nk] = SHUT;
+                            } else if (mode == kBoat) {
+                                if (!n_water && !Has(nb, kCityF)) {
+                                    dist[nk] = kShut;
                                     ok = false;
                                 }
                             } else {
                                 if (!cur_cross && !n_cross && n_water != cur_water) {
                                     ok = false;
                                 } else {
-                                    if (c > 2 && ((q.hills && has(nb, HILLS_F)) ||
-                                                  (q.woods && has(nb, FOREST_F))))
+                                    if (c > 2 && ((q.hills && Has(nb, kHillsF)) ||
+                                                  (q.woods && Has(nb, kForestF))))
                                         c = 2;
                                     if ((!cur_water || cur_cross) && n_water && !n_cross)
                                         c += q.penalty;
@@ -356,7 +356,7 @@ int Wavefront(Query& q, int pass) {
                             if (ok && nd + c < std::abs(nv)) dist[nk] = v - c;
                         }
                     }
-                    if (x == sx && y == sy && q.flood == NONE) going = false;
+                    if (x == sx && y == sy && q.flood == kNone) going = false;
                 }
             }
         }
@@ -381,26 +381,26 @@ Path Trace(Query& q) {
     Path steps;
     while (!(x == tx && y == ty)) {
         int cur = grid[y * w + x];
-        bool land = q.mode == LAND;
-        bool cur_water = land && has(cur, WATER_F);
-        bool cur_cross = land && has(cur, CROSS_F);
-        int toward = direction(x, y, tx, ty);
-        int bx = NONE, by = NONE;
+        bool land = q.mode == kLand;
+        bool cur_water = land && Has(cur, kWaterF);
+        bool cur_cross = land && Has(cur, kCrossF);
+        int toward = Direction(x, y, tx, ty);
+        int bx = kNone, by = kNone;
         bool got = false;
         for (int turn : kTraceOrder) {
             int dir = (toward + turn) % 8;
-            int nx = x + DIRS[dir][0], ny = y + DIRS[dir][1];
+            int nx = x + kDirs[dir][0], ny = y + kDirs[dir][1];
             bool inside = nx >= 0 && ny >= 0 && nx < w && ny < h;
             // the road builder steps diagonally only over water that is no bridge
             if (q.roads && dir % 2 == 1 &&
-                !(inside && has(grid[ny * w + nx], WATER_F) && !q.is_bridge(nx, ny)))
+                !(inside && Has(grid[ny * w + nx], kWaterF) && !q.is_bridge(nx, ny)))
                 continue;
             if (inside) {
                 int v = dist[ny * w + nx];
-                if (v != kUnreached && v != SHUT) {
+                if (v != kUnreached && v != kShut) {
                     int nb = grid[ny * w + nx];
-                    bool blocked = land && !cur_cross && !has(nb, CROSS_F) &&
-                                   has(nb, WATER_F) != cur_water;
+                    bool blocked = land && !cur_cross && !Has(nb, kCrossF) &&
+                                   Has(nb, kWaterF) != cur_water;
                     // ... and takes a first neighbour no nearer than here
                     bool tie = q.roads && !got && std::abs(v) == d;
                     if (!blocked && (std::abs(v) < d || tie)) {
@@ -426,7 +426,7 @@ Path Trace(Query& q) {
 
 }  // namespace
 
-std::optional<std::vector<std::pair<int, int>>> roadRoute(const RoadGround& m, const int costs[12],
+std::optional<std::vector<std::pair<int, int>>> RoadRoute(const RoadGround& m, const int costs[12],
                                                           int w, int h, int sx, int sy, int dx,
                                                           int dy) {
     if (dx < 0 || dy < 0 || dx >= w || dy >= h) return std::nullopt;
@@ -435,17 +435,17 @@ std::optional<std::vector<std::pair<int, int>>> roadRoute(const RoadGround& m, c
         for (int x = 0; x < w; x++) {
             int t = m.terrain(x, y);
             int byte = m.road(x, y) ? 1 : costs[t];
-            if (t == BRIDGE)
-                byte |= CROSS_F | WATER_F;
-            else if (t == WATER || t == SHORE)
-                byte |= WATER_F;
-            else if (t == FOREST)
-                byte |= FOREST_F;
-            else if (t == HILLS)
-                byte |= HILLS_F;
-            else if (t == CITY)
-                byte = CITY_F;  // nobody's city is player 14's
-            if (m.crossing(x, y)) byte |= CROSS_F;
+            if (t == kBridge)
+                byte |= kCrossF | kWaterF;
+            else if (t == kWater || t == kShore)
+                byte |= kWaterF;
+            else if (t == kForest)
+                byte |= kForestF;
+            else if (t == kHills)
+                byte |= kHillsF;
+            else if (t == kCity)
+                byte = kCityF;  // nobody's city is player 14's
+            if (m.crossing(x, y)) byte |= kCrossF;
             grd[y * w + x] = byte;
         }
     }
@@ -458,15 +458,15 @@ std::optional<std::vector<std::pair<int, int>>> roadRoute(const RoadGround& m, c
     q.dx = dx;
     q.dy = dy;
     q.grid = &grd;
-    q.mode = LAND;
+    q.mode = kLand;
     q.woods = q.hills = false;
-    q.penalty = to == WATER || to == SHORE ? WATER_PENALTY_TO : WATER_PENALTY;
+    q.penalty = to == kWater || to == kShore ? kWaterPenaltyTo : kWaterPenalty;
     q.dist.resize(static_cast<size_t>(w) * h);
-    for (int k = 0; k < w * h; k++) q.dist[k] = grd[k] % 8 == 0 ? SHUT : kUnreached;
+    for (int k = 0; k < w * h; k++) q.dist[k] = grd[k] % 8 == 0 ? kShut : kUnreached;
     q.roads = true;
-    q.is_bridge = [&m](int x, int y) { return m.terrain(x, y) == BRIDGE; };
+    q.is_bridge = [&m](int x, int y) { return m.terrain(x, y) == kBridge; };
     int goal = dy * w + dx;
-    if (q.dist[goal] == SHUT && !has(grd[goal], CITY_F)) return std::nullopt;
+    if (q.dist[goal] == kShut && !Has(grd[goal], kCityF)) return std::nullopt;
     q.dist[goal] = -1;
     if (Wavefront(q, 0) != 1) return std::nullopt;
     std::vector<std::pair<int, int>> out;
@@ -480,11 +480,11 @@ namespace {
 // to, unless a land or boat stack would cross between land and water, or the
 // ground there is impassable.
 bool SingleStep(const Game& g, int mode, int sx, int sy, int dx, int dy) {
-    auto wet = [](int t) { return t == WATER || t == SHORE; };
-    int from = scn::terrainAt(*g.map, sx, sy), to = scn::terrainAt(*g.map, dx, dy);
-    if (mode != FLYING) {
+    auto wet = [](int t) { return t == kWater || t == kShore; };
+    int from = scn::TerrainAt(*g.map, sx, sy), to = scn::TerrainAt(*g.map, dx, dy);
+    if (mode != kFlying) {
         if (wet(from) != wet(to)) return false;
-        if (COST[to] == 0) return false;
+        if (kCost[to] == 0) return false;
     }
     return true;
 }
@@ -499,17 +499,17 @@ std::vector<std::pair<int, int>> OpenCityAt(Game& g, std::vector<int>& grd, int 
     std::vector<std::pair<int, int>> restore;
     int goal = y0 * w + x0;
     int goal_byte = grd[goal];
-    City* city = g.map->cityTile[goal];
-    if (city && goal_byte % 8 == 0 && has(goal_byte, CITY_F)) {
-        bool port = isPort(g, *city);
+    City* city = g.map->city_tile[goal];
+    if (city && goal_byte % 8 == 0 && Has(goal_byte, kCityF)) {
+        bool port = IsPort(g, *city);
         for (int ox = 0; ox <= 1; ox++) {
             for (int oy = 0; oy <= 1; oy++) {
                 int x = city->x + ox, y = city->y + oy;
                 if (x < w && y < h) {
                     int k = y * w + x;
                     restore.emplace_back(k, grd[k]);
-                    int byte = grd[k] - grd[k] % 8 + COST[CITY];
-                    if (port) byte |= CROSS_F | WATER_F;
+                    int byte = grd[k] - grd[k] % 8 + kCost[kCity];
+                    if (port) byte |= kCrossF | kWaterF;
                     grd[k] = byte;
                 }
             }
@@ -522,12 +522,12 @@ std::vector<std::pair<int, int>> OpenCityAt(Game& g, std::vector<int>& grd, int 
 // a land stack 1 for the hills bonus and 2 for the woods'.
 int RouteFlags(int mode, bool woods, bool hills, bool at_sea) {
     if (at_sea) return 8;
-    if (mode != LAND) return 0;
+    if (mode != kLand) return 0;
     return (hills ? 1 : 0) | (woods ? 2 : 0);
 }
 
 bool StepDir(int& x, int& y, int dir, int w, int h) {
-    int nx = x + DIRS[dir][0], ny = y + DIRS[dir][1];
+    int nx = x + kDirs[dir][0], ny = y + kDirs[dir][1];
     if (nx < 0 || ny < 0 || nx >= w || ny >= h) return false;
     x = nx;
     y = ny;
@@ -536,7 +536,7 @@ bool StepDir(int& x, int& y, int dir, int w, int h) {
 
 int DirOf(int dx, int dy) {
     for (int d = 0; d < 8; d++)
-        if (DIRS[d][0] == dx && DIRS[d][1] == dy) return d;
+        if (kDirs[d][0] == dx && kDirs[d][1] == dy) return d;
     return 0;
 }
 
@@ -560,19 +560,19 @@ std::optional<std::vector<int>> CacheHit(const Game& g, const std::optional<Cach
 // that is shorter than this one.
 void CacheStore(Game& g, int d, int sx, int sy, int dx, int dy, int mode, int flags,
                 const std::vector<int>& dirs) {
-    auto& c = g.pathCache->slots;
+    auto& c = g.path_cache->slots;
     int slot = -1;
     if (d < 15) {
         slot = 0;
     } else {
         int shortest = -1, least = 10000;
-        for (int i = 1; i < CACHE_SLOTS; i++) {
+        for (int i = 1; i < kCacheSlots; i++) {
             const auto& e = c[i];
             if (!e) {
                 slot = i;
                 break;
             }
-            int ed = distance(e->dx, e->dy, e->sx, e->sy);
+            int ed = Distance(e->dx, e->dy, e->sx, e->sy);
             if (ed < least) {
                 shortest = i;
                 least = ed;
@@ -584,27 +584,27 @@ void CacheStore(Game& g, int d, int sx, int sy, int dx, int dy, int mode, int fl
 }
 }  // namespace
 
-std::shared_ptr<PathCache> newPathCache() {
+std::shared_ptr<PathCache> NewPathCache() {
     return std::make_shared<PathCache>();
 }
 
-std::optional<Path> findPath(Game& g, const Stack& stack, int sx, int sy, int dx, int dy) {
+std::optional<Path> FindPath(Game& g, const Stack& stack, int sx, int sy, int dx, int dy) {
     if (sx == dx && sy == dy) return Path{};
     int w = g.map->width, h = g.map->height;
     if (dx < 0 || dy < 0 || dx >= w || dy >= h) return std::nullopt;
 
-    int side = stack.empty() ? NONE : stack[0]->owner;
-    Mode m = stackMode(g, stack);
-    std::vector<int>& grd = grid(g, side);
-    int flags = RouteFlags(m.mode, m.woods, m.hills, m.atSea);
-    int d = distance(dx, dy, sx, sy);
+    int side = stack.empty() ? kNone : stack[0]->owner;
+    Mode m = StackMode(g, stack);
+    std::vector<int>& grd = Grid(g, side);
+    int flags = RouteFlags(m.mode, m.woods, m.hills, m.at_sea);
+    int d = Distance(dx, dy, sx, sy);
 
     std::optional<Path> path;
     std::optional<std::vector<int>> dirs;
-    if (g.pathCache) {
-        dirs = CacheHit(g, g.pathCache->slots[0], sx, sy, dx, dy, m.mode, flags);
-        for (int i = 1; !dirs && d > 14 && i < CACHE_SLOTS; i++) {
-            dirs = CacheHit(g, g.pathCache->slots[i], sx, sy, dx, dy, m.mode, flags);
+    if (g.path_cache) {
+        dirs = CacheHit(g, g.path_cache->slots[0], sx, sy, dx, dy, m.mode, flags);
+        for (int i = 1; !dirs && d > 14 && i < kCacheSlots; i++) {
+            dirs = CacheHit(g, g.path_cache->slots[i], sx, sy, dx, dy, m.mode, flags);
         }
     }
     if (dirs) {
@@ -620,15 +620,15 @@ std::optional<Path> findPath(Game& g, const Stack& stack, int sx, int sy, int dx
         int goal = dy * w + dx;
         auto restore = OpenCityAt(g, grd, dx, dy);
         int penalty = 0;
-        if (m.mode == LAND) {
-            int t = scn::terrainAt(*g.map, dx, dy);
-            penalty = (t == WATER || t == SHORE) ? WATER_PENALTY_TO : WATER_PENALTY;
+        if (m.mode == kLand) {
+            int t = scn::TerrainAt(*g.map, dx, dy);
+            penalty = (t == kWater || t == kShore) ? kWaterPenaltyTo : kWaterPenalty;
         }
         Query q{w,    h,      sx,      sy,      dx,      dy,
-                &grd, m.mode, m.woods, m.hills, penalty, prepare(g, grd, side, m.mode, dx, dy),
+                &grd, m.mode, m.woods, m.hills, penalty, Prepare(g, grd, side, m.mode, dx, dy),
                 0,    false,  nullptr};
         int found = 0;
-        if (q.dist[goal] != SHUT || has(grd[goal], CITY_F)) {
+        if (q.dist[goal] != kShut || Has(grd[goal], kCityF)) {
             q.dist[goal] = -1;
             for (int pass = 0; pass <= 1; pass++) {
                 if (found == 0) found = Wavefront(q, pass);
@@ -636,7 +636,7 @@ std::optional<Path> findPath(Game& g, const Stack& stack, int sx, int sy, int dx
         }
         if (found == 1) {
             path = Trace(q);
-            if (g.pathCache) {
+            if (g.path_cache) {
                 std::vector<int> ds;
                 int px = sx, py = sy;
                 for (const Step& st : *path) {
@@ -656,10 +656,10 @@ std::optional<Path> findPath(Game& g, const Stack& stack, int sx, int sy, int dx
         for (Step& step : *path) {
             int byte = grd[step.y * w + step.x];
             if (ashore) {
-                step.cost = PAST_SHORE;
+                step.cost = kPastShore;
             } else {
-                step.cost = walkCost(byte, m.mode, m.woods, m.hills);
-                ashore = m.mode == LAND && crossesShore(byte, m.atSea);
+                step.cost = WalkCost(byte, m.mode, m.woods, m.hills);
+                ashore = m.mode == kLand && CrossesShore(byte, m.at_sea);
             }
         }
     }
@@ -667,22 +667,22 @@ std::optional<Path> findPath(Game& g, const Stack& stack, int sx, int sy, int dx
     return path;
 }
 
-std::vector<int> flood(Game& g, int grid_side, int x, int y, int range, int mode, bool woods,
+std::vector<int> Flood(Game& g, int grid_side, int x, int y, int range, int mode, bool woods,
                        bool hills, int fog_side) {
     int w = g.map->width, h = g.map->height;
-    std::vector<int>& grd = grid(g, grid_side);
+    std::vector<int>& grd = Grid(g, grid_side);
     int goal = y * w + x;
     auto restore = OpenCityAt(g, grd, x, y);
     int penalty = 0;
-    if (mode == LAND) {
-        int t = scn::terrainAt(*g.map, x, y);
-        penalty = (t == WATER || t == SHORE) ? WATER_PENALTY_TO : WATER_PENALTY;
+    if (mode == kLand) {
+        int t = scn::TerrainAt(*g.map, x, y);
+        penalty = (t == kWater || t == kShore) ? kWaterPenaltyTo : kWaterPenalty;
     }
     Query q{w,    h,     x,      y,     x,       y,
-            &grd, mode,  woods,  hills, penalty, prepare(g, grd, fog_side, mode, x, y),
+            &grd, mode,  woods,  hills, penalty, Prepare(g, grd, fog_side, mode, x, y),
             0,    false, nullptr};
     q.flood = range;
-    if (q.dist[goal] != SHUT || has(grd[goal], CITY_F)) {
+    if (q.dist[goal] != kShut || Has(grd[goal], kCityF)) {
         q.dist[goal] = -1;
         if (Wavefront(q, 0) == 0) Wavefront(q, 1);
     }
@@ -690,29 +690,29 @@ std::vector<int> flood(Game& g, int grid_side, int x, int y, int range, int mode
     return q.dist;
 }
 
-std::string settleSea(Game& g, const Stack& stack, int x, int y, int mode, bool was_at_sea) {
-    if (mode != LAND) return "";
-    int t = scn::terrainAt(*g.map, x, y);
+std::string SettleSea(Game& g, const Stack& stack, int x, int y, int mode, bool was_at_sea) {
+    if (mode != kLand) return "";
+    int t = scn::TerrainAt(*g.map, x, y);
     if (!was_at_sea) {
-        if (t != WATER && t != SHORE) return "";
+        if (t != kWater && t != kShore) return "";
         bool flier = false, walker = false;
         for (Army* a : stack) {
-            if (g.types.byId(a->type)->flies)
+            if (g.types.ById(a->type)->flies)
                 flier = true;
-            else if (a->type != armytype::HERO)
+            else if (a->type != armytype::kHero)
                 walker = true;
         }
         if (walker) flier = false;
         std::string change;
         for (Army* a : stack) {
-            if (!g.types.byId(a->type)->flies && (a->type != armytype::HERO || !flier)) {
-                a->atSea = true;
+            if (!g.types.ById(a->type)->flies && (a->type != armytype::kHero || !flier)) {
+                a->at_sea = true;
                 change = "to sea";
             }
         }
         return change;
-    } else if (t != WATER && t != SHORE && t != BRIDGE) {
-        for (Army* a : stack) a->atSea = false;
+    } else if (t != kWater && t != kShore && t != kBridge) {
+        for (Army* a : stack) a->at_sea = false;
         return "ashore";
     }
     return "";
@@ -727,7 +727,7 @@ namespace {
 // route's end). A human's stack out of moves is done for the turn and put
 // down (1c8c:01fd). `landed` counts the steps to where it stopped.
 bool OutOfMoves(const Stack& stack, const Path& path, int landed, const std::string& stopped) {
-    int m = stackMoves(stack);
+    int m = StackMoves(stack);
     if (m < 2) return true;
     if (landed == 0 || stopped == "attack" || stopped == "at peace") return false;
     if (landed >= static_cast<int>(path.size())) return false;
@@ -739,12 +739,12 @@ bool OutOfMoves(const Stack& stack, const Path& path, int landed, const std::str
 
 // Walk `stack` along `path`, stopping where the rules say to stop.
 WalkResult WalkPath(Game& g, const Stack& stack, const Path& path) {
-    int side = stack.empty() ? NONE : stack[0]->owner;
-    int left = stackMoves(stack);
+    int side = stack.empty() ? kNone : stack[0]->owner;
+    int left = StackMoves(stack);
     WalkResult result;
     result.stopped = "arrived";
     for (Army* a : stack)
-        if (a->atSea) result.seaBefore = true;
+        if (a->at_sea) result.sea_before = true;
     int last_ok = 0, cumulative = 0;
     std::map<int, int> cost_to;
 
@@ -756,10 +756,10 @@ WalkResult WalkPath(Game& g, const Stack& stack, const Path& path) {
             result.stopped = "out of moves";
             break;
         }
-        City* city = g.map->cityTile[step.y * g.map->width + step.x];
-        auto here = game::armiesAt(g, step.x, step.y);
-        if (city && !city->razed && city->ownerIndex != side) {
-            if (!diplomacy::mayAttack(g, side, city->ownerIndex)) {
+        City* city = g.map->city_tile[step.y * g.map->width + step.x];
+        auto here = game::ArmiesAt(g, step.x, step.y);
+        if (city && !city->razed && city->owner_index != side) {
+            if (!diplomacy::MayAttack(g, side, city->owner_index)) {
                 result.stopped = "at peace";
                 break;
             }
@@ -768,7 +768,7 @@ WalkResult WalkPath(Game& g, const Stack& stack, const Path& path) {
             break;
         }
         bool theirs = !here.empty() && here[0]->owner != side;
-        if (theirs && diplomacy::mayAttack(g, side, here[0]->owner)) {
+        if (theirs && diplomacy::MayAttack(g, side, here[0]->owner)) {
             result.stopped = "attack";
             result.attack = Attack{step.x, step.y, nullptr};
             break;
@@ -778,7 +778,7 @@ WalkResult WalkPath(Game& g, const Stack& stack, const Path& path) {
         // the stack may only stop on a tile of its own where it fits; other
         // steps -- a side at peace's stack among them -- are passed over
         // (1a8b:07f9)
-        if (!theirs && static_cast<int>(here.size() + stack.size()) <= rules::MAX_STACK) {
+        if (!theirs && static_cast<int>(here.size() + stack.size()) <= rules::kMaxStack) {
             last_ok = i;
             cost_to[i] = cumulative;
         }
@@ -786,37 +786,37 @@ WalkResult WalkPath(Game& g, const Stack& stack, const Path& path) {
 
     if (last_ok == 0) {
         if (result.stopped == "arrived") result.stopped = "blocked";
-        result.outOfMoves = OutOfMoves(stack, path, 0, result.stopped);
+        result.out_of_moves = OutOfMoves(stack, path, 0, result.stopped);
         return result;
     }
 
     int cost = cost_to[last_ok];
     const Step& dest = path[last_ok - 1];
-    Mode m = stackMode(g, stack);
+    Mode m = StackMode(g, stack);
     for (Army* a : stack) {
         a->x = dest.x;
         a->y = dest.y;
         a->moves = std::max(0, a->moves - cost);
     }
-    std::string change = settleSea(g, stack, dest.x, dest.y, m.mode, m.atSea);
+    std::string change = SettleSea(g, stack, dest.x, dest.y, m.mode, m.at_sea);
     if (!change.empty()) {
         for (Army* a : stack) {
-            if (a->atSea == (change == "to sea")) a->moves = 0;
+            if (a->at_sea == (change == "to sea")) a->moves = 0;
         }
         result.stopped = "out of moves";
         result.attack.reset();
     }
 
     // walking uncovers the map as it goes
-    if (g.map->options.hiddenMap != 0 && side != NONE) {
-        bool flying = modeOf(g, stack) == FLYING;
+    if (g.map->options.hidden_map != 0 && side != kNone) {
+        bool flying = ModeOf(g, stack) == kFlying;
         int found = 0;
         for (int i = 0; i < static_cast<int>(path.size()); i++) {
             if (i == last_ok - 1) break;
-            found += game::reveal(g, side, path[i].x, path[i].y, flying);
+            found += game::Reveal(g, side, path[i].x, path[i].y, flying);
         }
-        found += game::reveal(g, side, dest.x, dest.y, flying);
-        if (found > 0) invalidate(g);
+        found += game::Reveal(g, side, dest.x, dest.y, flying);
+        if (found > 0) Invalidate(g);
     }
 
     result.steps = last_ok;
@@ -825,25 +825,25 @@ WalkResult WalkPath(Game& g, const Stack& stack, const Path& path) {
     if (last_ok < static_cast<int>(path.size()) && result.stopped == "arrived")
         result.stopped = "blocked";
     // going to sea or coming ashore ends the move as running out does
-    result.outOfMoves = !change.empty() || OutOfMoves(stack, path, last_ok, result.stopped);
+    result.out_of_moves = !change.empty() || OutOfMoves(stack, path, last_ok, result.stopped);
     return result;
 }
 }  // namespace
 
-WalkResult walk(Game& g, const Stack& stack, const Path& path) {
-    game::tidyTowers(g);
+WalkResult Walk(Game& g, const Stack& stack, const Path& path) {
+    game::TidyTowers(g);
     WalkResult result = WalkPath(g, stack, path);
-    game::tidyTowers(g);
+    game::TidyTowers(g);
     return result;
 }
 
-WalkResult moveTo(Game& g, const Stack& stack, int x, int y) {
+WalkResult MoveTo(Game& g, const Stack& stack, int x, int y) {
     WalkResult r;
     if (stack.empty()) {
         r.stopped = "blocked";
         return r;
     }
-    auto path = findPath(g, stack, stack[0]->x, stack[0]->y, x, y);
+    auto path = FindPath(g, stack, stack[0]->x, stack[0]->y, x, y);
     if (!path) {
         r.stopped = "no route";
         return r;
@@ -852,7 +852,7 @@ WalkResult moveTo(Game& g, const Stack& stack, int x, int y) {
         r.stopped = "arrived";
         return r;
     }
-    return walk(g, stack, *path);
+    return Walk(g, stack, *path);
 }
 
 }  // namespace move

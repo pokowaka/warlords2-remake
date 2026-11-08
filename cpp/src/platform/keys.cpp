@@ -10,26 +10,26 @@ namespace {
 std::set<std::string> down;
 }
 
-void press(const std::string& name) {
+void Press(const std::string& name) {
     down.insert(name);
 }
-void release(const std::string& name) {
+void Release(const std::string& name) {
     down.erase(name);
 }
-void clear() {
+void Clear() {
     down.clear();
 }
 
-bool isDown(std::initializer_list<const char*> names) {
+bool IsDown(std::initializer_list<const char*> names) {
     for (auto n : names)
         if (down.count(n)) return true;
     return false;
 }
-bool isDown(const std::string& name) {
+bool IsDown(const std::string& name) {
     return down.count(name) > 0;
 }
 
-std::string loveName(int k) {
+std::string LoveName(int k) {
     switch (k) {
     case SDLK_LSHIFT:
         return "lshift";

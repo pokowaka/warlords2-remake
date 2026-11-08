@@ -26,9 +26,9 @@ std::string Entry(const uidata::Strings& files, int group, int index, const Roll
 }
 }  // namespace
 
-std::pair<std::string, bool> song(const uidata::Strings& files, int cue,
+std::pair<std::string, bool> Song(const uidata::Strings& files, int cue,
                                   const std::vector<Side*>& sides, const Roll& roll) {
-    if (cue == COMPUTER) {
+    if (cue == kComputer) {
         // with a human still in play, group 11; in a game of computers alone, 5%
         // group 12, 47% group 11 and 48% group 10
         bool human = false;
@@ -53,13 +53,13 @@ std::pair<std::string, bool> song(const uidata::Strings& files, int cue,
     return {Entry(files, s->second.first, s->second.second, roll), true};
 }
 
-int advisor(const Game& g, Side& side, const Roll& roll) {
+int AdvisorCue(const Game& g, Side& side, const Roll& roll) {
     int cities = 0, heroes = 0;
     for (auto& c : g.map->cities)
-        if (c.ownerIndex == side.index && !c.razed) cities++;
-    if (cities > 39) return NONE;
+        if (c.owner_index == side.index && !c.razed) cities++;
+    if (cities > 39) return kNone;
     for (Army* a : g.armies)
-        if (a->owner == side.index && a->type == armytype::HERO) heroes++;
+        if (a->owner == side.index && a->type == armytype::kHero) heroes++;
     Advisor& adv = side.advisor;
     int group;
     if (cities < adv.mark) {
@@ -75,7 +75,7 @@ int advisor(const Game& g, Side& side, const Roll& roll) {
         auto it = kWinning.find(m);
         group = it != kWinning.end() ? it->second : 47;
     } else {
-        if (g.turn % 7 != 0) return NONE;
+        if (g.turn % 7 != 0) return kNone;
         if (side.gold < 100)
             group = 54;
         else if (side.gold > 2800)
@@ -87,15 +87,15 @@ int advisor(const Game& g, Side& side, const Roll& roll) {
         else if (roll(5) == 1)
             group = 58;
         else
-            return NONE;
+            return kNone;
     }
-    if (g.turn == 1) return NONE;
+    if (g.turn == 1) return kNone;
     return group;
 }
 
-std::pair<std::string, std::string> clip(const uidata::Strings& files, int group,
+std::pair<std::string, std::string> Clip(const uidata::Strings& files, int group,
                                          const Roll& roll) {
-    if (group >= GREET) return {Entry(files, group, 0, roll), Entry(files, group, 1, roll)};
+    if (group >= kGreet) return {Entry(files, group, 0, roll), Entry(files, group, 1, roll)};
     static const std::vector<std::string> kNone;
     const auto& g = group >= 0 && group < static_cast<int>(files.size()) ? files[group] : kNone;
     int i = roll(static_cast<int>(g.size()));

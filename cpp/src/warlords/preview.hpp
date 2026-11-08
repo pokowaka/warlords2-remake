@@ -14,11 +14,11 @@ namespace w2::preview {
 
 /** The map as PNG bytes, `scale` pixels a tile (1-40), drawn from the tile
  *  sheets in `dataDir`/TERRAIN0. Throws if the sheets cannot be read. */
-std::string png(const Map& map, const std::string& dataDir, int scale = 5);
+std::string Png(const Map& map, const std::string& data_dir, int scale = 5);
 
 /** The picture the start menu shows for a scenario (its PICS/SCENARIO.PCK,
  *  264 x 225): the same map, shrunk to the frame's height and centred on
  *  the sea, in the game's 16 colours. */
-pck::Pixels menuPicture(const Map& map, const std::string& dataDir);
+pck::Pixels MenuPicture(const Map& map, const std::string& data_dir);
 
 }  // namespace w2::preview

@@ -31,7 +31,7 @@ Checks:
 # Treat all warnings as errors (Strict Mode)
 WarningsAsErrors: '*'
 # Check our own headers too, not just the .cpp files
-HeaderFilterRegex: '.*/cpp/(src|test)/.*'
+HeaderFilterRegex: '(^|.*/)cpp/(src|test)/.*'
 HeaderFileExtensions:         ['h','hh','hpp','hxx']
 ImplementationFileExtensions: ['c','cc','cpp','cxx']
 

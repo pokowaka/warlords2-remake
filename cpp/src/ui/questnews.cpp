@@ -12,7 +12,7 @@
 
 namespace questnews {
 
-using w2::format;
+using w2::Format;
 
 namespace {
 const kit::Rect kR{80, 60, 480, 312};  // popup 2
@@ -27,56 +27,56 @@ struct Reward : kit::Modal {
     std::string last;
     void Close() {
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
-    void draw() override {
+    void Draw() override {
         const w2::Quest& q = *news->quest;
         const w2::Reward& r = *news->reward;
         w2::Army* h = q.hero;
-        kit::popup(kR);
-        front::drawStrategicMap(kMapX, kMapY, nullptr, true);
-        if (r.kind == "revealed" && r.site && h && h->x != w2::NONE)
-            kit::mapTarget(kMapX, kMapY, h->x, h->y, r.site->x, r.site->y);
-        if (h && h->x != w2::NONE) front::drawHeroFigure(kMapX, kMapY, h->x, h->y);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), "Quest", 432, 64);  // 4125:00c8
-        gfx::draw(G.scrollPic, 304, 95);
-        const Font& f = kit::font(2).colours(0, 7);
-        kit::centred(f, (h ? h->name : std::string()) + "'s Quest", 440, 145);  // 4125:00ce
-        kit::setPal(0);
-        gfx::rectangle(gfx::FILL, 360, 165, 160, 1);
-        kit::centred(f, kit::text(0x1c, 0), 440, 175);
-        kit::centred(f, kit::text(0x1c, 1), 440, 195);
-        kit::centred(f, kit::text(grp, 0), 440, 225);
-        kit::centred(f, kit::text(grp, 1), 440, 245);
-        kit::centred(f, last, 440, 265);
-        kit::drawControls(v);
+        kit::Popup(kR);
+        front::DrawStrategicMap(kMapX, kMapY, nullptr, true);
+        if (r.kind == "revealed" && r.site && h && h->x != w2::kNone)
+            kit::MapTarget(kMapX, kMapY, h->x, h->y, r.site->x, r.site->y);
+        if (h && h->x != w2::kNone) front::DrawHeroFigure(kMapX, kMapY, h->x, h->y);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), "Quest", 432, 64);  // 4125:00c8
+        gfx::Draw(G.scroll_pic, 304, 95);
+        const Font& f = kit::GetFont(2).Colours(0, 7);
+        kit::Centred(f, (h ? h->name : std::string()) + "'s Quest", 440, 145);  // 4125:00ce
+        kit::SetPal(0);
+        gfx::Rectangle(gfx::kFill, 360, 165, 160, 1);
+        kit::Centred(f, kit::Text(0x1c, 0), 440, 175);
+        kit::Centred(f, kit::Text(0x1c, 1), 440, 195);
+        kit::Centred(f, kit::Text(grp, 0), 440, 225);
+        kit::Centred(f, kit::Text(grp, 1), 440, 245);
+        kit::Centred(f, last, 440, 265);
+        kit::DrawControls(v);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
         if (c && c->id == kDone) Close();
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "escape" || key == "return" || key == "kpenter") Close();
     }
 };
 }  // namespace
 
-void show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
+void Show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
     if (!news) return;
     if (!news->failed.empty() || !news->reward) {
         int grp = news->why ? news->why : 0x20;
-        search::message(kit::text(grp, 0), kit::text(grp, 1), after);
+        search::ShowMessage(kit::Text(grp, 0), kit::Text(grp, 1), after);
         return;
     }
-    sound::music(w2::cues::TRIUMPH);
+    sound::Music(w2::cues::kTriumph);
     auto d = std::make_shared<Reward>();
     d->news = news;
     d->after = after;
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
-    d->v.state[kDone] = w2::uidata::NORMAL;
+    d->v.state[kDone] = w2::uidata::kNormal;
     const w2::Reward& r = *news->reward;
     if (r.kind == "revealed") {
         d->grp = 0x1d;
@@ -86,21 +86,21 @@ void show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
         d->last = r.item ? r.item->name : "";
     } else if (r.kind == "allies") {
         d->grp = 0x1f;
-        d->last = format(kit::text(0x1f, 2), static_cast<int>(r.armies.size()),
+        d->last = Format(kit::Text(0x1f, 2), static_cast<int>(r.armies.size()),
                          r.type ? r.type->name : "");
     } else {
         d->grp = 0x1f;
-        d->last = format(kit::text(0x1f, 2), r.gold, "gold");  // 4125:00d9
+        d->last = Format(kit::Text(0x1f, 2), r.gold, "gold");  // 4125:00d9
     }
-    kit::push(d);
+    kit::Push(d);
 }
 
-void poll() {
+void Poll() {
     w2::Side* side = G.player;
-    if (!side || side->computer || !side->questNews) return;
-    auto news = side->questNews;
-    side->questNews.reset();
-    show(news);
+    if (!side || side->computer || !side->quest_news) return;
+    auto news = side->quest_news;
+    side->quest_news.reset();
+    Show(news);
 }
 
 }  // namespace questnews

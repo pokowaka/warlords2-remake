@@ -18,20 +18,20 @@
 class Font {
   public:
     /** Load DATA/<name>.FIN and .FNT, keying out `keyIndex`. */
-    static std::shared_ptr<Font> load(const std::string& dataDir, const std::string& name,
-                                      const w2::pal::Palette& palette, int keyIndex);
-    int width(const std::string& text) const;
-    int draw(const std::string& text, double x, double y) const;
+    static std::shared_ptr<Font> Load(const std::string& data_dir, const std::string& name,
+                                      const w2::pal::Palette& palette, int key_index);
+    int Width(const std::string& text) const;
+    int Draw(const std::string& text, double x, double y) const;
     /** Draw centred in a rect, the way the original centres a control's text. */
-    void drawCentred(const std::string& text, double x, double y, double w, double h) const;
+    void DrawCentred(const std::string& text, double x, double y, double w, double h) const;
     /** The same font in other colours, as 78a8:06ae asks for it: the sheet's
      *  glyph colour (15) becomes `glyph` and its outline (0) `outline`. */
-    const Font& colours(int glyph, int outline) const;
-    int lineHeight = 0, baseline = 0;
+    const Font& Colours(int glyph, int outline) const;
+    int line_height = 0, baseline = 0;
 
   private:
     struct Metrics {
-        int count = 0, first = 0, sheetWidth = 0;
+        int count = 0, first = 0, sheet_width = 0;
         std::array<int, 256> ink{}, width{};
     };
     std::shared_ptr<Metrics> m_;

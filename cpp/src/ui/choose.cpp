@@ -30,13 +30,13 @@ struct Dialog : kit::Modal {
 
     void Refresh() {
         auto& st = v.state;
-        for (int i = 0; i < kRows; i++) st[kRow + i] = w2::uidata::NORMAL;
-        st[kOk] = w2::uidata::NORMAL;
-        st[kCancel] = w2::uidata::NORMAL;
+        for (int i = 0; i < kRows; i++) st[kRow + i] = w2::uidata::kNormal;
+        st[kOk] = w2::uidata::kNormal;
+        st[kCancel] = w2::uidata::kNormal;
         hidden.clear();
         if (N() > kRows) {
-            int up = top_row > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-            int down = top_row + kRows - 1 < N() - 1 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            int up = top_row > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
+            int down = top_row + kRows - 1 < N() - 1 ? w2::uidata::kNormal : w2::uidata::kDisabled;
             st[kPageUp] = up;
             st[kUp] = up;
             st[kPageDown] = down;
@@ -46,32 +46,32 @@ struct Dialog : kit::Modal {
         }
     }
 
-    int Chosen() const { return top_row + cur < N() ? top_row + cur : w2::NONE; }
+    int Chosen() const { return top_row + cur < N() ? top_row + cur : w2::kNone; }
 
     void Close(int entry) {
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a(entry);
     }
 
-    void draw() override {
-        kit::popup(kR);
-        const Font& f = kit::font(2);
-        gfx::setColor(1, 1, 1);
-        kit::centred(f, title, 196, 52);
-        kit::setPal(3);
-        gfx::rectangle(gfx::FILL, kBox.x, kBox.y, kBox.w, kBox.h);
-        kit::bevel(kBox.x, kBox.y, kBox.w, kBox.h, 4, 2);
-        gfx::setColor(1, 1, 1);
+    void Draw() override {
+        kit::Popup(kR);
+        const Font& f = kit::GetFont(2);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(f, title, 196, 52);
+        kit::SetPal(3);
+        gfx::Rectangle(gfx::kFill, kBox.x, kBox.y, kBox.w, kBox.h);
+        kit::Bevel(kBox.x, kBox.y, kBox.w, kBox.h, 4, 2);
+        gfx::SetColor(1, 1, 1);
         for (int i = 0; i < kRows; i++) {
             if (top_row + i < N())
-                f.colours(i == cur ? 15 : 2, 0).draw(names[top_row + i], 112, 74 + 20 * i);
+                f.Colours(i == cur ? 15 : 2, 0).Draw(names[top_row + i], 112, 74 + 20 * i);
         }
-        kit::drawControls(v, hidden);
+        kit::DrawControls(v, hidden);
     }
 
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y, hidden);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y, hidden);
         if (!c) return;
         int id = c->id;
         if (id >= kRow && id < kRow + kRows) {
@@ -89,27 +89,27 @@ struct Dialog : kit::Modal {
         } else if (id == kOk) {
             return Close(Chosen());
         } else if (id == kCancel) {
-            return Close(w2::NONE);
+            return Close(w2::kNone);
         }
         Refresh();
     }
 
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
             Close(Chosen());
         else if (key == "escape")
-            Close(w2::NONE);
+            Close(w2::kNone);
     }
 };
 }  // namespace
 
-void open(const std::string& title, const std::vector<std::string>& names, int start,
+void Open(const std::string& title, const std::vector<std::string>& names, int start,
           std::function<void(int)> after) {
     auto d = std::make_shared<Dialog>();
     d->title = title;
     d->names = names;
     d->after = after;
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
     d->cur = std::max(0, start);
     while (d->cur >= kRows) {
@@ -117,7 +117,7 @@ void open(const std::string& title, const std::vector<std::string>& names, int s
         d->top_row++;
     }
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace choose

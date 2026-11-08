@@ -30,12 +30,12 @@
 
 namespace w2::randommap {
 
-const char* const FILES[6] = {"SCN", "MAP", "RD", "SGN", "CTY", "SPC"};
-const int SLIDER_SHOWS[4][7] = {{5, 7, 9, 11, 13, 15, 17},
+const char* const kFiles[6] = {"SCN", "MAP", "RD", "SGN", "CTY", "SPC"};
+const int kSliderShows[4][7] = {{5, 7, 9, 11, 13, 15, 17},
                                 {5, 7, 9, 11, 13, 15, 17},
                                 {70, 75, 80, 85, 90, 95, 100},
                                 {9, 11, 13, 15, 17, 19, 21}};
-const char* const SLIDER_FORMATS[4] = {"(%d%%)", "(%d%%)", "(%d)", "(%d%%)"};
+const char* const kSliderFormats[4] = {"(%d%%)", "(%d%%)", "(%d)", "(%d%%)"};
 
 namespace {
 
@@ -260,7 +260,7 @@ class Generator {
     int Dice(int n, int sides, int bonus = 0) {
         if (sides == 0) return bonus;
         if (sides < 0) return n + bonus;
-        return rng->dice(n, sides, bonus);
+        return rng->Dice(n, sides, bonus);
     }
 
     /** terrain_near (4c49:11f5): is type `t` on any of the 8 tiles round. */
@@ -1137,11 +1137,11 @@ class Generator {
             std::string end = Str(0xf9c + 10 * k1, 10);
             int k2 = Dice(1, 10, -1);
             std::string word = Str(0xf38 + 10 * k2, 10) + end;
-            name = format(Str(kSiteFormats + 2 + 20 * f, 20), word);
+            name = Format(Str(kSiteFormats + 2 + 20 * f, 20), word);
             text = "#%03d|%s is|inhabited by monsters and|full of treasure!|\n";
         }
         Wstr(o + 4, name);
-        spc += format(text, i, name);
+        spc += Format(text, i, name);
     }
 
     // --- 4fef: terrain to tiles -----------------------------------------------
@@ -1461,7 +1461,7 @@ class Generator {
         ground.crossing = [this](int x, int y) {
             return x >= 0 && y >= 0 && x < kW && y < kH && (tiles[y * kW + x] & 0x8000) != 0;
         };
-        auto route = move::roadRoute(ground, kRoadCost, kW, kH, from.x, from.y, to.x, to.y);
+        auto route = move::RoadRoute(ground, kRoadCost, kW, kH, from.x, from.y, to.x, to.y);
         if (!route) return;
         int x = from.x, y = from.y, since = 0;
         for (size_t i = 0; i < route->size() && i < 200; i++) {
@@ -1725,9 +1725,9 @@ class Generator {
             if (port)
                 for (int i : footprint(c)) g.crossing[i] = 1;
         }
-        std::vector<std::vector<int>> d(n, std::vector<int>(n, travel::UNREACHED));
+        std::vector<std::vector<int>> d(n, std::vector<int>(n, travel::kUnreached));
         for (int c = 0; c < n; c++) {
-            auto field = travel::costs(g, footprint(c));
+            auto field = travel::Costs(g, footprint(c));
             for (int o = 0; o < n; o++)
                 for (int i : footprint(o)) d[c][o] = std::min(d[c][o], field[i]);
         }
@@ -1738,26 +1738,26 @@ class Generator {
             for (int a = 0; a < kSides; a++)
                 for (int b = a + 1; b < kSides; b++)
                     gap = std::min(gap, static_cast<double>(d[caps[a]][caps[b]]));
-            if (gap >= travel::UNREACHED) return 1e12;  // a capital cut off from another
-            gap /= travel::TURN;
+            if (gap >= travel::kUnreached) return 1e12;  // a capital cut off from another
+            gap /= travel::kTurn;
             std::array<int, kSides> share{};
             int remote = 0;
             double reach = 0;
             for (int c = 0; c < n; c++) {
                 if (std::find(caps.begin(), caps.end(), c) != caps.end()) continue;
-                int best = travel::UNREACHED, who = 0;
+                int best = travel::kUnreached, who = 0;
                 for (int s = 0; s < kSides; s++)
                     if (d[caps[s]][c] < best) {
                         best = d[caps[s]][c];
                         who = s;
                     }
-                if (best == travel::UNREACHED) {
+                if (best == travel::kUnreached) {
                     remote++;
                     continue;
                 }
                 share[who]++;
-                reach += static_cast<double>(best) / travel::TURN;
-                if (best > kRemote * travel::TURN) remote++;
+                reach += static_cast<double>(best) / travel::kTurn;
+                if (best > kRemote * travel::kTurn) remote++;
             }
             auto [lo, hi] = std::minmax_element(share.begin(), share.end());
             return 3.0 * remote + 1.0 * (*hi - *lo) + reach / n +
@@ -1925,23 +1925,23 @@ class Generator {
         std::string kind = w(0x1248, g2);
         int k = Dice(1, 3, -1);
         std::string adj = Str(0x1068 + 0x30 * g1 + 16 * k, 16);
-        cty += format("#%03d|%s is a %s|%s, %s|%s %s|\n", c, name, adj, kind, a, b, cc);
+        cty += Format("#%03d|%s is a %s|%s, %s|%s %s|\n", c, name, adj, kind, a, b, cc);
     }
 
     /** The army types' flags the generator asks after (build_army_move_flags,
      *  6715:0000): ARMYTYPE +54 flies, +48 magical -- an ally. */
     bool Flies(int t) const {
-        const ArmyType* a = types.byId(t);
+        const ArmyType* a = types.ById(t);
         return a && a->bonus[54] != 0;
     }
     bool Magical(int t) const {
-        const ArmyType* a = types.byId(t);
+        const ArmyType* a = types.ById(t);
         return a && a->bonus[48] != 0;
     }
 
     void SetSlot(int c, int k, int e) {
         int o = Crec(c);
-        const ArmyType* a = types.byId(e);
+        const ArmyType* a = types.ById(e);
         scn[o + 22 + k] = static_cast<uint8_t>(e);
         scn[o + 26 + k] = static_cast<uint8_t>(a ? a->time : 0);
         scn[o + 30 + k] = static_cast<uint8_t>(a ? a->strength : 0);
@@ -2049,7 +2049,7 @@ class Generator {
                 bool has = false;
                 for (int j = 0; j < 4; j++)
                     if (scn[o + 22 + j] == t) has = true;
-                const ArmyType* a = types.byId(t);
+                const ArmyType* a = types.ById(t);
                 if (!has && a && a->strength >= 5) {
                     pick = t;
                     break;
@@ -2111,8 +2111,8 @@ class Generator {
                 }
                 if (c < 0) continue;
                 int cxx = Cx(c), cyy = Cy(c);
-                put_str(o + 4, format(Str(kSignCity, 20), CstrOf(scn, Crec(c) + 4, 16)));
-                put_str(o + 54, format(Str(kSignLeagues, 20), Distance(x, y, cxx, cyy) * 2,
+                put_str(o + 4, Format(Str(kSignCity, 20), CstrOf(scn, Crec(c) + 4, 16)));
+                put_str(o + 54, Format(Str(kSignLeagues, 20), Distance(x, y, cxx, cyy) * 2,
                                        std::string(kCompass[Compass(x, y, cxx, cyy)])));
             }
         }
@@ -2171,7 +2171,7 @@ class Generator {
         std::vector<std::pair<int, int>> where;
         for (int c = 0; c < CityCount(); c++) where.push_back({Cx(c), Cy(c)});
         auto sp = Spans();
-        auto plan = scengen::planRoads(Grid(), kW, kH, where, sp, *rng);
+        auto plan = scengen::PlanRoads(Grid(), kW, kH, where, sp, *rng);
         SpotList list;
         for (int i = 0; i < 50; i++) {
             list.x[i] = list.y[i] = list.ew[i] = list.city_dist[i] = list.chosen_dist[i] = -1;
@@ -2364,8 +2364,8 @@ class Generator {
                 }
             }
             if (c < 0) continue;
-            put_str(o + 4, format(Str(kSignCity, 20), CstrOf(scn, Crec(c) + 4, 16)));
-            put_str(o + 54, format(Str(kSignLeagues, 20), Distance(x, y, Cx(c), Cy(c)) * 2,
+            put_str(o + 4, Format(Str(kSignCity, 20), CstrOf(scn, Crec(c) + 4, 16)));
+            put_str(o + 54, Format(Str(kSignLeagues, 20), Distance(x, y, Cx(c), Cy(c)) * 2,
                                    std::string(kCompass[Compass(x, y, Cx(c), Cy(c))])));
         }
         return std::string(out.begin(), out.end());
@@ -2377,7 +2377,7 @@ class Generator {
         case 0:
             return 0;
         case 1: {
-            plan = scengen::makeWorld(world, *rng, kW, kH);
+            plan = scengen::MakeWorld(world, *rng, kW, kH);
             for (int i = 0; i < kW * kH; i++) {
                 m[kGrid + i] = plan.terrain[i];
                 rd[i] &= 0xe0;
@@ -2519,9 +2519,9 @@ class Generator {
     }
 };
 
-std::array<int, 4> settle(std::array<int, 4> sliders, Rng& rng) {
+std::array<int, 4> Settle(std::array<int, 4> sliders, Rng& rng) {
     for (int& v : sliders) {
-        if (v == RANDOM_SLIDER) v = rng.dice(1, 7, -1);
+        if (v == kRandomSlider) v = rng.Dice(1, 7, -1);
     }
     return sliders;
 }
@@ -2529,7 +2529,7 @@ std::array<int, 4> settle(std::array<int, 4> sliders, Rng& rng) {
 namespace {
 /** random_map_load_params (4bed:0000): RANDOM.DAT with the sliders added. */
 std::vector<uint8_t> Params(const std::string& data_dir, const std::array<int, 4>& sliders) {
-    auto s = readFile(data_dir + "/RANDOM/RANDOM.DAT");
+    auto s = ReadFile(data_dir + "/RANDOM/RANDOM.DAT");
     if (!s) throw std::runtime_error("Random data not found");
     std::vector<uint8_t> m(s->begin(), s->end());
     if (m.size() < static_cast<size_t>(kDatSize)) m.resize(kDatSize, 0);
@@ -2547,64 +2547,64 @@ std::vector<uint8_t> Params(const std::string& data_dir, const std::array<int, 4
 
 Run::Run(const Options& opts) {
     if (!opts.rng) throw std::runtime_error("random map: no dice");
-    auto sliders = settle(opts.sliders, *opts.rng);
+    auto sliders = Settle(opts.sliders, *opts.rng);
     gen_ = std::make_unique<Generator>();
     Generator& g = *gen_;
-    g.m = Params(opts.dataDir, sliders);
+    g.m = Params(opts.data_dir, sliders);
     // auto_file_x_scn (4fef:1001): the scenario of the chosen terrain set,
     // Erythea for the only one there is, is the template
-    auto t = readFile(opts.dataDir + "/ERYTHEA/ERYTHEA.SCN");
+    auto t = ReadFile(opts.data_dir + "/ERYTHEA/ERYTHEA.SCN");
     if (!t) throw std::runtime_error("cannot open: ERYTHEA.SCN");
     g.scn.assign(t->begin(), t->end());
-    armytype::load(opts.dataDir + "/TERRAIN0/ARMYTYPE.DAT", g.types);
+    armytype::Load(opts.data_dir + "/TERRAIN0/ARMYTYPE.DAT", g.types);
     g.rng = opts.rng;
     g.allies = opts.allies;
-    g.fair = opts.fairCapitals;
+    g.fair = opts.fair_capitals;
     g.modern = opts.scenario;
     g.world = opts.world;
     g.tiles.assign(static_cast<size_t>(kW) * kH, 0);
     g.rd.assign(static_cast<size_t>(kW) * kH, 0);
-    g.scn[kSTerrainSet] = static_cast<uint8_t>(opts.terrainSet);
+    g.scn[kSTerrainSet] = static_cast<uint8_t>(opts.terrain_set);
 }
 
 Run::~Run() = default;
 
-bool Run::step() {
+bool Run::Step() {
     auto pct = gen_->Next(files_);
     if (!pct) return false;
     pct_ = *pct;
     return true;
 }
 
-Files generateNow(const Options& opts) {
+Files GenerateNow(const Options& opts) {
     Run run(opts);
-    while (run.step()) {
+    while (run.Step()) {
     }
-    return run.files();
+    return run.GetFiles();
 }
 
-void install(const std::string& data_dir, const Files& files) {
+void Install(const std::string& data_dir, const Files& files) {
     for (auto& [ext, bytes] : files)
-        installFile(data_dir + "/" + DIR + "/" + DIR + "." + ext, bytes);
+        InstallFile(data_dir + "/" + kDir + "/" + kDir + "." + ext, bytes);
 }
 
-Files installed(const std::string& data_dir) {
+Files Installed(const std::string& data_dir) {
     Files out;
-    for (const char* ext : FILES) {
-        if (auto b = readFile(data_dir + "/" + DIR + "/" + DIR + "." + ext)) out[ext] = *b;
+    for (const char* ext : kFiles) {
+        if (auto b = ReadFile(data_dir + "/" + kDir + "/" + kDir + "." + ext)) out[ext] = *b;
     }
     return out;
 }
 
-std::string terrainSetName(const std::string& data_dir, int set) {
-    auto s = readFile(data_dir + "/DATA/TERRAIN.DAT");
-    if (!s || set >= u16(*s, 0)) return "";
-    return cstr(*s, 2 + 52 * set + 2, 50);
+std::string TerrainSetName(const std::string& data_dir, int set) {
+    auto s = ReadFile(data_dir + "/DATA/TERRAIN.DAT");
+    if (!s || set >= U16(*s, 0)) return "";
+    return Cstr(*s, 2 + 52 * set + 2, 50);
 }
 
-int terrainSets(const std::string& data_dir) {
-    auto s = readFile(data_dir + "/DATA/TERRAIN.DAT");
-    return s ? std::max(1, u16(*s, 0)) : 1;
+int TerrainSets(const std::string& data_dir) {
+    auto s = ReadFile(data_dir + "/DATA/TERRAIN.DAT");
+    return s ? std::max(1, U16(*s, 0)) : 1;
 }
 
 }  // namespace w2::randommap

@@ -75,7 +75,7 @@ static void UpdateKsl(int& ksl, int& ksv, int fnum, int block) {
     ksv = block * 2 + ((fnum >> 9) & 1);
 }
 
-void Opl::write(int reg, int v) {
+void Opl::Write(int reg, int v) {
     int hi = reg & 0xe0;
     if (reg == 0x01) {
         wse_ = (v & 0x20) != 0;
@@ -125,10 +125,10 @@ void Opl::write(int reg, int v) {
 }
 
 // One step of an operator's envelope generator (Nuked's OPL3_EnvelopeCalc).
-void Opl::envelope(Slot& s, const Channel& c) {
+void Opl::Envelope(Slot& s, const Channel& c) {
     int eo = s.rout + s.tl * 4 + (c.ksl >> kKslshift[s.ksl]);
     if (s.am) eo += trem_;
-    s.egOut = eo > 0x1ff ? 0x1ff : eo;
+    s.eg_out = eo > 0x1ff ? 0x1ff : eo;
 
     bool reset = false;
     int rate;
@@ -153,8 +153,8 @@ void Opl::envelope(Slot& s, const Channel& c) {
         int rate_lo = r & 3;
         if (rate_hi > 15) rate_hi = 15;
         if (rate_hi < 12) {
-            if (egState_ == 1) {
-                int es = rate_hi + egAdd_;
+            if (eg_state_ == 1) {
+                int es = rate_hi + eg_add_;
                 if (es == 12)
                     shift = 1;
                 else if (es == 13)
@@ -163,9 +163,9 @@ void Opl::envelope(Slot& s, const Channel& c) {
                     shift = rate_lo & 1;
             }
         } else {
-            shift = (rate_hi & 3) + kIncstep[rate_lo][egTimerLo_];
+            shift = (rate_hi & 3) + kIncstep[rate_lo][eg_timer_lo_];
             if (shift & 4) shift = 3;
-            if (shift == 0) shift = egState_;
+            if (shift == 0) shift = eg_state_;
         }
     }
 
@@ -192,11 +192,11 @@ void Opl::envelope(Slot& s, const Channel& c) {
 }
 
 // the phase generator, with the chip's vibrato
-void Opl::phaseGen(Slot& s, const Channel& c) {
+void Opl::PhaseGen(Slot& s, const Channel& c) {
     int f = c.fnum;
     if (s.vib) {
         int range = (f >> 7) & 7;
-        int vp = vibPos_;
+        int vp = vib_pos_;
         if ((vp & 3) == 0)
             range = 0;
         else if (vp & 1)
@@ -206,18 +206,18 @@ void Opl::phaseGen(Slot& s, const Channel& c) {
         f += range;
     }
     uint32_t base = (static_cast<uint32_t>(f << c.block) & 0xffffffff) >> 1;
-    s.phaseOut = static_cast<int>(s.phase >> 9);
+    s.phase_out = static_cast<int>(s.phase >> 9);
     if (s.reset) s.phase = 0;
     s.phase = (s.phase + ((base * kMt[s.mult]) >> 1)) & 0x7ffff;
 }
 
-bool Opl::silent() const {
+bool Opl::Silent() const {
     for (const Slot& s : slots_)
         if (s.key || s.gen != kRelease || s.rout < 0x1f8) return false;
     return true;
 }
 
-void Opl::generate(int16_t* out, int n) {
+void Opl::Generate(int16_t* out, int n) {
     for (int i = 0; i < n; i++) {
         int acc = 0;
         for (Channel& c : ch_) {
@@ -232,18 +232,18 @@ void Opl::generate(int16_t* out, int n) {
             if (c.fb != 0)
                 fbmod = static_cast<int>(std::floor((m.prout + m.out) / std::pow(2.0, 9 - c.fb)));
             m.prout = m.out;
-            envelope(m, c);
-            phaseGen(m, c);
-            m.out = Wave(m.wf, m.phaseOut + fbmod, m.egOut);
+            Envelope(m, c);
+            PhaseGen(m, c);
+            m.out = Wave(m.wf, m.phase_out + fbmod, m.eg_out);
             // carrier, frequency-modulated by it (FM) or beside it (AM)
             k.prout = k.out;
-            envelope(k, c);
-            phaseGen(k, c);
+            Envelope(k, c);
+            PhaseGen(k, c);
             if (c.con == 0) {
-                k.out = Wave(k.wf, k.phaseOut + m.out, k.egOut);
+                k.out = Wave(k.wf, k.phase_out + m.out, k.eg_out);
                 acc += k.out;
             } else {
-                k.out = Wave(k.wf, k.phaseOut, k.egOut);
+                k.out = Wave(k.wf, k.phase_out, k.eg_out);
                 acc += m.out + k.out;
             }
         }
@@ -255,23 +255,23 @@ void Opl::generate(int16_t* out, int n) {
 
         // the chip's counters: tremolo every 64 samples, vibrato every 1024
         uint32_t t = timer_;
-        if ((t & 0x3f) == 0x3f) tremPos_ = (tremPos_ + 1) % 210;
-        int tp = tremPos_;
+        if ((t & 0x3f) == 0x3f) trem_pos_ = (trem_pos_ + 1) % 210;
+        int tp = trem_pos_;
         if (tp >= 105) tp = 210 - tp;
         trem_ = tp >> (dam_ ? 2 : 4);
-        if ((t & 0x3ff) == 0x3ff) vibPos_ = (vibPos_ + 1) & 7;
+        if ((t & 0x3ff) == 0x3ff) vib_pos_ = (vib_pos_ + 1) & 7;
         timer_ = (t + 1) & 0xffff;
         // the envelope clock: runs at half the sample rate, and each step's
         // trailing zeros pick which slow rates advance
-        if (egState_ == 1) {
-            uint32_t et = egTimer_;
+        if (eg_state_ == 1) {
+            uint32_t et = eg_timer_;
             int sh = 0;
             while (sh < 13 && ((et >> sh) & 1) == 0) sh++;
-            egAdd_ = sh > 12 ? 0 : sh + 1;
-            egTimerLo_ = static_cast<int>(et & 3);
-            egTimer_ = (et + 1) & 0xfffffff;
+            eg_add_ = sh > 12 ? 0 : sh + 1;
+            eg_timer_lo_ = static_cast<int>(et & 3);
+            eg_timer_ = (et + 1) & 0xfffffff;
         }
-        egState_ = 1 - egState_;
+        eg_state_ = 1 - eg_state_;
     }
 }
 

@@ -25,7 +25,7 @@ int Picture(int popup) {
     return popup == 20 ? 12 : popup == 21 ? 14 : 13;
 }  // FILE.DAT group 3
 std::string T(int g, int i) {
-    return kit::text(g, i);
+    return kit::Text(g, i);
 }
 
 struct PictureDialog : kit::Modal {
@@ -33,23 +33,23 @@ struct PictureDialog : kit::Modal {
     screen::View v;
     int dflt = 0, cancel = 0;
     std::function<void(int)> pick;
-    void draw() override {
-        kit::popupFrame(kR);
-        if (auto art = G.screen->artFor(Picture(popup))) {
-            gfx::setColor(1, 1, 1);
-            gfx::draw(art->image, gfx::newQuad(0, 0, kR.w, kR.h), kR.x, kR.y);
+    void Draw() override {
+        kit::PopupFrame(kR);
+        if (auto art = G.screen->ArtFor(Picture(popup))) {
+            gfx::SetColor(1, 1, 1);
+            gfx::Draw(art->image, gfx::NewQuad(0, 0, kR.w, kR.h), kR.x, kR.y);
         }
-        kit::drawControls(v);
+        kit::DrawControls(v);
     }
     void Press(int id) {
         auto p = pick;
-        kit::pop(this);
+        kit::Pop(this);
         p(id);
     }
-    void mousepressed(int x, int y, int) override {
-        if (auto c = kit::controlAt(v, x, y)) Press(c->id);
+    void Mousepressed(int x, int y, int) override {
+        if (auto c = kit::ControlAt(v, x, y)) Press(c->id);
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
             Press(dflt);
         else if (key == "escape")
@@ -61,28 +61,28 @@ void ShowPicture(int popup, int dialog, std::vector<int> ids, int dflt, int canc
                  std::function<void(int)> pick) {
     auto d = std::make_shared<PictureDialog>();
     d->popup = popup;
-    d->v = kit::view(dialog);
+    d->v = kit::View(dialog);
     d->view = &d->v;
-    for (int id : ids) d->v.state[id] = w2::uidata::NORMAL;
+    for (int id : ids) d->v.state[id] = w2::uidata::kNormal;
     d->dflt = dflt;
     d->cancel = cancel;
     d->pick = pick;
-    kit::push(d);
+    kit::Push(d);
 }
 
 // Congratulations (8065:1fbd), then the map shown whole (8065:2004).
 void Victory(kit::Done after) {
-    sound::music(w2::cues::TRIUMPH);
+    sound::Music(w2::cues::kTriumph);
     ShowPicture(22, 32, {483}, 483, 483, [after](int) {
-        G.g->map->options.hiddenMap = 0;
-        front::stratDirty();
-        search::message(T(0x10, 0), T(0x10, 1), after);
+        G.g->map->options.hidden_map = 0;
+        front::StratDirty();
+        search::ShowMessage(T(0x10, 0), T(0x10, 1), after);
     });
 }
 }  // namespace
 
-std::string fallenText(const w2::Fallen& f) {
-    return w2::format(T(0xb, f.line), f.side->name);
+std::string FallenText(const w2::Fallen& f) {
+    return w2::Format(T(0xb, f.line), f.side->name);
 }
 
 namespace {
@@ -95,19 +95,19 @@ void Tell(w2::Ending& e, kit::Done after) {
     if (e.told) return done();
     e.told = true;
     std::vector<std::string> lines;
-    for (auto& f : e.fallen) lines.push_back(fallenText(f));
-    bool no_humans = e.noHumans;
+    for (auto& f : e.fallen) lines.push_back(FallenText(f));
+    bool no_humans = e.no_humans;
     auto next = std::make_shared<std::function<void(size_t)>>();
     std::weak_ptr<std::function<void(size_t)>> self = next;
     *next = [lines, no_humans, done, self](size_t i) {
         if (i < lines.size()) {
             auto again = self.lock();
-            search::say(lines[i], [again, i]() { (*again)(i + 1); });
+            search::Say(lines[i], [again, i]() { (*again)(i + 1); });
             return;
         }
         if (no_humans) {
-            search::message(T(0xd, 0), T(0xd, 1),
-                            [done]() { search::message(T(0xd, 2), T(0xd, 3), done); });
+            search::ShowMessage(T(0xd, 0), T(0xd, 1),
+                                [done]() { search::ShowMessage(T(0xd, 2), T(0xd, 3), done); });
             return;
         }
         done();
@@ -116,64 +116,64 @@ void Tell(w2::Ending& e, kit::Done after) {
 }
 }  // namespace
 
-void show(w2::Ending& e, kit::Done after) {
+void Show(w2::Ending& e, kit::Done after) {
     auto done = [after]() {
         if (after) after();
     };
     if (!e.told) {
-        Tell(e, [&e, after]() { show(e, after); });
+        Tell(e, [&e, after]() { Show(e, after); });
         return;
     }
     // the last computer side has triumphed, and is the player's now
     if (e.triumph && e.winner == G.player && !e.shown) {
         e.shown = true;
-        search::say(w2::format(T(0xf, 0), G.player->name), done);
+        search::Say(w2::Format(T(0xf, 0), G.player->name), done);
         return;
     }
     // the offer waits on the game, not on the round's finding: computer
     // turns may have come between (8cc6:04bd)
-    if (w2::game::surrenderPending(*G.g)) {
-        G.g->surrenderShown = true;         // 2c04:015f
-        sound::music(w2::cues::SURRENDER);  // 8065:1f68
+    if (w2::game::SurrenderPending(*G.g)) {
+        G.g->surrender_shown = true;         // 2c04:015f
+        sound::Music(w2::cues::kSurrender);  // 8065:1f68
         ShowPicture(20, 30, {485, 486}, 485, 486, [after, done](int id) {
             if (id == 485) {
-                w2::game::acceptSurrender(*G.g, *G.player);
+                w2::game::AcceptSurrender(*G.g, *G.player);
                 Victory(after);
             } else {
-                sound::music(w2::cues::DEFIANCE);  // 8065:1ecd
+                sound::Music(w2::cues::kDefiance);  // 8065:1ecd
                 ShowPicture(21, 31, {484}, 484, 484, [done](int) { done(); });
             }
         });
         return;
     }
     if (e.won && e.winner == G.player) {
-        search::message(w2::format(T(0xf, 0), G.player->name), T(0xf, 1),
-                        [after]() { Victory(after); });
+        search::ShowMessage(w2::Format(T(0xf, 0), G.player->name), T(0xf, 1),
+                            [after]() { Victory(after); });
         return;
     }
     done();
 }
 
-void over(w2::Ending& e) {
+void Over(w2::Ending& e) {
     if (!e.told && !e.fallen.empty()) {
-        Tell(e, [&e]() { over(e); });
+        Tell(e, [&e]() { Over(e); });
         return;
     }
     if (e.winner) {
-        search::say(w2::format(T(0xf, 0), e.winner->name));
+        search::Say(w2::Format(T(0xf, 0), e.winner->name));
         return;
     }
     bool humans = false;
     for (w2::Side* s : G.g->sides)
-        if (s->alive && !s->computer && !w2::game::sideCities(*G.g, *s).empty()) humans = true;
-    if (!humans && w2::contains(e.message, "No more players")) {
-        search::message(T(0xc, 0), T(0xc, 1), []() {
+        if (s->alive && !s->computer && !w2::game::SideCities(*G.g, *s).empty()) humans = true;
+    if (!humans && w2::Contains(e.message, "No more players")) {
+        search::ShowMessage(T(0xc, 0), T(0xc, 1), []() {
             // "return to DOS" -- here, the start screens
-            search::message(T(0xc, 2), T(0xc, 3), []() { front::quit(); });
+            search::ShowMessage(T(0xc, 2), T(0xc, 3), []() { front::Quit(); });
         });
         return;
     }
-    search::message(T(0xd, 0), T(0xd, 1), []() { search::message(T(0xd, 2), T(0xd, 3)); });
+    search::ShowMessage(T(0xd, 0), T(0xd, 1), []() { search::ShowMessage(T(0xd, 2), T(0xd, 3)); });
 }
 
 }  // namespace ending

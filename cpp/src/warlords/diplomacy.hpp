@@ -13,73 +13,73 @@
 
 namespace w2::diplomacy {
 
-constexpr int PEACE = 0, INTERMEDIATE = 1, WAR = 2;
-extern const char* const STATE_NAMES[3];
+constexpr int kPeace = 0, kIntermediate = 1, kWar = 2;
+extern const char* const kStateNames[3];
 
 // STRING.DAT group 106, best first.
-extern const char* const TITLES[8];
+extern const char* const kTitles[8];
 /** Which titles are used, by how many sides are in play (1-based ranks). */
-const std::vector<int>& ratingRanks(int n);
+const std::vector<int>& RatingRanks(int n);
 
 /** War everywhere if Diplomacy is off, peace if it is on (484e:11bd). */
-void init(Game& g);
+void Init(Game& g);
 /** The state between two sides. */
-int state(const Game& g, int a, int b);
-inline bool atWar(const Game& g, int a, int b) {
-    return state(g, a, b) != PEACE;
+int State(const Game& g, int a, int b);
+inline bool AtWar(const Game& g, int a, int b) {
+    return State(g, a, b) != kPeace;
 }
 /** May `a` attack `b`? A side at peace may not. */
-bool mayAttack(const Game& g, int a, int b);
+bool MayAttack(const Game& g, int a, int b);
 /** Propose a state to another side. */
-void propose(Game& g, int a, int b, int st);
+void Propose(Game& g, int a, int b, int st);
 /** The state a side proposes to another. */
-int proposal(const Game& g, int a, int b);
+int Proposal(const Game& g, int a, int b);
 /** Apply one side's proposals. Returns a list of messages. */
-std::vector<std::string> apply(Game& g, Side& side);
+std::vector<std::string> Apply(Game& g, Side& side);
 /** Must `a` be asked before it attacks `b`'s tile -- "Thou art attacking
  *  without first having declared war!" (attack_tile, 67cc:00b2)? Yes at
  *  peace, and when uneasy if the tile is a city. */
-bool mustDeclare(const Game& g, int a, int b, const City* city);
+bool MustDeclare(const Game& g, int a, int b, const City* city);
 /** "Shall we attack anyway?" -- yes (67cc:20a8): war at once, both ways,
  *  proposals too, and it costs the attacker 1d100+100 diplomatic score from
  *  peace, 1d15+10 from uneasy. History notes the treachery. */
-void attackAnyway(Game& g, int a, int b);
+void AttackAnyway(Game& g, int a, int b);
 /** At the end of a side's turn, its peace overtures count (484e:1063). */
-void scoreUpdate(Game& g, Side& side);
+void ScoreUpdate(Game& g, Side& side);
 /** What a peaceful move adds to the diplomatic score (484e:1063); NONE for nothing. */
-int addScore(Game& g, Side& side, int from, int to);
+int AddScore(Game& g, Side& side, int from, int to);
 /** Every side's diplomatic title, by side index (diplomatic_rating, 484e:0aed). */
-std::map<int, std::string> ratings(const Game& g);
+std::map<int, std::string> Ratings(const Game& g);
 
 // ------------------------------------------------ Upgraded Diplomacy & Parley
 
 /** Are sides `a` and `b` mutually Allied (sharing fog-of-war vision and targets)? */
-bool isAllied(const Game& g, int a, int b);
-void setAllied(Game& g, int a, int b, bool v);
+bool IsAllied(const Game& g, int a, int b);
+void SetAllied(Game& g, int a, int b, bool v);
 
 /** Does `a` propose an Alliance with `b`? */
-bool proposalAllied(const Game& g, int a, int b);
-void proposeAlliance(Game& g, int a, int b, bool v);
+bool ProposalAllied(const Game& g, int a, int b);
+void ProposeAlliance(Game& g, int a, int b, bool v);
 
 /** Remaining turns of active peace/alliance truce between `a` and `b`. */
-int truceTurns(const Game& g, int a, int b);
-void setTruce(Game& g, int a, int b, int turns);
+int TruceTurns(const Game& g, int a, int b);
+void SetTruce(Game& g, int a, int b, int turns);
 
 /** Gold tribute attached to `a`'s proposal toward `b` (>0 offered, <0 demanded). */
-int goldOffer(const Game& g, int a, int b);
-void setGoldOffer(Game& g, int a, int b, int gold);
+int GoldOffer(const Game& g, int a, int b);
+void SetGoldOffer(Game& g, int a, int b, int gold);
 
 /** Joint war target side index (0..7, or NONE) requested by `a` from `b`. */
-int warTarget(const Game& g, int a, int b);
-void setWarTarget(Game& g, int a, int b, int targetSide);
+int WarTarget(const Game& g, int a, int b);
+void SetWarTarget(Game& g, int a, int b, int target_side);
 
 /** Relational trust score (-100 to +100) held by `a` toward `b`. */
-int trust(const Game& g, int a, int b);
-void addTrust(Game& g, int a, int b, int delta);
+int Trust(const Game& g, int a, int b);
+void AddTrust(Game& g, int a, int b, int delta);
 
 /** Primary target city index broadcast by `side` to its allies (or NONE). */
-int alliedTargetCity(const Game& g, int side);
-void setAlliedTargetCity(Game& g, int side, int cityIndex);
+int AlliedTargetCity(const Game& g, int side);
+void SetAlliedTargetCity(Game& g, int side, int city_index);
 
 struct AttitudeFactor {
     std::string label;
@@ -87,25 +87,25 @@ struct AttitudeFactor {
 };
 
 struct AttitudeBreakdown {
-    int fromSide = NONE;
-    int toSide = NONE;
-    std::string personalityName;
-    std::string personalityArchetype;
+    int from_side = kNone;
+    int to_side = kNone;
+    std::string personality_name;
+    std::string personality_archetype;
     std::string motto;
-    int totalScore = 0;
-    int trustScore = 0;
-    int truceRemaining = 0;
+    int total_score = 0;
+    int trust_score = 0;
+    int truce_remaining = 0;
     std::vector<AttitudeFactor> factors;
-    std::string stanceSummary;
-    std::string whatItTakes;
-    int peaceGoldNeeded = 0;  // 0 = free, >0 = gold tribute required, NONE = will not accept
-    int allyGoldNeeded = 0;   // 0 = free, >0 = gold tribute required, NONE = will not accept
+    std::string stance_summary;
+    std::string what_it_takes;
+    int peace_gold_needed = 0;  // 0 = free, >0 = gold tribute required, NONE = will not accept
+    int ally_gold_needed = 0;   // 0 = free, >0 = gold tribute required, NONE = will not accept
 };
 
 /**
  * Computes a transparent, human-readable breakdown of why `aiSide` holds its
  * current diplomatic disposition toward `targetSide`, and what deal it will accept.
  */
-AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide);
+AttitudeBreakdown ComputeAttitude(const Game& g, int ai_side, int target_side);
 
 }  // namespace w2::diplomacy

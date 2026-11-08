@@ -9,15 +9,15 @@
 
 int main(int argc, char** argv) {
     if (argc < 3) return 2;
-    auto seq = w2::xmi::parse(w2::mustRead(argv[1]));
+    auto seq = w2::xmi::Parse(w2::MustRead(argv[1]));
     if (!seq) return 1;
-    w2::AilFm drv(w2::mustRead("original/ADLIB.ADV"), w2::mustRead("original/MIDPAK.AD"));
-    drv.play(&*seq, false);
+    w2::AilFm drv(w2::MustRead("original/ADLIB.ADV"), w2::MustRead("original/MIDPAK.AD"));
+    drv.Play(&*seq, false);
     int secs = atoi(argv[2]);
     const int opl_rate = 49716;
     std::vector<int16_t> buf(opl_rate);
     for (int s = 0; s < secs; s++) {
-        drv.render(buf.data(), opl_rate);
+        drv.Render(buf.data(), opl_rate);
         long sum = 0, peak = 0;
         for (int i = 0; i < opl_rate; i++) {
             sum = (sum * 31 + buf[i] + 65536) % 1000000007;

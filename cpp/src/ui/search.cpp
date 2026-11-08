@@ -26,7 +26,7 @@
 
 namespace search {
 
-using w2::format;
+using w2::Format;
 
 namespace {
 const kit::Rect kMsg{144, 179, 352, 64};  // popup 5
@@ -37,22 +37,22 @@ struct Message : kit::Modal {
     kit::Done after;
     void Close() {
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
-    void draw() override {
-        kit::popup(kMsg);
-        gfx::setColor(1, 1, 1);
-        const Font& f = kit::font(2);
+    void Draw() override {
+        kit::Popup(kMsg);
+        gfx::SetColor(1, 1, 1);
+        const Font& f = kit::GetFont(2);
         if (one) {
-            kit::centred(f, line1, 320, 201);
+            kit::Centred(f, line1, 320, 201);
             return;
         }
-        if (!line1.empty()) kit::centred(f, line1, 320, 190);
-        if (!line2.empty()) kit::centred(f, line2, 320, 212);
+        if (!line1.empty()) kit::Centred(f, line1, 320, 190);
+        if (!line2.empty()) kit::Centred(f, line2, 320, 212);
     }
-    void mousepressed(int, int, int) override { Close(); }
-    void keypressed(const std::string&) override { Close(); }
+    void Mousepressed(int, int, int) override { Close(); }
+    void Keypressed(const std::string&) override { Close(); }
 };
 
 const kit::Rect kRuin{120, 50, 400, 360};  // popup 4
@@ -64,22 +64,22 @@ std::vector<std::string> RuinLines(const w2::SearchResult& r) {
     const w2::Monster* monster = r.monster ? r.monster : r.guardian;
     if (r.kind != "allies") {
         if (monster) {
-            lines.push_back(format(kit::text(0x33, 0), name, monster->name));
-            lines.push_back(kit::text(0x33, r.kind == "killed" ? 1 : 2));
+            lines.push_back(Format(kit::Text(0x33, 0), name, monster->name));
+            lines.push_back(kit::Text(0x33, r.kind == "killed" ? 1 : 2));
         } else {
-            lines.push_back(kit::text(0x32, 0));
+            lines.push_back(kit::Text(0x32, 0));
         }
     }
     if (r.kind == "item" && r.item) {
-        lines.push_back(format(kit::text(0x34, 0), name, r.item->name));
+        lines.push_back(Format(kit::Text(0x34, 0), name, r.item->name));
     } else if (r.kind == "gold") {
-        lines.push_back(format(kit::text(0x35, 0), name, r.gold));
+        lines.push_back(Format(kit::Text(0x35, 0), name, r.gold));
     } else if (r.kind == "allies") {
         // the number rolled (6536:01ab), placed or not
         int n = r.count > 0 ? r.count : static_cast<int>(r.armies.size());
         std::string tname = r.type ? r.type->name : "";
-        lines.push_back(n == 1 ? format(kit::text(0x36, 0), tname, name)
-                               : format(kit::text(0x36, 1), n, tname, name));
+        lines.push_back(n == 1 ? Format(kit::Text(0x36, 0), tname, name)
+                               : Format(kit::Text(0x36, 1), n, tname, name));
     }
     return lines;
 }
@@ -98,57 +98,57 @@ struct Ruin : kit::Modal {
     bool Done() const { return shown >= lines.size(); }
     void Advance() {
         // 6536:01ab: the orchestra comes in as the guardian's line is read on
-        if (guarded && shown == 1) sound::effect("orch");
+        if (guarded && shown == 1) sound::Effect("orch");
         shown++;
     }
     void Close() {
-        kit::pop(this);
-        w2::quest::event(*G.g, *G.player, "item");
+        kit::Pop(this);
+        w2::quest::Notify(*G.g, *G.player, "item");
     }
-    void draw() override {
-        kit::popup(kRuin);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), "Searching", 320, 53);  // 4125:0c90
-        gfx::draw(G.searchPic, 160, 92);
-        kit::setPal(0);
-        kit::outline(159, 91, 322, 202);
-        const Font& f = kit::font(2);
-        gfx::setColor(1, 1, 1);
+    void Draw() override {
+        kit::Popup(kRuin);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), "Searching", 320, 53);  // 4125:0c90
+        gfx::Draw(G.search_pic, 160, 92);
+        kit::SetPal(0);
+        kit::Outline(159, 91, 322, 202);
+        const Font& f = kit::GetFont(2);
+        gfx::SetColor(1, 1, 1);
         for (size_t i = 0; i < shown && i < lines.size(); i++)
-            f.draw(lines[i], 128, 300 + 20 * static_cast<int>(i));
-        if (Done() && !after) kit::drawControls(v, hidden);
+            f.Draw(lines[i], 128, 300 + 20 * static_cast<int>(i));
+        if (Done() && !after) kit::DrawControls(v, hidden);
     }
-    void mousepressed(int x, int y, int) override {
+    void Mousepressed(int x, int y, int) override {
         if (!Done()) {
             Advance();
             return;
         }
         if (after) {
             auto a = after;
-            kit::pop(this);
+            kit::Pop(this);
             a();
             return;
         }
-        auto c = kit::controlAt(v, x, y, hidden);
+        auto c = kit::ControlAt(v, x, y, hidden);
         if (!c) return;
         if (c->id == kTake && hero) {
             for (auto& it : G.g->map->items) {
                 if (it.status == 1 && it.x == hero->x && it.y == hero->y)
-                    w2::hero::takeItem(*G.g, hero, &it);
+                    w2::hero::TakeItem(*G.g, hero, &it);
             }
             Close();
         } else if (c->id == kDone) {
             Close();
         }
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (!Done()) {
             Advance();
             return;
         }
         if (after) {
             auto a = after;
-            kit::pop(this);
+            kit::Pop(this);
             a();
             return;
         }
@@ -164,13 +164,13 @@ void OpenRuin(std::vector<std::string> lines, bool guarded, bool can_take, w2::A
     d->can_take = can_take;
     d->hero = hero;
     d->after = after;
-    d->v = kit::view(kRuinDialog);
+    d->v = kit::View(kRuinDialog);
     d->view = &d->v;
-    d->v.state[kDone] = w2::uidata::NORMAL;
-    d->v.state[kTake] = w2::uidata::NORMAL;
+    d->v.state[kDone] = w2::uidata::kNormal;
+    d->v.state[kTake] = w2::uidata::kNormal;
     if (!can_take) d->hidden.insert(kTake);
-    sound::effect("dramatic");
-    kit::push(d);
+    sound::Effect("dramatic");
+    kit::Push(d);
 }
 
 const kit::Rect kTemple{160, 60, 320, 280};  // popup 9
@@ -178,57 +178,57 @@ const int kTempleDialog = 15, kBless = 328, kQuest = 329;
 
 // How many a temple blessed (temple_bless, 6536:08a1).
 std::string BlessLine(int n) {
-    if (n == 0) return kit::text(0x37, 0);
-    if (n == 1) return kit::text(0x38, 0);
-    return format(kit::text(0x38, 1), n);
+    if (n == 0) return kit::Text(0x37, 0);
+    if (n == 1) return kit::Text(0x38, 0);
+    return Format(kit::Text(0x38, 1), n);
 }
 
 struct Temple : kit::Modal {
     std::shared_ptr<w2::SearchResult> r;
     std::vector<w2::Army*> stack;
     screen::View v;
-    void draw() override {
-        kit::popupFrame(kTemple);
-        gfx::setColor(1, 1, 1);
-        gfx::draw(G.templePic, kTemple.x, kTemple.y);
-        const Font& f = kit::font(2).colours(7, 6);
-        kit::centred(f, format(kit::text(0x13, 0), r->site->name), 320, 270);
-        kit::centred(f, kit::text(0x13, 1), 320, 290);
-        kit::centred(f, kit::text(0x13, 2), 320, 310);
-        kit::drawControls(v);
+    void Draw() override {
+        kit::PopupFrame(kTemple);
+        gfx::SetColor(1, 1, 1);
+        gfx::Draw(G.temple_pic, kTemple.x, kTemple.y);
+        const Font& f = kit::GetFont(2).Colours(7, 6);
+        kit::Centred(f, Format(kit::Text(0x13, 0), r->site->name), 320, 270);
+        kit::Centred(f, kit::Text(0x13, 1), 320, 290);
+        kit::Centred(f, kit::Text(0x13, 2), 320, 310);
+        kit::DrawControls(v);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
         if (!c) return;
         if (c->id == kBless) {
             // temple_bless (6536:08a1): how many were blessed, and a parting line
             auto res = r;
             auto st = stack;
-            kit::pop(this);
-            message(BlessLine(w2::site::bless(*G.g, *res->site, st)), kit::text(0x38, 2));
+            kit::Pop(this);
+            ShowMessage(BlessLine(w2::site::Bless(*G.g, *res->site, st)), kit::Text(0x38, 2));
         } else if (c->id == kQuest) {
             auto res = r;
             auto st = stack;
-            kit::pop(this);
+            kit::Pop(this);
             // the searching stack's mode decides how far the target is uncovered
-            w2::quest::assign(*G.g, *G.player, res->hero, false,
-                              w2::move::modeOf(*G.g, st) == w2::move::FLYING);
-            front::openQuest();
+            w2::quest::Assign(*G.g, *G.player, res->hero, false,
+                              w2::move::ModeOf(*G.g, st) == w2::move::kFlying);
+            front::OpenQuest();
         }
     }
 };
 
 void OpenTemple(std::shared_ptr<w2::SearchResult> r, const std::vector<w2::Army*>& stack) {
-    sound::music(w2::cues::TEMPLE);  // 4976:0000
+    sound::Music(w2::cues::kTemple);  // 4976:0000
     auto d = std::make_shared<Temple>();
     d->r = r;
     d->stack = stack;
-    d->v = kit::view(kTempleDialog);
+    d->v = kit::View(kTempleDialog);
     d->view = &d->v;
-    d->v.state[kBless] = w2::uidata::NORMAL;
+    d->v.state[kBless] = w2::uidata::kNormal;
     bool can_quest = G.g->map->options.quests != 0 && !G.player->quest && r->hero;
-    d->v.state[kQuest] = can_quest ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-    kit::push(d);
+    d->v.state[kQuest] = can_quest ? w2::uidata::kNormal : w2::uidata::kDisabled;
+    kit::Push(d);
 }
 
 const kit::Rect kSage{80, 60, 480, 312};  // popup 2
@@ -248,39 +248,39 @@ struct Sage : kit::Modal {
     void Offers(bool on) {
         auto& st = v.state;
         if (on) {
-            st[kItems] = !list.empty() ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-            st[kGem] = w2::uidata::NORMAL;
-            st[kMap] = hidden_map ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kItems] = !list.empty() ? w2::uidata::kNormal : w2::uidata::kDisabled;
+            st[kGem] = w2::uidata::kNormal;
+            st[kMap] = hidden_map ? w2::uidata::kNormal : w2::uidata::kDisabled;
         } else {
-            st[kItems] = st[kGem] = st[kMap] = w2::uidata::DISABLED;
+            st[kItems] = st[kGem] = st[kMap] = w2::uidata::kDisabled;
         }
         hidden = {kSageDone};
     }
     void Finished() {
-        v.state[kSageDone] = w2::uidata::NORMAL;
+        v.state[kSageDone] = w2::uidata::kNormal;
         hidden = {kItems, kGem, kMap};
         pointing = false;
     }
-    void draw() override {
-        kit::popup(kSage);
-        front::drawStrategicMap(kSageX, kSageY);
-        if (!target) front::drawSiteMarkers(kSageX, kSageY, r->site);
+    void Draw() override {
+        kit::Popup(kSage);
+        front::DrawStrategicMap(kSageX, kSageY);
+        if (!target) front::DrawSiteMarkers(kSageX, kSageY, r->site);
         if (target) {
-            kit::mapTarget(kSageX, kSageY, h->x, h->y, target->x, target->y);
-            front::drawHeroFigure(kSageX, kSageY, h->x, h->y);
+            kit::MapTarget(kSageX, kSageY, h->x, h->y, target->x, target->y);
+            front::DrawHeroFigure(kSageX, kSageY, h->x, h->y);
         }
         if (patch) {
-            kit::setPal(15);
-            kit::outline(kSageX + 2 * (*patch)[0], kSageY + 2 * (*patch)[1], 2 * (*patch)[2],
+            kit::SetPal(15);
+            kit::Outline(kSageX + 2 * (*patch)[0], kSageY + 2 * (*patch)[1], 2 * (*patch)[2],
                          2 * (*patch)[3]);
         }
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), "A Sage!", 432, 62);  // 4125:0c7c
-        const Font& f = kit::font(2);
-        for (int i = 0; i <= 4; i++) kit::centred(f, kit::text(0x3f, i), 432, 120 + 20 * i);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), "A Sage!", 432, 62);  // 4125:0c7c
+        const Font& f = kit::GetFont(2);
+        for (int i = 0; i <= 4; i++) kit::Centred(f, kit::Text(0x3f, i), 432, 120 + 20 * i);
         for (size_t i = 0; i < said.size(); i++)
-            kit::centred(f, said[i], 432, 240 + 20 * static_cast<int>(i));
-        kit::drawControls(v, hidden);
+            kit::Centred(f, said[i], 432, 240 + 20 * static_cast<int>(i));
+        kit::DrawControls(v, hidden);
     }
     void Items() {
         Offers(false);
@@ -288,59 +288,59 @@ struct Sage : kit::Modal {
         for (auto& e : list) names.push_back(e.name);
         std::weak_ptr<Modal> self = weak_from_this();
         Sage* me = this;
-        choose::open("Items", names, 0, [me, self](int i) {
+        choose::Open("Items", names, 0, [me, self](int i) {
             if (self.expired()) return;
-            if (i == w2::NONE) return me->Offers(true);
+            if (i == w2::kNone) return me->Offers(true);
             const auto& e = me->list[i];
             if (e.kind == "gold")
-                me->said.push_back(kit::text(0x3e, 2));
+                me->said.push_back(kit::Text(0x3e, 2));
             else if (e.kind == "allies")
-                me->said.push_back(kit::text(0x3e, 3));
+                me->said.push_back(kit::Text(0x3e, 3));
             else
-                me->said.push_back(format(kit::text(0x3e, 0), e.name));
-            me->said.push_back(kit::text(0x3e, 1));
-            if (w2::Site* s = w2::site::sageShow(*G.g, *G.player, e, me->h->x, me->h->y)) {
-                me->said.push_back(format(kit::text(0x3e, 7), s->name));
+                me->said.push_back(Format(kit::Text(0x3e, 0), e.name));
+            me->said.push_back(kit::Text(0x3e, 1));
+            if (w2::Site* s = w2::site::SageShow(*G.g, *G.player, e, me->h->x, me->h->y)) {
+                me->said.push_back(Format(kit::Text(0x3e, 7), s->name));
                 me->target = s;
             }
-            front::stratDirty();
+            front::StratDirty();
             me->Finished();
         });
     }
-    void mousepressed(int x, int y, int) override {
+    void Mousepressed(int x, int y, int) override {
         if (pointing) {
             // the map is region 15: a click on it picks the tile (6536:0cd6)
             int tx = (x - kSageX) / 2, ty = (y - kSageY) / 2;
             if (x >= kSageX && y >= kSageY && x < kSageX + 224 && y < kSageY + 312) {
-                patch = w2::site::sageMap(*G.g, *G.player, tx, ty);
-                front::stratDirty();
+                patch = w2::site::SageMap(*G.g, *G.player, tx, ty);
+                front::StratDirty();
                 Finished();
             }
             return;
         }
-        auto c = kit::controlAt(v, x, y, hidden);
+        auto c = kit::ControlAt(v, x, y, hidden);
         if (!c) return;
         if (c->id == kItems) {
             Items();
         } else if (c->id == kGem) {
-            int n = w2::site::sageGem(*G.g, *G.player);
-            said.push_back(kit::text(0x3b, 0));
-            said.push_back(format(kit::text(0x3b, 1), n));
+            int n = w2::site::SageGem(*G.g, *G.player);
+            said.push_back(kit::Text(0x3b, 0));
+            said.push_back(Format(kit::Text(0x3b, 1), n));
             Finished();
         } else if (c->id == kMap) {
             Offers(false);
-            for (int i = 0; i <= 2; i++) said.push_back(kit::text(0x3c, i));
+            for (int i = 0; i <= 2; i++) said.push_back(kit::Text(0x3c, i));
             pointing = true;
         } else if (c->id == kSageDone) {
-            kit::pop(this);
-            front::stratDirty();
+            kit::Pop(this);
+            front::StratDirty();
         }
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (hidden.count(kSageDone)) return;
         if (key == "escape" || key == "return" || key == "kpenter") {
-            kit::pop(this);
-            front::stratDirty();
+            kit::Pop(this);
+            front::StratDirty();
         }
     }
 };
@@ -349,45 +349,46 @@ void OpenSage(std::shared_ptr<w2::SearchResult> r) {
     auto d = std::make_shared<Sage>();
     d->r = r;
     d->h = r->hero;
-    d->v = kit::view(kSageDialog);
+    d->v = kit::View(kSageDialog);
     d->view = &d->v;
-    d->list = w2::site::sageList(*G.g, *G.player, d->h->x, d->h->y);
-    d->hidden_map = G.g->map->options.hiddenMap != 0;
+    d->list = w2::site::SageList(*G.g, *G.player, d->h->x, d->h->y);
+    d->hidden_map = G.g->map->options.hidden_map != 0;
     d->Offers(true);
-    kit::push(d);
+    kit::Push(d);
 }
 }  // namespace
 
-void message(const std::string& line1, const std::string& line2, kit::Done after) {
+void ShowMessage(const std::string& line1, const std::string& line2, kit::Done after) {
     auto d = std::make_shared<Message>();
     d->line1 = line1;
     d->line2 = line2;
     d->after = after;
-    kit::push(d);
+    kit::Push(d);
 }
 
-void say(const std::string& line, kit::Done after) {
+void Say(const std::string& line, kit::Done after) {
     auto d = std::make_shared<Message>();
     d->line1 = line;
     d->one = true;
     d->after = after;
-    kit::push(d);
+    kit::Push(d);
 }
 
-void open(const std::vector<w2::Army*>& stack) {
+void Open(const std::vector<w2::Army*>& stack) {
     if (stack.empty()) return;
-    auto r = w2::game::searchHere(*G.g, stack, true);
+    auto r = w2::game::SearchHere(*G.g, stack, true);
     if (!r || r->kind == "no hero") return;
     // with no hero a temple blesses at once, with only its message (6536:0000)
-    if (r->kind == "temple" && !r->hero) return message(BlessLine(r->blessed), kit::text(0x38, 2));
+    if (r->kind == "temple" && !r->hero)
+        return ShowMessage(BlessLine(r->blessed), kit::Text(0x38, 2));
     if (r->kind == "temple") return OpenTemple(r, stack);
     if (r->kind == "sage") {
-        sound::music(w2::cues::SAGE);
-        OpenRuin({format(kit::text(0x3a, 0), r->hero ? r->hero->name : "")}, false, false, nullptr,
+        sound::Music(w2::cues::kSage);
+        OpenRuin({Format(kit::Text(0x3a, 0), r->hero ? r->hero->name : "")}, false, false, nullptr,
                  [r]() { OpenSage(r); });
         return;
     }
-    front::stratDirty();
+    front::StratDirty();
     bool guarded = r->kind != "allies" && (r->monster || r->guardian);
     bool can_take = r->kind == "item" && r->item && r->item->status == 1;
     OpenRuin(RuinLines(*r), guarded, can_take, r->hero, nullptr);

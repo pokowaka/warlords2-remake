@@ -18,7 +18,7 @@
 
 namespace help {
 
-const kit::Rect POPUP4{120, 50, 400, 360};
+const kit::Rect kPopuP4{120, 50, 400, 360};
 
 namespace {
 const kit::Rect kPopups[2] = {
@@ -41,7 +41,7 @@ int Parse(const std::string& text, std::vector<Step>& steps) {
     static const std::regex kNumRe("^(\\d+)");
     static const std::regex kTextRe("^\\((\\d+),(\\d+)\\)\\|(.*?)\\|");
     static const std::regex kGfxRe("^\\((\\d+),(\\d+),(\\d+),(\\d+)\\)(\\d+)\\((\\d+),(\\d+)\\)");
-    for (auto& line : w2::splitLines(text)) {
+    for (auto& line : w2::SplitLines(text)) {
         std::smatch m;
         if (!std::regex_search(line, m, kLineRe)) continue;
         char op = m[1].str()[0];
@@ -99,50 +99,50 @@ struct Page : kit::Modal {
     kit::Done after;
     void Close() {
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
-    void draw() override {
-        kit::popup(r);
-        const Font* font = &kit::font(2);
+    void Draw() override {
+        kit::Popup(r);
+        const Font* font = &kit::GetFont(2);
         int colour = 15;
         for (const Step& s : steps) {
             if (s.font) {
-                font = &kit::font(s.font);
+                font = &kit::GetFont(s.font);
                 colour = s.colour;
             } else if (s.is_text) {
-                const Font& fc = font->colours(colour, 0);
-                gfx::setColor(1, 1, 1);
+                const Font& fc = font->Colours(colour, 0);
+                gfx::SetColor(1, 1, 1);
                 if (s.align == 'C')
-                    kit::centred(fc, s.text, r.x + s.x, r.y + s.y);
+                    kit::Centred(fc, s.text, r.x + s.x, r.y + s.y);
                 else if (s.align == 'R')
-                    kit::right(fc, s.text, r.x + s.x, r.y + s.y);
+                    kit::Right(fc, s.text, r.x + s.x, r.y + s.y);
                 else
-                    fc.draw(s.text, r.x + s.x, r.y + s.y);
+                    fc.Draw(s.text, r.x + s.x, r.y + s.y);
             } else if (s.bitmap >= 0) {
-                if (auto art = G.screen->artFor(s.bitmap)) {
-                    gfx::setColor(1, 1, 1);
-                    gfx::draw(art->image, gfx::newQuad(s.sx, s.sy, s.w, s.h), r.x + s.x, r.y + s.y);
+                if (auto art = G.screen->ArtFor(s.bitmap)) {
+                    gfx::SetColor(1, 1, 1);
+                    gfx::Draw(art->image, gfx::NewQuad(s.sx, s.sy, s.w, s.h), r.x + s.x, r.y + s.y);
                 }
             }
         }
     }
-    void mousepressed(int, int, int) override { Close(); }
-    void keypressed(const std::string&) override { Close(); }
+    void Mousepressed(int, int, int) override { Close(); }
+    void Keypressed(const std::string&) override { Close(); }
 };
 }  // namespace
 
-bool open(const std::string& name, kit::Done after, const kit::Rect* r) {
+bool Open(const std::string& name, kit::Done after, const kit::Rect* r) {
     std::string path = name;
     for (auto& c : path)
         if (c == '\\') c = '/';
-    auto text = w2::readFile(G.dataDir + "/" + path);
+    auto text = w2::ReadFile(G.data_dir + "/" + path);
     if (!text) return false;
     auto d = std::make_shared<Page>();
     int page = Parse(*text, d->steps);
     d->r = r ? *r : (page == 1 ? kPopups[1] : kPopups[0]);
     d->after = after;
-    kit::push(d);
+    kit::Push(d);
     return true;
 }
 

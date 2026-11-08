@@ -8,12 +8,12 @@
 
 namespace w2 {
 
-const Json& Json::none() {
+const Json& Json::None() {
     static const Json kN;
     return kN;
 }
 
-bool Json::has(const std::string& k) const {
+bool Json::Has(const std::string& k) const {
     for (auto& e : o_)
         if (e.first == k) return true;
     return false;
@@ -22,18 +22,18 @@ bool Json::has(const std::string& k) const {
 const Json& Json::operator[](const std::string& k) const {
     for (auto& e : o_)
         if (e.first == k) return e.second;
-    return none();
+    return None();
 }
 
-Json& Json::set(const std::string& k, Json v) {
-    type_ = Object;
+Json& Json::Set(const std::string& k, Json v) {
+    type_ = kObject;
     for (auto& e : o_) {
         if (e.first == k) {
             e.second = std::move(v);
             return e.second;
         }
     }
-    if (v.isNull()) return const_cast<Json&>(none());
+    if (v.IsNull()) return const_cast<Json&>(None());
     o_.emplace_back(k, std::move(v));
     return o_.back().second;
 }
@@ -72,15 +72,15 @@ static void WriteString(std::string& out, const std::string& s) {
     out += '"';
 }
 
-void Json::write(std::string& out) const {
+void Json::Write(std::string& out) const {
     switch (type_) {
-    case Null:
+    case kNull:
         out += "null";
         break;
-    case Bool:
+    case kBool:
         out += b_ ? "true" : "false";
         break;
-    case Number: {
+    case kNumber: {
         char buf[32];
         if (std::floor(n_) == n_ && std::fabs(n_) < 1e15)
             snprintf(buf, sizeof buf, "%.0f", n_);
@@ -89,27 +89,27 @@ void Json::write(std::string& out) const {
         out += buf;
         break;
     }
-    case String:
+    case kString:
         WriteString(out, s_);
         break;
-    case Array:
+    case kArray:
         out += '[';
         for (size_t i = 0; i < a_.size(); i++) {
             if (i) out += ',';
-            a_[i].write(out);
+            a_[i].Write(out);
         }
         out += ']';
         break;
-    case Object: {
+    case kObject: {
         out += '{';
         bool first = true;
         for (auto& e : o_) {
-            if (e.second.isNull()) continue;
+            if (e.second.IsNull()) continue;
             if (!first) out += ',';
             first = false;
             WriteString(out, e.first);
             out += ':';
-            e.second.write(out);
+            e.second.Write(out);
         }
         out += '}';
         break;
@@ -117,9 +117,9 @@ void Json::write(std::string& out) const {
     }
 }
 
-std::string Json::dump() const {
+std::string Json::Dump() const {
     std::string out;
-    write(out);
+    Write(out);
     return out;
 }
 
@@ -190,7 +190,7 @@ struct Parser {
         char c = s[i];
         if (c == '{') {
             i++;
-            Json o = Json::object();
+            Json o = Json::Object();
             Ws();
             if (s[i] == '}') {
                 i++;
@@ -203,7 +203,7 @@ struct Parser {
                 if (s[i] != ':') Fail("colon");
                 i++;
                 Json v = Value();
-                o.set(k, std::move(v));
+                o.Set(k, std::move(v));
                 Ws();
                 if (s[i] == ',') {
                     i++;
@@ -218,14 +218,14 @@ struct Parser {
         }
         if (c == '[') {
             i++;
-            Json a = Json::array();
+            Json a = Json::Array();
             Ws();
             if (s[i] == ']') {
                 i++;
                 return a;
             }
             for (;;) {
-                a.push(Value());
+                a.Push(Value());
                 Ws();
                 if (s[i] == ',') {
                     i++;
@@ -251,7 +251,7 @@ struct Parser {
 };
 }  // namespace
 
-Json Json::parse(const std::string& text) {
+Json Json::Parse(const std::string& text) {
     Parser p{text};
     Json v = p.Value();
     p.Ws();

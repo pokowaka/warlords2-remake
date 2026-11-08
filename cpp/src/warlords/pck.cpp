@@ -23,13 +23,13 @@ size_t DecodePlane(const std::string& s, size_t pos, size_t plane_size, std::vec
         if (cmd < 0x80) {
             size_t count = cmd + 1;
             for (size_t i = 0; i < count; i++) {
-                if (n + i < plane_size) out[n + i] = static_cast<uint8_t>(u8(s, pos + 1 + i));
+                if (n + i < plane_size) out[n + i] = static_cast<uint8_t>(U8(s, pos + 1 + i));
             }
             n += count;
             pos += 1 + count;
         } else {
-            long dist = 65536 - (cmd * 256 + u8(s, pos + 1));
-            int count = u8(s, pos + 2) + 1;
+            long dist = 65536 - (cmd * 256 + U8(s, pos + 1));
+            int count = U8(s, pos + 2) + 1;
             pos += 3;
             for (int i = 0; i < count; i++) {
                 long src = static_cast<long>(n) - dist;
@@ -44,19 +44,19 @@ size_t DecodePlane(const std::string& s, size_t pos, size_t plane_size, std::vec
 }
 }  // namespace
 
-std::shared_ptr<const Pixels> decode(const std::string& path) {
+std::shared_ptr<const Pixels> Decode(const std::string& path) {
     {
         std::lock_guard<std::mutex> g(lock);
-        auto it = cache.find(upper(path));
+        auto it = cache.find(Upper(path));
         if (it != cache.end()) return it->second;
     }
-    auto data = readFile(path);
+    auto data = ReadFile(path);
     if (!data) throw std::runtime_error("cannot open image: " + path);
     const std::string& s = *data;
-    if (u16(s, 0) != 1) throw std::runtime_error(path + ": unexpected version");
+    if (U16(s, 0) != 1) throw std::runtime_error(path + ": unexpected version");
     auto p = std::make_shared<Pixels>();
-    p->w = u16(s, 2);
-    p->h = u16(s, 4);
+    p->w = U16(s, 2);
+    p->h = U16(s, 4);
     size_t rowbytes = p->w / 8;
     size_t plane_size = rowbytes * p->h;
     p->px.assign(static_cast<size_t>(p->w) * p->h, 0);
@@ -76,7 +76,7 @@ std::shared_ptr<const Pixels> decode(const std::string& path) {
         }
     }
     std::lock_guard<std::mutex> g(lock);
-    cache[upper(path)] = p;
+    cache[Upper(path)] = p;
     return p;
 }
 
@@ -111,7 +111,7 @@ void EncodePlane(const std::vector<uint8_t>& plane, std::string& out) {
 }
 }  // namespace
 
-std::string encode(const Pixels& p) {
+std::string Encode(const Pixels& p) {
     if (p.w % 8 != 0) throw std::runtime_error("pck: width must be a multiple of 8");
     std::string out;
     auto put16 = [&](int v) {
@@ -126,7 +126,7 @@ std::string encode(const Pixels& p) {
         std::vector<uint8_t> plane(rowbytes * p.h, 0);
         for (int y = 0; y < p.h; y++)
             for (int x = 0; x < p.w; x++)
-                if (p.at(x, y) & (1 << b))
+                if (p.At(x, y) & (1 << b))
                     plane[y * rowbytes + x / 8] |= static_cast<uint8_t>(0x80 >> (x % 8));
         EncodePlane(plane, out);
     }

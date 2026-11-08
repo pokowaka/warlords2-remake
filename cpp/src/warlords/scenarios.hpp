@@ -33,14 +33,14 @@ struct Entry {
 
 /** SCENARIO.DAT's records in order, then the generated scenarios SCENGEN.LST
  *  names, in its order. */
-std::vector<Entry> list(const std::string& dataDir);
+std::vector<Entry> List(const std::string& data_dir);
 
 /** Add a folder to SCENGEN.LST, once, keeping the list sorted. */
-bool remember(const std::string& dataDir, const std::string& dir);
+bool Remember(const std::string& data_dir, const std::string& dir);
 
 /** An entry as NAME.INF holds it. */
-std::string info(const Entry& e);
+std::string Info(const Entry& e);
 /** NAME.INF read back; nothing if it lacks a name. */
-std::optional<Entry> parseInfo(const std::string& text, const std::string& dir);
+std::optional<Entry> ParseInfo(const std::string& text, const std::string& dir);
 
 }  // namespace w2::scenarios

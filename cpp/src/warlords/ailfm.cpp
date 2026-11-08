@@ -66,24 +66,24 @@ AilFm::AilFm(const std::string& adv, const std::string& ad) {
         for (int i = 2; i < len; i++) t.push_back(static_cast<uint8_t>(ByteAt(ad, off + i)));
         lib_[bank * 128 + patch] = t;
     }
-    for (int r = 1; r <= 0xf5; r++) chip_.write(r, reset_[r]);
+    for (int r = 1; r <= 0xf5; r++) chip_.Write(r, reset_[r]);
     // channel state, as the driver's start-up leaves it on channels 1..9
     for (int ch = 1; ch <= 9; ch++) {
         Chan& c = chans_[ch];
         c.vol = 127;
         c.expr = 127;
-        if (ch <= 8) program(ch, programs_[ch]);
+        if (ch <= 8) Program(ch, programs_[ch]);
     }
     for (int& o : owner_) o = -1;
 }
 
-void AilFm::program(int ch, int p) {
+void AilFm::Program(int ch, int p) {
     auto it = lib_.find(chans_[ch].bank * 128 + p);
     chans_[ch].timbre = it == lib_.end() ? nullptr : &it->second;
 }
 
 // Write whatever the slot's flags say has changed (1807).
-void AilFm::update(Slot& s) {
+void AilFm::Update(Slot& s) {
     int v = s.voice;
     if (v < 0) return;
     int f = s.flags;
@@ -91,42 +91,42 @@ void AilFm::update(Slot& s) {
     int m = kOpreg[v], k = kOpreg[v] + 3;
     if (f >= 0x80) {
         int vib = c.mod >= 64 ? 0x40 : 0;
-        chip_.write(0x20 + m, s.modMult + s.modAvek + (s.modAvek % 0x80 >= 0x40 ? 0 : vib));
-        chip_.write(0x20 + k, s.carMult + s.carAvek + (s.carAvek % 0x80 >= 0x40 ? 0 : vib));
+        chip_.Write(0x20 + m, s.mod_mult + s.mod_avek + (s.mod_avek % 0x80 >= 0x40 ? 0 : vib));
+        chip_.Write(0x20 + k, s.car_mult + s.car_avek + (s.car_avek % 0x80 >= 0x40 ? 0 : vib));
         f -= 0x80;
     }
     if (f >= 0x40) {
         int vol = Scale(Scale(c.vol, c.expr), s.vel);
-        int ml = s.modLevel;
-        if (s.scaleMod) ml = ml * vol / 127;
-        int cl = s.carLevel * vol / 127;
-        chip_.write(0x40 + m, 63 - ml % 64 + s.modKsl);
-        chip_.write(0x40 + k, 63 - cl % 64 + s.carKsl);
+        int ml = s.mod_level;
+        if (s.scale_mod) ml = ml * vol / 127;
+        int cl = s.car_level * vol / 127;
+        chip_.Write(0x40 + m, 63 - ml % 64 + s.mod_ksl);
+        chip_.Write(0x40 + k, 63 - cl % 64 + s.car_ksl);
         f -= 0x40;
     }
     if (f >= 0x20) {
-        chip_.write(0x60 + m, s.modAD);
-        chip_.write(0x60 + k, s.carAD);
-        chip_.write(0x80 + m, s.modSR);
-        chip_.write(0x80 + k, s.carSR);
+        chip_.Write(0x60 + m, s.mod_ad);
+        chip_.Write(0x60 + k, s.car_ad);
+        chip_.Write(0x80 + m, s.mod_sr);
+        chip_.Write(0x80 + k, s.car_sr);
         f -= 0x20;
     }
     if (f >= 0x10) {
-        chip_.write(0xe0 + k, s.carWS);
-        chip_.write(0xe0 + m, s.modWS);
+        chip_.Write(0xe0 + k, s.car_ws);
+        chip_.Write(0xe0 + m, s.mod_ws);
         f -= 0x10;
     }
     if (f >= 0x08) {
-        chip_.write(0xc0 + v, s.fbc % 16);
+        chip_.Write(0xc0 + v, s.fbc % 16);
         f -= 0x08;
     }
     if (f % 2 == 1) {
         if (s.keyon == 0) {
-            chip_.write(0xb0 + v, s.b0 - s.b0 % 64 + s.b0 % 32);  // key off, pitch kept
+            chip_.Write(0xb0 + v, s.b0 - s.b0 % 64 + s.b0 % 32);  // key off, pitch kept
         } else {
-            chip_.write(0xa0 + v, frequency(s, c) % 256);
+            chip_.Write(0xa0 + v, Frequency(s, c) % 256);
             s.b0 = (fw_ / 256) % 4 + block_ * 4 + s.keyon;
-            chip_.write(0xb0 + v, s.b0);
+            chip_.Write(0xb0 + v, s.b0);
         }
         f -= 1;
     }
@@ -135,7 +135,7 @@ void AilFm::update(Slot& s) {
 
 // F-number and block for a slot's note (1b61): the note less two octaves,
 // folded into the 96 the tables cover, in sixteenths of a half-tone.
-int AilFm::frequency(const Slot& s, const Chan& c) {
+int AilFm::Frequency(const Slot& s, const Chan& c) {
     int n = s.note + s.transpose - 24;
     while (n < 0) n += 12;
     while (n > 95) n -= 12;
@@ -160,28 +160,28 @@ int AilFm::frequency(const Slot& s, const Chan& c) {
 
 // Give a slot a free voice, round-robin from the last one (1740); with none
 // free, let the slots fight over them (1c69).
-void AilFm::allocate(Slot& s) {
-    int v = nextVoice_;
+void AilFm::Allocate(Slot& s) {
+    int v = next_voice_;
     for (int i = 0; i < 9; i++) {
         v = (v + 1) % 9;
-        nextVoice_ = v;
+        next_voice_ = v;
         if (owner_[v] < 0) {
             s.voice = v;
             owner_[v] = s.ch;
             chans_[s.ch].voices++;
             s.flags = 0xf9;
-            update(s);
+            Update(s);
             return;
         }
     }
-    steal();
+    Steal();
 }
 
 // A note's claim to a voice is 0x7FFF less the voices its channel already
 // holds (a channel locked by controller 112 claims 0xFFFF). While the best
 // claim of a note without a voice is at least the weakest claim of one
 // with a voice, the weaker note is cut off and its voice handed over.
-void AilFm::steal() {
+void AilFm::Steal() {
     int prio[16] = {};
     int n = 0;
     for (int i = 0; i < 16; i++) {
@@ -213,30 +213,30 @@ void AilFm::steal() {
         Slot& w = slots_[worst];
         Slot& b = slots_[best];
         int v = w.voice;
-        release(w);
+        Release(w);
         w.active = false;
         b.voice = v;
         owner_[v] = b.ch;
         chans_[b.ch].voices++;
         b.flags = 0xf9;
-        update(b);
+        Update(b);
         n--;
     }
 }
 
 // Key off and give the voice back (179c).
-void AilFm::release(Slot& s) {
+void AilFm::Release(Slot& s) {
     if (s.voice < 0) return;
     s.keyon = 0;
     if (s.flags % 2 == 0) s.flags++;
-    update(s);
+    Update(s);
     chans_[s.ch].voices--;
     owner_[s.voice] = -1;
     s.voice = -1;
 }
 
-void AilFm::noteOn(int ch, int key, int vel) {
-    if (vel == 0) return noteOff(ch, key);
+void AilFm::NoteOn(int ch, int key, int vel) {
+    if (vel == 0) return NoteOff(ch, key);
     const Timbre* t;
     if (ch == 9) {
         auto it = percussion_.find(key);
@@ -280,42 +280,42 @@ void AilFm::noteOn(int ch, int key, int vel) {
     s.keyon = 0x20;
     s.fbc = timbre[6];
     s.conn = timbre[6] % 2;
-    s.modKsl = timbre[2] - timbre[2] % 64;
-    s.modLevel = 63 - timbre[2] % 64;
-    s.carKsl = timbre[8] - timbre[8] % 64;
-    s.carLevel = 63 - timbre[8] % 64;
-    s.modAvek = timbre[1] - timbre[1] % 16;
-    s.modMult = timbre[1] % 16;
-    s.carAvek = timbre[7] - timbre[7] % 16;
-    s.carMult = timbre[7] % 16;
-    s.modAD = timbre[3];
-    s.modSR = timbre[4];
-    s.modWS = timbre[5];
-    s.carAD = timbre[9];
-    s.carSR = timbre[10];
-    s.carWS = timbre[11];
+    s.mod_ksl = timbre[2] - timbre[2] % 64;
+    s.mod_level = 63 - timbre[2] % 64;
+    s.car_ksl = timbre[8] - timbre[8] % 64;
+    s.car_level = 63 - timbre[8] % 64;
+    s.mod_avek = timbre[1] - timbre[1] % 16;
+    s.mod_mult = timbre[1] % 16;
+    s.car_avek = timbre[7] - timbre[7] % 16;
+    s.car_mult = timbre[7] % 16;
+    s.mod_ad = timbre[3];
+    s.mod_sr = timbre[4];
+    s.mod_ws = timbre[5];
+    s.car_ad = timbre[9];
+    s.car_sr = timbre[10];
+    s.car_ws = timbre[11];
     // which operators follow the volume: the carrier always, the modulator
     // only when it is heard directly (additive)
-    s.scaleMod = s.conn == 1;
+    s.scale_mod = s.conn == 1;
     s.flags = 0xf9;
-    allocate(s);
+    Allocate(s);
 }
 
-void AilFm::noteOff(int ch, int key) {
+void AilFm::NoteOff(int ch, int key) {
     Chan& c = chans_[ch];
     for (Slot& s : slots_) {
         if (s.active && s.key == key && s.ch == ch) {
             if (c.sustain >= 64) {
                 s.sustained = true;
             } else {
-                release(s);
+                Release(s);
                 s.active = false;
             }
         }
     }
 }
 
-void AilFm::controller(int ch, int n, int v) {
+void AilFm::Controller(int ch, int n, int v) {
     Chan& c = chans_[ch];
     int bitv = 0;
     int* field = nullptr;
@@ -327,7 +327,7 @@ void AilFm::controller(int ch, int n, int v) {
         c.sustain = v;
         if (v < 64) {
             for (Slot& s : slots_)
-                if (s.active && s.ch == ch && s.sustained) noteOff(ch, s.key);
+                if (s.active && s.ch == ch && s.sustained) NoteOff(ch, s.key);
         }
     } else if (n == 1) {
         field = &c.mod;
@@ -347,36 +347,36 @@ void AilFm::controller(int ch, int n, int v) {
         for (Slot& s : slots_) {
             if (s.active && s.ch == ch) {
                 if ((s.flags / bitv) % 2 == 0) s.flags += bitv;
-                update(s);
+                Update(s);
             }
         }
     }
 }
 
 // One MIDI message (2009). Notes only sound on channels 2-10 (1-9 here).
-void AilFm::message(int st, int a, int b) {
+void AilFm::Message(int st, int a, int b) {
     int hi = st & 0xf0, ch = st & 15;
     if (hi == 0x90) {
-        if (ch >= 1 && ch <= 9) noteOn(ch, a, b);
+        if (ch >= 1 && ch <= 9) NoteOn(ch, a, b);
     } else if (hi == 0x80) {
-        noteOff(ch, a);
+        NoteOff(ch, a);
     } else if (hi == 0xb0) {
-        controller(ch, a, b);
+        Controller(ch, a, b);
     } else if (hi == 0xc0) {
-        program(ch, a);
+        Program(ch, a);
     } else if (hi == 0xe0) {
         chans_[ch].bend = b * 128 + a - 0x2000;
         for (Slot& s : slots_) {
             if (s.active && s.ch == ch) {
                 if (s.flags % 2 == 0) s.flags++;
-                update(s);
+                Update(s);
             }
         }
     }
 }
 
-void AilFm::play(const xmi::Sequence* seq, bool loop) {
-    stop();
+void AilFm::Play(const xmi::Sequence* seq, bool loop) {
+    Stop();
     seq_ = seq;
     pos_ = 0;
     tick_ = 0;
@@ -384,10 +384,10 @@ void AilFm::play(const xmi::Sequence* seq, bool loop) {
     playing_ = seq != nullptr;
 }
 
-void AilFm::stop() {
+void AilFm::Stop() {
     for (Slot& s : slots_) {
         if (s.active) {
-            release(s);
+            Release(s);
             s.active = false;
         }
     }
@@ -395,40 +395,40 @@ void AilFm::stop() {
 }
 
 // one interval of AIL's 120 Hz timer
-void AilFm::interval() {
+void AilFm::Interval() {
     const xmi::Sequence* q = seq_;
     if (!playing_ || !q) return;
     int t = tick_;
     while (pos_ < q->events.size() && q->events[pos_].t <= t) {
         const auto& e = q->events[pos_];
-        message(e.st, e.a, e.b);
+        Message(e.st, e.a, e.b);
         pos_++;
     }
     tick_ = t + 1;
     if (pos_ >= q->events.size() && tick_ > q->length) {
         if (loop_)
-            play(q, true);
+            Play(q, true);
         else
-            stop();
+            Stop();
     }
 }
 
-bool AilFm::idle() const {
-    return !playing_ && chip_.silent();
+bool AilFm::Idle() const {
+    return !playing_ && chip_.Silent();
 }
 
-void AilFm::render(int16_t* out, int n) {
-    const double per = Opl::RATE / xmi::TICK_RATE;
+void AilFm::Render(int16_t* out, int n) {
+    const double per = Opl::kRate / xmi::kTickRate;
     int i = 0;
     while (i < n) {
-        if (untilTick_ <= 0) {
-            interval();
-            untilTick_ += per;
+        if (until_tick_ <= 0) {
+            Interval();
+            until_tick_ += per;
         }
-        int k = std::min(n - i, static_cast<int>(std::ceil(untilTick_)));
-        chip_.generate(out + i, k);
+        int k = std::min(n - i, static_cast<int>(std::ceil(until_tick_)));
+        chip_.Generate(out + i, k);
         i += k;
-        untilTick_ -= k;
+        until_tick_ -= k;
     }
 }
 

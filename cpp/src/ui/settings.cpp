@@ -30,12 +30,12 @@ struct Settings : kit::Modal {
     kit::Done after;
     void Refresh() {
         auto& st = v.state;
-        st[kOk] = w2::uidata::NORMAL;
-        for (int k = 0; k < 3; k++) st[kSound + k] = w2::uidata::NORMAL;
+        st[kOk] = w2::uidata::kNormal;
+        for (int k = 0; k < 3; k++) st[kSound + k] = w2::uidata::kNormal;
         hidden.clear();
         for (int i = 0; i < 8; i++) {
-            if (G.g->map->sides[i].inUse) {
-                st[kHuman + i] = st[kEnhanced + i] = st[kObserve + i] = w2::uidata::NORMAL;
+            if (G.g->map->sides[i].in_use) {
+                st[kHuman + i] = st[kEnhanced + i] = st[kObserve + i] = w2::uidata::kNormal;
             } else {
                 hidden.insert(kHuman + i);
                 hidden.insert(kEnhanced + i);
@@ -44,53 +44,53 @@ struct Settings : kit::Modal {
         }
     }
     static void Box(bool on, int x, int y) {
-        gfx::setColor(1, 1, 1);
-        gfx::draw(G.abits, gfx::newQuad(320, on ? 0 : 20, 24, 20), x, y);
+        gfx::SetColor(1, 1, 1);
+        gfx::Draw(G.abits, gfx::NewQuad(320, on ? 0 : 20, 24, 20), x, y);
     }
-    void draw() override {
-        kit::popup(kR);
-        const Font& f = kit::font(2);
+    void Draw() override {
+        kit::Popup(kR);
+        const Font& f = kit::GetFont(2);
         w2::Side* me = G.player;
-        const Font& head = f.colours(me->colour, me->edge);
-        gfx::setColor(1, 1, 1);
-        kit::right(head, "Name", 248, 60);
-        kit::centred(head, "Human", 280, 60);
-        kit::centred(head, "Enhanced", 396, 60);
-        kit::centred(head, "Observe", 468, 60);
+        const Font& head = f.Colours(me->colour, me->edge);
+        gfx::SetColor(1, 1, 1);
+        kit::Right(head, "Name", 248, 60);
+        kit::Centred(head, "Human", 280, 60);
+        kit::Centred(head, "Enhanced", 396, 60);
+        kit::Centred(head, "Observe", 468, 60);
         for (int i = 0; i < 8; i++) {
             const w2::Side& s = G.g->map->sides[i];
             int y = 90 + 30 * i;
-            gfx::setColor(1, 1, 1);
-            kit::right(f.colours(s.colour, s.edge), s.name, 248, y);
-            bool playing = s.inUse && s.alive;
+            gfx::SetColor(1, 1, 1);
+            kit::Right(f.Colours(s.colour, s.edge), s.name, 248, y);
+            bool playing = s.in_use && s.alive;
             if (!playing) {
-                if (s.name != "Not used") f.draw("Deceased!", 280, y);
+                if (s.name != "Not used") f.Draw("Deceased!", 280, y);
             } else {
                 Box(!s.computer, 256, y);
-                gfx::setColor(1, 1, 1);
-                f.draw(s.computer ? (s.level >= 0 && s.level < 3 ? kLevels[s.level] : "") : "Human",
+                gfx::SetColor(1, 1, 1);
+                f.Draw(s.computer ? (s.level >= 0 && s.level < 3 ? kLevels[s.level] : "") : "Human",
                        280, y);
                 Box(s.enhanced, 400, y);
                 if (s.computer) Box(s.observe, 448, y);
             }
         }
-        const auto& on = sound::options();
+        const auto& on = sound::MutableOptions();
         bool state[3] = {on.music, on.effects, on.speech};
         for (int k = 0; k < 3; k++) {
             Box(state[k], kSounds[k].x, kSounds[k].y);
-            gfx::setColor(1, 1, 1);
-            f.draw(kSounds[k].label, kSounds[k].x + 24, kSounds[k].y);
+            gfx::SetColor(1, 1, 1);
+            f.Draw(kSounds[k].label, kSounds[k].x + 24, kSounds[k].y);
         }
-        kit::drawControls(v, hidden);
+        kit::DrawControls(v, hidden);
     }
     void Finish() {
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y, hidden);
-        if (!c || v.stateOf(c->id) == w2::uidata::DISABLED) return;
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y, hidden);
+        if (!c || v.StateOf(c->id) == w2::uidata::kDisabled) return;
         int id = c->id;
         if (id == kOk) return Finish();
         if (id >= kHuman && id < kHuman + 8) {
@@ -103,23 +103,23 @@ struct Settings : kit::Modal {
             w2::Side& s = G.g->map->sides[id - kObserve];
             if (s.computer) s.observe = !s.observe;
         } else if (id >= kSound && id < kSound + 3) {
-            sound::toggle(kSounds[id - kSound].key);
+            sound::Toggle(kSounds[id - kSound].key);
         }
         Refresh();
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter" || key == "escape") Finish();
     }
 };
 }  // namespace
 
-void open(kit::Done after) {
+void Open(kit::Done after) {
     auto d = std::make_shared<Settings>();
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
     d->after = after;
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace settings

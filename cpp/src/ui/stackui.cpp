@@ -26,9 +26,9 @@ const int kRows = 8;
 
 bool Flies(const w2::Army* a, const w2::ArmyType* t) {
     if (t->flies) return true;
-    if (!a->hero()) return false;
+    if (!a->Hero()) return false;
     for (w2::Item* it : a->items)
-        if (it->type == w2::rules::ITEM_FLIGHT) return true;
+        if (it->type == w2::rules::kItemFlight) return true;
     return false;
 }
 
@@ -37,66 +37,66 @@ struct Stack : kit::Modal {
     w2::slots::Slots s;
     void Refresh() {
         auto& st = v.state;
-        st[kOk] = st[kCancel] = w2::uidata::NORMAL;
-        st[kGroup] = s.n > 1 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        st[kOk] = st[kCancel] = w2::uidata::kNormal;
+        st[kGroup] = s.n > 1 ? w2::uidata::kNormal : w2::uidata::kDisabled;
         st[kUngroup] = st[kGroup];
         for (int i = 0; i < kRows; i++) {
-            st[kArmy + i] = i < s.n ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kArmy + i] = i < s.n ? w2::uidata::kNormal : w2::uidata::kDisabled;
             st[kMark + i] = st[kArmy + i];
         }
     }
-    void draw() override {
+    void Draw() override {
         w2::Side* side = G.player;
-        kit::popup(kR);
-        gfx::setColor(1, 1, 1);
-        if (auto head = G.screen->artFor(46))
-            gfx::draw(head->image, gfx::newQuad(0, 0, 400, 23), 80, 62);
-        const Font& f = kit::font(2);
-        f.draw(w2::fmt("(max +%d)", G.g->map->combatCap), 480, 66);  // 4125:320d
+        kit::Popup(kR);
+        gfx::SetColor(1, 1, 1);
+        if (auto head = G.screen->ArtFor(46))
+            gfx::Draw(head->image, gfx::NewQuad(0, 0, 400, 23), 80, 62);
+        const Font& f = kit::GetFont(2);
+        f.Draw(w2::Fmt("(max +%d)", G.g->map->combat_cap), 480, 66);  // 4125:320d
         auto abits = [](int sx, int sy, int w, int h, int x, int y) {
-            gfx::setColor(1, 1, 1);
-            gfx::draw(G.abits, gfx::newQuad(sx, sy, w, h), x, y);
+            gfx::SetColor(1, 1, 1);
+            gfx::Draw(G.abits, gfx::NewQuad(sx, sy, w, h), x, y);
         };
         std::vector<w2::Army*> moving;
         for (int i = 0; i < s.n; i++)
-            if (s.inGroup[i]) moving.push_back(s.army[i]);
+            if (s.in_group[i]) moving.push_back(s.army[i]);
         w2::Army* a1 = s.n > 0 ? s.army[0] : nullptr;
-        auto fight = a1 ? w2::combat::stackStrengths(*G.g, moving, a1->x, a1->y)
+        auto fight = a1 ? w2::combat::StackStrengths(*G.g, moving, a1->x, a1->y)
                         : std::map<const w2::Army*, int>{};
         for (int i = 0; i < kRows; i++) {
             int x = 112, y = 90 + 30 * i;
             if (i < s.n && s.army[i]) {
                 w2::Army* a = s.army[i];
-                const w2::ArmyType* t = G.g->types.byId(a->type);
-                if (s.mark[i] != w2::slots::NOMARK)
-                    abits(448, s.mark[i] == w2::slots::TICK ? 16 : 0, 32, 16, x - 32, y + 5);
-                kit::army(a->type, side->index, x, y, (side->index + s.group[i]) % 8 + 2,
-                          !s.inGroup[i]);
-                gfx::setColor(1, 1, 1);
-                f.draw(a->hero() ? a->name : t->name, x + 48, y + 5);
+                const w2::ArmyType* t = G.g->types.ById(a->type);
+                if (s.mark[i] != w2::slots::kNomark)
+                    abits(448, s.mark[i] == w2::slots::kTick ? 16 : 0, 32, 16, x - 32, y + 5);
+                kit::Army(a->type, side->index, x, y, (side->index + s.group[i]) % 8 + 2,
+                          !s.in_group[i]);
+                gfx::SetColor(1, 1, 1);
+                f.Draw(a->Hero() ? a->name : t->name, x + 48, y + 5);
                 int str = a->strength;
-                if (a->hero()) str += w2::combat::battleItems(*a);
-                f.draw(w2::fmt("%d", std::min(9, str)), x + 168, y + 5);
+                if (a->Hero()) str += w2::combat::BattleItems(*a);
+                f.Draw(w2::Fmt("%d", std::min(9, str)), x + 168, y + 5);
                 auto fi = fight.find(a);
-                if (s.inGroup[i] && fi != fight.end())
-                    f.draw(w2::fmt("(%d)", fi->second), x + 184, y + 5);
-                f.draw(w2::fmt("%d", a->moves), x + 232, y + 5);
+                if (s.in_group[i] && fi != fight.end())
+                    f.Draw(w2::Fmt("(%d)", fi->second), x + 184, y + 5);
+                f.Draw(w2::Fmt("%d", a->moves), x + 232, y + 5);
                 int src = -1;
                 if (Flies(a, t))
                     src = 184;
-                else if (a->atSea)
+                else if (a->at_sea)
                     src = 424;
-                else if (t->woodsMove && t->hillsMove)
+                else if (t->woods_move && t->hills_move)
                     src = 216;
-                else if (t->woodsMove)
+                else if (t->woods_move)
                     src = 248;
-                else if (t->hillsMove)
+                else if (t->hills_move)
                     src = 152;
                 if (src >= 0) abits(src, 30, 32, 10, x + 256, y + 8);
-                gfx::setColor(1, 1, 1);
-                f.draw(armybonus::bonusText(*t, a), x + 304, y + 5);
+                gfx::SetColor(1, 1, 1);
+                f.Draw(armybonus::BonusText(*t, a), x + 304, y + 5);
             } else {
-                kit::army(w2::NONE, side->index, x, y, 1);
+                kit::Army(w2::kNone, side->index, x, y, 1);
             }
         }
         std::set<int> h;
@@ -104,59 +104,59 @@ struct Stack : kit::Modal {
             h.insert(kArmy + i);
             h.insert(kMark + i);
         }
-        kit::drawControls(v, h);
+        kit::DrawControls(v, h);
     }
     void Keep() {
         w2::slots::Slots kept = s;
-        kit::pop(this);
+        kit::Pop(this);
         if (G.selection) G.selection->slots = kept;
-        front::afterSlotChange();
+        front::AfterSlotChange();
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
-        if (!c || v.stateOf(c->id) == w2::uidata::DISABLED) return;
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
+        if (!c || v.StateOf(c->id) == w2::uidata::kDisabled) return;
         int id = c->id;
         if (id == kOk) return Keep();
         if (id == kCancel) {
-            kit::pop(this);
+            kit::Pop(this);
             return;
         }
         if (id == kGroup)
-            w2::slots::all(s, *G.g);
+            w2::slots::All(s, *G.g);
         else if (id == kUngroup)
-            w2::slots::single(s, *G.g);
+            w2::slots::Single(s, *G.g);
         else if (id >= kArmy && id < kArmy + kRows)
-            w2::slots::toggle(s, *G.g, id - kArmy);
+            w2::slots::Toggle(s, *G.g, id - kArmy);
         else if (id >= kMark && id < kMark + kRows)
-            w2::slots::pickGroup(s, *G.g, id - kMark);
+            w2::slots::PickGroup(s, *G.g, id - kMark);
         Refresh();
     }
     // the right button on a row (sub-ids 37-44, 89e0:1747)
-    bool info(int sub, int sx, int sy) override {
+    bool Info(int sub, int sx, int sy) override {
         int n = sub - 37;
         if (n >= 0 && n < s.n)
-            infobox::army(sx, sy, s.army[n]);
+            infobox::Army(sx, sy, s.army[n]);
         else
-            infobox::lines(sx, sy, "Select Army", "Select armies when present");
+            infobox::ShowLines(sx, sy, "Select Army", "Select armies when present");
         return true;
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
             Keep();
         else if (key == "escape")
-            kit::pop(this);
+            kit::Pop(this);
     }
 };
 }  // namespace
 
-void open() {
+void Open() {
     if (!G.selection) return;
     auto d = std::make_shared<Stack>();
     d->s = G.selection->slots;
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace stackui

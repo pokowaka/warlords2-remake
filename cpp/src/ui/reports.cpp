@@ -17,7 +17,7 @@
 namespace reports {
 
 namespace report = w2::report;
-using w2::format;
+using w2::Format;
 
 namespace {
 const kit::Rect kR{80, 60, 480, 312};  // popup 2
@@ -31,31 +31,31 @@ const int kRows = 5;
 
 std::string Summary(int n, const report::Figures& f) {
     int r = f.result;
-    if (n == report::ARMY || n == report::CITY)
-        return r == 1 ? kit::text(kSSummary[n], 0) : format(kit::text(kSSummary[n], 1), r);
-    if (n == report::GOLD) return format(kit::text(kSSummary[n], 0), r);
-    if (n == report::PRODUCTION) return format(kit::text(kSSummary[n], r == 1 ? 1 : 0), r);
-    return kit::text(kSSummary[n], r);
+    if (n == report::kArmy || n == report::kCity)
+        return r == 1 ? kit::Text(kSSummary[n], 0) : Format(kit::Text(kSSummary[n], 1), r);
+    if (n == report::kGold) return Format(kit::Text(kSSummary[n], 0), r);
+    if (n == report::kProduction) return Format(kit::Text(kSSummary[n], r == 1 ? 1 : 0), r);
+    return kit::Text(kSSummary[n], r);
 }
 
 void DrawArmyBanners() {
     std::set<int> done;
-    gfx::setScissor(kMapX, kMapY, 224, 312);
-    gfx::setColor(1, 1, 1);
-    int viewer = w2::game::viewerSide(*G.g, G.player);
+    gfx::SetScissor(kMapX, kMapY, 224, 312);
+    gfx::SetColor(1, 1, 1);
+    int viewer = w2::game::ViewerSide(*G.g, G.player);
     for (w2::Army* a : G.g->armies) {
-        if (!a->transit && a->x != w2::NONE) {
+        if (!a->transit && a->x != w2::kNone) {
             int k = a->y * 1000 + a->x;
-            if (!done.count(k) && w2::game::seen(*G.g, viewer, a->x, a->y) &&
-                !w2::game::cityAt(*G.g, a->x, a->y)) {
+            if (!done.count(k) && w2::game::Seen(*G.g, viewer, a->x, a->y) &&
+                !w2::game::CityAt(*G.g, a->x, a->y)) {
                 done.insert(k);
-                int side = a->owner == w2::NONE ? 8 : a->owner;
-                gfx::draw(G.atransShields, gfx::newQuad(side * 16, 164, 16, 10),
+                int side = a->owner == w2::kNone ? 8 : a->owner;
+                gfx::Draw(G.atrans_shields, gfx::NewQuad(side * 16, 164, 16, 10),
                           kMapX + std::max(0, a->x * 2 - 1), kMapY + std::max(0, a->y * 2 - 1));
             }
         }
     }
-    gfx::setScissor();
+    gfx::SetScissor();
 }
 
 void DrawBars(const report::Figures& f) {
@@ -65,31 +65,31 @@ void DrawBars(const report::Figures& f) {
             int w = 1;
             if (f.max > 0) w = std::max(0, f.value[i]) * 240 / f.max;
             w = std::max(1, w);
-            gfx::setColor(1, 1, 1);
+            gfx::SetColor(1, 1, 1);
             int sx = 320 + 8 * (i % 4), sy = 40 + 8 * (i / 4);
             for (int x = 0; x < w; x += 8) {
                 int piece = std::min(8, w - x);
-                gfx::draw(G.shieldsImg, gfx::newQuad(sx, sy, piece, 8), 312 + x, y);
+                gfx::Draw(G.shields_img, gfx::NewQuad(sx, sy, piece, 8), 312 + x, y);
             }
-            kit::bevel(311, y - 1, w + 2, 10, 0, 1);
+            kit::Bevel(311, y - 1, w + 2, 10, 0, 1);
         }
     }
     auto axis = [](int colour, int d) {
-        kit::setPal(colour);
-        gfx::rectangle(gfx::FILL, 312 - d, 196 - d, 240, 1);
+        kit::SetPal(colour);
+        gfx::Rectangle(gfx::kFill, 312 - d, 196 - d, 240, 1);
         const int tx[5] = {312, 372, 432, 492, 552};
         for (int k = 0; k < 5; k++) {
             bool lng = k % 2 == 0;
-            gfx::rectangle(gfx::FILL, tx[k] - d, (lng ? 190 : 192) - d, 1, lng ? 6 : 4);
+            gfx::Rectangle(gfx::kFill, tx[k] - d, (lng ? 190 : 192) - d, 1, lng ? 6 : 4);
         }
     };
     axis(1, 0);
     axis(0, 1);
-    const Font& font = kit::font(2);
-    gfx::setColor(1, 1, 1);
-    kit::right(font, w2::fmt("%d", f.max), 556, 172);
-    kit::centred(font, w2::fmt("%d", f.max / 2), 432, 172);
-    kit::centred(font, "0", 308, 172);
+    const Font& font = kit::GetFont(2);
+    gfx::SetColor(1, 1, 1);
+    kit::Right(font, w2::Fmt("%d", f.max), 556, 172);
+    kit::Centred(font, w2::Fmt("%d", f.max / 2), 432, 172);
+    kit::Centred(font, "0", 308, 172);
 }
 
 struct Reports : kit::Modal {
@@ -98,14 +98,14 @@ struct Reports : kit::Modal {
     void Refresh() {
         auto& st = v.state;
         for (int i = 0; i <= 4; i++)
-            st[kTabFirst + i] = i == n ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
-        st[kDone] = w2::uidata::NORMAL;
+            st[kTabFirst + i] = i == n ? w2::uidata::kActive : w2::uidata::kNormal;
+        st[kDone] = w2::uidata::kNormal;
         hidden.clear();
-        if (n == report::PRODUCTION) {
+        if (n == report::kProduction) {
             int count = static_cast<int>(G.player->produced.size());
-            st[kUp] = top_row > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kUp] = top_row > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
             st[kPageUp] = st[kUp];
-            st[kDown] = top_row + kRows < count ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kDown] = top_row + kRows < count ? w2::uidata::kNormal : w2::uidata::kDisabled;
             st[kPageDown] = st[kDown];
         } else {
             for (int id : {kUp, kDown, kPageUp, kPageDown}) hidden.insert(id);
@@ -118,15 +118,15 @@ struct Reports : kit::Modal {
     }
     void DrawProduction() {
         const auto& list = G.player->produced;
-        const Font& font = kit::font(2);
+        const Font& font = kit::GetFont(2);
         for (int i = 0; i < kRows; i++) {
             if (top_row + i >= static_cast<int>(list.size())) break;
             const w2::Produced& e = list[top_row + i];
             int y = 176 + 30 * i;
-            gfx::setColor(1, 1, 1);
-            font.draw(w2::fmt("%d", top_row + i + 1), 312, y);
-            kit::army(e.type, G.player->index, 328, 170 + 30 * i, 1);
-            w2::City* city = e.city != w2::NONE ? G.g->map->city(e.city) : nullptr;
+            gfx::SetColor(1, 1, 1);
+            font.Draw(w2::Fmt("%d", top_row + i + 1), 312, y);
+            kit::Army(e.type, G.player->index, 328, 170 + 30 * i, 1);
+            w2::City* city = e.city != w2::kNone ? G.g->map->City(e.city) : nullptr;
             std::string name = e.standard ? "Standard" : (city ? city->name : "");
             std::string text;
             if (e.kind == "sent")
@@ -135,35 +135,35 @@ struct Reports : kit::Modal {
                 text = "... " + name;
             else
                 text = name;
-            gfx::setColor(1, 1, 1);
-            font.draw(text, 368, y);
+            gfx::SetColor(1, 1, 1);
+            font.Draw(text, 368, y);
         }
     }
-    void draw() override {
-        auto f = report::figures(*G.g, *G.player, n);
-        kit::popup(kR);
-        if (n == report::PRODUCTION) {
-            front::drawVectorMap(kMapX, kMapY, nullptr, w2::NONE, true);
+    void Draw() override {
+        auto f = report::ComputeFigures(*G.g, *G.player, n);
+        kit::Popup(kR);
+        if (n == report::kProduction) {
+            front::DrawVectorMap(kMapX, kMapY, nullptr, w2::kNone, true);
         } else {
-            front::drawStrategicMap(kMapX, kMapY);
-            if (n == report::ARMY) DrawArmyBanners();
+            front::DrawStrategicMap(kMapX, kMapY);
+            if (n == report::kArmy) DrawArmyBanners();
         }
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(kSTitle, n), 432, 62);
-        kit::centred(kit::font(2), kit::text(kSWhat, n), 432, 149);
-        if (n == report::PRODUCTION)
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), kit::Text(kSTitle, n), 432, 62);
+        kit::Centred(kit::GetFont(2), kit::Text(kSWhat, n), 432, 149);
+        if (n == report::kProduction)
             DrawProduction();
         else
             DrawBars(f);
-        kit::centred(kit::font(2).colours(G.player->colour, G.player->edge), Summary(n, f), 432,
+        kit::Centred(kit::GetFont(2).Colours(G.player->colour, G.player->edge), Summary(n, f), 432,
                      322);
-        kit::drawControls(v, hidden);
+        kit::DrawControls(v, hidden);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y, hidden);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y, hidden);
         if (!c) return;
         if (c->id == kDone)
-            kit::pop(this);
+            kit::Pop(this);
         else if (c->id >= kTabFirst && c->id < kTabFirst + 5) {
             n = c->id - kTabFirst;
             top_row = 0;
@@ -177,19 +177,19 @@ struct Reports : kit::Modal {
         else if (c->id == kPageDown)
             Scroll(kRows);
     }
-    void keypressed(const std::string& key) override {
-        if (key == "escape" || key == "return" || key == "kpenter") kit::pop(this);
+    void Keypressed(const std::string& key) override {
+        if (key == "escape" || key == "return" || key == "kpenter") kit::Pop(this);
     }
 };
 }  // namespace
 
-void open(int which) {
+void Open(int which) {
     auto d = std::make_shared<Reports>();
-    d->v = kit::view(kDialog);
+    d->v = kit::View(kDialog);
     d->view = &d->v;
     d->n = which;
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace reports

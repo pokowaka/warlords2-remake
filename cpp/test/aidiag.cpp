@@ -28,21 +28,21 @@ static void PrintSides(Game& g, const bool* modern) {
     std::printf("--- turn %d\n", g.turn);
     for (int s = 0; s < 8; s++) {
         Side& sd = g.map->sides[s];
-        if (!sd.inUse) continue;
+        if (!sd.in_use) continue;
         int cities = 0, armies = 0, str = 0, in_city = 0;
         for (auto& c : g.map->cities)
-            if (!c.razed && c.ownerIndex == s) cities++;
+            if (!c.razed && c.owner_index == s) cities++;
         for (Army* a : g.armies) {
-            if (a->owner != s || a->x == NONE) continue;
+            if (a->owner != s || a->x == kNone) continue;
             armies++;
             str += a->strength;
-            if (game::cityAt(g, a->x, a->y)) in_city++;
+            if (game::CityAt(g, a->x, a->y)) in_city++;
         }
         std::printf(
                 "  side %d %s %s cities=%2d armies=%3d strength=%4d in-city=%3d gold=%5d "
                 "income=%4d upkeep=%4d\n",
                 s, modern[s] ? "MODERN " : "CLASSIC", sd.alive ? "     " : "(dead)", cities, armies,
-                str, in_city, sd.gold, game::income(g, sd), game::upkeep(g, sd));
+                str, in_city, sd.gold, game::Income(g, sd), game::Upkeep(g, sd));
     }
 }
 
@@ -64,10 +64,10 @@ int main(int argc, char** argv) {
     int solo_seat = argc > 8 ? std::atoi(argv[8]) : -1;
     int diplo = argc > 9 ? std::atoi(argv[9]) : 0;
     opponents::Kind opp = (argc > 10 && std::string(argv[10]) == "raider")
-                                  ? opponents::Kind::Raider
-                                  : opponents::Kind::Classic;
+                                  ? opponents::Kind::kRaider
+                                  : opponents::Kind::kClassic;
     ai::ml::PolicyNetwork net;
-    if (!net.loadJson(weights)) {
+    if (!net.LoadJson(weights)) {
         std::fprintf(stderr,
                      "w2aidiag: cannot load weights '%s' (missing, or trained for different input "
                      "sizes)\n",
@@ -76,8 +76,8 @@ int main(int argc, char** argv) {
     }
     game::NewGameOptions o;
     o.seed = seed;
-    o.activeSides = active_sides;
-    o.cropMargin = crop_margin;
+    o.active_sides = active_sides;
+    o.crop_margin = crop_margin;
     o.options = {{"hiddenMap", hidden},
                  {"viewEnemies", 0},
                  {"diplomacy", diplo},
@@ -92,31 +92,31 @@ int main(int argc, char** argv) {
     if (scen == "RANDOM") {
         Rng map_rng(static_cast<double>(seed ^ 0x5bf03635U));
         randommap::Options ro;
-        ro.dataDir = "original";
+        ro.data_dir = "original";
         ro.rng = &map_rng;
         ro.sliders = {3, 3, 2, 3};
-        rfiles = randommap::generateNow(ro);
-        o.memoryFiles = &rfiles;
+        rfiles = randommap::GenerateNow(ro);
+        o.memory_files = &rfiles;
     }
-    auto gp = game::newGame("original", scen, o);
+    auto gp = game::NewGame("original", scen, o);
     Game& g = *gp;
     std::printf("=== %s seed=%d sides=%d crop=%d cities=%zu box=[%d..%d]x[%d..%d] ===\n",
                 scen.c_str(), seed, active_sides, crop_margin, g.map->cities.size(),
-                g.map->activeX0, g.map->activeX1, g.map->activeY0, g.map->activeY1);
+                g.map->active_x0, g.map->active_x1, g.map->active_y0, g.map->active_y1);
     bool modern[8] = {};
     int idx = 0;
     for (int s = 0; s < 8; s++) {
-        if (!g.map->sides[s].inUse) continue;
+        if (!g.map->sides[s].in_use) continue;
         modern[s] = (solo_seat >= 0) ? (idx == solo_seat) : (idx % 2 == 0);
         idx++;
-        g.map->sides[s].classicAi = !modern[s];
+        g.map->sides[s].classic_ai = !modern[s];
     }
 
     std::map<std::string, int> missions, built;
     long army_turns = 0, moved = 0;
     long city_turns = 0, producing_turns = 0, purchases = 0, rich_turns = 0, side_turns = 0;
     int last_printed = 0;
-    Side* cur = game::begin(g);
+    Side* cur = game::Begin(g);
     // City changes of hands: losses by camp of the loser, bucketed by the
     // garrison (armies in the city) the loser had when the attacker's turn began.
     long lost_by_camp[2][3] = {}, captured_from_enemy[2] = {}, captured_neutral[2] = {};
@@ -124,34 +124,35 @@ int main(int argc, char** argv) {
         int n = 0;
         for (int dy = 0; dy <= 1; dy++)
             for (int dx = 0; dx <= 1; dx++)
-                for (Army* a : game::armiesAt(g, c.x + dx, c.y + dy))
-                    if (a->owner == c.ownerIndex) n++;
+                for (Army* a : game::ArmiesAt(g, c.x + dx, c.y + dy))
+                    if (a->owner == c.owner_index) n++;
         return n;
     };
     while (cur && !g.over && !g.won && g.turn <= turns) {
         std::vector<int> owner_before(g.map->cities.size()), gar_before(g.map->cities.size());
         for (size_t ci = 0; ci < g.map->cities.size(); ci++) {
-            owner_before[ci] = g.map->cities[ci].ownerIndex;
-            gar_before[ci] = g.map->cities[ci].ownerIndex >= 0 ? garrison_of(g.map->cities[ci]) : 0;
+            owner_before[ci] = g.map->cities[ci].owner_index;
+            gar_before[ci] =
+                    g.map->cities[ci].owner_index >= 0 ? garrison_of(g.map->cities[ci]) : 0;
         }
         const int mover = cur->index;
         if (cur->alive) {
             if (modern[cur->index]) {
                 std::map<Army*, int> before;
                 for (Army* a : g.armies)
-                    if (a->owner == cur->index && a->x != NONE) before[a] = a->y * 1000 + a->x;
+                    if (a->owner == cur->index && a->x != kNone) before[a] = a->y * 1000 + a->x;
                 std::map<int, std::vector<int>> slots_before;
                 for (auto& c : g.map->cities) {
-                    if (c.ownerIndex != cur->index) continue;
+                    if (c.owner_index != cur->index) continue;
                     for (const auto& sl : c.slots) slots_before[c.index].push_back(sl.type);
                 }
-                ai::modern::playTurn(g, *cur, nullptr, &net, nullptr);
+                ai::modern::PlayTurn(g, *cur, nullptr, &net, nullptr);
                 side_turns++;
                 if (cur->gold >= 1500) rich_turns++;
                 for (auto& c : g.map->cities) {
-                    if (c.ownerIndex != cur->index || c.razed) continue;
+                    if (c.owner_index != cur->index || c.razed) continue;
                     city_turns++;
-                    if (game::producing(c)) producing_turns++;
+                    if (game::Producing(c)) producing_turns++;
                     auto it = slots_before.find(c.index);
                     for (const auto& sl : c.slots) {
                         if (it != slots_before.end() &&
@@ -162,29 +163,29 @@ int main(int argc, char** argv) {
                     }
                 }
                 for (auto& [a, pos] : before) {
-                    if (!g.alive(a)) continue;
+                    if (!g.Alive(a)) continue;
                     army_turns++;
-                    if (a->x != NONE && a->y * 1000 + a->x != pos) moved++;
+                    if (a->x != kNone && a->y * 1000 + a->x != pos) moved++;
                 }
-                for (auto& t : cur->aiThoughts) {
+                for (auto& t : cur->ai_thoughts) {
                     if (t.category != "Mission") continue;
-                    std::string label = t.targetName.substr(0, t.targetName.find(' '));
-                    if (t.targetName.rfind("Capture Neutral", 0) == 0) label = "CaptureNeutral";
+                    std::string label = t.target_name.substr(0, t.target_name.find(' '));
+                    if (t.target_name.rfind("Capture Neutral", 0) == 0) label = "CaptureNeutral";
                     missions[label]++;
                 }
                 for (auto& c : g.map->cities) {
-                    if (c.ownerIndex == cur->index && c.producing != NONE &&
+                    if (c.owner_index == cur->index && c.producing != kNone &&
                         c.producing < static_cast<int>(c.slots.size())) {
                         built[c.slots[c.producing].name]++;
                     }
                 }
             } else {
-                opponents::playTurn(g, *cur, opp);
+                opponents::PlayTurn(g, *cur, opp);
             }
         }
         for (size_t ci = 0; ci < g.map->cities.size(); ci++) {
             const City& c = g.map->cities[ci];
-            if (c.razed || c.ownerIndex != mover || owner_before[ci] == mover) continue;
+            if (c.razed || c.owner_index != mover || owner_before[ci] == mover) continue;
             int mover_camp = modern[mover] ? 0 : 1;
             if (owner_before[ci] < 0 || owner_before[ci] >= 8) {
                 captured_neutral[mover_camp]++;
@@ -193,7 +194,7 @@ int main(int argc, char** argv) {
                 lost_by_camp[modern[owner_before[ci]] ? 0 : 1][std::min(2, gar_before[ci])]++;
             }
         }
-        cur = game::endTurn(g);
+        cur = game::EndTurn(g);
         if (g.turn != last_printed && (g.turn % 5 == 0 || g.turn == 2)) {
             last_printed = g.turn;
             PrintSides(g, modern);

@@ -12,22 +12,22 @@
 
 namespace w2::ai::personality {
 
-constexpr int TRAIT_DIM = 10;
+constexpr int kTraitDim = 10;
 
 enum TraitIndex : int {
-    AGGRESSION = 0,
-    HONOUR = 1,
-    AVARICE = 2,
-    SCORCHED_EARTH = 3,
-    HERO_FOCUS = 4,
-    COALITION_DRIVE = 5,
-    CAVALRY_AFFINITY = 6,
-    FLIER_AFFINITY = 7,
-    SIEGE_AFFINITY = 8,
-    CAUTION = 9,
+    kAggression = 0,
+    kHonour = 1,
+    kAvarice = 2,
+    kScorchedEarth = 3,
+    kHeroFocus = 4,
+    kCoalitionDrive = 5,
+    kCavalryAffinity = 6,
+    kFlierAffinity = 7,
+    kSiegeAffinity = 8,
+    kCaution = 9,
 };
 
-using PersonalityVector = std::array<float, TRAIT_DIM>;
+using PersonalityVector = std::array<float, kTraitDim>;
 
 struct Profile {
     int level = 0;
@@ -46,7 +46,7 @@ struct Profile {
  * @param card Character card index in [0, 8].
  * @return Reference to the static Profile descriptor.
  */
-const Profile& profileFor(int level, int card);
+const Profile& ProfileFor(int level, int card);
 
 /**
  * Returns the personality profile for a specific side in the game.
@@ -54,6 +54,6 @@ const Profile& profileFor(int level, int card);
  * @param side The side whose level and card determine the profile.
  * @return Reference to the static Profile descriptor.
  */
-const Profile& forSide(const Side& side);
+const Profile& ForSide(const Side& side);
 
 }  // namespace w2::ai::personality

@@ -17,11 +17,11 @@
 namespace w2::travel {
 
 /** Movement points in a turn: a Light Infantry's. */
-constexpr int TURN = 12;
+constexpr int kTurn = 12;
 /** Going to sea or ashore ends the move: a turn's worth of points. */
-constexpr int SEA_SWITCH = TURN;
+constexpr int kSeaSwitch = kTurn;
 /** A tile that cannot be reached. */
-constexpr int UNREACHED = INT_MAX;
+constexpr int kUnreached = INT_MAX;
 
 struct Ground {
     int w = 0, h = 0;
@@ -32,6 +32,6 @@ struct Ground {
 
 /** Movement points from the nearest of `sources` (tile indices) to every
  *  tile, UNREACHED where it cannot be reached. */
-std::vector<int> costs(const Ground& g, const std::vector<int>& sources);
+std::vector<int> Costs(const Ground& g, const std::vector<int>& sources);
 
 }  // namespace w2::travel

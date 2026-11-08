@@ -11,7 +11,7 @@ namespace prefs {
 
 static const char* file_name = "w2-prefs.json";
 
-std::string userFile(const std::string& name) {
+std::string UserFile(const std::string& name) {
     static std::string dir = []() {
         char* p = SDL_GetPrefPath("", "Warlords II Remake");
         std::string d = p ? p : "";
@@ -27,10 +27,10 @@ std::map<std::string, std::string>& Store() {
     static bool loaded = false;
     if (!loaded) {
         loaded = true;
-        if (auto text = w2::readFile(userFile(file_name))) {
+        if (auto text = w2::ReadFile(UserFile(file_name))) {
             try {
-                auto j = w2::Json::parse(*text);
-                for (auto& [k, v] : j.entries()) s[k] = v.str();
+                auto j = w2::Json::Parse(*text);
+                for (auto& [k, v] : j.Entries()) s[k] = v.Str();
             } catch (...) {
             }
         }
@@ -39,25 +39,25 @@ std::map<std::string, std::string>& Store() {
 }
 }  // namespace
 
-std::string get(const std::string& key) {
+std::string Get(const std::string& key) {
     auto& s = Store();
     auto it = s.find(key);
     return it == s.end() ? "" : it->second;
 }
 
-void set(const std::string& key, const std::string& value) {
+void Set(const std::string& key, const std::string& value) {
     auto& s = Store();
     if (value.empty())
         s.erase(key);
     else
         s[key] = value;
-    w2::Json j = w2::Json::object();
-    for (auto& [k, v] : s) j.set(k, v);
-    w2::writeFile(userFile(file_name), j.dump());
+    w2::Json j = w2::Json::Object();
+    for (auto& [k, v] : s) j.Set(k, v);
+    w2::WriteFile(UserFile(file_name), j.Dump());
 }
 
-int getInt(const std::string& key, int dflt) {
-    auto v = w2::toInt(get(key));
+int GetInt(const std::string& key, int dflt) {
+    auto v = w2::ToInt(Get(key));
     return v ? static_cast<int>(*v) : dflt;
 }
 

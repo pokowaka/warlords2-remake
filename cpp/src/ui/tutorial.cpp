@@ -15,25 +15,25 @@ const char* const kFiles[] = {"THERO",  "TPROD",  "TSELECT",  "TMOVE",    "TFIGH
                               "TPROD2", "TTURN2", "TWARLORD", "TENDTURN", "TFRESULT"};
 }  // namespace
 
-void show(const std::string& moment, kit::Done after) {
+void Show(const std::string& moment, kit::Done after) {
     auto done = [after]() {
         if (after) after();
     };
     auto it = kPages.find(moment);
     if (!G.g || it == kPages.end() || G.g->map->options.tutorial == 0) return done();
-    if (G.g->tutorialSeen.count(moment)) return done();
-    G.g->tutorialSeen.insert(moment);
-    if (!help::open(std::string("TUTORIA\\") + kFiles[it->second] + ".GFX", after)) done();
+    if (G.g->tutorial_seen.count(moment)) return done();
+    G.g->tutorial_seen.insert(moment);
+    if (!help::Open(std::string("TUTORIA\\") + kFiles[it->second] + ".GFX", after)) done();
 }
 
 static void ChainFrom(std::vector<std::string> moments, size_t k, kit::Done after) {
     if (k < moments.size())
-        show(moments[k], [moments, k, after]() { ChainFrom(moments, k + 1, after); });
+        Show(moments[k], [moments, k, after]() { ChainFrom(moments, k + 1, after); });
     else if (after)
         after();
 }
 
-void chain(const std::vector<std::string>& moments, kit::Done after) {
+void Chain(const std::vector<std::string>& moments, kit::Done after) {
     ChainFrom(moments, 0, after);
 }
 

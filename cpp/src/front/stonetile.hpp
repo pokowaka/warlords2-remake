@@ -6,8 +6,8 @@
 
 namespace stonetile {
 
-constexpr int W = 244, H = 220;
-constexpr int RECTS[][6] = {
+constexpr int kW = 244, kH = 220;
+constexpr int kRects[][6] = {
     {0, 1, 244, 27, 244, 1},     {0, 32, 244, 7, 244, 472},  {0, 31, 151, 1, 488, 471},
     {151, 31, 93, 1, 151, 471},  {1, 18, 13, 202, 1, 18},    {1, 0, 13, 18, 1, 220},
     {138, 18, 13, 202, 626, 18}, {138, 0, 13, 18, 626, 220}, {14, 28, 8, 3, 542, 18},
@@ -254,6 +254,6 @@ constexpr int RECTS[][6] = {
     {223, 0, 8, 1, 383, 332},    {231, 0, 8, 1, 579, 18},    {239, 0, 5, 1, 385, 84},
     {0, 0, 1, 1, 487, 23},
 };
-constexpr int COUNT = sizeof(RECTS) / sizeof(RECTS[0]);
+constexpr int kCount = sizeof(kRects) / sizeof(kRects[0]);
 
 }  // namespace stonetile

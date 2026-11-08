@@ -24,63 +24,63 @@ struct Order : kit::Modal {
     screen::View v;
     std::vector<int> backup;
     int chosen = -1;
-    std::vector<int>& Row() { return G.g->map->fightOrder[G.player->index]; }
+    std::vector<int>& Row() { return G.g->map->fight_order[G.player->index]; }
     int TypeAt(int rank) {
         auto& r = Row();
         for (int t = 0; t <= 28 && t < static_cast<int>(r.size()); t++)
             if (r[t] == rank) return t;
-        return w2::NONE;
+        return w2::kNone;
     }
     void Swap(int a, int b) {
         int ta = TypeAt(a), tb = TypeAt(b);
-        if (ta != w2::NONE) Row()[ta] = b;
-        if (tb != w2::NONE) Row()[tb] = a;
+        if (ta != w2::kNone) Row()[ta] = b;
+        if (tb != w2::kNone) Row()[tb] = a;
     }
     void Refresh() {
         auto& st = v.state;
-        st[kOk] = st[kCancel] = st[kDefault] = w2::uidata::NORMAL;
-        st[kEarlier] = chosen > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        st[kOk] = st[kCancel] = st[kDefault] = w2::uidata::kNormal;
+        st[kEarlier] = chosen > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
         st[kLater] =
-                (chosen >= 0 && chosen < kPlaces - 1) ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        for (int i = 0; i < kPlaces; i++) st[kPlace + i] = w2::uidata::NORMAL;
+                (chosen >= 0 && chosen < kPlaces - 1) ? w2::uidata::kNormal : w2::uidata::kDisabled;
+        for (int i = 0; i < kPlaces; i++) st[kPlace + i] = w2::uidata::kNormal;
     }
     void Close(bool keep) {
         if (!keep) Row() = backup;
-        kit::pop(this);
+        kit::Pop(this);
     }
-    void draw() override {
+    void Draw() override {
         w2::Side* side = G.player;
-        kit::popup(kR);
-        gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(kS, 0), 320, 64);
-        kit::shield(side->index, 88, 64);
-        kit::shield(side->index, 512, 64);
-        const Font& f = kit::font(2);
-        gfx::setColor(1, 1, 1);
-        kit::centred(f, w2::format(kit::text(kS, 1), side->name), 320, 104);
-        kit::centred(f, kit::text(kS, 2), 320, 348);
-        kit::centred(f, kit::text(kS, 3), 320, 368);
-        kit::centred(f, kit::text(kS, 4), 320, 388);
+        kit::Popup(kR);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(1), kit::Text(kS, 0), 320, 64);
+        kit::Shield(side->index, 88, 64);
+        kit::Shield(side->index, 512, 64);
+        const Font& f = kit::GetFont(2);
+        gfx::SetColor(1, 1, 1);
+        kit::Centred(f, w2::Format(kit::Text(kS, 1), side->name), 320, 104);
+        kit::Centred(f, kit::Text(kS, 2), 320, 348);
+        kit::Centred(f, kit::Text(kS, 3), 320, 368);
+        kit::Centred(f, kit::Text(kS, 4), 320, 388);
         for (int i = 0; i < kPlaces; i++) {
             int x = 120 * (i % 4), y = 31 * (i / 4);
             int t = TypeAt(i);
-            if (t != w2::NONE)
-                kit::army(t, side->index, 88 + x, 128 + y, i == chosen ? side->index + 2 : 1);
-            gfx::setColor(1, 1, 1);
-            f.draw(w2::fmt("%d.", i + 1), 128 + x, 134 + y);  // 4125:0d5c
+            if (t != w2::kNone)
+                kit::Army(t, side->index, 88 + x, 128 + y, i == chosen ? side->index + 2 : 1);
+            gfx::SetColor(1, 1, 1);
+            f.Draw(w2::Fmt("%d.", i + 1), 128 + x, 134 + y);  // 4125:0d5c
         }
         std::set<int> h;
         for (int i = 0; i < kPlaces; i++) h.insert(kPlace + i);
-        kit::drawControls(v, h);
+        kit::DrawControls(v, h);
     }
-    void mousepressed(int x, int y, int) override {
-        auto c = kit::controlAt(v, x, y);
+    void Mousepressed(int x, int y, int) override {
+        auto c = kit::ControlAt(v, x, y);
         if (!c) return;
         int id = c->id;
         if (id == kOk) return Close(true);
         if (id == kCancel) return Close(false);
         if (id == kDefault) {
-            Row() = G.g->map->fightOrder[kNeutral];
+            Row() = G.g->map->fight_order[kNeutral];
             chosen = -1;
         } else if (id == kEarlier && chosen > 0) {
             Swap(chosen, chosen - 1);
@@ -102,17 +102,17 @@ struct Order : kit::Modal {
         Refresh();
     }
     // the right button on a place (sub-ids 45-71, 6a89:1475)
-    bool info(int sub, int sx, int sy) override {
+    bool Info(int sub, int sx, int sy) override {
         int t = TypeAt(sub - 45);
-        const w2::ArmyType* rec = t != w2::NONE ? G.g->types.byId(t) : nullptr;
+        const w2::ArmyType* rec = t != w2::kNone ? G.g->types.ById(t) : nullptr;
         if (!rec) return false;
-        infobox::armyType(sx, sy, t,
+        infobox::ArmyType(sx, sy, t,
                           w2::Slot{rec->id, rec->name, rec->strength, rec->time, rec->cost,
                                    rec->move, rec->price},
                           G.player->index);
         return true;
     }
-    void keypressed(const std::string& key) override {
+    void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
             Close(true);
         else if (key == "escape")
@@ -121,13 +121,13 @@ struct Order : kit::Modal {
 };
 }  // namespace
 
-void open() {
+void Open() {
     auto d = std::make_shared<Order>();
-    d->backup = G.g->map->fightOrder[G.player->index];
-    d->v = kit::view(kDialog);
+    d->backup = G.g->map->fight_order[G.player->index];
+    d->v = kit::View(kDialog);
     d->view = &d->v;
     d->Refresh();
-    kit::push(d);
+    kit::Push(d);
 }
 
 }  // namespace fightorder

@@ -63,20 +63,20 @@ Image::~Image() {
     if (tex && active_renderer) SDL_DestroyTexture(tex);
 }
 
-void init(SDL_Renderer* r) {
+void Init(SDL_Renderer* r) {
     active_renderer = r;
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
 }
 
-void shutdown() {
+void Shutdown() {
     active_renderer = nullptr;
 }
 
-SDL_Renderer* renderer() {
+SDL_Renderer* Renderer() {
     return active_renderer;
 }
 
-ImageP newImageRGBA(int w, int h, const uint8_t* rgba) {
+ImageP NewImageRgba(int w, int h, const uint8_t* rgba) {
     auto img = std::make_shared<Image>();
     img->w = w;
     img->h = h;
@@ -91,14 +91,14 @@ ImageP newImageRGBA(int w, int h, const uint8_t* rgba) {
     return img;
 }
 
-void begin() {
-    setScissor();
+void Begin() {
+    SetScissor();
     t = T{};
     stack.clear();
-    setColor(1, 1, 1);
+    SetColor(1, 1, 1);
 }
 
-void clear(float r, float g, float b) {
+void Clear(float r, float g, float b) {
     SDL_RenderSetClipRect(active_renderer, nullptr);
     SDL_SetRenderDrawBlendMode(active_renderer, SDL_BLENDMODE_NONE);
     SDL_SetRenderDrawColor(active_renderer, static_cast<Uint8>(r * 255),
@@ -107,10 +107,10 @@ void clear(float r, float g, float b) {
     if (clipped) SDL_RenderSetClipRect(active_renderer, &clip);
 }
 
-void push() {
+void Push() {
     stack.push_back(t);
 }
-void pop() {
+void Pop() {
     if (stack.empty()) {
         t = T{};
         return;
@@ -118,52 +118,52 @@ void pop() {
     t = stack.back();
     stack.pop_back();
 }
-void origin() {
+void Origin() {
     t = T{};
 }
-void translate(double x, double y) {
+void Translate(double x, double y) {
     t.tx += t.sx * x;
     t.ty += t.sy * y;
 }
-void scale(double s) {
-    scale(s, s);
+void Scale(double s) {
+    Scale(s, s);
 }
-void scale(double sx, double sy) {
+void Scale(double sx, double sy) {
     t.sx *= sx;
     t.sy *= sy;
 }
-void transformPoint(double x, double y, double& ox, double& oy) {
+void TransformPoint(double x, double y, double& ox, double& oy) {
     ox = t.sx * x + t.tx;
     oy = t.sy * y + t.ty;
 }
-void inverseTransformPoint(double x, double y, double& ox, double& oy) {
+void InverseTransformPoint(double x, double y, double& ox, double& oy) {
     ox = (x - t.tx) / t.sx;
     oy = (y - t.ty) / t.sy;
 }
 
-void setColor(float r, float g, float b, float a) {
+void SetColor(float r, float g, float b, float a) {
     color = Color{r, g, b, a};
 }
-void setColor(const Color& c) {
+void SetColor(const Color& c) {
     color = c;
 }
-Color getColor() {
+Color GetColor() {
     return color;
 }
 
-void setScissor(double x, double y, double w, double h) {
+void SetScissor(double x, double y, double w, double h) {
     clip = DevRect(x, y, w, h);
     clipped = true;
     SDL_RenderSetClipRect(active_renderer, &clip);
 }
-void setScissor() {
+void SetScissor() {
     clipped = false;
     if (active_renderer) SDL_RenderSetClipRect(active_renderer, nullptr);
 }
 
-void rectangle(Mode mode, double x, double y, double w, double h) {
+void Rectangle(Mode mode, double x, double y, double w, double h) {
     SetDrawColor();
-    if (mode == FILL) {
+    if (mode == kFill) {
         SDL_Rect r = DevRect(x, y, w, h);
         if (r.w > 0 && r.h > 0) SDL_RenderFillRect(active_renderer, &r);
         return;
@@ -174,28 +174,28 @@ void rectangle(Mode mode, double x, double y, double w, double h) {
         if (r.w > 0 && r.h > 0) SDL_RenderFillRect(active_renderer, &r);
 }
 
-void line(double x1, double y1, double x2, double y2) {
+void Line(double x1, double y1, double x2, double y2) {
     // only ever straight in this game: a one-pixel rect along it
     if (y1 == y2)
-        rectangle(FILL, std::min(x1, x2), y1 - 0.5, std::fabs(x2 - x1), 1);
+        Rectangle(kFill, std::min(x1, x2), y1 - 0.5, std::fabs(x2 - x1), 1);
     else if (x1 == x2)
-        rectangle(FILL, x1 - 0.5, std::min(y1, y2), 1, std::fabs(y2 - y1));
+        Rectangle(kFill, x1 - 0.5, std::min(y1, y2), 1, std::fabs(y2 - y1));
     else {
         SetDrawColor();
         double ax, ay, bx, by;
-        transformPoint(x1, y1, ax, ay);
-        transformPoint(x2, y2, bx, by);
+        TransformPoint(x1, y1, ax, ay);
+        TransformPoint(x2, y2, bx, by);
         SDL_RenderDrawLine(active_renderer, Dev(ax), Dev(ay), Dev(bx), Dev(by));
     }
 }
 
-void draw(const Image* img, double x, double y) {
+void Draw(const Image* img, double x, double y) {
     if (!img || !img->tex) return;
     ApplyColor(img->tex);
     Blit(img, 0, 0, img->w, img->h, x, y);
 }
 
-void draw(const Image* img, const Quad& q, double x, double y) {
+void Draw(const Image* img, const Quad& q, double x, double y) {
     if (!img || !img->tex) return;
     ApplyColor(img->tex);
     int qx = static_cast<int>(q.x), qy = static_cast<int>(q.y), qw = static_cast<int>(q.w),
@@ -216,7 +216,7 @@ void draw(const Image* img, const Quad& q, double x, double y) {
     Blit(img, sx, sy, sw, sh, x + (sx - qx), y + (sy - qy));
 }
 
-std::vector<uint8_t> readPixels(int& w, int& h) {
+std::vector<uint8_t> ReadPixels(int& w, int& h) {
     if (SDL_Texture* target = SDL_GetRenderTarget(active_renderer))
         SDL_QueryTexture(target, nullptr, nullptr, &w, &h);
     else
@@ -228,9 +228,9 @@ std::vector<uint8_t> readPixels(int& w, int& h) {
     return px;
 }
 
-void saveShot(const std::string& file) {
+void SaveShot(const std::string& file) {
     int w, h;
-    auto px = readPixels(w, h);
+    auto px = ReadPixels(w, h);
     SDL_Surface* s = SDL_CreateRGBSurfaceWithFormatFrom(px.data(), w, h, 32, w * 4,
                                                         SDL_PIXELFORMAT_ABGR8888);
     if (s) {

@@ -17,35 +17,35 @@
 
 namespace layout {
 
-constexpr int W = 640, H = 480;
-constexpr int SHORT_H = 400;
+constexpr int kW = 640, kH = 480;
+constexpr int kShortH = 400;
 
 struct Rect {
     int x = 0, y = 0, w = 0, h = 0;
     int id = 0;
-    bool contains(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; }
+    bool Contains(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; }
 };
 struct Offset {
     int x = 0, y = 0;
 };
 
 struct Layout {
-    int w = W, h = H, ex = 0, ey = 0;
+    int w = kW, h = kH, ex = 0, ey = 0;
     int cut = 0;  // rows under 480, taken off the strategic map's foot
     bool classic = true;
     Offset strat, panel, bar, map, dialog;
-    Rect mapRect, panelRect, stratRect, barRect;
-    const Offset& offset(const std::string& group) const;
+    Rect map_rect, panel_rect, strat_rect, bar_rect;
+    const Offset& Offset(const std::string& group) const;
 };
 
 /** The layout of a screen `w` x `h` UI pixels. */
-Layout compute(int w, int h);
+Layout Compute(int w, int h);
 /** Which group a rect of the original screen belongs to. */
-std::string group(int x, int y);
+std::string Group(int x, int y);
 /** A copy of the original rect `r`, moved with group `g`. */
-Rect move(const Layout& L, const std::string& g, Rect r);
+Rect Move(const Layout& l, const std::string& g, Rect r);
 /** One of the main screen's regions, placed: the map, its frame and the menu
  *  bar stretch, the rest move with their group. */
-Rect region(const Layout& L, Rect r);
+Rect Region(const Layout& l, Rect r);
 
 }  // namespace layout

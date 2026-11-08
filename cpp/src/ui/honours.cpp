@@ -19,7 +19,7 @@
 
 namespace honours {
 
-using w2::format;
+using w2::Format;
 
 namespace {
 const kit::Rect kR{160, 90, 320, 200};
@@ -32,17 +32,17 @@ struct Popup : kit::Modal {
     kit::Done after;
     void Close() {
         auto a = after;
-        kit::pop(this);
+        kit::Pop(this);
         if (a) a();
     }
-    void draw() override {
-        kit::popupFrame(kR);
-        gfx::setColor(1, 1, 1);
-        if (pic) gfx::draw(pic, kR.x, kR.y);
+    void Draw() override {
+        kit::PopupFrame(kR);
+        gfx::SetColor(1, 1, 1);
+        if (pic) gfx::Draw(pic, kR.x, kR.y);
         lines();
     }
-    void mousepressed(int, int, int) override { Close(); }
-    void keypressed(const std::string&) override { Close(); }
+    void Mousepressed(int, int, int) override { Close(); }
+    void Keypressed(const std::string&) override { Close(); }
 };
 
 void Show(gfx::ImageP pic, std::function<void()> lines, kit::Done after) {
@@ -50,7 +50,7 @@ void Show(gfx::ImageP pic, std::function<void()> lines, kit::Done after) {
     d->pic = pic;
     d->lines = std::move(lines);
     d->after = std::move(after);
-    kit::push(d);
+    kit::Push(d);
 }
 
 void Promotion(std::vector<w2::Promotion> list, size_t i, kit::Done after) {
@@ -64,55 +64,55 @@ void Promotion(std::vector<w2::Promotion> list, size_t i, kit::Done after) {
     int group = kPromotionGroup + level - 2;
     int base = hero->female ? 6 : 0;
     std::string name = hero->name;
-    int strength = hero->strength, moves = hero->maxMoves;
-    sound::music(w2::cues::PROMOTION);
-    auto pic = G.levelPic.count(level) ? G.levelPic[level] : nullptr;
+    int strength = hero->strength, moves = hero->max_moves;
+    sound::Music(w2::cues::kPromotion);
+    auto pic = G.level_pic.count(level) ? G.level_pic[level] : nullptr;
     Show(
             pic,
             [=]() {
-                kit::centred(kit::font(1), kit::text(group, base), 320, 93);
-                const Font& f = kit::font(2);
-                kit::centred(f, name, 320, 140);
-                kit::centred(f, kit::text(group, base + 1), 320, 160);
-                kit::centred(f, kit::text(group, base + 2), 320, 180);
-                kit::centred(f, kit::text(group, base + 3), 320, 200);
-                kit::centred(f, kit::text(group, base + 4), 320, 232);
-                kit::centred(f, format(kit::text(group, base + 5), level, strength, gain, moves, 2),
+                kit::Centred(kit::GetFont(1), kit::Text(group, base), 320, 93);
+                const Font& f = kit::GetFont(2);
+                kit::Centred(f, name, 320, 140);
+                kit::Centred(f, kit::Text(group, base + 1), 320, 160);
+                kit::Centred(f, kit::Text(group, base + 2), 320, 180);
+                kit::Centred(f, kit::Text(group, base + 3), 320, 200);
+                kit::Centred(f, kit::Text(group, base + 4), 320, 232);
+                kit::Centred(f, Format(kit::Text(group, base + 5), level, strength, gain, moves, 2),
                              320, 252);
             },
             [list, i, after]() { Promotion(list, i + 1, after); });
 }
 }  // namespace
 
-void promotions(const std::vector<w2::Promotion>& list, kit::Done after) {
+void Promotions(const std::vector<w2::Promotion>& list, kit::Done after) {
     Promotion(list, 0, after);
 }
 
-void medal(w2::Army* a, kit::Done after) {
+void Medal(w2::Army* a, kit::Done after) {
     int n = a->medals ? a->medals : 1;
     bool grew_move = a->strength >= 15;
-    int now = grew_move ? a->maxMoves : a->strength;
-    auto pick = [](int group, int count) { return kit::text(group, G.g->rng.dice(1, count, -1)); };
+    int now = grew_move ? a->max_moves : a->strength;
+    auto pick = [](int group, int count) { return kit::Text(group, G.g->rng.Dice(1, count, -1)); };
     std::string line1 = pick(kMedalFor, 7), line3 = pick(kMedalGiven, 4);
-    const w2::ArmyType* t = G.g->types.byId(a->type);
+    const w2::ArmyType* t = G.g->types.ById(a->type);
     std::string tname = t ? t->name : "";
     int type = a->type, owner = a->owner;
-    sound::music(w2::cues::MEDAL);
+    sound::Music(w2::cues::kMedal);
     Show(
-            G.medalPic[n - 1],
+            G.medal_pic[n - 1],
             [=]() {
-                kit::army(type, owner, 176, 155, 0);
-                gfx::setColor(1, 1, 1);
-                const Font& f = kit::font(2);
-                f.draw(line1, 216, 155);
-                f.draw(format(kit::text(kMedalUnit, 0), tname), 216, 175);
-                f.draw(line3, 176, 195);
-                f.draw(kit::text(kMedalName, n - 1), 176, 215);
-                f.draw(kit::text(kMedalGrew, grew_move ? 1 : 0), 176, 245);
-                f.draw(format(kit::text(kMedalGrew, 2), now - 1, now), 176, 265);
+                kit::Army(type, owner, 176, 155, 0);
+                gfx::SetColor(1, 1, 1);
+                const Font& f = kit::GetFont(2);
+                f.Draw(line1, 216, 155);
+                f.Draw(Format(kit::Text(kMedalUnit, 0), tname), 216, 175);
+                f.Draw(line3, 176, 195);
+                f.Draw(kit::Text(kMedalName, n - 1), 176, 215);
+                f.Draw(kit::Text(kMedalGrew, grew_move ? 1 : 0), 176, 245);
+                f.Draw(Format(kit::Text(kMedalGrew, 2), now - 1, now), 176, 265);
             },
             [after]() {
-                sound::music(w2::cues::PLAY);
+                sound::Music(w2::cues::kPlay);
                 if (after) after();
             });
 }

@@ -185,14 +185,14 @@ const Profile kProfiles[3][9] = {
 
 }  // namespace
 
-const Profile& profileFor(int level, int card) {
+const Profile& ProfileFor(int level, int card) {
     int lv = std::clamp(level, 0, 2);
     int cd = std::clamp(card, 0, 8);
     return kProfiles[lv][cd];
 }
 
-const Profile& forSide(const Side& side) {
-    return profileFor(side.level, side.card);
+const Profile& ForSide(const Side& side) {
+    return ProfileFor(side.level, side.card);
 }
 
 }  // namespace w2::ai::personality

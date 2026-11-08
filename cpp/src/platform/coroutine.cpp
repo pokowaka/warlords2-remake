@@ -12,9 +12,9 @@ Coroutine::~Coroutine() {
         // unwind the body: its next yield throws, and it runs to its end
         SDL_LockMutex(lock_);
         cancel_ = true;
-        bodyTurn_ = true;
+        body_turn_ = true;
         SDL_CondBroadcast(cond_);
-        while (bodyTurn_) SDL_CondWait(cond_, lock_);
+        while (body_turn_) SDL_CondWait(cond_, lock_);
         SDL_UnlockMutex(lock_);
     }
     if (thread_) SDL_WaitThread(thread_, nullptr);
@@ -22,10 +22,10 @@ Coroutine::~Coroutine() {
     SDL_DestroyMutex(lock_);
 }
 
-int Coroutine::run(void* p) {
+int Coroutine::Run(void* p) {
     Coroutine* self = static_cast<Coroutine*>(p);
     SDL_LockMutex(self->lock_);
-    while (!self->bodyTurn_) SDL_CondWait(self->cond_, self->lock_);
+    while (!self->body_turn_) SDL_CondWait(self->cond_, self->lock_);
     SDL_UnlockMutex(self->lock_);
     if (!self->cancel_) {
         try {
@@ -37,24 +37,24 @@ int Coroutine::run(void* p) {
     }
     SDL_LockMutex(self->lock_);
     self->finished_ = true;
-    self->bodyTurn_ = false;
+    self->body_turn_ = false;
     SDL_CondBroadcast(self->cond_);
     SDL_UnlockMutex(self->lock_);
     return 0;
 }
 
-bool Coroutine::resume() {
+bool Coroutine::Resume() {
     if (finished_) return false;
     if (!started_) {
         started_ = true;
         // the AI recurses a little and keeps its working state on the heap; 16MB
         // is far more than it needs
-        thread_ = SDL_CreateThreadWithStackSize(run, "computer", 16UZ * 1024 * 1024, this);
+        thread_ = SDL_CreateThreadWithStackSize(Run, "computer", 16UZ * 1024 * 1024, this);
     }
     SDL_LockMutex(lock_);
-    bodyTurn_ = true;
+    body_turn_ = true;
     SDL_CondBroadcast(cond_);
-    while (bodyTurn_) SDL_CondWait(cond_, lock_);
+    while (body_turn_) SDL_CondWait(cond_, lock_);
     SDL_UnlockMutex(lock_);
     if (error_) {
         auto e = error_;
@@ -64,12 +64,12 @@ bool Coroutine::resume() {
     return !finished_;
 }
 
-void Coroutine::yield(Yield y) {
+void Coroutine::YieldValue(Yield y) {
     SDL_LockMutex(lock_);
     value_ = std::move(y);
-    bodyTurn_ = false;
+    body_turn_ = false;
     SDL_CondBroadcast(cond_);
-    while (!bodyTurn_) SDL_CondWait(cond_, lock_);
+    while (!body_turn_) SDL_CondWait(cond_, lock_);
     bool cancelled = cancel_;
     SDL_UnlockMutex(lock_);
     if (cancelled) throw Cancelled{};

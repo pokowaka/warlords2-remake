@@ -28,8 +28,8 @@ using PauseCallback = std::function<void(const char*)>;
  * @param customPolicy Optional policy network override (used during arena evaluation/training).
  * @param sampler Optional stochastic rollout sampler & trajectory recorder for PPO training.
  */
-void playTurn(Game& g, Side& side, const PauseCallback& pause = nullptr,
-              const ml::PolicyNetwork* customPolicy = nullptr,
+void PlayTurn(Game& g, Side& side, const PauseCallback& pause = nullptr,
+              const ml::PolicyNetwork* custom_policy = nullptr,
               ml::RolloutSampler* sampler = nullptr);
 
 /**
@@ -39,29 +39,29 @@ void playTurn(Game& g, Side& side, const PauseCallback& pause = nullptr,
  */
 struct MissionSnapshot {
     std::vector<ml::MissionInVec> candidates;
-    std::vector<float> logMult;
+    std::vector<float> log_mult;
     std::vector<int>
             kind;  // TargetKind per option (0 hold, 1 neutral city, 2 enemy city, 3 enemy stack,
                    // 4 ruin/sage, 5 temple/item, 6 fog frontier, 7 reinforce own city)
-    std::vector<int> cityIndex;         // the target city per option, or NONE
+    std::vector<int> city_index;        // the target city per option, or NONE
     std::vector<int> tx, ty;            // the target tile per option
-    std::vector<int> stackSize;         // coalition size per option
+    std::vector<int> stack_size;        // coalition size per option
     std::uintptr_t seed = 0;            // the group's first army (Game::pool address)
     std::vector<std::uintptr_t> group;  // every army of the group
-    int startX = 0, startY = 0, startCity = NONE;
+    int start_x = 0, start_y = 0, start_city = kNone;
 };
 
 /**
  * Builds, without moving anything, the first mission decision the Modern AI
  * would face for every army group of `side` this turn (fair information).
  */
-std::vector<MissionSnapshot> snapshotMissions(Game& g, Side& side, const ml::PolicyNetwork& policy);
+std::vector<MissionSnapshot> SnapshotMissions(Game& g, Side& side, const ml::PolicyNetwork& policy);
 
 /**
  * Selects which owned city a newly hired hero should appear in, scored by the
  * neural policy's economy head.
  */
-City* selectHeroCity(Game& g, Side& side, City* dflt,
-                     const ml::PolicyNetwork* customPolicy = nullptr);
+City* SelectHeroCity(Game& g, Side& side, City* dflt,
+                     const ml::PolicyNetwork* custom_policy = nullptr);
 
 }  // namespace w2::ai::modern
