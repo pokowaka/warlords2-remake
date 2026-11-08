@@ -121,3 +121,7 @@ CheckOptions:
     value:  2
   - key:    readability-identifier-length.IgnoredLoopCounterNames
     value:  '^(i|j|x|y)$'
+  - key:    readability-identifier-length.MinimumBindingNameLength
+    value:  3
+  - key:    readability-identifier-length.IgnoredBindingNames
+    value:  '^(_|x|y|dx|dy)$'
