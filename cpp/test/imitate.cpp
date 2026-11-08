@@ -42,68 +42,90 @@ namespace ml = w2::ai::ml;
 
 namespace {
 
+/** @brief Directory holding the original game data. */
 const std::string kData = "original";
+/** @brief The built-in scenarios the games cycle through. */
 const std::vector<std::string> kScenarios = {"ERYTHEA", "ISLADIA", "DRAGON",
                                              "TUTORIA", "SORCERY", "HADESHA"};
+/** @brief One combination of game options a game is played with. */
 struct Preset {
-    int hidden, diplomacy, neutral;
+    int hidden;     ///< The "hiddenMap" option (fog of war).
+    int diplomacy;  ///< The "diplomacy" option.
+    int neutral;    ///< The "neutralCities" option.
 };
+/** @brief The option presets; game `i` uses preset `i % 4`. */
 const Preset kPresets[4] = {{0, 0, 0}, {0, 1, 1}, {1, 1, 2}, {1, 0, 1}};
-constexpr uint32_t kSeedBase = 600000;  // disjoint from evaluation seeds (700000+)
-constexpr float kBcTemperature = 0.5F;  // the training temperature PPO uses
+constexpr uint32_t kSeedBase = 600000;  ///< Disjoint from the evaluation seeds (700000+).
+constexpr float kBcTemperature = 0.5F;  ///< The training temperature PPO uses.
 
-enum Kind { kHold = 0, kNeutralCity = 1, kEnemyCity = 2, kReinforce = 7 };
-
-struct Example {
-    std::vector<ml::MissionInVec> candidates;
-    std::vector<float> log_mult;
-    std::vector<int> kind;
-    int label = 0;
-    bool validation = false;
+/** @brief The mission option kinds (MissionSnapshot::kind) the labelling looks at. */
+enum Kind {
+    kHold = 0,         ///< Stay in (hold) a city.
+    kNeutralCity = 1,  ///< Capture a neutral city.
+    kEnemyCity = 2,    ///< Capture an enemy city.
+    kReinforce = 7     ///< Reinforce an own city.
 };
 
-int Dist(int x0, int y0, int x1, int y1) {
-    return std::max(std::abs(x0 - x1), std::abs(y0 - y1));
+/** @brief One labelled group decision: the Modern AI's options and the Classic AI's choice. */
+struct Example {
+    std::vector<ml::MissionInVec> candidates;  ///< MissionNet inputs, one per option.
+    std::vector<float> log_mult;               ///< Log multiplicity of each option.
+    std::vector<int> kind;                     ///< Kind of each option (see Kind).
+    int label = 0;                             ///< Index of the option the Classic AI took.
+    bool validation = false;                   ///< Held out for validation, not trained on.
+};
+
+/** @brief The distance between two tiles in king moves (Chebyshev distance). */
+int Dist(int from_x, int from_y, int to_x, int to_y) {
+    return std::max(std::abs(from_x - to_x), std::abs(from_y - to_y));
 }
 
-// The option that matches what the Classic AI did with the group, or -1.
-//
-// The Modern AI's first decision for a group is "where does a coalition led by
-// the group's first army go, and how big is it"; the armies left behind get
-// their own decisions afterwards. So the label follows the group's *moving*
-// part: if any of its armies left, the first decision is the target they went
-// for, with as many armies as went there; only when none left is it "hold".
-int LabelSnapshot(Game& g, int me, const ai::modern::MissionSnapshot& sn) {
-    const size_t n = sn.candidates.size();
-    City* start_city = sn.start_city != kNone ? &g.map->cities[sn.start_city] : nullptr;
-    auto stayed = [&](Army* a) {
-        if (a->x == kNone) return false;
-        if (start_city) return game::CityAt(g, a->x, a->y) == start_city;
-        return a->x == sn.start_x && a->y == sn.start_y;
+/**
+ * @brief The option that matches what the Classic AI did with the group, or -1.
+ *
+ * The Modern AI's first decision for a group is "where does a coalition led by
+ * the group's first army go, and how big is it"; the armies left behind get
+ * their own decisions afterwards. So the label follows the group's *moving*
+ * part: if any of its armies left, the first decision is the target they went
+ * for, with as many armies as went there; only when none left is it "hold".
+ *
+ * @param game The game after the Classic AI has played the turn.
+ * @param my_side Index of the side whose turn it was.
+ * @param snapshot The Modern AI's options for the group, taken before the turn.
+ */
+int LabelSnapshot(Game& game, int my_side, const ai::modern::MissionSnapshot& snapshot) {
+    const size_t candidate_count = snapshot.candidates.size();
+    City* start_city =
+            snapshot.start_city != kNone ? &game.map->cities[snapshot.start_city] : nullptr;
+    auto stayed = [&](Army* army) {
+        if (army->x == kNone) return false;
+        if (start_city) return game::CityAt(game, army->x, army->y) == start_city;
+        return army->x == snapshot.start_x && army->y == snapshot.start_y;
     };
 
     // The reference army: the first of the group (in the Modern AI's order) that left alive
     Army* mover = nullptr;
     int movers = 0, dead_movers = 0;
-    for (std::uintptr_t id : sn.group) {
-        Army* a = reinterpret_cast<Army*>(id);
-        if (!g.Alive(a)) {
+    for (std::uintptr_t army_id : snapshot.group) {
+        Army* army = reinterpret_cast<Army*>(army_id);
+        if (!game.Alive(army)) {
             dead_movers++;
             continue;
         }
-        if (stayed(a)) continue;
+        if (stayed(army)) continue;
         movers++;
-        if (!mover) mover = a;
+        if (!mover) mover = army;
     }
     // the seed first if it moved (it leads the Modern AI's coalition)
-    Army* seed = reinterpret_cast<Army*>(sn.seed);
-    if (g.Alive(seed) && !stayed(seed)) mover = seed;
+    Army* seed = reinterpret_cast<Army*>(snapshot.seed);
+    if (game.Alive(seed) && !stayed(seed)) mover = seed;
 
     auto pick_size = [&](const std::vector<size_t>& matches, int along) {
         size_t best = matches[0];
-        for (size_t i : matches)
-            if (std::abs(sn.stack_size[i] - along) < std::abs(sn.stack_size[best] - along))
-                best = i;
+        for (size_t option : matches)
+            if (std::abs(snapshot.stack_size[option] - along) <
+                std::abs(snapshot.stack_size[best] - along))
+                best = option;
         return static_cast<int>(best);
     };
 
@@ -111,36 +133,37 @@ int LabelSnapshot(Game& g, int me, const ai::modern::MissionSnapshot& sn) {
         if (dead_movers > 0) return -1;  // the ones that left all fell: target unknown
         if (!start_city) return -1;      // stood still in the field: no Modern option says that
         std::vector<size_t> holds;
-        for (size_t i = 0; i < n; i++)
-            if (sn.kind[i] == kHold && sn.city_index[i] == sn.start_city) holds.push_back(i);
+        for (size_t i = 0; i < candidate_count; i++)
+            if (snapshot.kind[i] == kHold && snapshot.city_index[i] == snapshot.start_city)
+                holds.push_back(i);
         if (holds.empty()) return -1;
-        return pick_size(holds, static_cast<int>(sn.group.size()));
+        return pick_size(holds, static_cast<int>(snapshot.group.size()));
     }
 
-    const int ex = mover->x, ey = mover->y;
-    if (ex == kNone) return -1;
-    City* end_city = game::CityAt(g, ex, ey);
+    const int end_x = mover->x, end_y = mover->y;
+    if (end_x == kNone) return -1;
+    City* end_city = game::CityAt(game, end_x, end_y);
     auto city_options = [&](int city_index) {
         std::vector<size_t> out;
-        for (size_t i = 0; i < n; i++)
-            if (sn.city_index[i] == city_index &&
-                (sn.kind[i] == kNeutralCity || sn.kind[i] == kEnemyCity ||
-                 sn.kind[i] == kReinforce))
+        for (size_t i = 0; i < candidate_count; i++)
+            if (snapshot.city_index[i] == city_index &&
+                (snapshot.kind[i] == kNeutralCity || snapshot.kind[i] == kEnemyCity ||
+                 snapshot.kind[i] == kReinforce))
                 out.push_back(i);
         return out;
     };
     std::vector<size_t> matches;
-    if (end_city && end_city->owner_index == me && end_city != start_city) {
+    if (end_city && end_city->owner_index == my_side && end_city != start_city) {
         matches = city_options(end_city->index);
     } else if (mover->ai_order == ai::core::kOrderCity && mover->ai_dest != kNone) {
         matches = city_options(mover->ai_dest);
     } else {
         // the target it ended closest to, among those it moved towards
         int best_d = 1 << 30;
-        for (size_t i = 0; i < n; i++) {
-            if (sn.kind[i] == kHold) continue;
-            int d_end = Dist(ex, ey, sn.tx[i], sn.ty[i]);
-            int d_start = Dist(sn.start_x, sn.start_y, sn.tx[i], sn.ty[i]);
+        for (size_t i = 0; i < candidate_count; i++) {
+            if (snapshot.kind[i] == kHold) continue;
+            int d_end = Dist(end_x, end_y, snapshot.tx[i], snapshot.ty[i]);
+            int d_start = Dist(snapshot.start_x, snapshot.start_y, snapshot.tx[i], snapshot.ty[i]);
             if (d_end >= d_start) continue;
             if (d_end < best_d) {
                 best_d = d_end;
@@ -151,87 +174,112 @@ int LabelSnapshot(Game& g, int me, const ai::modern::MissionSnapshot& sn) {
         if (!matches.empty()) {
             size_t first = matches[0];
             std::vector<size_t> same;
-            for (size_t i : matches)
-                if (sn.kind[i] == sn.kind[first] && sn.tx[i] == sn.tx[first] &&
-                    sn.ty[i] == sn.ty[first])
-                    same.push_back(i);
+            for (size_t option : matches)
+                if (snapshot.kind[option] == snapshot.kind[first] &&
+                    snapshot.tx[option] == snapshot.tx[first] &&
+                    snapshot.ty[option] == snapshot.ty[first])
+                    same.push_back(option);
             matches = same;
         }
     }
     if (matches.empty()) return -1;
     // coalition size: the movers that ended with the reference army
     int along = 0;
-    for (std::uintptr_t id : sn.group) {
-        Army* a = reinterpret_cast<Army*>(id);
-        if (!g.Alive(a) || a->x == kNone || stayed(a)) continue;
-        City* c = game::CityAt(g, a->x, a->y);
-        if ((end_city && c == end_city) || Dist(a->x, a->y, ex, ey) <= 1) along++;
+    for (std::uintptr_t army_id : snapshot.group) {
+        Army* army = reinterpret_cast<Army*>(army_id);
+        if (!game.Alive(army) || army->x == kNone || stayed(army)) continue;
+        City* city = game::CityAt(game, army->x, army->y);
+        if ((end_city && city == end_city) || Dist(army->x, army->y, end_x, end_y) <= 1) along++;
     }
     (void)movers;
     return pick_size(matches, std::max(1, along));
 }
 
-std::unique_ptr<Game> NewClassicGame(int gi, randommap::Files& files) {
-    uint32_t seed = kSeedBase + static_cast<uint32_t>(gi) * 13U;
-    const Preset& p = kPresets[gi % 4];
-    game::NewGameOptions o;
-    o.seed = seed;
-    o.options = {{"hiddenMap", p.hidden},
-                 {"viewEnemies", 0},
-                 {"diplomacy", p.diplomacy},
-                 {"neutralCities", p.neutral},
-                 {"quests", 1}};
-    for (int s = 0; s < 8; s++) {
-        o.sides[s].computer = true;
-        o.sides[s].level = 2;
-        o.sides[s].card = static_cast<int>((seed + s * 5) % 9);
+/**
+ * @brief Starts game number @p game_index with every side played by the Classic AI.
+ *
+ * The seed, option preset and scenario follow from the index; every fifth game
+ * is on a random map, as in training.
+ *
+ * @param files Receives the generated map files of a random-map game; they must
+ *        outlive the game.
+ */
+std::unique_ptr<Game> NewClassicGame(int game_index, randommap::Files& files) {
+    uint32_t seed = kSeedBase + static_cast<uint32_t>(game_index) * 13U;
+    const Preset& preset = kPresets[game_index % 4];
+    game::NewGameOptions game_options;
+    game_options.seed = seed;
+    game_options.options = {{"hiddenMap", preset.hidden},
+                            {"viewEnemies", 0},
+                            {"diplomacy", preset.diplomacy},
+                            {"neutralCities", preset.neutral},
+                            {"quests", 1}};
+    for (int side = 0; side < 8; side++) {
+        game_options.sides[side].computer = true;
+        game_options.sides[side].level = 2;
+        game_options.sides[side].card = static_cast<int>((seed + side * 5) % 9);
     }
-    if (gi % 5 == 4) {  // a fifth on random maps, as in training
+    if (game_index % 5 == 4) {  // a fifth on random maps, as in training
         Rng map_rng(static_cast<double>(seed ^ 0x5bf03635U));
-        randommap::Options ro;
-        ro.data_dir = kData;
-        ro.rng = &map_rng;
-        ro.sliders = {3, 3, 2, 3};
-        ro.allies = p.diplomacy != 0;
-        files = randommap::GenerateNow(ro);
-        o.memory_files = &files;
-        return game::NewGame(kData, "RANDOM", o);
+        randommap::Options map_options;
+        map_options.data_dir = kData;
+        map_options.rng = &map_rng;
+        map_options.sliders = {3, 3, 2, 3};
+        map_options.allies = preset.diplomacy != 0;
+        files = randommap::GenerateNow(map_options);
+        game_options.memory_files = &files;
+        return game::NewGame(kData, "RANDOM", game_options);
     }
-    return game::NewGame(kData, kScenarios[(gi / 4) % kScenarios.size()], o);
+    return game::NewGame(kData, kScenarios[(game_index / 4) % kScenarios.size()], game_options);
 }
 
-// Behaviour-cloning gradient of -log p(label) for one decision, added into grad.
-double BcAccumulate(const ml::PolicyNetwork& net, const Example& ex, ml::PolicyNetwork& grad,
+/**
+ * @brief Adds the behaviour-cloning gradient of -log p(label) for one decision into @p grad.
+ * @param correct Set to whether greedy play (the highest utility) picks the label.
+ * @return The decision's loss, -log p(label).
+ */
+double BcAccumulate(const ml::PolicyNetwork& net, const Example& example, ml::PolicyNetwork& grad,
                     bool& correct) {
-    const size_t candidate_count = ex.candidates.size();
-    const float inv_t = 1.0F / kBcTemperature;
-    std::vector<float> u(candidate_count), z(candidate_count), p(candidate_count);
-    float max_z = -1e30F;
+    const size_t candidate_count = example.candidates.size();
+    const float inverse_temperature = 1.0F / kBcTemperature;
+    std::vector<float> utilities(candidate_count), logits(candidate_count),
+            probabilities(candidate_count);
+    float max_logit = -1e30F;
     int argmax = 0;
     for (size_t i = 0; i < candidate_count; i++) {
-        u[i] = net.mission_net.Forward(ex.candidates[i])[0];
+        utilities[i] = net.mission_net.Forward(example.candidates[i])[0];
         // No multiplicity prior here: greedy play (T = 0.02) ranks options by
         // utility alone, so the utilities themselves must put the label on top
-        z[i] = u[i] * inv_t;
-        if (z[i] > max_z) max_z = z[i];
-        if (u[i] > u[argmax]) argmax = static_cast<int>(i);
+        logits[i] = utilities[i] * inverse_temperature;
+        if (logits[i] > max_logit) max_logit = logits[i];
+        if (utilities[i] > utilities[argmax]) argmax = static_cast<int>(i);
     }
     float sum = 0.0F;
     for (size_t i = 0; i < candidate_count; i++) {
-        p[i] = std::exp(z[i] - max_z);
-        sum += p[i];
+        probabilities[i] = std::exp(logits[i] - max_logit);
+        sum += probabilities[i];
     }
-    for (float& v : p) v /= sum;
-    correct = (argmax == ex.label);  // greedy play takes the highest utility
+    for (float& probability : probabilities) probability /= sum;
+    correct = (argmax == example.label);  // greedy play takes the highest utility
     for (size_t i = 0; i < candidate_count; i++) {
-        float d = inv_t * (p[i] - (i == static_cast<size_t>(ex.label) ? 1.0F : 0.0F));
-        if (d != 0.0F) net.mission_net.Backward(ex.candidates[i], {d, 0.0F}, grad.mission_net);
+        float logit_grad =
+                inverse_temperature *
+                (probabilities[i] - (i == static_cast<size_t>(example.label) ? 1.0F : 0.0F));
+        if (logit_grad != 0.0F)
+            net.mission_net.Backward(example.candidates[i], {logit_grad, 0.0F}, grad.mission_net);
     }
-    return -std::log(std::max(1e-12F, p[ex.label]));
+    return -std::log(std::max(1e-12F, probabilities[example.label]));
 }
 
 }  // namespace
 
+/**
+ * @brief Plays the Classic AI games, labels the Modern AI's options and trains MissionNet.
+ *
+ * Usage: `w2imitate IN.json OUT.json [GAMES] [TURNS] [EPOCHS] [LR]`. The weights
+ * are written to OUT.json after every epoch; GAMES = 0 only rewrites IN.json in
+ * the current format.
+ */
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::fprintf(stderr, "usage: w2imitate IN.json OUT.json [GAMES] [TURNS] [EPOCHS] [LR]\n");
@@ -245,69 +293,72 @@ int main(int argc, char** argv) {
     const int games = argc > 3 ? std::atoi(argv[3]) : 144;
     const int turns = argc > 4 ? std::atoi(argv[4]) : 40;
     const int epochs = argc > 5 ? std::atoi(argv[5]) : 6;
-    const float lr = argc > 6 ? static_cast<float>(std::atof(argv[6])) : 1e-3F;
+    const float learning_rate = argc > 6 ? static_cast<float>(std::atof(argv[6])) : 1e-3F;
     const unsigned threads = std::max(2U, std::thread::hardware_concurrency());
     if (games == 0) {  // just rewrite the weights in the current format
         return net.SaveJson(argv[2], 0, 0.0F) ? 0 : 1;
     }
 
     // ---- data: Classic games, two recorded sides each
-    auto t0 = std::chrono::steady_clock::now();
+    auto start_time = std::chrono::steady_clock::now();
     std::vector<Example> data;
-    std::mutex mu;
+    std::mutex data_mutex;
     std::atomic<int> next{0};
     long snapshots = 0, labelled = 0;
     std::vector<std::thread> pool;
-    for (unsigned w = 0; w < threads; w++) {
+    for (unsigned worker = 0; worker < threads; worker++) {
         pool.emplace_back([&]() {
-            for (int gi; (gi = next.fetch_add(1)) < games;) {
+            for (int game_index; (game_index = next.fetch_add(1)) < games;) {
                 randommap::Files files;
-                auto gp = NewClassicGame(gi, files);
-                Game& g = *gp;
+                auto game_ptr = NewClassicGame(game_index, files);
+                Game& game = *game_ptr;
                 std::vector<int> in_use;
-                for (int s = 0; s < 8; s++) {
-                    if (g.map->sides[s].in_use) in_use.push_back(s);
-                    g.map->sides[s].classic_ai = true;
+                for (int side = 0; side < 8; side++) {
+                    if (game.map->sides[side].in_use) in_use.push_back(side);
+                    game.map->sides[side].classic_ai = true;
                 }
                 if (in_use.empty()) continue;
-                const int rec_a = in_use[static_cast<size_t>(gi) % in_use.size()],
-                          rec_b = in_use[static_cast<size_t>(gi + 3) % in_use.size()];
-                const bool validation = (gi % 10 == 9);
+                const int recorded_a = in_use[static_cast<size_t>(game_index) % in_use.size()],
+                          recorded_b = in_use[static_cast<size_t>(game_index + 3) % in_use.size()];
+                const bool validation = (game_index % 10 == 9);
                 std::vector<Example> local;
                 long local_snaps = 0;
-                Side* cur = game::Begin(g);
+                Side* current = game::Begin(game);
                 int safety = 0;
-                while (cur && !g.over && !g.won && g.turn <= turns && safety++ < turns * 12) {
-                    if (cur->computer && cur->alive) {
-                        const bool rec = (cur->index == rec_a || cur->index == rec_b);
+                while (current && !game.over && !game.won && game.turn <= turns &&
+                       safety++ < turns * 12) {
+                    if (current->computer && current->alive) {
+                        const bool recorded =
+                                (current->index == recorded_a || current->index == recorded_b);
                         std::vector<ai::modern::MissionSnapshot> snaps;
-                        if (rec) snaps = ai::modern::SnapshotMissions(g, *cur, net);
-                        ai::PlayTurn(g, *cur, nullptr);
-                        for (auto& sn : snaps) {
+                        if (recorded) snaps = ai::modern::SnapshotMissions(game, *current, net);
+                        ai::PlayTurn(game, *current, nullptr);
+                        for (auto& snapshot : snaps) {
                             local_snaps++;
-                            if (sn.candidates.size() < 2) continue;
-                            int label = LabelSnapshot(g, cur->index, sn);
+                            if (snapshot.candidates.size() < 2) continue;
+                            int label = LabelSnapshot(game, current->index, snapshot);
                             if (label < 0) continue;
-                            Example ex;
-                            ex.candidates = std::move(sn.candidates);
-                            ex.log_mult = std::move(sn.log_mult);
-                            ex.kind = sn.kind;
-                            ex.label = label;
-                            ex.validation = validation;
-                            local.push_back(std::move(ex));
+                            Example example;
+                            example.candidates = std::move(snapshot.candidates);
+                            example.log_mult = std::move(snapshot.log_mult);
+                            example.kind = snapshot.kind;
+                            example.label = label;
+                            example.validation = validation;
+                            local.push_back(std::move(example));
                         }
                     }
-                    cur = game::EndTurn(g);
+                    current = game::EndTurn(game);
                 }
-                std::lock_guard<std::mutex> lock(mu);
+                std::lock_guard<std::mutex> lock(data_mutex);
                 snapshots += local_snaps;
                 labelled += static_cast<long>(local.size());
-                for (auto& e : local) data.push_back(std::move(e));
+                for (auto& example : local) data.push_back(std::move(example));
             }
         });
     }
-    for (auto& t : pool) t.join();
-    double gen_sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    for (auto& thread : pool) thread.join();
+    double gen_sec =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();
     std::vector<size_t> train, valid;
     for (size_t i = 0; i < data.size(); i++) (data[i].validation ? valid : train).push_back(i);
     std::printf(
@@ -319,109 +370,116 @@ int main(int argc, char** argv) {
     std::fflush(stdout);
 
     // ---- behaviour cloning on MissionNet
-    auto evaluate = [&](const std::vector<size_t>& idx, double& loss, double& acc) {
-        std::atomic<size_t> nx{0};
-        std::vector<double> l(threads, 0.0), a(threads, 0.0);
-        std::vector<std::thread> ps;
-        for (unsigned w = 0; w < threads; w++) {
-            ps.emplace_back([&, w]() {
+    auto evaluate = [&](const std::vector<size_t>& indices, double& loss, double& acc) {
+        std::atomic<size_t> next_index{0};
+        std::vector<double> worker_loss(threads, 0.0), worker_correct(threads, 0.0);
+        std::vector<std::thread> workers;
+        for (unsigned worker = 0; worker < threads; worker++) {
+            workers.emplace_back([&, worker]() {
                 ml::PolicyNetwork scratch;
                 scratch.Zero();
-                for (size_t i; (i = nx.fetch_add(1)) < idx.size();) {
-                    bool ok = false;
-                    l[w] += BcAccumulate(net, data[idx[i]], scratch, ok);
-                    a[w] += ok ? 1.0 : 0.0;
+                for (size_t i; (i = next_index.fetch_add(1)) < indices.size();) {
+                    bool correct = false;
+                    worker_loss[worker] += BcAccumulate(net, data[indices[i]], scratch, correct);
+                    worker_correct[worker] += correct ? 1.0 : 0.0;
                 }
             });
         }
-        for (auto& t : ps) t.join();
+        for (auto& thread : workers) thread.join();
         loss = acc = 0.0;
-        for (unsigned w = 0; w < threads; w++) {
-            loss += l[w];
-            acc += a[w];
+        for (unsigned worker = 0; worker < threads; worker++) {
+            loss += worker_loss[worker];
+            acc += worker_correct[worker];
         }
-        loss /= std::max<size_t>(1, idx.size());
-        acc /= std::max<size_t>(1, idx.size());
+        loss /= std::max<size_t>(1, indices.size());
+        acc /= std::max<size_t>(1, indices.size());
     };
     // What the Classic AI chose, and what the network picks greedily, by target kind
     auto kind_histogram = [&](const char* label) {
         const char* names[8] = {"hold", "neutral", "enemyCity", "enemyStack",
                                 "ruin", "temple",  "fog",       "reinforce"};
         std::array<long, 8> classic{}, modern{};
-        for (size_t i : valid) {
-            const Example& ex = data[i];
-            classic[ex.kind[ex.label]]++;
-            int am = 0;
+        for (size_t example_index : valid) {
+            const Example& example = data[example_index];
+            classic[example.kind[example.label]]++;
+            int greedy_choice = 0;
             float best = -1e30F;
-            for (size_t k = 0; k < ex.candidates.size(); k++) {
-                float u = net.mission_net.Forward(ex.candidates[k])[0];
-                if (u > best) {
-                    best = u;
-                    am = static_cast<int>(k);
+            for (size_t candidate = 0; candidate < example.candidates.size(); candidate++) {
+                float utility = net.mission_net.Forward(example.candidates[candidate])[0];
+                if (utility > best) {
+                    best = utility;
+                    greedy_choice = static_cast<int>(candidate);
                 }
             }
-            modern[ex.kind[am]]++;
+            modern[example.kind[greedy_choice]]++;
         }
         std::printf("%s kinds (Classic label / network greedy):", label);
-        for (int k = 0; k < 8; k++) std::printf(" %s %ld/%ld", names[k], classic[k], modern[k]);
+        for (int kind = 0; kind < 8; kind++)
+            std::printf(" %s %ld/%ld", names[kind], classic[kind], modern[kind]);
         std::printf("\n");
     };
     kind_histogram("before");
-    double vl = 0, va = 0;
-    evaluate(valid, vl, va);
-    std::printf("before: validation loss %.3f | greedy agreement with Classic %.1f%%\n", vl,
-                100.0 * va);
+    double valid_loss = 0, valid_accuracy = 0;
+    evaluate(valid, valid_loss, valid_accuracy);
+    std::printf("before: validation loss %.3f | greedy agreement with Classic %.1f%%\n", valid_loss,
+                100.0 * valid_accuracy);
     std::fflush(stdout);
 
+    // Adam over the flattened parameters
     std::vector<float> params = net.Flatten();
     const size_t param_count = params.size();
-    std::vector<float> m(param_count, 0.0F), v(param_count, 0.0F);
+    std::vector<float> first_moment(param_count, 0.0F), second_moment(param_count, 0.0F);
     int step = 0;
     std::mt19937 rng(7);
     const size_t batch = 512;
-    for (int ep = 1; ep <= epochs; ep++) {
+    for (int epoch = 1; epoch <= epochs; epoch++) {
         std::shuffle(train.begin(), train.end(), rng);
         double train_loss = 0.0;
-        for (size_t b0 = 0; b0 < train.size(); b0 += batch) {
-            size_t b1 = std::min(train.size(), b0 + batch);
-            std::atomic<size_t> nx{b0};
+        for (size_t batch_start = 0; batch_start < train.size(); batch_start += batch) {
+            size_t batch_end = std::min(train.size(), batch_start + batch);
+            std::atomic<size_t> next_index{batch_start};
             std::vector<ml::PolicyNetwork> grads(threads);
-            std::vector<double> l(threads, 0.0);
-            std::vector<std::thread> ps;
-            for (unsigned w = 0; w < threads; w++) {
-                grads[w].Zero();
-                ps.emplace_back([&, w]() {
-                    for (size_t i; (i = nx.fetch_add(1)) < b1;) {
-                        bool ok = false;
-                        l[w] += BcAccumulate(net, data[train[i]], grads[w], ok);
+            std::vector<double> worker_loss(threads, 0.0);
+            std::vector<std::thread> workers;
+            for (unsigned worker = 0; worker < threads; worker++) {
+                grads[worker].Zero();
+                workers.emplace_back([&, worker]() {
+                    for (size_t i; (i = next_index.fetch_add(1)) < batch_end;) {
+                        bool correct = false;
+                        worker_loss[worker] +=
+                                BcAccumulate(net, data[train[i]], grads[worker], correct);
                     }
                 });
             }
-            for (auto& t : ps) t.join();
-            std::vector<float> g(param_count, 0.0F);
-            for (unsigned w = 0; w < threads; w++) {
-                auto fg = grads[w].Flatten();
-                for (size_t d = 0; d < param_count; d++) g[d] += fg[d];
-                train_loss += l[w];
+            for (auto& thread : workers) thread.join();
+            std::vector<float> grad_sum(param_count, 0.0F);
+            for (unsigned worker = 0; worker < threads; worker++) {
+                auto worker_grad = grads[worker].Flatten();
+                for (size_t param = 0; param < param_count; param++)
+                    grad_sum[param] += worker_grad[param];
+                train_loss += worker_loss[worker];
             }
-            const float scale = 1.0F / static_cast<float>(b1 - b0);
+            const float scale = 1.0F / static_cast<float>(batch_end - batch_start);
             step++;
-            float bc1 = 1.0F - std::pow(0.9F, static_cast<float>(step)),
-                  bc2 = 1.0F - std::pow(0.999F, static_cast<float>(step));
-            for (size_t d = 0; d < param_count; d++) {
-                float gd = g[d] * scale;
-                m[d] = 0.9F * m[d] + 0.1F * gd;
-                v[d] = 0.999F * v[d] + 0.001F * gd * gd;
-                params[d] -= lr * (m[d] / bc1) / (std::sqrt(v[d] / bc2) + 1e-8F);
+            float bias_correction1 = 1.0F - std::pow(0.9F, static_cast<float>(step)),
+                  bias_correction2 = 1.0F - std::pow(0.999F, static_cast<float>(step));
+            for (size_t param = 0; param < param_count; param++) {
+                float mean_grad = grad_sum[param] * scale;
+                first_moment[param] = 0.9F * first_moment[param] + 0.1F * mean_grad;
+                second_moment[param] =
+                        0.999F * second_moment[param] + 0.001F * mean_grad * mean_grad;
+                params[param] -= learning_rate * (first_moment[param] / bias_correction1) /
+                                 (std::sqrt(second_moment[param] / bias_correction2) + 1e-8F);
             }
             net.Unflatten(params);
         }
-        evaluate(valid, vl, va);
+        evaluate(valid, valid_loss, valid_accuracy);
         std::printf("epoch %d: train loss %.3f | validation loss %.3f | greedy agreement %.1f%%\n",
-                    ep, train_loss / std::max<size_t>(1, train.size()), vl, 100.0 * va);
+                    epoch, train_loss / std::max<size_t>(1, train.size()), valid_loss,
+                    100.0 * valid_accuracy);
         std::fflush(stdout);
         std::string path = std::string(argv[2]);
-        net.SaveJson(path, ep, 0.0F);
+        net.SaveJson(path, epoch, 0.0F);
     }
     kind_histogram("after");
     return 0;

@@ -41,187 +41,235 @@ namespace ml = w2::ai::ml;
 
 namespace {
 
+/** @brief Directory holding the original game data. */
 const std::string kData = "original";
+/** @brief The built-in scenarios the benchmark games cycle through. */
 const std::vector<std::string> kScenarios = {"ERYTHEA", "ISLADIA", "DRAGON",
                                              "TUTORIA", "SORCERY", "HADESHA"};
+/** @brief One combination of game options a benchmark game is played with. */
 struct Preset {
-    const char* label;
-    int hidden, diplomacy, neutral;
+    const char* label;  ///< Name printed in the per-game report.
+    int hidden;         ///< The "hiddenMap" option (fog of war).
+    int diplomacy;      ///< The "diplomacy" option.
+    int neutral;        ///< The "neutralCities" option.
 };
+/** @brief The benchmark option presets. */
 const Preset kPresets[4] = {{"Beginner-Open", 0, 0, 0},
                             {"Interm-Diplo", 0, 1, 1},
                             {"Adv-Hidden", 1, 1, 2},
                             {"Fog-TotalWar", 1, 0, 1}};
-constexpr uint32_t kSeedBase = 750000;  // the development seed set
+constexpr uint32_t kSeedBase = 750000;  ///< The development seed set.
 
-// How candidates are judged:
-//   peek:   each candidate turn is played once on a copy with the real game's
-//           dice and that very result is kept -- it sees its own battles'
-//           outcome before committing (an upper bound, not a fair player);
-//   honest: a candidate is a way of deciding (the policy with one sampling
-//           seed); every rollout replays its turn with fresh dice, and the
-//           chosen candidate is then played in the real game with its dice;
-//   fair:   honest, and every rollout copy first loses the enemy armies the
-//           side cannot see (field armies on unseen tiles and in transit).
-enum class Judge { kPeek, kHonest, kFair };
-
-struct Settings {
-    const ml::PolicyNetwork* policy = nullptr;
-    Judge judge = Judge::kHonest;
-    int candidates = 4;      // K sampled turns besides the greedy one
-    int rollouts = 4;        // R copies per candidate
-    int horizon = 2;         // H rounds played on after the candidate turn
-    float cand_temp = 0.5F;  // temperature the sampled candidates are drawn at
-    float switch_z = 0.0F;   // only leave the greedy turn when a candidate beats it by switchZ
-                             // standard errors
+/** @brief How candidate turns are judged. */
+enum class Judge {
+    kPeek,    ///< Each candidate turn is played once on a copy with the real game's
+              ///< dice and that very result is kept -- it sees its own battles'
+              ///< outcome before committing (an upper bound, not a fair player).
+    kHonest,  ///< A candidate is a way of deciding (the policy with one sampling
+              ///< seed); every rollout replays its turn with fresh dice, and the
+              ///< chosen candidate is then played in the real game with its dice.
+    kFair     ///< Honest, and every rollout copy first loses the enemy armies the
+              ///< side cannot see (field armies on unseen tiles and in transit).
 };
 
-std::unique_ptr<Game> CopyGame(const Game& g) {
-    return save::Decode(save::Encode(g), kData);
+/** @brief The search parameters, from the command line. */
+struct Settings {
+    const ml::PolicyNetwork* policy = nullptr;  ///< The network every Modern side plays.
+    Judge judge = Judge::kHonest;               ///< How candidates are judged.
+    int candidates = 4;                         ///< K: sampled turns besides the greedy one.
+    int rollouts = 4;                           ///< R: copies per candidate.
+    int horizon = 2;                            ///< H: rounds played on after the candidate turn.
+    float cand_temp = 0.5F;  ///< Temperature the sampled candidates are drawn at.
+    float switch_z = 0.0F;   ///< Only leave the greedy turn when a candidate beats it by
+                             ///< this many standard errors.
+};
+
+/** @brief A deep copy of @p game, made through a save/load round trip. */
+std::unique_ptr<Game> CopyGame(const Game& game) {
+    return save::Decode(save::Encode(game), kData);
 }
 
-// The side's view of the board: enemy field armies it cannot see are removed
-// (garrisons of cities stay -- a known approximation), and armies in transit.
-void RestrictToView(Game& g, int me) {
+/**
+ * @brief Reduces @p game to the side's view of the board.
+ *
+ * Enemy field armies it cannot see are removed (garrisons of cities stay --
+ * a known approximation), and so are armies in transit.
+ */
+void RestrictToView(Game& game, int my_side) {
     std::array<std::vector<Army*>, 8> unseen;
-    for (Army* a : g.armies) {
-        if (a->owner < 0 || a->owner >= 8 || a->owner == me || a->disbanded) continue;
-        bool hidden = a->transit || a->x == kNone;
-        if (!hidden && !game::CityAt(g, a->x, a->y))
-            hidden = !ai::belief::IsTileVisible(g, me, a->x, a->y);
-        if (hidden) unseen[a->owner].push_back(a);
+    for (Army* army : game.armies) {
+        if (army->owner < 0 || army->owner >= 8 || army->owner == my_side || army->disbanded)
+            continue;
+        bool hidden = army->transit || army->x == kNone;
+        if (!hidden && !game::CityAt(game, army->x, army->y))
+            hidden = !ai::belief::IsTileVisible(game, my_side, army->x, army->y);
+        if (hidden) unseen[army->owner].push_back(army);
     }
-    for (int s = 0; s < 8; s++) {
-        if (!unseen[s].empty()) game::Disband(g, g.map->sides[s], unseen[s]);
+    for (int side_index = 0; side_index < 8; side_index++) {
+        if (!unseen[side_index].empty())
+            game::Disband(game, game.map->sides[side_index], unseen[side_index]);
     }
 }
 
-// Plays `side`'s turn as candidate k: k == 0 is the greedy turn, k > 0 the
-// policy sampled at the candidate temperature with seed k.
-void PlayCandidate(Game& g, int side_index, int k, uint32_t base_seed, const Settings& st) {
-    Side& side = *g.map->Side(side_index);
-    if (k == 0) {
-        ai::modern::PlayTurn(g, side, nullptr, st.policy, nullptr);
+/**
+ * @brief Plays the side's turn as candidate number @p candidate.
+ *
+ * Candidate 0 is the greedy turn; candidate k > 0 is the policy sampled at the
+ * candidate temperature with seed k.
+ */
+void PlayCandidate(Game& game, int side_index, int candidate, uint32_t base_seed,
+                   const Settings& settings) {
+    Side& side = *game.map->Side(side_index);
+    if (candidate == 0) {
+        ai::modern::PlayTurn(game, side, nullptr, settings.policy, nullptr);
         return;
     }
     ml::RolloutSampler sampler;
-    sampler.temperature = st.cand_temp;
-    sampler.rng_state = base_seed ^ static_cast<uint32_t>(k * 2246822519U);
-    ai::modern::PlayTurn(g, side, nullptr, st.policy, &sampler);
+    sampler.temperature = settings.cand_temp;
+    sampler.rng_state = base_seed ^ static_cast<uint32_t>(candidate * 2246822519U);
+    ai::modern::PlayTurn(game, side, nullptr, settings.policy, &sampler);
 }
 
-// Plays the current side's turn with its own kind of AI (Modern: greedy).
-void PlayOwnTurn(Game& g, Side& side, const ml::PolicyNetwork& policy) {
+/** @brief Plays the current side's turn with its own kind of AI (Modern: greedy). */
+void PlayOwnTurn(Game& game, Side& side, const ml::PolicyNetwork& policy) {
     if (side.classic_ai)
-        ai::PlayTurn(g, side, nullptr);
+        ai::PlayTurn(game, side, nullptr);
     else
-        ai::modern::PlayTurn(g, side, nullptr, &policy, nullptr);
+        ai::modern::PlayTurn(game, side, nullptr, &policy, nullptr);
 }
 
-// From a game in which `side` has just played its turn, plays on for `rounds`
-// rounds (other sides and later turns of `side` with their normal AIs) and
-// returns `side`'s empire score.
-float Rollout(Game& g, int side_index, int rounds, const ml::PolicyNetwork& policy) {
-    const int stop_turn = g.turn + rounds;
-    Side* cur = game::EndTurn(g);
+/**
+ * @brief Plays on from a game in which the side has just played its turn.
+ *
+ * Plays @p rounds rounds (other sides and later turns of the side, all with
+ * their normal AIs).
+ *
+ * @return The side's empire score at the end.
+ */
+float Rollout(Game& game, int side_index, int rounds, const ml::PolicyNetwork& policy) {
+    const int stop_turn = game.turn + rounds;
+    Side* current = game::EndTurn(game);
     int safety = 0;
-    while (cur && !g.over && !g.won && g.turn < stop_turn && safety++ < rounds * 12) {
-        if (cur->computer && cur->alive) PlayOwnTurn(g, *cur, policy);
-        cur = game::EndTurn(g);
+    while (current && !game.over && !game.won && game.turn < stop_turn && safety++ < rounds * 12) {
+        if (current->computer && current->alive) PlayOwnTurn(game, *current, policy);
+        current = game::EndTurn(game);
     }
-    return ml::ComputeEmpireScore(g, side_index);
+    return ml::ComputeEmpireScore(game, side_index);
 }
 
+/** @brief The rollout scores of one candidate turn. */
 struct CandidateResult {
-    std::unique_ptr<Game> after;  // peek only: the game right after the candidate turn
-    double mean = 0.0, sd = 0.0;
-    int k = 0;
-    uint32_t base_seed = 0;
+    std::unique_ptr<Game> after;  ///< Peek only: the game right after the candidate turn.
+    double mean = 0.0;            ///< Mean empire score over the rollouts.
+    double sd = 0.0;              ///< Standard deviation of the rollout scores.
+    int k = 0;                    ///< Candidate number (0 = greedy).
+    uint32_t base_seed = 0;       ///< Seed the sampled candidates are derived from.
 };
 
-// Builds and scores the K+1 candidates for `side` in `g` (its turn is next).
-std::vector<CandidateResult> ScoreCandidates(const Game& g, int side_index, const Settings& st) {
+/** @brief Builds and scores the K+1 candidates for the side in @p game (its turn is next). */
+std::vector<CandidateResult> ScoreCandidates(const Game& game, int side_index,
+                                             const Settings& settings) {
     std::vector<CandidateResult> out;
-    const uint32_t base_seed = static_cast<uint32_t>(g.rng.state * 2654435761U) ^
-                               static_cast<uint32_t>(g.turn * 40503U);
-    for (int k = 0; k <= st.candidates; k++) {
-        CandidateResult c;
-        std::vector<double> v;
-        if (st.judge == Judge::kPeek) {
-            c.after = CopyGame(g);
-            PlayCandidate(*c.after, side_index, k, base_seed, st);
-            for (int r = 0; r < st.rollouts; r++) {
-                auto copy = CopyGame(*c.after);
-                copy->rng.state ^= static_cast<uint32_t>((r + 1) * 0x9e3779b9U);
-                v.push_back(Rollout(*copy, side_index, st.horizon, *st.policy));
+    const uint32_t base_seed = static_cast<uint32_t>(game.rng.state * 2654435761U) ^
+                               static_cast<uint32_t>(game.turn * 40503U);
+    for (int candidate = 0; candidate <= settings.candidates; candidate++) {
+        CandidateResult result;
+        std::vector<double> scores;
+        if (settings.judge == Judge::kPeek) {
+            result.after = CopyGame(game);
+            PlayCandidate(*result.after, side_index, candidate, base_seed, settings);
+            for (int rollout = 0; rollout < settings.rollouts; rollout++) {
+                auto copy = CopyGame(*result.after);
+                copy->rng.state ^= static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U);
+                scores.push_back(Rollout(*copy, side_index, settings.horizon, *settings.policy));
             }
         } else {
-            for (int r = 0; r < st.rollouts; r++) {
-                auto copy = CopyGame(g);
+            for (int rollout = 0; rollout < settings.rollouts; rollout++) {
+                auto copy = CopyGame(game);
                 copy->rng.state ^= static_cast<uint32_t>(
-                        (r + 1) * 0x9e3779b9U);  // fresh dice, also for the candidate turn
-                if (st.judge == Judge::kFair) RestrictToView(*copy, side_index);
-                PlayCandidate(*copy, side_index, k, base_seed, st);
-                v.push_back(Rollout(*copy, side_index, st.horizon, *st.policy));
+                        (rollout + 1) * 0x9e3779b9U);  // fresh dice, also for the candidate turn
+                if (settings.judge == Judge::kFair) RestrictToView(*copy, side_index);
+                PlayCandidate(*copy, side_index, candidate, base_seed, settings);
+                scores.push_back(Rollout(*copy, side_index, settings.horizon, *settings.policy));
             }
         }
-        for (double x : v) c.mean += x;
-        c.mean /= std::max<size_t>(1, v.size());
-        for (double x : v) c.sd += (x - c.mean) * (x - c.mean);
-        c.sd = std::sqrt(c.sd / std::max<size_t>(1, v.size() - 1));
-        c.k = k;
-        c.base_seed = base_seed;
-        out.push_back(std::move(c));
+        for (double score : scores) result.mean += score;
+        result.mean /= std::max<size_t>(1, scores.size());
+        for (double score : scores) result.sd += (score - result.mean) * (score - result.mean);
+        result.sd = std::sqrt(result.sd / std::max<size_t>(1, scores.size() - 1));
+        result.k = candidate;
+        result.base_seed = base_seed;
+        out.push_back(std::move(result));
     }
     return out;
 }
 
+/**
+ * @brief Starts benchmark game number @p case_index, every side a level-2 computer.
+ *
+ * Consecutive pairs of cases share a scenario and preset (they swap seats).
+ *
+ * @param preset_out Receives the index of the preset used.
+ * @param scen_out Receives the scenario name.
+ */
 std::unique_ptr<Game> NewBenchmarkGame(int case_index, uint32_t seed, int& preset_out,
                                        std::string& scen_out) {
-    int i = case_index / 2;
-    scen_out = kScenarios[(i + i / 4) % kScenarios.size()];
-    preset_out = i % 4;
-    const Preset& p = kPresets[preset_out];
-    game::NewGameOptions o;
-    o.seed = seed;
-    o.options = {{"hiddenMap", p.hidden},
-                 {"viewEnemies", 0},
-                 {"diplomacy", p.diplomacy},
-                 {"neutralCities", p.neutral},
-                 {"quests", 1}};
-    for (int s = 0; s < 8; s++) {
-        o.sides[s].computer = true;
-        o.sides[s].level = 2;
-        o.sides[s].card = static_cast<int>((seed + s * 5) % 9);
+    int pair_index = case_index / 2;
+    scen_out = kScenarios[(pair_index + pair_index / 4) % kScenarios.size()];
+    preset_out = pair_index % 4;
+    const Preset& preset = kPresets[preset_out];
+    game::NewGameOptions game_options;
+    game_options.seed = seed;
+    game_options.options = {{"hiddenMap", preset.hidden},
+                            {"viewEnemies", 0},
+                            {"diplomacy", preset.diplomacy},
+                            {"neutralCities", preset.neutral},
+                            {"quests", 1}};
+    for (int side = 0; side < 8; side++) {
+        game_options.sides[side].computer = true;
+        game_options.sides[side].level = 2;
+        game_options.sides[side].card = static_cast<int>((seed + side * 5) % 9);
     }
-    return game::NewGame(kData, scen_out, o);
+    return game::NewGame(kData, scen_out, game_options);
 }
 
-// Modern on alternating seats (swap 0/1), Classic on the rest, as in w2arena.
-std::array<bool, 8> AssignSeats(Game& g, int swap) {
+/**
+ * @brief Puts the Modern AI on alternating seats (@p swap 0/1), the Classic AI on the rest,
+ *        as in w2arena.
+ * @return Which sides play the Modern AI.
+ */
+std::array<bool, 8> AssignSeats(Game& game, int swap) {
     std::array<bool, 8> modern{};
-    int idx = 0;
-    for (int s = 0; s < 8; s++) {
-        Side& side = g.map->sides[s];
+    int seat = 0;
+    for (int side_index = 0; side_index < 8; side_index++) {
+        Side& side = game.map->sides[side_index];
         if (!side.in_use) continue;
-        modern[s] = ((idx + swap) % 2 == 0);
-        side.classic_ai = !modern[s];
-        idx++;
+        modern[side_index] = ((seat + swap) % 2 == 0);
+        side.classic_ai = !modern[side_index];
+        seat++;
     }
     return modern;
 }
 
-double ModernShare(const Game& g, const std::array<bool, 8>& modern) {
-    int m = 0, k = 0;
-    for (const auto& c : g.map->cities) {
-        if (c.razed || c.owner_index < 0 || c.owner_index >= 8) continue;
-        (modern[c.owner_index] ? m : k)++;
+/** @brief The share of the standing owned cities that Modern sides hold (0.5 if none). */
+double ModernShare(const Game& game, const std::array<bool, 8>& modern) {
+    int modern_cities = 0, classic_cities = 0;
+    for (const auto& city : game.map->cities) {
+        if (city.razed || city.owner_index < 0 || city.owner_index >= 8) continue;
+        (modern[city.owner_index] ? modern_cities : classic_cities)++;
     }
-    return (m + k) > 0 ? static_cast<double>(m) / (m + k) : 0.5;
+    return (modern_cities + classic_cities) > 0
+                   ? static_cast<double>(modern_cities) / (modern_cities + classic_cities)
+                   : 0.5;
 }
 
 }  // namespace
 
+/**
+ * @brief Runs the benchmark games in `probe` or `play` mode and prints the results.
+ *
+ * See the file comment for the arguments.
+ */
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::fprintf(stderr,
@@ -237,105 +285,114 @@ int main(int argc, char** argv) {
     }
     std::string mode = argc > 2 ? argv[2] : "probe";
     int seeds = argc > 3 ? std::atoi(argv[3]) : 16;
-    Settings st;
-    st.policy = &policy;
-    st.candidates = argc > 4 ? std::atoi(argv[4]) : 4;
-    st.rollouts = argc > 5 ? std::atoi(argv[5]) : 4;
-    st.horizon = argc > 6 ? std::atoi(argv[6]) : 2;
+    Settings settings;
+    settings.policy = &policy;
+    settings.candidates = argc > 4 ? std::atoi(argv[4]) : 4;
+    settings.rollouts = argc > 5 ? std::atoi(argv[5]) : 4;
+    settings.horizon = argc > 6 ? std::atoi(argv[6]) : 2;
     int turns = argc > 7 ? std::atoi(argv[7]) : 40;
     std::string judge = argc > 8 ? argv[8] : "honest";
-    st.judge = judge == "peek" ? Judge::kPeek : judge == "fair" ? Judge::kFair : Judge::kHonest;
-    st.cand_temp = argc > 9 ? static_cast<float>(std::atof(argv[9])) : 0.5F;
-    st.switch_z = argc > 10 ? static_cast<float>(std::atof(argv[10])) : 0.0F;
+    settings.judge = judge == "peek"   ? Judge::kPeek
+                     : judge == "fair" ? Judge::kFair
+                                       : Judge::kHonest;
+    settings.cand_temp = argc > 9 ? static_cast<float>(std::atof(argv[9])) : 0.5F;
+    settings.switch_z = argc > 10 ? static_cast<float>(std::atof(argv[10])) : 0.0F;
     const uint32_t seed_offset = argc > 11 ? static_cast<uint32_t>(std::atoi(argv[11])) : 0U;
     const bool play = (mode == "play");
 
     const int cases = seeds * 2;
     std::vector<double> shares(cases, 0.5), plain_shares(cases, 0.5);
-    std::mutex mu;
+    std::mutex results_mutex;
     // probe statistics
     long probes = 0, beaten = 0, beaten_clearly = 0;
     double gain_sum = 0.0, rollout_sd_sum = 0.0;
     std::atomic<int> next{0};
-    auto t0 = std::chrono::steady_clock::now();
+    auto start_time = std::chrono::steady_clock::now();
     std::vector<std::thread> pool;
     unsigned workers = std::max(2U, std::thread::hardware_concurrency());
-    for (unsigned w = 0; w < workers; w++) {
+    for (unsigned worker = 0; worker < workers; worker++) {
         pool.emplace_back([&]() {
-            for (int ci; (ci = next.fetch_add(1)) < cases;) {
+            for (int case_index; (case_index = next.fetch_add(1)) < cases;) {
                 int preset = 0;
-                std::string scen;
-                uint32_t seed = kSeedBase + seed_offset + static_cast<uint32_t>(ci / 2);
-                auto gp = NewBenchmarkGame(ci + 2 * static_cast<int>(seed_offset), seed, preset,
-                                           scen);
-                auto modern = AssignSeats(*gp, ci % 2);
-                Side* cur = game::Begin(*gp);
+                std::string scenario;
+                uint32_t seed = kSeedBase + seed_offset + static_cast<uint32_t>(case_index / 2);
+                auto game = NewBenchmarkGame(case_index + 2 * static_cast<int>(seed_offset), seed,
+                                             preset, scenario);
+                auto modern = AssignSeats(*game, case_index % 2);
+                Side* current = game::Begin(*game);
                 int safety = 0;
-                while (cur && !gp->over && !gp->won && gp->turn <= turns && safety++ < turns * 12) {
-                    const int s = cur->index;
+                while (current && !game->over && !game->won && game->turn <= turns &&
+                       safety++ < turns * 12) {
+                    const int side_index = current->index;
                     const bool search_here =
-                            cur->computer && cur->alive && modern[s] &&
+                            current->computer && current->alive && modern[side_index] &&
                             (play ||
-                             (!play && (gp->turn == 10 || gp->turn == 20 || gp->turn == 30)));
+                             (!play && (game->turn == 10 || game->turn == 20 || game->turn == 30)));
                     if (search_here) {
-                        auto cands = ScoreCandidates(*gp, s, st);
+                        auto candidates = ScoreCandidates(*game, side_index, settings);
                         size_t best = 0;
-                        for (size_t k = 1; k < cands.size(); k++)
-                            if (cands[k].mean > cands[best].mean) best = k;
-                        if (best != 0 && st.switch_z > 0.0F) {
+                        for (size_t candidate = 1; candidate < candidates.size(); candidate++)
+                            if (candidates[candidate].mean > candidates[best].mean)
+                                best = candidate;
+                        if (best != 0 && settings.switch_z > 0.0F) {
                             // Conservative switching: noise alone must not pull us off the greedy
                             // turn
-                            double se = std::sqrt(
-                                    (cands[best].sd * cands[best].sd + cands[0].sd * cands[0].sd) /
-                                    std::max(1, st.rollouts));
-                            if (cands[best].mean - cands[0].mean <= st.switch_z * se) best = 0;
+                            double std_error =
+                                    std::sqrt((candidates[best].sd * candidates[best].sd +
+                                               candidates[0].sd * candidates[0].sd) /
+                                              std::max(1, settings.rollouts));
+                            if (candidates[best].mean - candidates[0].mean <=
+                                settings.switch_z * std_error)
+                                best = 0;
                         }
                         if (!play) {
-                            std::lock_guard<std::mutex> lock(mu);
+                            std::lock_guard<std::mutex> lock(results_mutex);
                             probes++;
-                            double gain = cands[best].mean - cands[0].mean;
+                            double gain = candidates[best].mean - candidates[0].mean;
                             gain_sum += gain;
                             if (best != 0) beaten++;
-                            double se = std::sqrt(
-                                    (cands[best].sd * cands[best].sd + cands[0].sd * cands[0].sd) /
-                                    std::max(1, st.rollouts));
-                            if (best != 0 && gain > 2.0 * se) beaten_clearly++;
-                            rollout_sd_sum += cands[0].sd;
-                            PlayOwnTurn(*gp, *cur,
+                            double std_error =
+                                    std::sqrt((candidates[best].sd * candidates[best].sd +
+                                               candidates[0].sd * candidates[0].sd) /
+                                              std::max(1, settings.rollouts));
+                            if (best != 0 && gain > 2.0 * std_error) beaten_clearly++;
+                            rollout_sd_sum += candidates[0].sd;
+                            PlayOwnTurn(*game, *current,
                                         policy);  // probe only: the game itself goes on unsearched
-                        } else if (st.judge == Judge::kPeek) {
-                            gp = std::move(cands[best].after);
-                            cur = gp->map->Side(s);
+                        } else if (settings.judge == Judge::kPeek) {
+                            game = std::move(candidates[best].after);
+                            current = game->map->Side(side_index);
                         } else {
-                            PlayCandidate(*gp, s, cands[best].k, cands[best].base_seed,
-                                          st);  // real dice
+                            PlayCandidate(*game, side_index, candidates[best].k,
+                                          candidates[best].base_seed, settings);  // real dice
                         }
-                    } else if (cur->computer && cur->alive) {
-                        PlayOwnTurn(*gp, *cur, policy);
+                    } else if (current->computer && current->alive) {
+                        PlayOwnTurn(*game, *current, policy);
                     }
-                    cur = game::EndTurn(*gp);
+                    current = game::EndTurn(*game);
                 }
-                double share = ModernShare(*gp, modern);
-                std::lock_guard<std::mutex> lock(mu);
-                shares[ci] = share;
-                std::printf("  case %3d %-8s %-14s share %.3f\n", ci, scen.c_str(),
+                double share = ModernShare(*game, modern);
+                std::lock_guard<std::mutex> lock(results_mutex);
+                shares[case_index] = share;
+                std::printf("  case %3d %-8s %-14s share %.3f\n", case_index, scenario.c_str(),
                             kPresets[preset].label, share);
                 std::fflush(stdout);
             }
         });
     }
-    for (auto& t : pool) t.join();
-    double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    for (auto& thread : pool) thread.join();
+    double sec =
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();
 
     double mean = 0.0;
-    for (double x : shares) mean += x;
+    for (double share : shares) mean += share;
     mean /= std::max(1, cases);
     double var = 0.0;
-    for (double x : shares) var += (x - mean) * (x - mean);
+    for (double share : shares) var += (share - mean) * (share - mean);
     var /= std::max(1, cases - 1);
     std::printf("=== %s | %s | %d games | K=%d R=%d H=%d T=%.2f z=%.1f | %.0f s ===\n",
-                mode.c_str(), judge.c_str(), cases, st.candidates, st.rollouts, st.horizon,
-                st.cand_temp, st.switch_z, sec);
+                mode.c_str(), judge.c_str(), cases, settings.candidates, settings.rollouts,
+                settings.horizon, settings.cand_temp, settings.switch_z, sec);
     std::printf("Modern city share %.1f%% +/- %.1f%% (95%%)\n", 100.0 * mean,
                 196.0 * std::sqrt(var / std::max(1, cases)));
     if (!play && probes > 0) {

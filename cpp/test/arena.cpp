@@ -1,36 +1,41 @@
-// Self-play reinforcement-learning trainer for the Modern AI (`w2arena`).
-//
-// Trains the 4-head PolicyNetwork with PPO + GAE in all-computer games.
-//
-// Objective. A side's reward each turn is the change in its empire score S
-// (computeEmpireScore: 2 x city share + 0.5 x income share + 0.25 x army share,
-// plus a small reconnaissance term under Hidden Map), measured from the start
-// of its turn to the start of its next one, so losses suffered during rivals'
-// turns count. Winning adds +1 and elimination -0.5 (and S drops to 0).
-// Training games are cut off after --turns turns; that cut-off is a time limit,
-// not an end of the game, so the critic's estimate is bootstrapped there.
-// The objective is therefore the discounted growth of S with no fixed horizon,
-// which matches open-ended real games. S is a hand-chosen definition of doing
-// well; everything else (targets, coalitions, production, diplomacy) is learned.
-//
-// Opponents. Each game is either a mirror match (every side plays the current
-// learner and is recorded), a league match (half the sides play a snapshot
-// from the hall of fame), or -- only with --classic-frac > 0 -- a match against
-// the 1993 Classic AI. By default the Classic AI is used solely for evaluation.
-//
-// Evaluation. Two disjoint seed sets, both disjoint from training seeds:
-//   selection: decides which checkpoint is kept (--select-seeds);
-//   report:    measured once at the end, never used for any decision
-//              (--report-seeds).
-// Each seed is played twice with the Modern/Classic side assignment swapped,
-// half the sides each. The figure of merit is the Modern AI's share of the
-// cities held by the two camps when the game is cut off, with a 95% interval.
-//
-// Usage (from the repository root):
-//   bazel-bin/cpp/w2arena [--iterations N] [--games-per-iter G] [--turns T]
-//                     [--eval-every E] [--eval-turns T] [--select-seeds S]
-//                     [--report-seeds R] [--classic-frac F] [--from-scratch]
-//                     [--out PATH] [--log CSV] [--benchmark-only]
+/**
+ * @file
+ * @brief Self-play reinforcement-learning trainer for the Modern AI (`w2arena`).
+ *
+ * Trains the 4-head PolicyNetwork with PPO + GAE in all-computer games.
+ *
+ * Objective. A side's reward each turn is the change in its empire score S
+ * (ComputeEmpireScore: 2 x city share + 0.5 x income share + 0.25 x army share,
+ * plus a small reconnaissance term under Hidden Map), measured from the start
+ * of its turn to the start of its next one, so losses suffered during rivals'
+ * turns count. Winning adds +1 and elimination -0.5 (and S drops to 0).
+ * Training games are cut off after --turns turns; that cut-off is a time limit,
+ * not an end of the game, so the critic's estimate is bootstrapped there.
+ * The objective is therefore the discounted growth of S with no fixed horizon,
+ * which matches open-ended real games. S is a hand-chosen definition of doing
+ * well; everything else (targets, coalitions, production, diplomacy) is learned.
+ *
+ * Opponents. Each game is either a mirror match (every side plays the current
+ * learner and is recorded), a league match (half the sides play a snapshot
+ * from the hall of fame), or -- only with --classic-frac > 0 -- a match against
+ * the 1993 Classic AI. By default the Classic AI is used solely for evaluation.
+ *
+ * Evaluation. Two disjoint seed sets, both disjoint from training seeds:
+ *   - selection: decides which checkpoint is kept (--select-seeds);
+ *   - report: measured once at the end, never used for any decision
+ *     (--report-seeds).
+ *
+ * Each seed is played twice with the Modern/Classic side assignment swapped,
+ * half the sides each. The figure of merit is the Modern AI's share of the
+ * cities held by the two camps when the game is cut off, with a 95% interval.
+ *
+ * Usage (from the repository root):
+ *
+ *     bazel-bin/cpp/w2arena [--iterations N] [--games-per-iter G] [--turns T]
+ *                       [--eval-every E] [--eval-turns T] [--select-seeds S]
+ *                       [--report-seeds R] [--classic-frac F] [--from-scratch]
+ *                       [--out PATH] [--log CSV] [--benchmark-only]
+ */
 
 #include <algorithm>
 #include <atomic>
@@ -63,13 +68,20 @@ namespace ml = w2::ai::ml;
 
 namespace {
 
+/**
+ * @brief A combination of game options that training and evaluation games use.
+ *
+ * Games rotate through the presets so the policy learns to play with and
+ * without hidden map, diplomacy and neutral cities.
+ */
 struct TrainingPreset {
-    const char* label;
-    int hidden_map;
-    int diplomacy;
-    int neutral_cities;
+    const char* label;   ///< Short name printed in the per-preset breakdown.
+    int hidden_map;      ///< Value of the `hiddenMap` game option (0 or 1).
+    int diplomacy;       ///< Value of the `diplomacy` game option (0 or 1).
+    int neutral_cities;  ///< Value of the `neutralCities` game option (0 to 2).
 };
 
+/** @brief The four presets games cycle through. */
 constexpr TrainingPreset kPresets[4] = {
     {"Beginner-Open", 0, 0, 0},
     {"Interm-Diplo", 0, 1, 1},
@@ -77,76 +89,96 @@ constexpr TrainingPreset kPresets[4] = {
     {"Fog-TotalWar", 1, 0, 1},
 };
 
+/** @brief The shipped scenarios games cycle through. */
 const std::vector<std::string> kScenarios = {"ERYTHEA", "ISLADIA", "DRAGON",
                                              "TUTORIA", "SORCERY", "HADESHA"};
 
 // Seed ranges: training uses iter * 1009 + game * 97 + 17 (< 700000 for any
 // sane run); evaluation sets live well above it and never overlap.
+/** @brief First seed of the selection set, which picks the checkpoint kept. */
 constexpr uint32_t kSelectSeedBase = 700000;
+/** @brief First seed of the held-out report set, measured once at the end. */
 constexpr uint32_t kReportSeedBase = 800000;
-// Development A/B comparisons (--compare / --dev-seeds) use their own set, so
-// neither in-run selection nor the held-out report is spent on tuning.
+/**
+ * @brief First seed of the development set (--compare / --dev-seeds).
+ *
+ * Development A/B comparisons use their own set, so neither in-run selection
+ * nor the held-out report is spent on tuning.
+ */
 constexpr uint32_t kDevSeedBase = 750000;
 
-enum class EvalMode { kMixed, kSolo };
-
-struct Config {
-    std::string data_dir = "original";
-    std::string out_path = "cpp/ai_weights.json";
-    std::string log_path;
-    int iterations = 300;
-    int games_per_iter = 48;
-    int max_turns = 40;
-    int eval_every = 10;
-    int eval_turns = 40;
-    int select_seeds = 12;
-    int report_seeds = 32;
-    int epochs = 4;
-    int minibatches = 8;
-    float lr_start = 3.0e-3F;
-    float lr_end = 3.0e-4F;
-    float temp_start = 1.0F;
-    float temp_end = ml::kTrainTemperatureEnd;
-    float eval_temp =
-            ml::kDeployTemperature;  // --eval-temp: temperature evaluation games sample at
-    float clip_eps = 0.2F;
-    float ent_coef = 0.01F;
-    float value_coef = 0.5F;
-    float gamma = 0.97F;
-    float gae_lambda = 0.95F;
-    float local_weight = 1.0F;
-    float target_kl = 0.03F;
-    float max_grad_norm = 0.5F;
-    float classic_frac = 0.0F;
-    float random_map_frac = 0.0F;
-    int active_sides = 8;
-    int crop_margin = 0;
-    uint32_t seed_offset = 0;
-    float win_reward = 1.0F;
-    float elimination_reward = -0.5F;
-    bool solo_learner = false;
-    bool from_scratch = false;
-    bool benchmark_only = false;
-    EvalMode eval_mode = EvalMode::kMixed;
-    std::string compare_path;  // --compare: B checkpoint, A is --out
-    int dev_seeds = 0;         // --dev-seeds: benchmark/compare on the development set
-    bool breakdown = false;
-    int critic_warmup = 0;    // --critic-warmup: iterations where only the critics learn
-    float mixed_frac = 0.0F;  // --mixed-frac: solo-learner games played 4 vs 4 instead (all learner
-                              // seats recorded)
-    int save_every = 0;       // --save-every: also write <out>.iterN.json snapshots
-    float raider_frac =
-            0.0F;  // --raider-frac: share of Classic training seats played by the Raider
-    float departure_weight =
-            0.0F;             // --departure-weight: credit a city loss to the move that emptied it
-    std::string frozen_path;  // --frozen-opponent: fixed Modern checkpoint some opponent seats play
-    float frozen_frac = 0.0F;  // --frozen-frac: share of non-learner training seats played by it
-    int search_k = 0;  // --search-k: candidate turns per learner turn (0 = no search training)
-    int search_r = 2;  // --search-r: rollouts (dice copies) per candidate
-    int search_h = 2;  // --search-h: rounds played on after a candidate turn
-    opponents::Kind eval_opponent = opponents::Kind::kClassic;  // --eval-opponent classic|raider
+/** @brief How evaluation games split the seats between Modern and Classic AI. */
+enum class EvalMode {
+    kMixed,  ///< Half the sides each, alternating seats (4 vs 4).
+    kSolo,   ///< One Modern side against K-1 Classic sides.
 };
 
+/** @brief Training and evaluation settings, filled from the command line. */
+struct Config {
+    std::string data_dir = "original";            ///< --data: game data directory.
+    std::string out_path = "cpp/ai_weights.json";  ///< --out: checkpoint read and written.
+    std::string log_path;  ///< --log: CSV file with one line per iteration (none if empty).
+    int iterations = 300;  ///< --iterations: training iterations to run.
+    int games_per_iter = 48;  ///< --games-per-iter: rollout games per iteration.
+    int max_turns = 40;       ///< --turns: training games are cut off after this turn.
+    int eval_every = 10;      ///< --eval-every: iterations between selection evaluations.
+    int eval_turns = 40;      ///< --eval-turns: evaluation games are cut off after this turn.
+    int select_seeds = 12;    ///< --select-seeds: seeds in the selection set.
+    int report_seeds = 32;    ///< --report-seeds: seeds in the held-out report set.
+    int epochs = 4;           ///< --epochs: PPO passes over each iteration's turns.
+    int minibatches = 8;      ///< --minibatches: minibatches per epoch.
+    float lr_start = 3.0e-3F;  ///< --lr: learning rate at the first iteration.
+    float lr_end = 3.0e-4F;    ///< Learning rate at the last iteration (linear decay).
+    float temp_start = 1.0F;   ///< --temp-start: sampling temperature at the first iteration.
+    float temp_end = ml::kTrainTemperatureEnd;  ///< --temp-end: temperature at the last one.
+    float eval_temp =
+            ml::kDeployTemperature;  ///< --eval-temp: temperature evaluation games sample at.
+    float clip_eps = 0.2F;           ///< PPO clipping range of the probability ratio.
+    float ent_coef = 0.01F;          ///< Weight of the entropy bonus.
+    float value_coef = 0.5F;         ///< Weight of the critics' losses.
+    float gamma = 0.97F;             ///< Discount per own turn.
+    float gae_lambda = 0.95F;        ///< --lambda: GAE lambda.
+    float local_weight = 1.0F;  ///< --local-weight: weight of the per-stack local advantage.
+    float target_kl = 0.03F;    ///< An iteration stops its epochs once the KL exceeds this.
+    float max_grad_norm = 0.5F;  ///< Gradients are clipped to this global norm.
+    float classic_frac = 0.0F;   ///< --classic-frac: share of training games against Classic.
+    float random_map_frac = 0.0F;  ///< --random-map-frac: share of games on a random map.
+    int active_sides = 8;          ///< --active-sides: sides in play (2 to 8).
+    int crop_margin = 0;           ///< --crop-margin: crop the map around the sides in play.
+    uint32_t seed_offset = 0;      ///< --seed-offset: added to every training seed.
+    float win_reward = 1.0F;       ///< Terminal reward for winning the game.
+    float elimination_reward = -0.5F;  ///< Terminal reward for being eliminated.
+    bool solo_learner = false;  ///< --solo-learner: one learner seat against Classic AI.
+    bool from_scratch = false;  ///< --from-scratch: ignore an existing checkpoint.
+    bool benchmark_only = false;  ///< --benchmark-only: evaluate the checkpoint and stop.
+    EvalMode eval_mode = EvalMode::kMixed;  ///< --eval-mode: seat split of evaluation games.
+    std::string compare_path;  ///< --compare: B checkpoint, A is --out
+    int dev_seeds = 0;         ///< --dev-seeds: benchmark/compare on the development set
+    bool breakdown = false;    ///< --breakdown: print shares per preset and scenario.
+    int critic_warmup = 0;     ///< --critic-warmup: iterations where only the critics learn
+    float mixed_frac = 0.0F;   ///< --mixed-frac: solo-learner games played 4 vs 4 instead (all
+                               ///< learner seats recorded)
+    int save_every = 0;        ///< --save-every: also write <out>.iterN.json snapshots
+    float raider_frac =
+            0.0F;  ///< --raider-frac: share of Classic training seats played by the Raider
+    float departure_weight =
+            0.0F;  ///< --departure-weight: credit a city loss to the move that emptied it
+    std::string frozen_path;  ///< --frozen-opponent: fixed Modern checkpoint some opponent seats
+                              ///< play
+    float frozen_frac = 0.0F;  ///< --frozen-frac: share of non-learner training seats played by it
+    int search_k = 0;  ///< --search-k: candidate turns per learner turn (0 = no search training)
+    int search_r = 2;  ///< --search-r: rollouts (dice copies) per candidate
+    int search_h = 2;  ///< --search-h: rounds played on after a candidate turn
+    opponents::Kind eval_opponent =
+            opponents::Kind::kClassic;  ///< --eval-opponent classic|raider|frozen
+};
+
+/**
+ * @brief Builds the options of an all-computer game for one preset and seed.
+ *
+ * The seed also picks each side's starting card, so games of different seeds
+ * differ even on the same scenario.
+ */
 game::NewGameOptions GameOptions(const Config& cfg, const TrainingPreset& preset, uint32_t seed) {
     game::NewGameOptions opts;
     opts.seed = static_cast<double>(seed);
@@ -167,6 +199,13 @@ game::NewGameOptions GameOptions(const Config& cfg, const TrainingPreset& preset
     return opts;
 }
 
+/**
+ * @brief Starts a game of `scenario`, or of a freshly generated random map.
+ *
+ * A random map is used when the scenario is "RANDOM", or, when
+ * `allow_random_map` is set, for the --random-map-frac share of seeds (picked
+ * by a hash of the seed, so the choice is reproducible).
+ */
 std::unique_ptr<Game> MakeArenaGame(const Config& cfg, const std::string& scenario,
                                     const TrainingPreset& preset, uint32_t seed,
                                     bool allow_random_map) {
@@ -175,13 +214,13 @@ std::unique_ptr<Game> MakeArenaGame(const Config& cfg, const std::string& scenar
                      static_cast<float>(1U << 24);
     if ((allow_random_map && map_roll < cfg.random_map_frac) || scenario == "RANDOM") {
         Rng map_rng(static_cast<double>(seed ^ 0x5bf03635U));
-        randommap::Options ropts;
-        ropts.data_dir = cfg.data_dir;
-        ropts.rng = &map_rng;
-        ropts.sliders = {3, 3, 2, 3};
-        ropts.allies = preset.diplomacy != 0;
-        ropts.terrain_set = 0;
-        auto files = randommap::GenerateNow(ropts);
+        randommap::Options map_options;
+        map_options.data_dir = cfg.data_dir;
+        map_options.rng = &map_rng;
+        map_options.sliders = {3, 3, 2, 3};
+        map_options.allies = preset.diplomacy != 0;
+        map_options.terrain_set = 0;
+        auto files = randommap::GenerateNow(map_options);
         opts.memory_files = &files;
         return game::NewGame(cfg.data_dir, "RANDOM", opts);
     }
@@ -190,68 +229,91 @@ std::unique_ptr<Game> MakeArenaGame(const Config& cfg, const std::string& scenar
 
 // ---------------------------------------------------------------- rollouts
 
+/** @brief The recorded turns of one learner side in one game, and how it ended. */
 struct SideEpisode {
-    int side_index = 0;
-    std::vector<ml::TurnStepRecord> turns;
-    float final_score = 0.0F;      // S when the game ended or was cut off
-    bool terminal = false;         // eliminated or game over: no bootstrap
-    float terminal_reward = 0.0F;  // win / elimination bonus
-    float bootstrap_value = 0.0F;  // V(s) at the cut-off when not terminal
-    int final_cities = 0;
-    bool searched = false;  // turns carry search-based advantages (no GAE)
+    int side_index = 0;                       ///< The side the turns were played for.
+    std::vector<ml::TurnStepRecord> turns;    ///< The side's turns, in order.
+    float final_score = 0.0F;      ///< S when the game ended or was cut off
+    bool terminal = false;         ///< eliminated or game over: no bootstrap
+    float terminal_reward = 0.0F;  ///< win / elimination bonus
+    float bootstrap_value = 0.0F;  ///< V(s) at the cut-off when not terminal
+    int final_cities = 0;          ///< Cities the side held at the end.
+    bool searched = false;  ///< turns carry search-based advantages (no GAE)
 };
 
+/** @brief What one rollout game produced: its episodes and a few totals for the log. */
 struct RolloutSummary {
-    std::vector<SideEpisode> episodes;
-    int recorded_cities = 0;
-    int recorded_sides = 0;
-    int neutrals_left = 0;
+    std::vector<SideEpisode> episodes;  ///< One per recorded side that played a turn.
+    int recorded_cities = 0;  ///< Cities the recorded sides held at the end, summed.
+    int recorded_sides = 0;   ///< Number of recorded sides.
+    int neutrals_left = 0;    ///< Cities still neutral at the end.
 };
 
-enum class Opponent { kMirror, kLeague, kClassic };
+/** @brief Who the non-recorded sides of a training game are. */
+enum class Opponent {
+    kMirror,   ///< Every side plays the current learner and is recorded.
+    kLeague,   ///< Half the sides play a hall-of-fame snapshot.
+    kClassic,  ///< Half the sides play the Classic AI.
+};
 
-// The fixed Modern checkpoint Frozen opponents play (--frozen-opponent); set
-// once in main before any game starts.
+/**
+ * @brief The fixed Modern checkpoint Frozen opponents play (--frozen-opponent).
+ *
+ * Set once in main before any game starts.
+ */
 const ml::PolicyNetwork* g_frozen = nullptr;
 
-// Departure credit: for each move of `turn` that left an own city empty (and
-// still empty when the turn ended), record that city's weight in the empire
-// score if `side` no longer holds it now, i.e. it fell before this side's next
-// turn. The loss is already in the turn's reward; this only says which move
-// caused it.
-void MarkDepartures(const Game& g, int side, ml::TurnStepRecord& turn) {
+/**
+ * @brief Records which of a turn's moves left an own city to be taken.
+ *
+ * Departure credit: for each move of `turn` that left an own city empty (and
+ * still empty when the turn ended), record that city's weight in the empire
+ * score if `side` no longer holds it now, i.e. it fell before this side's next
+ * turn. The loss is already in the turn's reward; this only says which move
+ * caused it.
+ */
+void MarkDepartures(const Game& game, int side, ml::TurnStepRecord& turn) {
     int standing = 0, total_income = 0;
-    for (const auto& c : g.map->cities) {
-        if (c.razed) continue;
+    for (const auto& city : game.map->cities) {
+        if (city.razed) continue;
         standing++;
-        total_income += std::max(1, c.income);
+        total_income += std::max(1, city.income);
     }
-    for (auto& ms : turn.mission_steps) {
-        if (ms.vacated_city == kNone || ms.vacated_city >= static_cast<int>(g.map->cities.size()))
+    for (auto& step : turn.mission_steps) {
+        if (step.vacated_city == kNone ||
+            step.vacated_city >= static_cast<int>(game.map->cities.size()))
             continue;
-        const City& c = g.map->cities[ms.vacated_city];
-        if (!c.razed && c.owner_index == side) continue;
-        ms.vacated_loss = 2.0F / static_cast<float>(std::max(1, standing)) +
-                          0.5F * static_cast<float>(std::max(1, c.income)) /
-                                  static_cast<float>(std::max(1, total_income));
+        const City& vacated = game.map->cities[step.vacated_city];
+        if (!vacated.razed && vacated.owner_index == side) continue;
+        step.vacated_loss = 2.0F / static_cast<float>(std::max(1, standing)) +
+                            0.5F * static_cast<float>(std::max(1, vacated.income)) /
+                                    static_cast<float>(std::max(1, total_income));
     }
 }
 
+/**
+ * @brief Plays one training game and returns the recorded sides' episodes.
+ *
+ * Seats are assigned per `mode` (or per --solo-learner / --mixed-frac): learner
+ * seats sample from `learner` and are recorded, the others play the Classic
+ * AI, the Raider, the Frozen checkpoint or `snapshot`. When the game is cut off,
+ * each living recorded side's critic value is kept for bootstrapping.
+ */
 RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
                           const TrainingPreset& preset, uint32_t seed, float temperature,
                           const ml::PolicyNetwork& learner, const ml::PolicyNetwork& snapshot,
                           Opponent mode) {
-    auto gp = MakeArenaGame(cfg, scenario, preset, seed, true);
-    Game& g = *gp;
+    auto owned_game = MakeArenaGame(cfg, scenario, preset, seed, true);
+    Game& game = *owned_game;
 
     std::array<bool, 8> recorded{};
     std::array<bool, 8> classic{};
     std::array<opponents::Kind, 8> classic_kind{};
-    std::array<SideEpisode, 8> eps{};
+    std::array<SideEpisode, 8> episodes{};
     std::array<ml::RolloutSampler, 8> samplers{};
     int active_count = 0;
-    for (int s = 0; s < 8; s++) {
-        if (g.map->sides[s].in_use) active_count++;
+    for (int side_index = 0; side_index < 8; side_index++) {
+        if (game.map->sides[side_index].in_use) active_count++;
     }
     int solo_seat =
             active_count > 0 ? static_cast<int>(seed % static_cast<uint32_t>(active_count)) : 0;
@@ -261,95 +323,100 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
                      static_cast<float>(1U << 24);
     const bool solo = cfg.solo_learner && !(mix_roll < cfg.mixed_frac);
     const bool mixed_vs_classic = cfg.solo_learner && !solo;
-    int idx = 0;
-    for (int s = 0; s < 8; s++) {
-        Side& side = g.map->sides[s];
+    int seat = 0;
+    for (int side_index = 0; side_index < 8; side_index++) {
+        Side& side = game.map->sides[side_index];
         if (!side.in_use) continue;
-        bool learner_side = solo ? (idx == solo_seat)
+        bool learner_side = solo ? (seat == solo_seat)
                             : mixed_vs_classic
-                                    ? ((idx + seed) % 2 == 0)
-                                    : ((mode == Opponent::kMirror) || ((idx + seed) % 2 == 0));
-        idx++;
-        recorded[s] = learner_side;
-        classic[s] = (solo || mixed_vs_classic) ? !learner_side
-                                                : ((mode == Opponent::kClassic) && !learner_side);
-        side.classic_ai = classic[s];
-        float raid_roll =
-                static_cast<float>(
-                        ((seed * 747796405U) ^ static_cast<uint32_t>((s + 1) * 2891336453U)) >> 8) /
-                static_cast<float>(1U << 24);
+                                    ? ((seat + seed) % 2 == 0)
+                                    : ((mode == Opponent::kMirror) || ((seat + seed) % 2 == 0));
+        seat++;
+        recorded[side_index] = learner_side;
+        classic[side_index] = (solo || mixed_vs_classic)
+                                      ? !learner_side
+                                      : ((mode == Opponent::kClassic) && !learner_side);
+        side.classic_ai = classic[side_index];
+        float raid_roll = static_cast<float>(((seed * 747796405U) ^
+                                              static_cast<uint32_t>((side_index + 1) * 2891336453U)) >>
+                                             8) /
+                          static_cast<float>(1U << 24);
         float frozen_roll = static_cast<float>(((seed * 2654435769U) ^
-                                                static_cast<uint32_t>((s + 1) * 3266489917U)) >>
+                                                static_cast<uint32_t>((side_index + 1) * 3266489917U)) >>
                                                8) /
                             static_cast<float>(1U << 24);
-        classic_kind[s] =
+        classic_kind[side_index] =
                 raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
-        if (classic[s] && g_frozen && frozen_roll < cfg.frozen_frac) {
-            classic_kind[s] = opponents::Kind::kFrozen;
+        if (classic[side_index] && g_frozen && frozen_roll < cfg.frozen_frac) {
+            classic_kind[side_index] = opponents::Kind::kFrozen;
             side.classic_ai = false;  // a Modern AI seat, just not a learning one
         }
-        eps[s].side_index = s;
-        samplers[s].rng_state = (seed * 2654435761U) ^ static_cast<uint32_t>((s + 1) * 2246822519U);
-        samplers[s].temperature = temperature;
+        episodes[side_index].side_index = side_index;
+        samplers[side_index].rng_state =
+                (seed * 2654435761U) ^ static_cast<uint32_t>((side_index + 1) * 2246822519U);
+        samplers[side_index].temperature = temperature;
     }
 
-    Side* cur = game::Begin(g);
+    Side* current = game::Begin(game);
     int safety = 0;
-    while (cur && !g.over && !g.won && g.turn <= cfg.max_turns && safety < cfg.max_turns * 12) {
+    while (current && !game.over && !game.won && game.turn <= cfg.max_turns &&
+           safety < cfg.max_turns * 12) {
         safety++;
-        int s = cur->index;
-        if (cur->computer && cur->alive) {
-            if (recorded[s]) {
-                if (!eps[s].turns.empty()) MarkDepartures(g, s, eps[s].turns.back());
-                eps[s].turns.emplace_back();
-                samplers[s].current_turn = &eps[s].turns.back();
-                ai::modern::PlayTurn(g, *cur, nullptr, &learner, &samplers[s]);
-                samplers[s].current_turn = nullptr;
-            } else if (classic[s]) {
-                opponents::PlayTurn(g, *cur, classic_kind[s], g_frozen);
+        int side_index = current->index;
+        if (current->computer && current->alive) {
+            if (recorded[side_index]) {
+                if (!episodes[side_index].turns.empty())
+                    MarkDepartures(game, side_index, episodes[side_index].turns.back());
+                episodes[side_index].turns.emplace_back();
+                samplers[side_index].current_turn = &episodes[side_index].turns.back();
+                ai::modern::PlayTurn(game, *current, nullptr, &learner, &samplers[side_index]);
+                samplers[side_index].current_turn = nullptr;
+            } else if (classic[side_index]) {
+                opponents::PlayTurn(game, *current, classic_kind[side_index], g_frozen);
             } else {
-                ml::RolloutSampler opp;
-                opp.rng_state = samplers[s].rng_state ^ static_cast<uint32_t>(g.turn * 374761393U);
-                opp.temperature = temperature;
-                ai::modern::PlayTurn(g, *cur, nullptr, &snapshot, &opp);
+                ml::RolloutSampler opponent_sampler;
+                opponent_sampler.rng_state = samplers[side_index].rng_state ^
+                                             static_cast<uint32_t>(game.turn * 374761393U);
+                opponent_sampler.temperature = temperature;
+                ai::modern::PlayTurn(game, *current, nullptr, &snapshot, &opponent_sampler);
             }
         }
-        cur = game::EndTurn(g);
+        current = game::EndTurn(game);
     }
 
-    RolloutSummary out;
+    RolloutSummary summary;
     std::array<int, 8> cities{};
-    for (const auto& c : g.map->cities) {
-        if (c.razed) continue;
-        if (c.owner_index == kNone)
-            out.neutrals_left++;
-        else if (c.owner_index >= 0 && c.owner_index < 8)
-            cities[c.owner_index]++;
+    for (const auto& city : game.map->cities) {
+        if (city.razed) continue;
+        if (city.owner_index == kNone)
+            summary.neutrals_left++;
+        else if (city.owner_index >= 0 && city.owner_index < 8)
+            cities[city.owner_index]++;
     }
-    for (int s = 0; s < 8; s++) {
-        if (!recorded[s] || eps[s].turns.empty()) continue;
-        Side& side = g.map->sides[s];
-        SideEpisode& ep = eps[s];
-        MarkDepartures(g, s, ep.turns.back());
-        ep.final_cities = cities[s];
-        ep.final_score = ml::ComputeEmpireScore(g, s);
+    for (int side_index = 0; side_index < 8; side_index++) {
+        if (!recorded[side_index] || episodes[side_index].turns.empty()) continue;
+        Side& side = game.map->sides[side_index];
+        SideEpisode& episode = episodes[side_index];
+        MarkDepartures(game, side_index, episode.turns.back());
+        episode.final_cities = cities[side_index];
+        episode.final_score = ml::ComputeEmpireScore(game, side_index);
         if (!side.alive) {
-            ep.terminal = true;
-            ep.terminal_reward = cfg.elimination_reward;
-        } else if (g.over || g.won) {
-            ep.terminal = true;
-            bool won_game = (g.ending.winner && g.ending.winner->index == s);
-            ep.terminal_reward = won_game ? cfg.win_reward : 0.0F;
+            episode.terminal = true;
+            episode.terminal_reward = cfg.elimination_reward;
+        } else if (game.over || game.won) {
+            episode.terminal = true;
+            bool won_game = (game.ending.winner && game.ending.winner->index == side_index);
+            episode.terminal_reward = won_game ? cfg.win_reward : 0.0F;
         } else {
-            ai::belief::Update(g, side);
-            ep.bootstrap_value = learner.EvaluateValue(ml::BuildContext(g, side),
-                                                       ml::BuildCriticFeatures(g, side));
+            ai::belief::Update(game, side);
+            episode.bootstrap_value = learner.EvaluateValue(ml::BuildContext(game, side),
+                                                            ml::BuildCriticFeatures(game, side));
         }
-        out.recorded_cities += cities[s];
-        out.recorded_sides++;
-        out.episodes.push_back(std::move(ep));
+        summary.recorded_cities += cities[side_index];
+        summary.recorded_sides++;
+        summary.episodes.push_back(std::move(episode));
     }
-    return out;
+    return summary;
 }
 
 // ---------------------------------------------------------------- search training
@@ -366,130 +433,147 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
 // that is privileged information, used only to train; the policy still plays
 // on fair information.
 
-std::unique_ptr<Game> CopyGame(const Config& cfg, const Game& g) {
-    return save::Decode(save::Encode(g), cfg.data_dir);
+/** @brief Returns an independent copy of `game`, made by saving and loading it. */
+std::unique_ptr<Game> CopyGame(const Config& cfg, const Game& game) {
+    return save::Decode(save::Encode(game), cfg.data_dir);
 }
 
+/**
+ * @brief Plays one search-training game (--search-k) for a single learner seat.
+ *
+ * See the section comment above: each learner turn is tried --search-k times,
+ * each candidate is valued by --search-r rollouts of --search-h rounds, and the
+ * game goes on from the best candidate. All candidates are recorded, with
+ * their value minus the candidates' mean as the advantage.
+ */
 RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                                 const TrainingPreset& preset, uint32_t seed, float temperature,
                                 const ml::PolicyNetwork& learner) {
-    auto gp = MakeArenaGame(cfg, scenario, preset, seed, false);
+    auto current_game = MakeArenaGame(cfg, scenario, preset, seed, false);
     int active_count = 0;
-    for (int s = 0; s < 8; s++) {
-        if (gp->map->sides[s].in_use) active_count++;
+    for (int side_index = 0; side_index < 8; side_index++) {
+        if (current_game->map->sides[side_index].in_use) active_count++;
     }
     const int solo_seat =
             active_count > 0 ? static_cast<int>(seed % static_cast<uint32_t>(active_count)) : 0;
     int learner_side = kNone;
     std::array<opponents::Kind, 8> kind{};
-    int idx = 0;
-    for (int s = 0; s < 8; s++) {
-        Side& side = gp->map->sides[s];
+    int seat = 0;
+    for (int side_index = 0; side_index < 8; side_index++) {
+        Side& side = current_game->map->sides[side_index];
         if (!side.in_use) continue;
-        const bool me = (idx++ == solo_seat);
-        if (me) learner_side = s;
-        side.classic_ai = !me;
-        float raid_roll =
-                static_cast<float>(
-                        ((seed * 747796405U) ^ static_cast<uint32_t>((s + 1) * 2891336453U)) >> 8) /
-                static_cast<float>(1U << 24);
+        const bool is_learner = (seat++ == solo_seat);
+        if (is_learner) learner_side = side_index;
+        side.classic_ai = !is_learner;
+        float raid_roll = static_cast<float>(((seed * 747796405U) ^
+                                              static_cast<uint32_t>((side_index + 1) * 2891336453U)) >>
+                                             8) /
+                          static_cast<float>(1U << 24);
         float frozen_roll = static_cast<float>(((seed * 2654435769U) ^
-                                                static_cast<uint32_t>((s + 1) * 3266489917U)) >>
+                                                static_cast<uint32_t>((side_index + 1) * 3266489917U)) >>
                                                8) /
                             static_cast<float>(1U << 24);
-        kind[s] =
+        kind[side_index] =
                 raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
-        if (!me && g_frozen && frozen_roll < cfg.frozen_frac) {
-            kind[s] = opponents::Kind::kFrozen;
+        if (!is_learner && g_frozen && frozen_roll < cfg.frozen_frac) {
+            kind[side_index] = opponents::Kind::kFrozen;
             side.classic_ai = false;
         }
     }
 
     // Every side's normal play; the learner plays greedily outside its searched turn
-    auto play_side = [&](Game& g, Side& side) {
+    auto play_side = [&](Game& game, Side& side) {
         if (side.index == learner_side)
-            ai::modern::PlayTurn(g, side, nullptr, &learner, nullptr);
+            ai::modern::PlayTurn(game, side, nullptr, &learner, nullptr);
         else
-            opponents::PlayTurn(g, side, kind[side.index], g_frozen);
+            opponents::PlayTurn(game, side, kind[side.index], g_frozen);
     };
-    auto rollout_value = [&](Game& g) {
-        const int stop_turn = g.turn + cfg.search_h;
-        Side* cur = game::EndTurn(g);
+    // Plays a copy on for --search-h rounds and returns the learner's empire score
+    auto rollout_value = [&](Game& game) {
+        const int stop_turn = game.turn + cfg.search_h;
+        Side* current = game::EndTurn(game);
         int safety = 0;
-        while (cur && !g.over && !g.won && g.turn < stop_turn && safety++ < cfg.search_h * 12) {
-            if (cur->computer && cur->alive) play_side(g, *cur);
-            cur = game::EndTurn(g);
+        while (current && !game.over && !game.won && game.turn < stop_turn &&
+               safety++ < cfg.search_h * 12) {
+            if (current->computer && current->alive) play_side(game, *current);
+            current = game::EndTurn(game);
         }
-        return ml::ComputeEmpireScore(g, learner_side);
+        return ml::ComputeEmpireScore(game, learner_side);
     };
 
-    RolloutSummary out;
-    SideEpisode search_ep;
-    search_ep.side_index = learner_side;
-    search_ep.searched = true;
-    Side* cur = game::Begin(*gp);
+    RolloutSummary summary;
+    SideEpisode search_episode;
+    search_episode.side_index = learner_side;
+    search_episode.searched = true;
+    Side* current = game::Begin(*current_game);
     int safety = 0;
-    while (cur && !gp->over && !gp->won && gp->turn <= cfg.max_turns &&
-           safety++ < cfg.max_turns * 12) {
-        const int s = cur->index;
-        if (cur->computer && cur->alive && s == learner_side) {
-            std::vector<std::unique_ptr<Game>> after;
-            std::vector<ml::TurnStepRecord> recs(cfg.search_k);
-            std::vector<double> value(cfg.search_k, 0.0);
-            for (int k = 0; k < cfg.search_k; k++) {
-                auto cand = CopyGame(cfg, *gp);
+    while (current && !current_game->over && !current_game->won &&
+           current_game->turn <= cfg.max_turns && safety++ < cfg.max_turns * 12) {
+        const int side_index = current->index;
+        if (current->computer && current->alive && side_index == learner_side) {
+            std::vector<std::unique_ptr<Game>> candidate_games;
+            std::vector<ml::TurnStepRecord> candidate_turns(cfg.search_k);
+            std::vector<double> values(cfg.search_k, 0.0);
+            for (int candidate = 0; candidate < cfg.search_k; candidate++) {
+                auto candidate_game = CopyGame(cfg, *current_game);
                 ml::RolloutSampler sampler;
                 sampler.temperature = temperature;
                 sampler.rng_state = (seed * 2654435761U) ^
-                                    static_cast<uint32_t>((gp->turn + 1) * 40503U) ^
-                                    static_cast<uint32_t>((k + 1) * 2246822519U);
-                sampler.current_turn = &recs[k];
-                ai::modern::PlayTurn(*cand, *cand->map->Side(s), nullptr, &learner, &sampler);
+                                    static_cast<uint32_t>((current_game->turn + 1) * 40503U) ^
+                                    static_cast<uint32_t>((candidate + 1) * 2246822519U);
+                sampler.current_turn = &candidate_turns[candidate];
+                ai::modern::PlayTurn(*candidate_game, *candidate_game->map->Side(side_index),
+                                     nullptr, &learner, &sampler);
                 sampler.current_turn = nullptr;
-                for (int r = 0; r < cfg.search_r; r++) {
-                    auto copy = CopyGame(cfg, *cand);
-                    copy->rng.state ^= static_cast<uint32_t>((r + 1) * 0x9e3779b9U);
-                    value[k] += rollout_value(*copy);
+                for (int rollout = 0; rollout < cfg.search_r; rollout++) {
+                    auto copy = CopyGame(cfg, *candidate_game);
+                    copy->rng.state ^= static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U);
+                    values[candidate] += rollout_value(*copy);
                 }
-                value[k] /= cfg.search_r;
-                after.push_back(std::move(cand));
+                values[candidate] /= cfg.search_r;
+                candidate_games.push_back(std::move(candidate_game));
             }
             double mean = 0.0;
-            for (double v : value) mean += v;
+            for (double value : values) mean += value;
             mean /= std::max(1, cfg.search_k);
             size_t best = 0;
-            for (int k = 0; k < cfg.search_k; k++) {
-                if (value[k] > value[best]) best = static_cast<size_t>(k);
-                auto& tr = recs[k];
-                tr.advantage = static_cast<float>(value[k] - mean);
-                tr.return_target = std::numeric_limits<float>::quiet_NaN();  // no critic target
-                for (auto& ms : tr.mission_steps) {
-                    ms.advantage = tr.advantage;
-                    ms.stack_return_target = std::numeric_limits<float>::quiet_NaN();
+            for (int candidate = 0; candidate < cfg.search_k; candidate++) {
+                if (values[candidate] > values[best]) best = static_cast<size_t>(candidate);
+                auto& turn = candidate_turns[candidate];
+                turn.advantage = static_cast<float>(values[candidate] - mean);
+                turn.return_target = std::numeric_limits<float>::quiet_NaN();  // no critic target
+                for (auto& step : turn.mission_steps) {
+                    step.advantage = turn.advantage;
+                    step.stack_return_target = std::numeric_limits<float>::quiet_NaN();
                 }
-                search_ep.turns.push_back(std::move(tr));
+                search_episode.turns.push_back(std::move(turn));
             }
-            gp = std::move(after[best]);
-            cur = gp->map->Side(s);
-        } else if (cur->computer && cur->alive) {
-            play_side(*gp, *cur);
+            current_game = std::move(candidate_games[best]);
+            current = current_game->map->Side(side_index);
+        } else if (current->computer && current->alive) {
+            play_side(*current_game, *current);
         }
-        cur = game::EndTurn(*gp);
+        current = game::EndTurn(*current_game);
     }
-    for (const auto& c : gp->map->cities) {
-        if (c.razed) continue;
-        if (c.owner_index == kNone)
-            out.neutrals_left++;
-        else if (c.owner_index == learner_side)
-            out.recorded_cities++;
+    for (const auto& city : current_game->map->cities) {
+        if (city.razed) continue;
+        if (city.owner_index == kNone)
+            summary.neutrals_left++;
+        else if (city.owner_index == learner_side)
+            summary.recorded_cities++;
     }
-    out.recorded_sides = 1;
-    if (!search_ep.turns.empty()) out.episodes.push_back(std::move(search_ep));
-    return out;
+    summary.recorded_sides = 1;
+    if (!search_episode.turns.empty()) summary.episodes.push_back(std::move(search_episode));
+    return summary;
 }
 
-// GAE over each side's own turns, plus optional per-stack multi-turn local
-// credit tracked over non-recycled Game::pool Army* identities.
+/**
+ * @brief Fills in each turn's and each move's advantage and critic targets.
+ *
+ * GAE over each side's own turns, plus optional per-stack multi-turn local
+ * credit tracked over non-recycled Game::pool Army* identities. Episodes from
+ * search training already carry their advantages and are skipped.
+ */
 void ComputeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda,
                        float local_weight, float departure_weight) {
     constexpr float kStackGamma = 0.90F;
@@ -498,590 +582,691 @@ void ComputeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
     // above, so the signal teaches *when* to leave, not "never leave".
     double vac_sum = 0.0;
     int vac_count = 0;
-    for (const auto& ep : episodes) {
-        for (const auto& tr : ep.turns) {
-            for (const auto& ms : tr.mission_steps) {
-                if (ms.vacated_city == kNone) continue;
-                vac_sum += ms.vacated_loss;
+    for (const auto& episode : episodes) {
+        for (const auto& turn : episode.turns) {
+            for (const auto& step : turn.mission_steps) {
+                if (step.vacated_city == kNone) continue;
+                vac_sum += step.vacated_loss;
                 vac_count++;
             }
         }
     }
     const float vac_mean = vac_count > 0 ? static_cast<float>(vac_sum / vac_count) : 0.0F;
-    for (auto& ep : episodes) {
-        if (ep.searched) continue;  // advantages came from comparing candidate turns
-        const int turn_count = static_cast<int>(ep.turns.size());
+    for (auto& episode : episodes) {
+        if (episode.searched) continue;  // advantages came from comparing candidate turns
+        const int turn_count = static_cast<int>(episode.turns.size());
         float gae = 0.0F;
         std::unordered_map<std::uintptr_t, float> unit_future_local;
-        for (int t = turn_count - 1; t >= 0; t--) {
-            auto& cur = ep.turns[t];
-            bool last = (t == turn_count - 1);
-            float next_score = last ? ep.final_score : ep.turns[t + 1].start_score;
-            float next_value =
-                    last ? (ep.terminal ? 0.0F : ep.bootstrap_value) : ep.turns[t + 1].value_pred;
-            float reward = (next_score - cur.start_score) + (last ? ep.terminal_reward : 0.0F);
-            float delta = reward + gamma * next_value - cur.value_pred;
+        for (int turn_index = turn_count - 1; turn_index >= 0; turn_index--) {
+            auto& turn = episode.turns[turn_index];
+            bool last = (turn_index == turn_count - 1);
+            float next_score = last ? episode.final_score : episode.turns[turn_index + 1].start_score;
+            float next_value = last ? (episode.terminal ? 0.0F : episode.bootstrap_value)
+                                    : episode.turns[turn_index + 1].value_pred;
+            float reward = (next_score - turn.start_score) + (last ? episode.terminal_reward : 0.0F);
+            float delta = reward + gamma * next_value - turn.value_pred;
             gae = delta + gamma * lambda * gae;
-            cur.advantage = gae;
-            cur.return_target = gae + cur.value_pred;
+            turn.advantage = gae;
+            turn.return_target = gae + turn.value_pred;
 
-            for (auto& [uid, val] : unit_future_local) val *= kStackGamma;
-            for (int mi = static_cast<int>(cur.mission_steps.size()) - 1; mi >= 0; mi--) {
-                auto& ms = cur.mission_steps[mi];
-                if (!ms.unit_ids.empty()) {
+            for (auto& [unit_id, future_local] : unit_future_local) future_local *= kStackGamma;
+            for (int step_index = static_cast<int>(turn.mission_steps.size()) - 1; step_index >= 0;
+                 step_index--) {
+                auto& step = turn.mission_steps[step_index];
+                if (!step.unit_ids.empty()) {
                     float per_unit =
-                            ms.immediate_delta_score / static_cast<float>(ms.unit_ids.size());
-                    for (std::uintptr_t uid : ms.unit_ids) {
-                        unit_future_local[uid] += per_unit;
+                            step.immediate_delta_score / static_cast<float>(step.unit_ids.size());
+                    for (std::uintptr_t unit_id : step.unit_ids) {
+                        unit_future_local[unit_id] += per_unit;
                     }
                 }
-                const auto& eval_ids = ms.pool_unit_ids.empty() ? ms.unit_ids : ms.pool_unit_ids;
+                const auto& eval_ids =
+                        step.pool_unit_ids.empty() ? step.unit_ids : step.pool_unit_ids;
                 float group_return = 0.0F;
-                for (std::uintptr_t uid : eval_ids) {
-                    auto it = unit_future_local.find(uid);
-                    if (it != unit_future_local.end()) group_return += it->second;
+                for (std::uintptr_t unit_id : eval_ids) {
+                    auto found = unit_future_local.find(unit_id);
+                    if (found != unit_future_local.end()) group_return += found->second;
                 }
-                ms.stack_return_target = group_return;
-                float local_adv = ms.stack_return_target - ms.stack_value_pred;
-                ms.advantage = cur.advantage + local_weight * local_adv;
-                if (ms.vacated_city != kNone)
-                    ms.advantage -= departure_weight * (ms.vacated_loss - vac_mean);
+                step.stack_return_target = group_return;
+                float local_adv = step.stack_return_target - step.stack_value_pred;
+                step.advantage = turn.advantage + local_weight * local_adv;
+                if (step.vacated_city != kNone)
+                    step.advantage -= departure_weight * (step.vacated_loss - vac_mean);
             }
         }
     }
 }
 
+/**
+ * @brief Standardises advantages to zero mean and unit spread, clamped to +/-5.
+ */
 struct Normalizer {
-    float mean = 0.0F, inv_std = 1.0F;
-    float operator()(float x) const { return std::clamp((x - mean) * inv_std, -5.0F, 5.0F); }
-    static Normalizer Fit(const std::vector<float>& v) {
-        Normalizer n;
-        if (v.size() < 2) return n;
-        double s = 0.0, sq = 0.0;
-        for (float x : v) s += x;
-        n.mean = static_cast<float>(s / v.size());
-        for (float x : v)
-            sq += (static_cast<double>(x) - n.mean) * (static_cast<double>(x) - n.mean);
-        n.inv_std = 1.0F / std::max(1e-4F, static_cast<float>(std::sqrt(sq / v.size())));
-        return n;
+    float mean = 0.0F;     ///< Mean of the fitted values.
+    float inv_std = 1.0F;  ///< One over their standard deviation.
+    /** @brief Returns `value` standardised and clamped to [-5, 5]. */
+    float operator()(float value) const {
+        return std::clamp((value - mean) * inv_std, -5.0F, 5.0F);
+    }
+    /** @brief Fits a normalizer to `values`; fewer than two values give the identity. */
+    static Normalizer Fit(const std::vector<float>& values) {
+        Normalizer normalizer;
+        if (values.size() < 2) return normalizer;
+        double sum = 0.0, squared_deviations = 0.0;
+        for (float value : values) sum += value;
+        normalizer.mean = static_cast<float>(sum / values.size());
+        for (float value : values)
+            squared_deviations += (static_cast<double>(value) - normalizer.mean) *
+                                  (static_cast<double>(value) - normalizer.mean);
+        normalizer.inv_std =
+                1.0F / std::max(1e-4F, static_cast<float>(std::sqrt(squared_deviations /
+                                                                    values.size())));
+        return normalizer;
     }
 };
 
 // ---------------------------------------------------------------- PPO maths
 
+/** @brief Decision counts and loss sums of one or more PPO gradient passes. */
 struct HeadStats {
-    int mission = 0, econ = 0, diplo = 0, turns = 0, stack_values = 0;
-    double policy_loss = 0.0, value_loss = 0.0, entropy = 0.0, kl = 0.0;
-    int kl_samples = 0, ent_samples = 0;
-    void Add(const HeadStats& o) {
-        mission += o.mission;
-        econ += o.econ;
-        diplo += o.diplo;
-        turns += o.turns;
-        stack_values += o.stack_values;
-        policy_loss += o.policy_loss;
-        value_loss += o.value_loss;
-        entropy += o.entropy;
-        kl += o.kl;
-        kl_samples += o.kl_samples;
-        ent_samples += o.ent_samples;
+    int mission = 0;       ///< Mission-head decisions (move choices and stage choices).
+    int econ = 0;          ///< Economy-head decisions.
+    int diplo = 0;         ///< Diplomacy-head decisions (stance, tribute, joint war).
+    int turns = 0;         ///< Turns with a critic target.
+    int stack_values = 0;  ///< Moves with a stack-critic target.
+    double policy_loss = 0.0;  ///< Sum of the clipped surrogate losses.
+    double value_loss = 0.0;   ///< Sum of the critics' squared-error losses.
+    double entropy = 0.0;      ///< Sum of the normalised entropies of categorical choices.
+    double kl = 0.0;           ///< Sum of the KL estimates against the playing policy.
+    int kl_samples = 0;        ///< Number of terms in `kl`.
+    int ent_samples = 0;       ///< Number of terms in `entropy`.
+    /** @brief Adds `other`'s counts and sums to these. */
+    void Add(const HeadStats& other) {
+        mission += other.mission;
+        econ += other.econ;
+        diplo += other.diplo;
+        turns += other.turns;
+        stack_values += other.stack_values;
+        policy_loss += other.policy_loss;
+        value_loss += other.value_loss;
+        entropy += other.entropy;
+        kl += other.kl;
+        kl_samples += other.kl_samples;
+        ent_samples += other.ent_samples;
     }
 };
 
-// Clipped-surrogate gradient for a categorical choice over options with policy
-// logits z_i = u_i / T - logMult_i, plus a KL pull toward the multiplicity
-// prior q_i ~ exp(-logMult_i) (entropy regularisation over action families).
-// Writes dLoss/du_i into dU.
-void CategoricalPpo(const std::vector<float>& u, const std::vector<float>* log_mult, int chosen,
-                    float old_log_prob, float adv, float inv_t, const Config& cfg,
-                    std::vector<float>& d_u, HeadStats& st) {
-    const size_t candidate_count = u.size();
-    d_u.assign(candidate_count, 0.0F);
+/**
+ * @brief PPO gradient of one categorical choice.
+ *
+ * Clipped-surrogate gradient for a categorical choice over options with policy
+ * logits z_i = u_i / T - logMult_i (u_i = `scores`), plus a KL pull toward the
+ * multiplicity prior q_i ~ exp(-logMult_i) (entropy regularisation over action
+ * families). Writes dLoss/du_i into `d_scores`.
+ */
+void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* log_mult,
+                    int chosen, float old_log_prob, float adv, float inv_t, const Config& cfg,
+                    std::vector<float>& d_scores, HeadStats& stats) {
+    const size_t candidate_count = scores.size();
+    d_scores.assign(candidate_count, 0.0F);
     if (candidate_count <= 1) return;
-    auto lm_of = [&](size_t i) {
-        return (log_mult && i < log_mult->size()) ? (*log_mult)[i] : 0.0F;
+    auto lm_of = [&](size_t index) {
+        return (log_mult && index < log_mult->size()) ? (*log_mult)[index] : 0.0F;
     };
-    float max_z = -1e30F;
-    std::vector<float> z(candidate_count);
+    float max_logit = -1e30F;
+    std::vector<float> logits(candidate_count);
     for (size_t i = 0; i < candidate_count; i++) {
-        z[i] = u[i] * inv_t - lm_of(i);
-        max_z = std::max(max_z, z[i]);
+        logits[i] = scores[i] * inv_t - lm_of(i);
+        max_logit = std::max(max_logit, logits[i]);
     }
-    std::vector<float> p(candidate_count);
+    std::vector<float> probs(candidate_count);
     float sum = 0.0F;
     for (size_t i = 0; i < candidate_count; i++) {
-        p[i] = std::exp(std::max(-30.0F, z[i] - max_z));
-        sum += p[i];
+        probs[i] = std::exp(std::max(-30.0F, logits[i] - max_logit));
+        sum += probs[i];
     }
-    for (float& v : p) v /= sum;
+    for (float& prob : probs) prob /= sum;
 
-    float new_lp = std::log(std::max(1e-12F, p[chosen]));
-    float log_ratio = std::clamp(new_lp - old_log_prob, -10.0F, 10.0F);
+    float new_log_prob = std::log(std::max(1e-12F, probs[chosen]));
+    float log_ratio = std::clamp(new_log_prob - old_log_prob, -10.0F, 10.0F);
     float ratio = std::exp(log_ratio);
-    st.policy_loss += -std::min(ratio * adv,
-                                std::clamp(ratio, 1.0F - cfg.clip_eps, 1.0F + cfg.clip_eps) * adv);
-    st.kl += (ratio - 1.0F) - log_ratio;
-    st.kl_samples++;
+    stats.policy_loss +=
+            -std::min(ratio * adv,
+                      std::clamp(ratio, 1.0F - cfg.clip_eps, 1.0F + cfg.clip_eps) * adv);
+    stats.kl += (ratio - 1.0F) - log_ratio;
+    stats.kl_samples++;
     bool clipped = (adv > 0.0F && ratio > 1.0F + cfg.clip_eps) ||
                    (adv < 0.0F && ratio < 1.0F - cfg.clip_eps);
     float d_loss_d_log_p = clipped ? 0.0F : -ratio * adv;
 
-    float mean_adj = 0.0F, ent = 0.0F;
+    float mean_adj = 0.0F, entropy = 0.0F;
     for (size_t j = 0; j < candidate_count; j++) {
-        float lp = std::log(std::max(1e-12F, p[j]));
-        mean_adj += p[j] * (lp + lm_of(j));
-        ent -= p[j] * lp;
+        float log_prob = std::log(std::max(1e-12F, probs[j]));
+        mean_adj += probs[j] * (log_prob + lm_of(j));
+        entropy -= probs[j] * log_prob;
     }
     float norm_log_k = std::max(1.0F, std::log(static_cast<float>(candidate_count)));
-    st.entropy += ent / norm_log_k;
-    st.ent_samples++;
+    stats.entropy += entropy / norm_log_k;
+    stats.ent_samples++;
     float kl_coef = cfg.ent_coef / norm_log_k;
     for (size_t j = 0; j < candidate_count; j++) {
-        float ind = (static_cast<int>(j) == chosen) ? 1.0F : 0.0F;
-        float lp = std::log(std::max(1e-12F, p[j]));
-        d_u[j] = d_loss_d_log_p * (ind - p[j]) * inv_t +
-                 kl_coef * p[j] * ((lp + lm_of(j)) - mean_adj) * inv_t;
+        float indicator = (static_cast<int>(j) == chosen) ? 1.0F : 0.0F;
+        float log_prob = std::log(std::max(1e-12F, probs[j]));
+        d_scores[j] = d_loss_d_log_p * (indicator - probs[j]) * inv_t +
+                      kl_coef * probs[j] * ((log_prob + lm_of(j)) - mean_adj) * inv_t;
     }
 }
 
-// Clipped-surrogate gradient for a yes/no choice with logit `logit`
-// (P(yes) = sigmoid(logit / T)), plus an entropy bonus. Returns dLoss/dlogit.
+/**
+ * @brief PPO gradient of one yes/no choice.
+ *
+ * Clipped-surrogate gradient for a yes/no choice with logit `logit`
+ * (P(yes) = sigmoid(logit / T)), plus an entropy bonus. Returns dLoss/dlogit.
+ */
 float BinaryPpo(float logit, bool chosen, float old_log_prob, float adv, float inv_t,
-                const Config& cfg, HeadStats& st) {
-    float z = std::clamp(logit * inv_t, -15.0F, 15.0F);
-    float p = 1.0F / (1.0F + std::exp(-z));
-    float new_lp = std::log(std::max(1e-12F, chosen ? p : 1.0F - p));
-    float log_ratio = std::clamp(new_lp - old_log_prob, -10.0F, 10.0F);
+                const Config& cfg, HeadStats& stats) {
+    float scaled_logit = std::clamp(logit * inv_t, -15.0F, 15.0F);
+    float prob_yes = 1.0F / (1.0F + std::exp(-scaled_logit));
+    float new_log_prob = std::log(std::max(1e-12F, chosen ? prob_yes : 1.0F - prob_yes));
+    float log_ratio = std::clamp(new_log_prob - old_log_prob, -10.0F, 10.0F);
     float ratio = std::exp(log_ratio);
-    st.policy_loss += -std::min(ratio * adv,
-                                std::clamp(ratio, 1.0F - cfg.clip_eps, 1.0F + cfg.clip_eps) * adv);
-    st.kl += (ratio - 1.0F) - log_ratio;
-    st.kl_samples++;
+    stats.policy_loss +=
+            -std::min(ratio * adv,
+                      std::clamp(ratio, 1.0F - cfg.clip_eps, 1.0F + cfg.clip_eps) * adv);
+    stats.kl += (ratio - 1.0F) - log_ratio;
+    stats.kl_samples++;
     bool clipped = (adv > 0.0F && ratio > 1.0F + cfg.clip_eps) ||
                    (adv < 0.0F && ratio < 1.0F - cfg.clip_eps);
     float d_loss_d_log_p = clipped ? 0.0F : -ratio * adv;
-    float y = chosen ? 1.0F : 0.0F;
-    // d(-H)/dz = p (1 - p) z for the Bernoulli entropy H
-    return d_loss_d_log_p * (y - p) * inv_t + cfg.ent_coef * p * (1.0F - p) * z * inv_t;
+    float chosen_value = chosen ? 1.0F : 0.0F;
+    // d(-H)/dz = p (1 - p) z for the Bernoulli entropy H, with z the scaled
+    // logit and p = P(yes)
+    return d_loss_d_log_p * (chosen_value - prob_yes) * inv_t +
+           cfg.ent_coef * prob_yes * (1.0F - prob_yes) * scaled_logit * inv_t;
 }
 
+/** @brief One advantage normalizer per policy head. */
 struct Normalizers {
-    Normalizer mission, econ, diplo;
+    Normalizer mission;  ///< For the mission head's per-move advantages.
+    Normalizer econ;     ///< For the economy head's per-turn advantages.
+    Normalizer diplo;    ///< For the diplomacy head's per-turn advantages.
 };
 
-// Accumulate the gradients of one turn's decisions and its critic target.
-void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& tr,
-                    const Normalizers& nz, float inv_t, const Config& cfg, ml::PolicyNetwork& grad,
-                    HeadStats& st, std::vector<float>& u, std::vector<float>& d_u) {
+/**
+ * @brief Accumulates the gradients of one turn's decisions and its critic target.
+ *
+ * Adds to `grad` and `stats`; `scores` and `d_scores` are scratch buffers
+ * reused between calls.
+ */
+void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn,
+                    const Normalizers& normalizers, float inv_t, const Config& cfg,
+                    ml::PolicyNetwork& grad, HeadStats& stats, std::vector<float>& scores,
+                    std::vector<float>& d_scores) {
     // Critic: 0.5 (V - G)^2 on a linear head (search-trained turns have no return target)
-    const bool has_critic_target = !std::isnan(tr.return_target);
+    const bool has_critic_target = !std::isnan(turn.return_target);
     if (has_critic_target) {
-        const ml::ValueInVec value_in = ml::PackValueInput(tr.start_ctx, tr.start_critic);
-        float v = net.value_net.Forward(value_in)[0];
-        float dv = v - tr.return_target;
-        st.value_loss += 0.5 * dv * dv;
-        st.turns++;
-        net.value_net.Backward(value_in, {dv}, grad.value_net);
+        const ml::ValueInVec value_in = ml::PackValueInput(turn.start_ctx, turn.start_critic);
+        float predicted_value = net.value_net.Forward(value_in)[0];
+        float value_error = predicted_value - turn.return_target;
+        stats.value_loss += 0.5 * value_error * value_error;
+        stats.turns++;
+        net.value_net.Backward(value_in, {value_error}, grad.value_net);
     }
 
-    for (const auto& ms : tr.mission_steps) {
+    for (const auto& step : turn.mission_steps) {
         if (has_critic_target) {
-            float sv = net.EvaluateStackValue(ms.stack_value_in);
-            float dsv = sv - ms.stack_return_target;
-            st.value_loss += 0.25 * dsv * dsv;
-            st.stack_values++;
-            net.stack_value_net.Backward(ms.stack_value_in, {dsv}, grad.stack_value_net);
+            float predicted_stack_value = net.EvaluateStackValue(step.stack_value_in);
+            float stack_value_error = predicted_stack_value - step.stack_return_target;
+            stats.value_loss += 0.25 * stack_value_error * stack_value_error;
+            stats.stack_values++;
+            net.stack_value_net.Backward(step.stack_value_in, {stack_value_error},
+                                         grad.stack_value_net);
         }
 
-        float adv = nz.mission(ms.advantage);
-        const size_t candidate_count = ms.candidates.size();
+        float adv = normalizers.mission(step.advantage);
+        const size_t candidate_count = step.candidates.size();
         if (candidate_count > 1) {
-            u.resize(candidate_count);
-            for (size_t k = 0; k < candidate_count; k++)
-                u[k] = net.mission_net.Forward(ms.candidates[k])[0];
-            CategoricalPpo(u, &ms.log_mult, ms.chosen_idx, ms.old_log_prob, adv, inv_t, cfg, d_u,
-                           st);
-            for (size_t k = 0; k < candidate_count; k++) {
-                if (d_u[k] != 0.0F)
-                    net.mission_net.Backward(ms.candidates[k], {d_u[k], 0.0F}, grad.mission_net);
+            scores.resize(candidate_count);
+            for (size_t candidate = 0; candidate < candidate_count; candidate++)
+                scores[candidate] = net.mission_net.Forward(step.candidates[candidate])[0];
+            CategoricalPpo(scores, &step.log_mult, step.chosen_idx, step.old_log_prob, adv, inv_t,
+                           cfg, d_scores, stats);
+            for (size_t candidate = 0; candidate < candidate_count; candidate++) {
+                if (d_scores[candidate] != 0.0F)
+                    net.mission_net.Backward(step.candidates[candidate],
+                                             {d_scores[candidate], 0.0F}, grad.mission_net);
             }
-            st.mission++;
+            stats.mission++;
         }
-        if (ms.has_stage_choice && ms.chosen_idx < static_cast<int>(candidate_count)) {
-            float s = net.mission_net.Forward(ms.candidates[ms.chosen_idx])[1];
-            float d = BinaryPpo(s, ms.stage_chosen, ms.old_stage_log_prob, adv, inv_t, cfg, st);
-            net.mission_net.Backward(ms.candidates[ms.chosen_idx], {0.0F, d}, grad.mission_net);
-            st.mission++;
+        if (step.has_stage_choice && step.chosen_idx < static_cast<int>(candidate_count)) {
+            float stage_logit = net.mission_net.Forward(step.candidates[step.chosen_idx])[1];
+            float d_stage_logit = BinaryPpo(stage_logit, step.stage_chosen,
+                                            step.old_stage_log_prob, adv, inv_t, cfg, stats);
+            net.mission_net.Backward(step.candidates[step.chosen_idx], {0.0F, d_stage_logit},
+                                     grad.mission_net);
+            stats.mission++;
         }
     }
 
-    float econ_adv = nz.econ(tr.advantage);
-    for (const auto& es : tr.econ_steps) {
-        const size_t candidate_count = es.candidates.size();
+    float econ_adv = normalizers.econ(turn.advantage);
+    for (const auto& econ_step : turn.econ_steps) {
+        const size_t candidate_count = econ_step.candidates.size();
         if (candidate_count <= 1) continue;
-        u.resize(candidate_count);
-        for (size_t k = 0; k < candidate_count; k++)
-            u[k] = net.econ_net.Forward(es.candidates[k])[0];
-        CategoricalPpo(u, &es.log_mult, es.chosen_idx, es.old_log_prob, econ_adv, inv_t, cfg, d_u,
-                       st);
-        for (size_t k = 0; k < candidate_count; k++) {
-            if (d_u[k] != 0.0F) net.econ_net.Backward(es.candidates[k], {d_u[k]}, grad.econ_net);
+        scores.resize(candidate_count);
+        for (size_t candidate = 0; candidate < candidate_count; candidate++)
+            scores[candidate] = net.econ_net.Forward(econ_step.candidates[candidate])[0];
+        CategoricalPpo(scores, &econ_step.log_mult, econ_step.chosen_idx, econ_step.old_log_prob,
+                       econ_adv, inv_t, cfg, d_scores, stats);
+        for (size_t candidate = 0; candidate < candidate_count; candidate++) {
+            if (d_scores[candidate] != 0.0F)
+                net.econ_net.Backward(econ_step.candidates[candidate], {d_scores[candidate]},
+                                      grad.econ_net);
         }
-        st.econ++;
+        stats.econ++;
     }
 
-    float diplo_adv = nz.diplo(tr.advantage);
-    for (const auto& ds : tr.diplo_steps) {
-        auto raw = net.diplo_net.Forward(ds.input);
+    float diplo_adv = normalizers.diplo(turn.advantage);
+    for (const auto& diplo_step : turn.diplo_steps) {
+        auto raw = net.diplo_net.Forward(diplo_step.input);
         std::array<float, ml::kDiploOutDim> d_out{};
-        u = {raw[0], raw[1], raw[2], raw[3]};
-        CategoricalPpo(u, nullptr, ds.chosen_stance, ds.old_stance_log_prob, diplo_adv, inv_t, cfg,
-                       d_u, st);
-        for (int k = 0; k < 4; k++) d_out[k] = d_u[k];
-        st.diplo++;
-        if (ds.has_tribute) {
-            d_out[4] = BinaryPpo(raw[4], ds.tribute_chosen, ds.old_tribute_log_prob, diplo_adv,
-                                 inv_t, cfg, st);
-            st.diplo++;
+        scores = {raw[0], raw[1], raw[2], raw[3]};
+        CategoricalPpo(scores, nullptr, diplo_step.chosen_stance, diplo_step.old_stance_log_prob,
+                       diplo_adv, inv_t, cfg, d_scores, stats);
+        for (int stance = 0; stance < 4; stance++) d_out[stance] = d_scores[stance];
+        stats.diplo++;
+        if (diplo_step.has_tribute) {
+            d_out[4] = BinaryPpo(raw[4], diplo_step.tribute_chosen,
+                                 diplo_step.old_tribute_log_prob, diplo_adv, inv_t, cfg, stats);
+            stats.diplo++;
         }
-        if (ds.has_joint_war) {
-            d_out[5] = BinaryPpo(raw[5], ds.joint_war_chosen, ds.old_joint_war_log_prob, diplo_adv,
-                                 inv_t, cfg, st);
-            st.diplo++;
+        if (diplo_step.has_joint_war) {
+            d_out[5] = BinaryPpo(raw[5], diplo_step.joint_war_chosen,
+                                 diplo_step.old_joint_war_log_prob, diplo_adv, inv_t, cfg, stats);
+            stats.diplo++;
         }
-        net.diplo_net.Backward(ds.input, d_out, grad.diplo_net);
+        net.diplo_net.Backward(diplo_step.input, d_out, grad.diplo_net);
     }
 }
 
 // ---------------------------------------------------------------- evaluation
 
-// One evaluation game: the scenario/preset/seed/seat assignment and its outcome.
+/** @brief One evaluation game: the scenario/preset/seed/seat assignment and its outcome. */
 struct EvalCase {
-    std::string scenario;
-    int preset = 0;
-    uint32_t seed = 0;
-    int swap = 0;
-    double share = 0.5;  // Modern share of the cities held by both camps
-    int top = 0;         // 1 when the largest side is a Modern side
-    int modern = 0, classic = 0;
-    int modern_sides = 0, sides = 0;
+    std::string scenario;  ///< Scenario played.
+    int preset = 0;        ///< Index into kPresets.
+    uint32_t seed = 0;     ///< Game seed.
+    int swap = 0;          ///< 1 for the game of the seed with the seats swapped.
+    double share = 0.5;    ///< Modern share of the cities held by both camps
+    int top = 0;           ///< 1 when the largest side is a Modern side
+    int modern = 0;        ///< Cities the Modern sides held at the end.
+    int classic = 0;       ///< Cities the opponent sides held at the end.
+    int modern_sides = 0;  ///< Seats played by the Modern AI.
+    int sides = 0;         ///< Seats in play.
 };
 
+/** @brief The summary of a set of evaluation games. */
 struct EvalResult {
-    int games = 0;
-    double mean_share = 0.0;  // Modern AI's share of the cities held by both camps
-    double ci95 = 0.0;        // half-width of the 95% interval on meanShare
-    int modern_top = 0;       // games whose largest side is a Modern AI side
-    int modern_cities = 0, classic_cities = 0;
-    double parity = 0.5;  // share an equally strong Modern side would get
-    std::vector<EvalCase> cases;
+    int games = 0;            ///< Number of games played.
+    double mean_share = 0.0;  ///< Modern AI's share of the cities held by both camps
+    double ci95 = 0.0;        ///< half-width of the 95% interval on mean_share
+    int modern_top = 0;       ///< games whose largest side is a Modern AI side
+    int modern_cities = 0;    ///< Cities the Modern sides held, over all games.
+    int classic_cities = 0;   ///< Cities the opponent sides held, over all games.
+    double parity = 0.5;      ///< share an equally strong Modern side would get
+    std::vector<EvalCase> cases;  ///< The individual games.
 };
 
-// Solo evaluation (1 Modern vs K-1 Classic) is used when asked for, and during
-// cropped-map curriculum selection where the training setup is solo.
+/**
+ * @brief Tells whether evaluation games seat one Modern side against the rest.
+ *
+ * Solo evaluation (1 Modern vs K-1 Classic) is used when asked for, and during
+ * cropped-map curriculum selection where the training setup is solo.
+ */
 bool UseSolo(const Config& cfg, bool is_selection) {
     if (cfg.eval_mode == EvalMode::kSolo) return true;
     return cfg.solo_learner && is_selection && (cfg.active_sides < 8 || cfg.crop_margin > 0);
 }
 
+/**
+ * @brief Lists the games of an evaluation set: each seed twice, seats swapped.
+ *
+ * Scenario and preset rotate with the seed so every set covers all of them.
+ */
 std::vector<EvalCase> EvalCases(uint32_t seed_base, int seeds) {
     std::vector<EvalCase> cases;
     for (int i = 0; i < seeds; i++) {
         for (int swap = 0; swap < 2; swap++) {
-            EvalCase c;
-            c.scenario = kScenarios[(i + i / 4) % kScenarios.size()];
-            c.preset = i % 4;
-            c.seed = seed_base + static_cast<uint32_t>(i);
-            c.swap = swap;
-            cases.push_back(c);
+            EvalCase eval_case;
+            eval_case.scenario = kScenarios[(i + i / 4) % kScenarios.size()];
+            eval_case.preset = i % 4;
+            eval_case.seed = seed_base + static_cast<uint32_t>(i);
+            eval_case.swap = swap;
+            cases.push_back(eval_case);
         }
     }
     return cases;
 }
 
-void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& c, bool solo,
-                  bool allow_random, int turns) {
-    auto gp = MakeArenaGame(cfg, c.scenario, kPresets[c.preset], c.seed, allow_random);
-    Game& g = *gp;
+/**
+ * @brief Plays one evaluation game and records its outcome in `eval_case`.
+ *
+ * Modern seats play `policy` without a rollout sampler (at the deploy
+ * temperature, --eval-temp); the other seats play --eval-opponent. Fills in
+ * the outcome fields of `eval_case`.
+ */
+void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& eval_case,
+                  bool solo, bool allow_random, int turns) {
+    auto owned_game = MakeArenaGame(cfg, eval_case.scenario, kPresets[eval_case.preset],
+                                    eval_case.seed, allow_random);
+    Game& game = *owned_game;
     int active_count = 0;
-    for (int s = 0; s < 8; s++) {
-        if (g.map->sides[s].in_use) active_count++;
+    for (int side_index = 0; side_index < 8; side_index++) {
+        if (game.map->sides[side_index].in_use) active_count++;
     }
     // Solo: the Modern seat rotates with the seed; the swapped game takes the seat
     // half-way round the table so both games of a seed differ in position.
     int solo_seat =
             active_count > 0
-                    ? static_cast<int>((c.seed + static_cast<uint32_t>(
-                                                         c.swap * std::max(1, active_count / 2))) %
-                                       static_cast<uint32_t>(active_count))
+                    ? static_cast<int>(
+                              (eval_case.seed + static_cast<uint32_t>(
+                                                        eval_case.swap *
+                                                        std::max(1, active_count / 2))) %
+                              static_cast<uint32_t>(active_count))
                     : 0;
     std::array<bool, 8> modern{};
-    int idx = 0;
-    for (int s = 0; s < 8; s++) {
-        if (!g.map->sides[s].in_use) continue;
-        modern[s] = solo ? (idx == solo_seat) : ((idx + c.swap) % 2 == 0);
+    int seat = 0;
+    for (int side_index = 0; side_index < 8; side_index++) {
+        if (!game.map->sides[side_index].in_use) continue;
+        modern[side_index] = solo ? (seat == solo_seat) : ((seat + eval_case.swap) % 2 == 0);
         // Opponent seats are Classic AI sides unless the Frozen Modern checkpoint plays them
-        g.map->sides[s].classic_ai = !modern[s] && cfg.eval_opponent != opponents::Kind::kFrozen;
-        if (modern[s]) c.modern_sides++;
-        c.sides++;
-        idx++;
+        game.map->sides[side_index].classic_ai =
+                !modern[side_index] && cfg.eval_opponent != opponents::Kind::kFrozen;
+        if (modern[side_index]) eval_case.modern_sides++;
+        eval_case.sides++;
+        seat++;
     }
-    Side* cur = game::Begin(g);
+    Side* current = game::Begin(game);
     int safety = 0;
-    while (cur && !g.over && !g.won && g.turn <= turns && safety < turns * 12) {
+    while (current && !game.over && !game.won && game.turn <= turns && safety < turns * 12) {
         safety++;
-        if (cur->computer && cur->alive) {
-            if (modern[cur->index])
-                ai::modern::PlayTurn(g, *cur, nullptr, &policy, nullptr);
+        if (current->computer && current->alive) {
+            if (modern[current->index])
+                ai::modern::PlayTurn(game, *current, nullptr, &policy, nullptr);
             else
-                opponents::PlayTurn(g, *cur, cfg.eval_opponent, g_frozen);
+                opponents::PlayTurn(game, *current, cfg.eval_opponent, g_frozen);
         }
-        cur = game::EndTurn(g);
+        current = game::EndTurn(game);
     }
-    std::array<int, 8> cnt{};
-    int m = 0, k = 0, best = kNone, best_cnt = -1;
-    for (const auto& city : g.map->cities) {
+    std::array<int, 8> city_counts{};
+    int modern_cities = 0, classic_cities = 0, largest_side = kNone, largest_count = -1;
+    for (const auto& city : game.map->cities) {
         if (city.razed || city.owner_index < 0 || city.owner_index >= 8) continue;
-        cnt[city.owner_index]++;
-        (modern[city.owner_index] ? m : k)++;
+        city_counts[city.owner_index]++;
+        (modern[city.owner_index] ? modern_cities : classic_cities)++;
     }
-    for (int s = 0; s < 8; s++) {
-        if (cnt[s] > best_cnt) {
-            best_cnt = cnt[s];
-            best = s;
+    for (int side_index = 0; side_index < 8; side_index++) {
+        if (city_counts[side_index] > largest_count) {
+            largest_count = city_counts[side_index];
+            largest_side = side_index;
         }
     }
-    c.share = (m + k) > 0 ? static_cast<double>(m) / static_cast<double>(m + k) : 0.5;
-    c.top = (best != kNone && modern[best]) ? 1 : 0;
-    c.modern = m;
-    c.classic = k;
+    eval_case.share = (modern_cities + classic_cities) > 0
+                              ? static_cast<double>(modern_cities) /
+                                        static_cast<double>(modern_cities + classic_cities)
+                              : 0.5;
+    eval_case.top = (largest_side != kNone && modern[largest_side]) ? 1 : 0;
+    eval_case.modern = modern_cities;
+    eval_case.classic = classic_cities;
 }
 
-// Plays `policies.size()` checkpoints on the same cases (same maps, seats and
-// seeds), in parallel over all hardware threads.
+/**
+ * @brief Plays each of `policies` on the same evaluation cases.
+ *
+ * Plays `policies.size()` checkpoints on the same cases (same maps, seats and
+ * seeds), in parallel over all hardware threads.
+ * @return One list of played cases per policy, in the order of `policies`.
+ */
 std::vector<std::vector<EvalCase>> RunEval(const Config& cfg,
                                            const std::vector<const ml::PolicyNetwork*>& policies,
                                            uint32_t seed_base, int seeds, int turns) {
     bool is_selection = (seed_base == kSelectSeedBase);
     bool solo = UseSolo(cfg, is_selection);
-    std::vector<std::vector<EvalCase>> out(policies.size(), EvalCases(seed_base, seeds));
-    const size_t per_policy = out[0].size();
+    std::vector<std::vector<EvalCase>> results(policies.size(), EvalCases(seed_base, seeds));
+    const size_t per_policy = results[0].size();
     const size_t total = per_policy * policies.size();
     std::atomic<size_t> next{0};
     unsigned int workers = std::max(2U, std::thread::hardware_concurrency());
     std::vector<std::thread> pool;
-    for (unsigned int w = 0; w < workers; w++) {
+    for (unsigned int worker = 0; worker < workers; worker++) {
         pool.emplace_back([&]() {
             for (size_t i; (i = next.fetch_add(1)) < total;) {
-                size_t p = i % policies.size(), ci = i / policies.size();
-                PlayEvalCase(cfg, *policies[p], out[p][ci], solo, is_selection, turns);
+                size_t policy_index = i % policies.size(), case_index = i / policies.size();
+                PlayEvalCase(cfg, *policies[policy_index], results[policy_index][case_index], solo,
+                             is_selection, turns);
             }
         });
     }
-    for (auto& t : pool) t.join();
-    return out;
+    for (auto& thread : pool) thread.join();
+    return results;
 }
 
+/** @brief Sums up played evaluation cases: mean share, its 95% interval and totals. */
 EvalResult Summarize(std::vector<EvalCase> cases) {
-    EvalResult r;
-    r.games = static_cast<int>(cases.size());
+    EvalResult result;
+    result.games = static_cast<int>(cases.size());
     double parity = 0.0;
-    for (const auto& c : cases) {
-        r.mean_share += c.share;
-        r.modern_top += c.top;
-        r.modern_cities += c.modern;
-        r.classic_cities += c.classic;
-        parity += c.sides > 0 ? static_cast<double>(c.modern_sides) / static_cast<double>(c.sides)
-                              : 0.5;
+    for (const auto& eval_case : cases) {
+        result.mean_share += eval_case.share;
+        result.modern_top += eval_case.top;
+        result.modern_cities += eval_case.modern;
+        result.classic_cities += eval_case.classic;
+        parity += eval_case.sides > 0 ? static_cast<double>(eval_case.modern_sides) /
+                                                static_cast<double>(eval_case.sides)
+                                      : 0.5;
     }
-    r.mean_share /= std::max(1, r.games);
-    r.parity = parity / std::max(1, r.games);
-    double var = 0.0;
-    for (const auto& c : cases) var += (c.share - r.mean_share) * (c.share - r.mean_share);
-    var /= std::max(1, r.games - 1);
-    r.ci95 = 1.96 * std::sqrt(var / std::max(1, r.games));
-    r.cases = std::move(cases);
-    return r;
+    result.mean_share /= std::max(1, result.games);
+    result.parity = parity / std::max(1, result.games);
+    double variance = 0.0;
+    for (const auto& eval_case : cases)
+        variance += (eval_case.share - result.mean_share) * (eval_case.share - result.mean_share);
+    variance /= std::max(1, result.games - 1);
+    result.ci95 = 1.96 * std::sqrt(variance / std::max(1, result.games));
+    result.cases = std::move(cases);
+    return result;
 }
 
+/** @brief Plays `policy` against --eval-opponent on an evaluation set and sums it up. */
 EvalResult EvaluateVsClassic(const Config& cfg, const ml::PolicyNetwork& policy, uint32_t seed_base,
                              int seeds, int turns) {
     return Summarize(std::move(RunEval(cfg, {&policy}, seed_base, seeds, turns)[0]));
 }
 
-void PrintEval(const char* label, const EvalResult& r) {
+/** @brief Prints one line summing up an evaluation, tagged with `label`. */
+void PrintEval(const char* label, const EvalResult& result) {
     std::printf(
             "  [%s] %d games: Modern city share %.1f%% +/- %.1f%% (95%%, parity %.1f%%) | cities "
             "%d vs %d | "
             "Modern largest side in %d/%d\n",
-            label, r.games, r.mean_share * 100.0, r.ci95 * 100.0, r.parity * 100.0, r.modern_cities,
-            r.classic_cities, r.modern_top, r.games);
+            label, result.games, result.mean_share * 100.0, result.ci95 * 100.0,
+            result.parity * 100.0, result.modern_cities, result.classic_cities, result.modern_top,
+            result.games);
     std::fflush(stdout);
 }
 
-// Mean share per preset and per scenario.
-void PrintBreakdown(const EvalResult& r) {
-    auto line = [&](const char* kind, const std::string& key, auto match) {
-        double s = 0.0;
-        int n = 0, m = 0, k = 0;
-        for (const auto& c : r.cases) {
-            if (!match(c)) continue;
-            s += c.share;
-            n++;
-            m += c.modern;
-            k += c.classic;
+/** @brief Prints the mean share per preset and per scenario (--breakdown). */
+void PrintBreakdown(const EvalResult& result) {
+    auto print_line = [&](const char* kind, const std::string& key, auto match) {
+        double share_sum = 0.0;
+        int games = 0, modern_cities = 0, classic_cities = 0;
+        for (const auto& eval_case : result.cases) {
+            if (!match(eval_case)) continue;
+            share_sum += eval_case.share;
+            games++;
+            modern_cities += eval_case.modern;
+            classic_cities += eval_case.classic;
         }
-        if (n > 0)
+        if (games > 0)
             std::printf("    %-8s %-14s %4d games  share %5.1f%%  cities %5d vs %5d\n", kind,
-                        key.c_str(), n, 100.0 * s / n, m, k);
+                        key.c_str(), games, 100.0 * share_sum / games, modern_cities,
+                        classic_cities);
     };
-    for (int p = 0; p < 4; p++)
-        line("preset", kPresets[p].label, [&](const EvalCase& c) { return c.preset == p; });
-    for (const auto& sc : kScenarios)
-        line("scenario", sc, [&](const EvalCase& c) { return c.scenario == sc; });
+    for (int preset = 0; preset < 4; preset++)
+        print_line("preset", kPresets[preset].label,
+                   [&](const EvalCase& eval_case) { return eval_case.preset == preset; });
+    for (const auto& scenario : kScenarios)
+        print_line("scenario", scenario,
+                   [&](const EvalCase& eval_case) { return eval_case.scenario == scenario; });
     std::fflush(stdout);
 }
 
-// Paired comparison: the same cases played by A and B; the mean per-game share
-// difference has a much tighter interval than two independent means.
-void PrintPaired(const char* name_a, const EvalResult& a, const char* name_b, const EvalResult& b) {
-    const size_t n = std::min(a.cases.size(), b.cases.size());
-    std::vector<double> d(n);
+/**
+ * @brief Prints a paired comparison of two checkpoints evaluated on the same cases.
+ *
+ * Paired comparison: the same cases played by A and B; the mean per-game share
+ * difference has a much tighter interval than two independent means.
+ */
+void PrintPaired(const char* name_a, const EvalResult& result_a, const char* name_b,
+                 const EvalResult& result_b) {
+    const size_t game_count = std::min(result_a.cases.size(), result_b.cases.size());
+    std::vector<double> differences(game_count);
     double mean = 0.0;
     int wins = 0, losses = 0;
-    for (size_t i = 0; i < n; i++) {
-        d[i] = b.cases[i].share - a.cases[i].share;
-        mean += d[i];
-        wins += d[i] > 1e-9;
-        losses += d[i] < -1e-9;
+    for (size_t i = 0; i < game_count; i++) {
+        differences[i] = result_b.cases[i].share - result_a.cases[i].share;
+        mean += differences[i];
+        wins += differences[i] > 1e-9;
+        losses += differences[i] < -1e-9;
     }
-    mean /= std::max<size_t>(1, n);
-    double var = 0.0;
-    for (double x : d) var += (x - mean) * (x - mean);
-    var /= std::max<size_t>(1, n - 1);
-    double ci = 1.96 * std::sqrt(var / std::max<size_t>(1, n));
+    mean /= std::max<size_t>(1, game_count);
+    double variance = 0.0;
+    for (double difference : differences) variance += (difference - mean) * (difference - mean);
+    variance /= std::max<size_t>(1, game_count - 1);
+    double half_width = 1.96 * std::sqrt(variance / std::max<size_t>(1, game_count));
     std::printf(
             "  [paired] B - A = %+.2f%% +/- %.2f%% (95%%) over %zu games | B better in %d, worse "
             "in %d | %s\n",
-            mean * 100.0, ci * 100.0, n, wins, losses,
-            (mean - ci > 0)   ? "B significantly better"
-            : (mean + ci < 0) ? "B significantly worse"
-                              : "no significant difference");
+            mean * 100.0, half_width * 100.0, game_count, wins, losses,
+            (mean - half_width > 0)   ? "B significantly better"
+            : (mean + half_width < 0) ? "B significantly worse"
+                                      : "no significant difference");
     std::printf("    A = %s\n    B = %s\n", name_a, name_b);
     std::fflush(stdout);
 }
 
 // ---------------------------------------------------------------- main
 
+/**
+ * @brief Reads the command-line options into `cfg`.
+ * @return false, after printing why, on an unknown option or value.
+ */
 bool ParseArgs(int argc, char** argv, Config& cfg) {
     for (int i = 1; i < argc; i++) {
-        std::string a = argv[i];
+        std::string arg = argv[i];
         auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
-        if (a == "--iterations")
+        if (arg == "--iterations")
             cfg.iterations = std::max(0, std::stoi(next()));
-        else if (a == "--games-per-iter")
+        else if (arg == "--games-per-iter")
             cfg.games_per_iter = std::max(2, std::stoi(next()));
-        else if (a == "--turns")
+        else if (arg == "--turns")
             cfg.max_turns = std::max(6, std::stoi(next()));
-        else if (a == "--eval-every")
+        else if (arg == "--eval-every")
             cfg.eval_every = std::max(1, std::stoi(next()));
-        else if (a == "--eval-turns")
+        else if (arg == "--eval-turns")
             cfg.eval_turns = std::max(6, std::stoi(next()));
-        else if (a == "--select-seeds")
+        else if (arg == "--select-seeds")
             cfg.select_seeds = std::max(1, std::stoi(next()));
-        else if (a == "--report-seeds")
+        else if (arg == "--report-seeds")
             cfg.report_seeds = std::max(0, std::stoi(next()));
-        else if (a == "--epochs")
+        else if (arg == "--epochs")
             cfg.epochs = std::max(1, std::stoi(next()));
-        else if (a == "--minibatches")
+        else if (arg == "--minibatches")
             cfg.minibatches = std::max(1, std::stoi(next()));
-        else if (a == "--lr")
+        else if (arg == "--lr")
             cfg.lr_start = std::stof(next());
-        else if (a == "--temp-start")
+        else if (arg == "--temp-start")
             cfg.temp_start = std::max(0.1F, std::stof(next()));
-        else if (a == "--temp-end")
+        else if (arg == "--temp-end")
             cfg.temp_end = std::max(0.1F, std::stof(next()));
-        else if (a == "--eval-temp")
+        else if (arg == "--eval-temp")
             cfg.eval_temp = std::max(0.01F, std::stof(next()));
-        else if (a == "--seed-offset")
+        else if (arg == "--seed-offset")
             cfg.seed_offset =
                     std::min<uint32_t>(500000U, static_cast<uint32_t>(std::stoul(next())));
-        else if (a == "--classic-frac")
+        else if (arg == "--classic-frac")
             cfg.classic_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (a == "--random-map-frac")
+        else if (arg == "--random-map-frac")
             cfg.random_map_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (a == "--active-sides")
+        else if (arg == "--active-sides")
             cfg.active_sides = std::clamp(std::stoi(next()), 2, 8);
-        else if (a == "--crop-margin")
+        else if (arg == "--crop-margin")
             cfg.crop_margin = std::max(0, std::stoi(next()));
-        else if (a == "--lambda")
+        else if (arg == "--lambda")
             cfg.gae_lambda = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (a == "--local-weight")
+        else if (arg == "--local-weight")
             cfg.local_weight = std::max(0.0F, std::stof(next()));
-        else if (a == "--out")
+        else if (arg == "--out")
             cfg.out_path = next();
-        else if (a == "--log")
+        else if (arg == "--log")
             cfg.log_path = next();
-        else if (a == "--data")
+        else if (arg == "--data")
             cfg.data_dir = next();
-        else if (a == "--solo-learner")
+        else if (arg == "--solo-learner")
             cfg.solo_learner = true;
-        else if (a == "--from-scratch")
+        else if (arg == "--from-scratch")
             cfg.from_scratch = true;
-        else if (a == "--benchmark-only")
+        else if (arg == "--benchmark-only")
             cfg.benchmark_only = true;
-        else if (a == "--eval-mode") {
-            std::string m = next();
-            if (m == "solo")
+        else if (arg == "--eval-mode") {
+            std::string mode = next();
+            if (mode == "solo")
                 cfg.eval_mode = EvalMode::kSolo;
-            else if (m == "mixed")
+            else if (mode == "mixed")
                 cfg.eval_mode = EvalMode::kMixed;
             else {
                 std::fprintf(stderr,
                              "Unknown --eval-mode '%s'; expected 'mixed' (4 vs 4) or 'solo' (1 vs "
                              "K-1).\n",
-                             m.c_str());
+                             mode.c_str());
                 return false;
             }
-        } else if (a == "--compare")
+        } else if (arg == "--compare")
             cfg.compare_path = next();
-        else if (a == "--dev-seeds")
+        else if (arg == "--dev-seeds")
             cfg.dev_seeds = std::max(0, std::stoi(next()));
-        else if (a == "--breakdown")
+        else if (arg == "--breakdown")
             cfg.breakdown = true;
-        else if (a == "--critic-warmup")
+        else if (arg == "--critic-warmup")
             cfg.critic_warmup = std::max(0, std::stoi(next()));
-        else if (a == "--mixed-frac")
+        else if (arg == "--mixed-frac")
             cfg.mixed_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (a == "--save-every")
+        else if (arg == "--save-every")
             cfg.save_every = std::max(0, std::stoi(next()));
-        else if (a == "--raider-frac")
+        else if (arg == "--raider-frac")
             cfg.raider_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (a == "--departure-weight")
+        else if (arg == "--departure-weight")
             cfg.departure_weight = std::max(0.0F, std::stof(next()));
-        else if (a == "--frozen-opponent")
+        else if (arg == "--frozen-opponent")
             cfg.frozen_path = next();
-        else if (a == "--frozen-frac")
+        else if (arg == "--frozen-frac")
             cfg.frozen_frac = std::clamp(std::stof(next()), 0.0F, 1.0F);
-        else if (a == "--search-k")
+        else if (arg == "--search-k")
             cfg.search_k = std::max(0, std::stoi(next()));
-        else if (a == "--search-r")
+        else if (arg == "--search-r")
             cfg.search_r = std::max(1, std::stoi(next()));
-        else if (a == "--search-h")
+        else if (arg == "--search-h")
             cfg.search_h = std::max(1, std::stoi(next()));
-        else if (a == "--eval-opponent") {
-            std::string o = next();
-            if (o == "raider")
+        else if (arg == "--eval-opponent") {
+            std::string opponent = next();
+            if (opponent == "raider")
                 cfg.eval_opponent = opponents::Kind::kRaider;
-            else if (o == "frozen")
+            else if (opponent == "frozen")
                 cfg.eval_opponent = opponents::Kind::kFrozen;
-            else if (o == "classic")
+            else if (opponent == "classic")
                 cfg.eval_opponent = opponents::Kind::kClassic;
             else {
                 std::fprintf(
                         stderr,
                         "Unknown --eval-opponent '%s'; expected 'classic', 'raider' or 'frozen'.\n",
-                        o.c_str());
+                        opponent.c_str());
                 return false;
             }
         }
@@ -1089,7 +1274,7 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
         else {
             std::fprintf(stderr,
                          "Unknown argument '%s'; see the usage at the top of cpp/test/arena.cpp.\n",
-                         a.c_str());
+                         arg.c_str());
             return false;
         }
     }
@@ -1098,6 +1283,13 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
 
 }  // namespace
 
+/**
+ * @brief Runs the trainer, or only a benchmark or an A/B comparison.
+ *
+ * Each iteration plays the rollout games in parallel, computes advantages,
+ * runs PPO with Adam on the learner and, every --eval-every iterations, keeps
+ * the checkpoint with the best selection-set share.
+ */
 int main(int argc, char** argv) {
     Config cfg;
     if (!ParseArgs(argc, argv, cfg)) return 2;
@@ -1151,10 +1343,10 @@ int main(int argc, char** argv) {
             return 1;
         }
         if (cfg.compare_path.empty()) {
-            EvalResult r =
+            EvalResult result =
                     Summarize(std::move(RunEval(cfg, {&learner}, base, seeds, cfg.eval_turns)[0]));
-            PrintEval(label, r);
-            if (cfg.breakdown) PrintBreakdown(r);
+            PrintEval(label, result);
+            if (cfg.breakdown) PrintBreakdown(result);
             return 0;
         }
         ml::PolicyNetwork other;
@@ -1165,12 +1357,13 @@ int main(int argc, char** argv) {
             return 1;
         }
         auto both = RunEval(cfg, {&learner, &other}, base, seeds, cfg.eval_turns);
-        EvalResult ra = Summarize(std::move(both[0])), rb = Summarize(std::move(both[1]));
-        PrintEval((std::string(label) + " A").c_str(), ra);
-        if (cfg.breakdown) PrintBreakdown(ra);
-        PrintEval((std::string(label) + " B").c_str(), rb);
-        if (cfg.breakdown) PrintBreakdown(rb);
-        PrintPaired(cfg.out_path.c_str(), ra, cfg.compare_path.c_str(), rb);
+        EvalResult result_a = Summarize(std::move(both[0])),
+                   result_b = Summarize(std::move(both[1]));
+        PrintEval((std::string(label) + " A").c_str(), result_a);
+        if (cfg.breakdown) PrintBreakdown(result_a);
+        PrintEval((std::string(label) + " B").c_str(), result_b);
+        if (cfg.breakdown) PrintBreakdown(result_b);
+        PrintPaired(cfg.out_path.c_str(), result_a, cfg.compare_path.c_str(), result_b);
         return 0;
     }
     std::string mode_label = cfg.solo_learner ? "solo-learner (1 vs K-1 Classic)"
