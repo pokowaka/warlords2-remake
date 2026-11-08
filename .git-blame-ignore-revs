@@ -1,0 +1,5 @@
+# Commits git blame skips: formatting only. Use it with
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: Format the C++ with clang-format
+18c4c50cdba3cd4a2a0c7bb130815019584263dd
