@@ -18,167 +18,199 @@ namespace {
 
 using namespace w2::move;  // the terrain type ids
 
-constexpr int kN = 1, kE = 2, kS = 4, kW = 8;
+/// The four compass directions as bits, as a road piece's arms are counted.
+constexpr int kNorth = 1, kEast = 2, kSouth = 4, kWest = 8;
+/// The four orthogonal steps, north first and clockwise.
 constexpr int kDX4[4] = {0, 1, 0, -1}, kDY4[4] = {-1, 0, 1, 0};
-constexpr int kBiT4[4] = {kN, kE, kS, kW};
-// What each road piece joins (docs/formats/map.md > .RD): piece n, n = 1..17.
+/// The arm bit for each of the four steps in kDX4/kDY4.
+constexpr int kArmBit4[4] = {kNorth, kEast, kSouth, kWest};
+/// What each road piece joins (docs/formats/map.md > .RD): piece n, n = 1..17.
 constexpr int kRoadShape[18] = {0,
-                                kE | kW,
-                                kN | kS,
-                                kN | kE | kS | kW,
-                                kE | kS | kW,
-                                kN | kS | kW,
-                                kN | kE | kW,
-                                kN | kE | kS,
-                                kS | kW,
-                                kN | kW,
-                                kN | kE,
-                                kE | kS,
-                                kW,
-                                kS,
-                                kE,
-                                kN,
-                                kE | kW,
-                                kN | kS};
+                                kEast | kWest,
+                                kNorth | kSouth,
+                                kNorth | kEast | kSouth | kWest,
+                                kEast | kSouth | kWest,
+                                kNorth | kSouth | kWest,
+                                kNorth | kEast | kWest,
+                                kNorth | kEast | kSouth,
+                                kSouth | kWest,
+                                kNorth | kWest,
+                                kNorth | kEast,
+                                kEast | kSouth,
+                                kWest,
+                                kSouth,
+                                kEast,
+                                kNorth,
+                                kEast | kWest,
+                                kNorth | kSouth};
+/// The directions a signpost names, by the number Compass() gives.
 const char* const kCompass[8] = {"north", "northeast", "east", "southeast",
                                  "south", "southwest", "west", "northwest"};
 
-// A city may not come closer than this to another: the tiles between the two
-// footprints. The hand-made scenarios never go under 1 (see docs/mapeval.md).
+/// A city may not come closer than this to another: the tiles between the two
+/// footprints. The hand-made scenarios never go under 1 (see docs/mapeval.md).
 constexpr int kMinCityGap = 1;
-// A city this close (tiles between footprints) to another counts as crowded.
+/// A city this close (tiles between footprints) to another counts as crowded.
 constexpr int kCrowdedGap = 2;
-// Two capitals may not be closer than this, in turns of travel. The hand-made
-// scenarios never come under 2.5 (Erythea); this is about 60% of that.
+/// Two capitals may not be closer than this, in turns of travel. The hand-made
+/// scenarios never come under 2.5 (Erythea); this is about 60% of that.
 constexpr double kCapitalGapTurns = 1.5;
-// A neutral city further than this from every capital is out in the wilds.
+/// A neutral city further than this from every capital is out in the wilds.
 constexpr int kRemoteTurns = 5;
 
-double Quantile(std::vector<double> v, double q) {
-    if (v.empty()) return 0;
-    std::sort(v.begin(), v.end());
-    double at = q * static_cast<double>(v.size() - 1);
-    size_t lo = static_cast<size_t>(std::floor(at)), hi = static_cast<size_t>(std::ceil(at));
-    return v[lo] + (v[hi] - v[lo]) * (at - static_cast<double>(lo));
+/**
+ * @brief The value at `quantile` (0..1) of the values, interpolating
+ *        between the two nearest; 0 for no values.
+ */
+double Quantile(std::vector<double> values, double quantile) {
+    if (values.empty()) return 0;
+    std::sort(values.begin(), values.end());
+    double position = quantile * static_cast<double>(values.size() - 1);
+    size_t below = static_cast<size_t>(std::floor(position)),
+           above = static_cast<size_t>(std::ceil(position));
+    return values[below] +
+           (values[above] - values[below]) * (position - static_cast<double>(below));
 }
 
-/** The map, read once into flat grids the checks share. */
+/** @brief The map, read once into flat grids the checks share. */
 struct View {
-    const Map& m;
-    int w, h;
-    std::vector<int> terrain, road;          // terrain type, road piece (0 none)
-    std::vector<int> city_of;                // city index on each footprint tile, or -1
-    std::vector<bool> site, crossing, port;  // port: a footprint tile of a port city
+    const Map& map;              ///< The map being evaluated.
+    int width;                   ///< The map's width in tiles.
+    int height;                  ///< The map's height in tiles.
+    std::vector<int> terrain;    ///< Terrain type of each tile.
+    std::vector<int> road;       ///< Road piece on each tile, 0 for none.
+    std::vector<int> city_of;    ///< City index on each footprint tile, or -1.
+    std::vector<bool> site;      ///< A site stands on the tile.
+    std::vector<bool> crossing;  ///< The tile is marked as a crossing.
+    std::vector<bool> port;      ///< The tile is part of a port city's footprint.
 
-    explicit View(const Map& map) : m(map), w(map.width), h(map.height) {
-        int n = w * h;
-        terrain.resize(n);
-        road.resize(n);
-        city_of.assign(n, -1);
-        site.assign(n, false);
-        crossing.assign(n, false);
-        port.assign(n, false);
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                int i = y * w + x;
-                terrain[i] = scn::TerrainAt(m, x, y);
-                int r = scn::RoadAt(m, x, y) % 32;
-                road[i] = r <= 17 ? r : 0;
-                crossing[i] = scn::IsCrossing(m, x, y);
+    explicit View(const Map& scenario_map)
+            : map(scenario_map), width(scenario_map.width), height(scenario_map.height) {
+        int tile_count = width * height;
+        terrain.resize(tile_count);
+        road.resize(tile_count);
+        city_of.assign(tile_count, -1);
+        site.assign(tile_count, false);
+        crossing.assign(tile_count, false);
+        port.assign(tile_count, false);
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int tile = y * width + x;
+                terrain[tile] = scn::TerrainAt(map, x, y);
+                int piece = scn::RoadAt(map, x, y) % 32;
+                road[tile] = piece <= 17 ? piece : 0;
+                crossing[tile] = scn::IsCrossing(map, x, y);
             }
         }
-        for (const City& c : m.cities) {
+        for (const City& city : map.cities) {
             bool is_port = false;
             for (int dy = -1; dy <= 2 && !is_port; dy++)
                 for (int dx = -1; dx <= 2 && !is_port; dx++) {
                     if (dx >= 0 && dx <= 1 && dy >= 0 && dy <= 1) continue;
-                    int t = TerrainOr(c.x + dx, c.y + dy, -1);
-                    is_port = t == kBridge || t == kWater || t == kShore;
+                    int around = TerrainOr(city.x + dx, city.y + dy, -1);
+                    is_port = around == kBridge || around == kWater || around == kShore;
                 }
             for (int dy = 0; dy <= 1; dy++)
                 for (int dx = 0; dx <= 1; dx++) {
-                    if (!In(c.x + dx, c.y + dy)) continue;
-                    int i = (c.y + dy) * w + c.x + dx;
-                    city_of[i] = c.index;
-                    port[i] = is_port;
+                    if (!In(city.x + dx, city.y + dy)) continue;
+                    int tile = (city.y + dy) * width + city.x + dx;
+                    city_of[tile] = city.index;
+                    port[tile] = is_port;
                 }
         }
-        for (const Site& s : m.sites)
-            if (In(s.x, s.y)) site[s.y * w + s.x] = true;
+        for (const Site& map_site : map.sites)
+            if (In(map_site.x, map_site.y)) site[map_site.y * width + map_site.x] = true;
     }
-    bool In(int x, int y) const { return x >= 0 && y >= 0 && x < w && y < h; }
-    int TerrainOr(int x, int y, int dflt) const { return In(x, y) ? terrain[y * w + x] : dflt; }
-    bool Sea(int i) const { return terrain[i] == kWater || terrain[i] == kShore; }
-    /** Road, or a bridge: what a road network is made of. */
-    bool Roadway(int i) const { return road[i] != 0 || terrain[i] == kBridge; }
-    /** What a road may lead to: a city, a site, a signpost or a crossing. */
-    bool Destination(int i) const {
-        return city_of[i] >= 0 || site[i] || terrain[i] == kTower || crossing[i];
+    /** @brief Is (x, y) on the map? */
+    bool In(int x, int y) const { return x >= 0 && y >= 0 && x < width && y < height; }
+    /** @brief The terrain at (x, y), or `fallback` off the map. */
+    int TerrainOr(int x, int y, int fallback) const {
+        return In(x, y) ? terrain[y * width + x] : fallback;
     }
-    /** Is a destination on this tile or any of its 8 neighbours? */
+    /** @brief Is the tile water or shore? */
+    bool Sea(int tile) const { return terrain[tile] == kWater || terrain[tile] == kShore; }
+    /** @brief Road, or a bridge: what a road network is made of. */
+    bool Roadway(int tile) const { return road[tile] != 0 || terrain[tile] == kBridge; }
+    /** @brief What a road may lead to: a city, a site, a signpost or a crossing. */
+    bool Destination(int tile) const {
+        return city_of[tile] >= 0 || site[tile] || terrain[tile] == kTower || crossing[tile];
+    }
+    /** @brief Is a destination on this tile or any of its 8 neighbours? */
     bool DestinationNear(int x, int y) const {
         for (int dy = -1; dy <= 1; dy++)
             for (int dx = -1; dx <= 1; dx++)
-                if (In(x + dx, y + dy) && Destination((y + dy) * w + x + dx)) return true;
+                if (In(x + dx, y + dy) && Destination((y + dy) * width + x + dx)) return true;
         return false;
     }
 };
 
+/** @brief What every check works with: the map's view and the evaluation it fills in. */
 struct Context {
-    const View& v;
-    Evaluation& e;
+    const View& view;        ///< The map, read into grids.
+    Evaluation& evaluation;  ///< Where the issues and metrics go.
+    /** @brief Records a hard- or soft-rule failure on a tile. */
     void AddIssue(const char* check, int x, int y, const std::string& detail) {
-        e.issues.push_back({check, x, y, detail});
+        evaluation.issues.push_back({check, x, y, detail});
     }
-    void Metric(const char* key, double value) { e.metrics.emplace_back(key, value); }
+    /** @brief Records a named number. */
+    void Metric(const char* key, double value) { evaluation.metrics.emplace_back(key, value); }
 };
 
 // ---------------------------------------------------------------- cities
 
-/** Tiles between two footprints along x and along y (0 when touching). */
-std::pair<int, int> Gaps(const City& a, const City& b) {
-    int gx = std::max(0, std::abs(a.x - b.x) - 2), gy = std::max(0, std::abs(a.y - b.y) - 2);
-    return {gx, gy};
+/** @brief Tiles between two footprints along x and along y (0 when touching). */
+std::pair<int, int> Gaps(const City& first, const City& second) {
+    int gap_x = std::max(0, std::abs(first.x - second.x) - 2),
+        gap_y = std::max(0, std::abs(first.y - second.y) - 2);
+    return {gap_x, gap_y};
 }
-bool Overlap(const City& a, const City& b) {
-    return std::abs(a.x - b.x) < 2 && std::abs(a.y - b.y) < 2;
+/** @brief Do two cities' 2x2 footprints share a tile? */
+bool Overlap(const City& first, const City& second) {
+    return std::abs(first.x - second.x) < 2 && std::abs(first.y - second.y) < 2;
 }
 
-void Cities(Context& cx) {
-    const Map& m = cx.v.m;
-    const View& v = cx.v;
-    int n = static_cast<int>(m.cities.size());
+/**
+ * @brief The cities: their footprints, names and spacing, and how evenly
+ *        they spread over the land.
+ */
+void Cities(Context& context) {
+    const Map& map = context.view.map;
+    const View& view = context.view;
+    int city_count = static_cast<int>(map.cities.size());
     std::vector<double> nearest_gap, nearest_dist;
     int crowded = 0;
     std::map<std::string, int> names;
-    for (const City& c : m.cities) {
-        if (names[c.name]++ == 1)
-            cx.AddIssue("city-name", c.x, c.y, "two or more cities are called " + c.name);
+    for (const City& city : map.cities) {
+        if (names[city.name]++ == 1)
+            context.AddIssue("city-name", city.x, city.y,
+                             "two or more cities are called " + city.name);
         for (int dy = 0; dy <= 1; dy++)
             for (int dx = 0; dx <= 1; dx++) {
-                int t = v.TerrainOr(c.x + dx, c.y + dy, -1);
-                if (t != kCity) {
-                    cx.AddIssue("city-terrain", c.x + dx, c.y + dy,
-                                c.name + "'s footprint stands on " +
-                                        (t >= 0 ? kTerrainNames[t] : "the map's edge"));
+                int terrain = view.TerrainOr(city.x + dx, city.y + dy, -1);
+                if (terrain != kCity) {
+                    context.AddIssue(
+                            "city-terrain", city.x + dx, city.y + dy,
+                            city.name + "'s footprint stands on " +
+                                    (terrain >= 0 ? kTerrainNames[terrain] : "the map's edge"));
                 }
             }
         int best = std::numeric_limits<int>::max();
         double best_dist = std::numeric_limits<double>::max();
-        for (const City& o : m.cities) {
-            if (&o == &c) continue;
-            auto [gx, gy] = Gaps(c, o);
-            int gap = Overlap(c, o) ? -1 : std::max(gx, gy);
+        for (const City& other : map.cities) {
+            if (&other == &city) continue;
+            auto [gap_x, gap_y] = Gaps(city, other);
+            int gap = Overlap(city, other) ? -1 : std::max(gap_x, gap_y);
             best = std::min(best, gap);
-            best_dist = std::min(best_dist, std::hypot(c.x - o.x, c.y - o.y));
-            if (c.index < o.index && gap < kMinCityGap) {
-                cx.AddIssue("city-gap", c.x, c.y,
-                            c.name + " and " + o.name +
-                                    (gap < 0 ? " overlap"
-                                             : " are " + std::to_string(gap) + " tile(s) apart"));
+            best_dist = std::min(best_dist, std::hypot(city.x - other.x, city.y - other.y));
+            if (city.index < other.index && gap < kMinCityGap) {
+                context.AddIssue(
+                        "city-gap", city.x, city.y,
+                        city.name + " and " + other.name +
+                                (gap < 0 ? " overlap"
+                                         : " are " + std::to_string(gap) + " tile(s) apart"));
             }
         }
-        if (n > 1) {
+        if (city_count > 1) {
             nearest_gap.push_back(best);
             nearest_dist.push_back(best_dist);
             if (best <= kCrowdedGap) crowded++;
@@ -187,84 +219,94 @@ void Cities(Context& cx) {
     // Clark-Evans: the mean nearest-neighbour distance over what random points
     // on the same land would give; < 1 clustered, 1 random, > 1 evenly spread
     int land = 0;
-    for (int i = 0; i < v.w * v.h; i++) land += !v.Sea(i);
+    for (int i = 0; i < view.width * view.height; i++) land += !view.Sea(i);
     double mean = 0;
-    for (double d : nearest_dist) mean += d;
+    for (double dist : nearest_dist) mean += dist;
     mean = nearest_dist.empty() ? 0 : mean / static_cast<double>(nearest_dist.size());
-    double expected = n > 0 && land > 0 ? 0.5 / std::sqrt(static_cast<double>(n) / land) : 0;
-    cx.Metric("cities", n);
-    cx.Metric("cityGapMin", Quantile(nearest_gap, 0));
-    cx.Metric("cityGapP5", Quantile(nearest_gap, 0.05));
-    cx.Metric("cityGapMedian", Quantile(nearest_gap, 0.5));
-    cx.Metric("crowdedCityFrac", n ? static_cast<double>(crowded) / n : 0);
-    cx.Metric("clarkEvansR", expected > 0 ? mean / expected : 0);
+    double expected = city_count > 0 && land > 0
+                              ? 0.5 / std::sqrt(static_cast<double>(city_count) / land)
+                              : 0;
+    context.Metric("cities", city_count);
+    context.Metric("cityGapMin", Quantile(nearest_gap, 0));
+    context.Metric("cityGapP5", Quantile(nearest_gap, 0.05));
+    context.Metric("cityGapMedian", Quantile(nearest_gap, 0.5));
+    context.Metric("crowdedCityFrac", city_count ? static_cast<double>(crowded) / city_count : 0);
+    context.Metric("clarkEvansR", expected > 0 ? mean / expected : 0);
 }
 
 // ---------------------------------------------------------------- roads
 
-void Roads(Context& cx) {
-    const View& v = cx.v;
-    const Map& m = v.m;
-    int w = v.w, h = v.h;
+/**
+ * @brief The roads: pieces whose arms meet nothing, networks that reach no
+ *        place or only one, how many cities the roads join, and how far a
+ *        road detours between neighbouring cities.
+ */
+void Roads(Context& context) {
+    const View& view = context.view;
+    const Map& map = view.map;
+    int width = view.width, height = view.height;
     int road_tiles = 0, pieces = 0, mismatched = 0, dead_ends = 0;
-    for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int i = y * w + x;
-            if (!v.road[i]) continue;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            int tile = y * width + x;
+            if (!view.road[tile]) continue;
             pieces++;
             // the piece's own arms against what lies beyond them: an arm must meet
             // a roadway or a place, and a road piece pointing back needs an arm
-            int shape = kRoadShape[v.road[i]], joined = 0;
+            int shape = kRoadShape[view.road[tile]], joined = 0;
             bool bad = false;
-            for (int d = 0; d < 4; d++) {
-                int nx = x + kDX4[d], ny = y + kDY4[d];
-                if (!v.In(nx, ny)) continue;
-                int j = ny * w + nx;
-                if (v.Roadway(j) || v.Destination(j)) joined |= kBiT4[d];
-                bool back = v.road[j] && (kRoadShape[v.road[j]] & kBiT4[(d + 2) % 4]);
-                if (back && !(shape & kBiT4[d])) bad = true;
+            for (int dir = 0; dir < 4; dir++) {
+                int next_x = x + kDX4[dir], next_y = y + kDY4[dir];
+                if (!view.In(next_x, next_y)) continue;
+                int next = next_y * width + next_x;
+                if (view.Roadway(next) || view.Destination(next)) joined |= kArmBit4[dir];
+                bool back =
+                        view.road[next] && (kRoadShape[view.road[next]] & kArmBit4[(dir + 2) % 4]);
+                if (back && !(shape & kArmBit4[dir])) bad = true;
             }
             if (shape & ~joined) bad = true;
             if (bad) mismatched++;
-            for (int d = 0; d < 4; d++) {
-                if (!(shape & kBiT4[d]) || (joined & kBiT4[d])) continue;
-                if (v.DestinationNear(x, y)) continue;
+            for (int dir = 0; dir < 4; dir++) {
+                if (!(shape & kArmBit4[dir]) || (joined & kArmBit4[dir])) continue;
+                if (view.DestinationNear(x, y)) continue;
                 dead_ends++;
-                cx.AddIssue("dead-end", x, y,
-                            std::string("the road's ") + "NESW"[d] + " arm leads nowhere");
+                context.AddIssue("dead-end", x, y,
+                                 std::string("the road's ") + "NESW"[dir] + " arm leads nowhere");
             }
         }
     }
     // the networks: 4-connected roads and bridges, and what each one reaches
-    std::vector<int> comp(static_cast<size_t>(w) * h, -1);
-    int comps = 0, stray = 0, spurs = 0, main_size = 0;
-    std::vector<std::set<int>> comp_cities;
-    for (int s = 0; s < w * h; s++) {
-        if (!v.Roadway(s) || comp[s] >= 0) continue;
+    std::vector<int> network_of(static_cast<size_t>(width) * height, -1);
+    int networks = 0, stray = 0, spurs = 0, main_size = 0;
+    std::vector<std::set<int>> network_cities;
+    for (int start = 0; start < width * height; start++) {
+        if (!view.Roadway(start) || network_of[start] >= 0) continue;
         std::set<int> reached;
         std::set<int> others;  // sites, signposts and crossings, by tile
         int size = 0;
-        std::deque<int> q{s};
-        comp[s] = comps;
-        while (!q.empty()) {
-            int i = q.front();
-            q.pop_front();
+        std::deque<int> frontier{start};
+        network_of[start] = networks;
+        while (!frontier.empty()) {
+            int tile = frontier.front();
+            frontier.pop_front();
             size++;
-            int x = i % w, y = i / w;
+            int x = tile % width, y = tile / width;
             for (int dy = -1; dy <= 1; dy++)
                 for (int dx = -1; dx <= 1; dx++) {
-                    if (!v.In(x + dx, y + dy)) continue;
-                    int j = (y + dy) * w + x + dx;
-                    if (v.city_of[j] >= 0) reached.insert(v.city_of[j]);
-                    if (v.site[j] || v.crossing[j] || v.terrain[j] == kTower) others.insert(j);
+                    if (!view.In(x + dx, y + dy)) continue;
+                    int around = (y + dy) * width + x + dx;
+                    if (view.city_of[around] >= 0) reached.insert(view.city_of[around]);
+                    if (view.site[around] || view.crossing[around] ||
+                        view.terrain[around] == kTower)
+                        others.insert(around);
                 }
-            for (int d = 0; d < 4; d++) {
-                int nx = x + kDX4[d], ny = y + kDY4[d];
-                if (!v.In(nx, ny)) continue;
-                int j = ny * w + nx;
-                if (v.Roadway(j) && comp[j] < 0) {
-                    comp[j] = comps;
-                    q.push_back(j);
+            for (int dir = 0; dir < 4; dir++) {
+                int next_x = x + kDX4[dir], next_y = y + kDY4[dir];
+                if (!view.In(next_x, next_y)) continue;
+                int next = next_y * width + next_x;
+                if (view.Roadway(next) && network_of[next] < 0) {
+                    network_of[next] = networks;
+                    frontier.push_back(next);
                 }
             }
         }
@@ -272,240 +314,261 @@ void Roads(Context& cx) {
         int ends = static_cast<int>(reached.size()) + static_cast<int>(others.size());
         if (ends == 0) {
             stray++;
-            cx.AddIssue("road-to-nowhere", s % w, s / w,
-                        "a road of " + std::to_string(size) + " tile(s) reaching no place");
+            context.AddIssue("road-to-nowhere", start % width, start / width,
+                             "a road of " + std::to_string(size) + " tile(s) reaching no place");
         } else if (ends == 1) {
             spurs++;
-            cx.AddIssue("spur-road", s % w, s / w,
-                        "a road of " + std::to_string(size) + " tile(s) reaching one place only");
+            context.AddIssue(
+                    "spur-road", start % width, start / width,
+                    "a road of " + std::to_string(size) + " tile(s) reaching one place only");
         }
         if (static_cast<int>(reached.size()) > main_size)
             main_size = static_cast<int>(reached.size());
-        comp_cities.push_back(reached);
-        comps++;
+        network_cities.push_back(reached);
+        networks++;
     }
-    int n = static_cast<int>(m.cities.size());
-    std::vector<bool> on_road(n, false);
-    for (auto& r : comp_cities)
-        for (int c : r) on_road[c] = true;
+    int city_count = static_cast<int>(map.cities.size());
+    std::vector<bool> on_road(city_count, false);
+    for (auto& cities_reached : network_cities)
+        for (int city_index : cities_reached) on_road[city_index] = true;
     int linked = static_cast<int>(std::count(on_road.begin(), on_road.end(), true));
 
     // detours: from each city along its roads to the first other cities met
     std::vector<double> detours;
-    for (const City& c : m.cities) {
-        std::vector<int> dist(static_cast<size_t>(w) * h, -1);
-        std::deque<int> q;
+    for (const City& city : map.cities) {
+        std::vector<int> dist(static_cast<size_t>(width) * height, -1);
+        std::deque<int> frontier;
         for (int dy = -1; dy <= 2; dy++)
             for (int dx = -1; dx <= 2; dx++) {
-                int x = c.x + dx, y = c.y + dy;
-                if (!v.In(x, y)) continue;
-                int i = y * w + x;
-                if (v.Roadway(i) && v.city_of[i] < 0) {
-                    dist[i] = 1;
-                    q.push_back(i);
+                int x = city.x + dx, y = city.y + dy;
+                if (!view.In(x, y)) continue;
+                int tile = y * width + x;
+                if (view.Roadway(tile) && view.city_of[tile] < 0) {
+                    dist[tile] = 1;
+                    frontier.push_back(tile);
                 }
             }
         std::set<int> met;
-        while (!q.empty()) {
-            int i = q.front();
-            q.pop_front();
-            int x = i % w, y = i / w;
+        while (!frontier.empty()) {
+            int tile = frontier.front();
+            frontier.pop_front();
+            int x = tile % width, y = tile / width;
             int other = -1;
             for (int dy = -1; dy <= 1 && other < 0; dy++)
                 for (int dx = -1; dx <= 1 && other < 0; dx++)
-                    if (v.In(x + dx, y + dy)) {
-                        int k = v.city_of[(y + dy) * w + x + dx];
-                        if (k >= 0 && k != c.index) other = k;
+                    if (view.In(x + dx, y + dy)) {
+                        int near_city = view.city_of[(y + dy) * width + x + dx];
+                        if (near_city >= 0 && near_city != city.index) other = near_city;
                     }
             if (other >= 0) {
                 if (met.insert(other).second) {
-                    auto [gx, gy] = Gaps(c, m.cities[other]);
-                    detours.push_back(static_cast<double>(dist[i]) / std::max(1, gx + gy));
+                    auto [gap_x, gap_y] = Gaps(city, map.cities[other]);
+                    detours.push_back(static_cast<double>(dist[tile]) / std::max(1, gap_x + gap_y));
                 }
                 continue;  // a road through a city is two roads
             }
-            for (int d = 0; d < 4; d++) {
-                int nx = x + kDX4[d], ny = y + kDY4[d];
-                if (!v.In(nx, ny)) continue;
-                int j = ny * w + nx;
-                if (v.Roadway(j) && dist[j] < 0 && v.city_of[j] < 0) {
-                    dist[j] = dist[i] + 1;
-                    q.push_back(j);
+            for (int dir = 0; dir < 4; dir++) {
+                int next_x = x + kDX4[dir], next_y = y + kDY4[dir];
+                if (!view.In(next_x, next_y)) continue;
+                int next = next_y * width + next_x;
+                if (view.Roadway(next) && dist[next] < 0 && view.city_of[next] < 0) {
+                    dist[next] = dist[tile] + 1;
+                    frontier.push_back(next);
                 }
             }
         }
     }
-    cx.Metric("roadTiles", road_tiles);
-    cx.Metric("roadNetworks", comps);
-    cx.Metric("roadsToNowhere", stray);
-    cx.Metric("spurRoads", spurs);
-    cx.Metric("spurRoadsPerCity", n ? static_cast<double>(spurs) / n : 0);
-    cx.Metric("deadEnds", dead_ends);
-    cx.Metric("deadEndsPer100Road", road_tiles ? 100.0 * dead_ends / road_tiles : 0);
-    cx.Metric("roadShapeMismatchFrac", pieces ? static_cast<double>(mismatched) / pieces : 0);
-    cx.Metric("cityRoadCoverage", n ? static_cast<double>(linked) / n : 0);
-    cx.Metric("mainNetworkCityShare", n ? static_cast<double>(main_size) / n : 0);
-    cx.Metric("roadTilesPerCity", n ? static_cast<double>(road_tiles) / n : 0);
-    cx.Metric("roadDetourMedian", Quantile(detours, 0.5));
-    cx.Metric("roadDetourP95", Quantile(detours, 0.95));
+    context.Metric("roadTiles", road_tiles);
+    context.Metric("roadNetworks", networks);
+    context.Metric("roadsToNowhere", stray);
+    context.Metric("spurRoads", spurs);
+    context.Metric("spurRoadsPerCity", city_count ? static_cast<double>(spurs) / city_count : 0);
+    context.Metric("deadEnds", dead_ends);
+    context.Metric("deadEndsPer100Road", road_tiles ? 100.0 * dead_ends / road_tiles : 0);
+    context.Metric("roadShapeMismatchFrac", pieces ? static_cast<double>(mismatched) / pieces : 0);
+    context.Metric("cityRoadCoverage", city_count ? static_cast<double>(linked) / city_count : 0);
+    context.Metric("mainNetworkCityShare",
+                   city_count ? static_cast<double>(main_size) / city_count : 0);
+    context.Metric("roadTilesPerCity",
+                   city_count ? static_cast<double>(road_tiles) / city_count : 0);
+    context.Metric("roadDetourMedian", Quantile(detours, 0.5));
+    context.Metric("roadDetourP95", Quantile(detours, 0.95));
 }
 
 // ---------------------------------------------------------------- reach
 
-/** Every tile a stack can get to from (x, y): mountains are shut; it changes
- *  between land and sea only through a crossing (a bridge, a marked tile, a
- *  port city's footprint) -- docs/rules.md > Movement. Land only: no sea. */
-std::vector<bool> Reach(const View& v, int x0, int y0, bool land_only) {
-    int w = v.w, h = v.h;
-    std::vector<bool> seen(static_cast<size_t>(w) * h, false);
-    // a road over mountains is a pass (18a9:0896): any road tile costs 1
-    auto open = [&](int i) {
-        return (v.terrain[i] != kMountains || v.road[i]) && !(land_only && v.Sea(i));
+/**
+ * @brief Every tile a stack can get to from (start_x, start_y).
+ *
+ * Mountains are shut; it changes between land and sea only through a
+ * crossing (a bridge, a marked tile, a port city's footprint) --
+ * docs/rules.md > Movement. With `land_only`, the sea is shut too.
+ */
+std::vector<bool> Reach(const View& view, int start_x, int start_y, bool land_only) {
+    int width = view.width, height = view.height;
+    std::vector<bool> seen(static_cast<size_t>(width) * height, false);
+    // a road over mountains is a pass: any road tile costs 1
+    auto open = [&](int tile) {
+        return (view.terrain[tile] != kMountains || view.road[tile]) &&
+               !(land_only && view.Sea(tile));
     };
-    auto crossing = [&](int i) { return v.crossing[i] || v.port[i] || v.terrain[i] == kBridge; };
-    int s = y0 * w + x0;
-    if (!v.In(x0, y0) || !open(s)) return seen;
-    std::deque<int> q{s};
-    seen[s] = true;
-    while (!q.empty()) {
-        int i = q.front();
-        q.pop_front();
-        int x = i % w, y = i / w;
-        for (int d = 0; d < 8; d++) {
-            int nx = x + kDirs[d][0], ny = y + kDirs[d][1];
-            if (!v.In(nx, ny)) continue;
-            int j = ny * w + nx;
-            if (seen[j] || !open(j)) continue;
-            if (v.Sea(i) != v.Sea(j) && !crossing(i) && !crossing(j)) continue;
-            seen[j] = true;
-            q.push_back(j);
+    auto crossing = [&](int tile) {
+        return view.crossing[tile] || view.port[tile] || view.terrain[tile] == kBridge;
+    };
+    int start = start_y * width + start_x;
+    if (!view.In(start_x, start_y) || !open(start)) return seen;
+    std::deque<int> frontier{start};
+    seen[start] = true;
+    while (!frontier.empty()) {
+        int tile = frontier.front();
+        frontier.pop_front();
+        int x = tile % width, y = tile / width;
+        for (int dir = 0; dir < 8; dir++) {
+            int next_x = x + kDirs[dir][0], next_y = y + kDirs[dir][1];
+            if (!view.In(next_x, next_y)) continue;
+            int next = next_y * width + next_x;
+            if (seen[next] || !open(next)) continue;
+            if (view.Sea(tile) != view.Sea(next) && !crossing(tile) && !crossing(next)) continue;
+            seen[next] = true;
+            frontier.push_back(next);
         }
     }
     return seen;
 }
 
-void Reachability(Context& cx) {
-    const View& v = cx.v;
-    const Map& m = v.m;
-    int w = v.w;
+/**
+ * @brief Can every capital reach every city and site, and what share of the
+ *        cities can it reach without taking to the sea?
+ */
+void Reachability(Context& context) {
+    const View& view = context.view;
+    const Map& map = view.map;
+    int width = view.width;
     std::vector<const City*> capitals;
-    for (const Side& s : m.sides)
-        if (s.capital) capitals.push_back(s.capital);
+    for (const Side& side : map.sides)
+        if (side.capital) capitals.push_back(side.capital);
     double land_share = 0;
     std::set<int> lost_cities, lost_sites;
-    for (const City* cap : capitals) {
-        auto all = Reach(v, cap->x, cap->y, false);
-        auto land = Reach(v, cap->x, cap->y, true);
+    for (const City* capital : capitals) {
+        auto all = Reach(view, capital->x, capital->y, false);
+        auto land = Reach(view, capital->x, capital->y, true);
         int by_land = 0;
-        for (const City& c : m.cities) {
-            if (land[c.y * w + c.x]) by_land++;
-            if (!all[c.y * w + c.x] && lost_cities.insert(c.index).second)
-                cx.AddIssue("unreachable", c.x, c.y,
-                            c.name + " cannot be reached from " + cap->name);
+        for (const City& city : map.cities) {
+            if (land[city.y * width + city.x]) by_land++;
+            if (!all[city.y * width + city.x] && lost_cities.insert(city.index).second)
+                context.AddIssue("unreachable", city.x, city.y,
+                                 city.name + " cannot be reached from " + capital->name);
         }
-        for (const Site& s : m.sites)
-            if (!all[s.y * w + s.x] && lost_sites.insert(s.index).second)
-                cx.AddIssue("unreachable", s.x, s.y,
-                            s.name + " cannot be reached from " + cap->name);
-        land_share += m.cities.empty() ? 0 : static_cast<double>(by_land) / m.cities.size();
+        for (const Site& site : map.sites)
+            if (!all[site.y * width + site.x] && lost_sites.insert(site.index).second)
+                context.AddIssue("unreachable", site.x, site.y,
+                                 site.name + " cannot be reached from " + capital->name);
+        land_share += map.cities.empty() ? 0 : static_cast<double>(by_land) / map.cities.size();
     }
-    cx.Metric("capitals", capitals.size());
-    cx.Metric("landReachShare", capitals.empty() ? 0 : land_share / capitals.size());
+    context.Metric("capitals", capitals.size());
+    context.Metric("landReachShare", capitals.empty() ? 0 : land_share / capitals.size());
 }
 
 // ---------------------------------------------------------------- fairness
 
-double Gini(std::vector<double> v) {
-    if (v.size() < 2) return 0;
-    std::sort(v.begin(), v.end());
+/** @brief The Gini coefficient of the values: 0 all equal, towards 1 all in one. */
+double Gini(std::vector<double> values) {
+    if (values.size() < 2) return 0;
+    std::sort(values.begin(), values.end());
     double sum = 0, weighted = 0;
-    for (size_t i = 0; i < v.size(); i++) {
-        sum += v[i];
-        weighted += static_cast<double>(i + 1) * v[i];
+    for (size_t i = 0; i < values.size(); i++) {
+        sum += values[i];
+        weighted += static_cast<double>(i + 1) * values[i];
     }
     if (sum <= 0) return 0;
-    double n = static_cast<double>(v.size());
-    return (2 * weighted) / (n * sum) - (n + 1) / n;
+    double count = static_cast<double>(values.size());
+    return (2 * weighted) / (count * sum) - (count + 1) / count;
 }
 
-/** Each side's start, by travel cost from its capital: how near its rivals
- *  are, and what it can expand into -- the neutral cities it reaches before
- *  anyone else does (a Voronoi diagram by travel cost), their income, and
- *  how many lie within a few turns. */
-void Fairness(Context& cx) {
-    const View& v = cx.v;
-    const Map& m = v.m;
-    int w = v.w, n = w * v.h;
+/**
+ * @brief Each side's start, by travel cost from its capital.
+ *
+ * How near its rivals are, and what it can expand into: the neutral cities
+ * it reaches before anyone else does (a Voronoi diagram by travel cost),
+ * their income, and how many lie within a few turns.
+ */
+void Fairness(Context& context) {
+    const View& view = context.view;
+    const Map& map = view.map;
+    int width = view.width, tile_count = width * view.height;
     travel::Ground ground;
-    ground.w = w;
-    ground.h = v.h;
-    ground.terrain = v.terrain;
-    ground.road.resize(n);
-    ground.crossing.resize(n);
-    for (int i = 0; i < n; i++) {
-        ground.road[i] = v.road[i] != 0;
-        ground.crossing[i] = v.crossing[i] || v.port[i] || v.terrain[i] == kBridge;
+    ground.w = width;
+    ground.h = view.height;
+    ground.terrain = view.terrain;
+    ground.road.resize(tile_count);
+    ground.crossing.resize(tile_count);
+    for (int i = 0; i < tile_count; i++) {
+        ground.road[i] = view.road[i] != 0;
+        ground.crossing[i] = view.crossing[i] || view.port[i] || view.terrain[i] == kBridge;
     }
-    auto footprint = [&](const City& c) {
-        std::vector<int> t;
+    auto footprint = [&](const City& city) {
+        std::vector<int> tiles;
         for (int dy = 0; dy <= 1; dy++)
             for (int dx = 0; dx <= 1; dx++)
-                if (v.In(c.x + dx, c.y + dy)) t.push_back((c.y + dy) * w + c.x + dx);
-        return t;
+                if (view.In(city.x + dx, city.y + dy))
+                    tiles.push_back((city.y + dy) * width + city.x + dx);
+        return tiles;
     };
-    auto cost_to = [&](const std::vector<int>& field, const City& c) {
+    auto cost_to = [&](const std::vector<int>& costs, const City& city) {
         int best = travel::kUnreached;
-        for (int t : footprint(c)) best = std::min(best, field[t]);
+        for (int tile : footprint(city)) best = std::min(best, costs[tile]);
         return best;
     };
-    std::vector<const City*> caps;
-    for (const Side& s : m.sides)
-        if (s.capital) caps.push_back(s.capital);
-    int k = static_cast<int>(caps.size());
-    if (k < 2) return;
-    std::vector<std::vector<int>> field(k);
-    for (int i = 0; i < k; i++) field[i] = travel::Costs(ground, footprint(*caps[i]));
+    std::vector<const City*> capitals;
+    for (const Side& side : map.sides)
+        if (side.capital) capitals.push_back(side.capital);
+    int capital_count = static_cast<int>(capitals.size());
+    if (capital_count < 2) return;
+    std::vector<std::vector<int>> cost_fields(capital_count);
+    for (int i = 0; i < capital_count; i++)
+        cost_fields[i] = travel::Costs(ground, footprint(*capitals[i]));
 
     // the nearest rival capital, in turns
     std::vector<double> gaps;
-    for (int i = 0; i < k; i++) {
+    for (int i = 0; i < capital_count; i++) {
         int best = travel::kUnreached;
-        for (int j = 0; j < k; j++)
-            if (j != i) best = std::min(best, cost_to(field[i], *caps[j]));
+        for (int j = 0; j < capital_count; j++)
+            if (j != i) best = std::min(best, cost_to(cost_fields[i], *capitals[j]));
         if (best == travel::kUnreached) continue;
         double turns = static_cast<double>(best) / travel::kTurn;
         gaps.push_back(turns);
-        for (int j = i + 1; j < k; j++) {
-            int c = cost_to(field[i], *caps[j]);
-            if (c != travel::kUnreached &&
-                static_cast<double>(c) / travel::kTurn < kCapitalGapTurns)
-                cx.AddIssue("capital-gap", caps[i]->x, caps[i]->y,
-                            caps[i]->name + " and " + caps[j]->name + " are " +
-                                    Fmt("%.1f", static_cast<double>(c) / travel::kTurn) +
-                                    " turns apart");
+        for (int j = i + 1; j < capital_count; j++) {
+            int cost = cost_to(cost_fields[i], *capitals[j]);
+            if (cost != travel::kUnreached &&
+                static_cast<double>(cost) / travel::kTurn < kCapitalGapTurns)
+                context.AddIssue("capital-gap", capitals[i]->x, capitals[i]->y,
+                                 capitals[i]->name + " and " + capitals[j]->name + " are " +
+                                         Fmt("%.1f", static_cast<double>(cost) / travel::kTurn) +
+                                         " turns apart");
         }
     }
     // the neutral cities each side reaches first, and those within reach
-    std::vector<double> cities(k, 0), income(k, 0), near2(k, 0), near4(k, 0), hinterland(k, 0);
+    std::vector<double> cities(capital_count, 0), income(capital_count, 0), near2(capital_count, 0),
+            near4(capital_count, 0), hinterland(capital_count, 0);
     int neutral = 0, remote = 0;
-    for (const City& c : m.cities) {
-        if (std::find(caps.begin(), caps.end(), &c) != caps.end()) continue;
+    for (const City& city : map.cities) {
+        if (std::find(capitals.begin(), capitals.end(), &city) != capitals.end()) continue;
         neutral++;
         int best = travel::kUnreached, second = travel::kUnreached, who = -1;
-        for (int i = 0; i < k; i++) {
-            int d = cost_to(field[i], c);
-            if (d < best) {
+        for (int i = 0; i < capital_count; i++) {
+            int cost = cost_to(cost_fields[i], city);
+            if (cost < best) {
                 second = best;
-                best = d;
+                best = cost;
                 who = i;
-            } else if (d < second)
-                second = d;
-            if (d <= 2 * travel::kTurn) near2[i]++;
-            if (d <= 4 * travel::kTurn) near4[i]++;
+            } else if (cost < second)
+                second = cost;
+            if (cost <= 2 * travel::kTurn) near2[i]++;
+            if (cost <= 4 * travel::kTurn) near4[i]++;
         }
         if (who < 0) continue;
         cities[who]++;
-        income[who] += c.income;
+        income[who] += city.income;
         if (best > kRemoteTurns * travel::kTurn) remote++;
         // a city nobody else can contest: the next side is twice as far, and
         // at least two turns further
@@ -513,92 +576,99 @@ void Fairness(Context& cx) {
             (second >= 2 * best && second - best >= 2 * travel::kTurn))
             hinterland[who]++;
     }
-    double fair = neutral > 0 ? static_cast<double>(neutral) / k : 1;
-    cx.Metric("capitalGapMinTurns", gaps.empty() ? 0 : Quantile(gaps, 0));
-    cx.Metric("capitalGapMedianTurns", Quantile(gaps, 0.5));
-    cx.Metric("expansionMinShare", *std::min_element(cities.begin(), cities.end()) / fair);
-    cx.Metric("expansionMaxShare", *std::max_element(cities.begin(), cities.end()) / fair);
-    cx.Metric("expansionGini", Gini(cities));
-    cx.Metric("incomeGini", Gini(income));
-    cx.Metric("near2MinShare", *std::min_element(near2.begin(), near2.end()) / fair);
-    cx.Metric("near4MinShare", *std::min_element(near4.begin(), near4.end()) / fair);
-    cx.Metric("hinterlandMaxShare", *std::max_element(hinterland.begin(), hinterland.end()) / fair);
-    cx.Metric("remoteCityFrac", neutral ? static_cast<double>(remote) / neutral : 0);
+    double fair = neutral > 0 ? static_cast<double>(neutral) / capital_count : 1;
+    context.Metric("capitalGapMinTurns", gaps.empty() ? 0 : Quantile(gaps, 0));
+    context.Metric("capitalGapMedianTurns", Quantile(gaps, 0.5));
+    context.Metric("expansionMinShare", *std::min_element(cities.begin(), cities.end()) / fair);
+    context.Metric("expansionMaxShare", *std::max_element(cities.begin(), cities.end()) / fair);
+    context.Metric("expansionGini", Gini(cities));
+    context.Metric("incomeGini", Gini(income));
+    context.Metric("near2MinShare", *std::min_element(near2.begin(), near2.end()) / fair);
+    context.Metric("near4MinShare", *std::min_element(near4.begin(), near4.end()) / fair);
+    context.Metric("hinterlandMaxShare",
+                   *std::max_element(hinterland.begin(), hinterland.end()) / fair);
+    context.Metric("remoteCityFrac", neutral ? static_cast<double>(remote) / neutral : 0);
 }
 
 // ---------------------------------------------------------------- terrain
 
-void Terrain(Context& cx) {
-    const View& v = cx.v;
-    const Map& m = v.m;
-    int w = v.w, h = v.h, n = w * h;
+/**
+ * @brief The ground: how much is land, how ragged its coast, how the cities
+ *        share out over the landmasses, and how lumpy the forest, hills,
+ *        mountains and marsh are.
+ */
+void Terrain(Context& context) {
+    const View& view = context.view;
+    const Map& map = view.map;
+    int width = view.width, height = view.height, tile_count = width * height;
     int land = 0, coast = 0;
-    for (int i = 0; i < n; i++) {
-        if (v.Sea(i)) continue;
+    for (int i = 0; i < tile_count; i++) {
+        if (view.Sea(i)) continue;
         land++;
-        int x = i % w, y = i / w;
-        for (int d = 0; d < 4; d++) {
-            int t = v.TerrainOr(x + kDX4[d], y + kDY4[d], kWater);
-            if (t == kWater || t == kShore) {
+        int x = i % width, y = i / width;
+        for (int dir = 0; dir < 4; dir++) {
+            int neighbour = view.TerrainOr(x + kDX4[dir], y + kDY4[dir], kWater);
+            if (neighbour == kWater || neighbour == kShore) {
                 coast++;
                 break;
             }
         }
     }
     // landmasses: 8-connected land, crossing bridges, and the cities on each
-    std::vector<int> mass(n, -1);
+    std::vector<int> mass(tile_count, -1);
     std::vector<int> mass_cities;
-    for (int s = 0; s < n; s++) {
-        if (v.Sea(s) || mass[s] >= 0) continue;
-        int id = static_cast<int>(mass_cities.size());
+    for (int start = 0; start < tile_count; start++) {
+        if (view.Sea(start) || mass[start] >= 0) continue;
+        int mass_id = static_cast<int>(mass_cities.size());
         mass_cities.push_back(0);
-        std::deque<int> q{s};
-        mass[s] = id;
-        while (!q.empty()) {
-            int i = q.front();
-            q.pop_front();
-            int x = i % w, y = i / w;
-            for (int d = 0; d < 8; d++) {
-                int nx = x + kDirs[d][0], ny = y + kDirs[d][1];
-                if (!v.In(nx, ny)) continue;
-                int j = ny * w + nx;
-                bool through = !v.Sea(j) || v.terrain[j] == kBridge;
-                if (through && mass[j] < 0) {
-                    mass[j] = id;
-                    q.push_back(j);
+        std::deque<int> frontier{start};
+        mass[start] = mass_id;
+        while (!frontier.empty()) {
+            int tile = frontier.front();
+            frontier.pop_front();
+            int x = tile % width, y = tile / width;
+            for (int dir = 0; dir < 8; dir++) {
+                int next_x = x + kDirs[dir][0], next_y = y + kDirs[dir][1];
+                if (!view.In(next_x, next_y)) continue;
+                int next = next_y * width + next_x;
+                bool through = !view.Sea(next) || view.terrain[next] == kBridge;
+                if (through && mass[next] < 0) {
+                    mass[next] = mass_id;
+                    frontier.push_back(next);
                 }
             }
         }
     }
-    for (const City& c : m.cities)
-        if (v.In(c.x, c.y) && mass[c.y * w + c.x] >= 0) mass_cities[mass[c.y * w + c.x]]++;
+    for (const City& city : map.cities)
+        if (view.In(city.x, city.y) && mass[city.y * width + city.x] >= 0)
+            mass_cities[mass[city.y * width + city.x]]++;
     int inhabited = 0, biggest = 0;
-    for (int k : mass_cities) {
-        inhabited += k > 0;
-        biggest = std::max(biggest, k);
+    for (int cities_on_mass : mass_cities) {
+        inhabited += cities_on_mass > 0;
+        biggest = std::max(biggest, cities_on_mass);
     }
 
     // patches: how lumpy forest, hills, mountains and marsh are
     auto patches = [&](int type, double& median, int& lone, int& total) {
-        std::vector<bool> seen(n, false);
+        std::vector<bool> seen(tile_count, false);
         std::vector<double> sizes;
-        for (int s = 0; s < n; s++) {
-            if (v.terrain[s] != type || seen[s]) continue;
+        for (int start = 0; start < tile_count; start++) {
+            if (view.terrain[start] != type || seen[start]) continue;
             int size = 0;
-            std::deque<int> q{s};
-            seen[s] = true;
-            while (!q.empty()) {
-                int i = q.front();
-                q.pop_front();
+            std::deque<int> frontier{start};
+            seen[start] = true;
+            while (!frontier.empty()) {
+                int tile = frontier.front();
+                frontier.pop_front();
                 size++;
-                int x = i % w, y = i / w;
-                for (int d = 0; d < 8; d++) {
-                    int nx = x + kDirs[d][0], ny = y + kDirs[d][1];
-                    if (!v.In(nx, ny)) continue;
-                    int j = ny * w + nx;
-                    if (v.terrain[j] == type && !seen[j]) {
-                        seen[j] = true;
-                        q.push_back(j);
+                int x = tile % width, y = tile / width;
+                for (int dir = 0; dir < 8; dir++) {
+                    int next_x = x + kDirs[dir][0], next_y = y + kDirs[dir][1];
+                    if (!view.In(next_x, next_y)) continue;
+                    int next = next_y * width + next_x;
+                    if (view.terrain[next] == type && !seen[next]) {
+                        seen[next] = true;
+                        frontier.push_back(next);
                     }
                 }
             }
@@ -615,103 +685,116 @@ void Terrain(Context& cx) {
     patches(kMountains, mountains, lone, total);
     patches(kMarsh, marsh, lone, total);
 
-    cx.Metric("landFrac", static_cast<double>(land) / n);
-    cx.Metric("coastComplexity", land ? coast / std::sqrt(static_cast<double>(land)) : 0);
-    cx.Metric("inhabitedLandmasses", inhabited);
-    cx.Metric("biggestLandmassCityShare",
-              m.cities.empty() ? 0 : static_cast<double>(biggest) / m.cities.size());
-    cx.Metric("forestPatchMedian", forest);
-    cx.Metric("hillsPatchMedian", hills);
-    cx.Metric("mountainPatchMedian", mountains);
-    cx.Metric("marshPatchMedian", marsh);
-    cx.Metric("speckleFrac", total ? static_cast<double>(lone) / total : 0);
+    context.Metric("landFrac", static_cast<double>(land) / tile_count);
+    context.Metric("coastComplexity", land ? coast / std::sqrt(static_cast<double>(land)) : 0);
+    context.Metric("inhabitedLandmasses", inhabited);
+    context.Metric("biggestLandmassCityShare",
+                   map.cities.empty() ? 0 : static_cast<double>(biggest) / map.cities.size());
+    context.Metric("forestPatchMedian", forest);
+    context.Metric("hillsPatchMedian", hills);
+    context.Metric("mountainPatchMedian", mountains);
+    context.Metric("marshPatchMedian", marsh);
+    context.Metric("speckleFrac", total ? static_cast<double>(lone) / total : 0);
 }
 
 // ---------------------------------------------------------------- signs, ports
 
-/** 828e:0b51, as the generator gives a signpost's direction. */
-int Compass(int x1, int y1, int x2, int y2) {
-    if (x1 == x2) return y1 < y2 ? 4 : 0;
-    if (y1 == y2) return x1 < x2 ? 2 : 6;
-    if (x2 < x1 && y2 < y1) return 7;
-    if (x2 < x1 && y1 < y2) return 5;
-    if (x1 < x2 && y2 < y1) return 1;
+/**
+ * @brief The direction from one tile to another as the generator gives a
+ *        signpost's (an index into kCompass).
+ */
+int Compass(int from_x, int from_y, int to_x, int to_y) {
+    if (from_x == to_x) return from_y < to_y ? 4 : 0;
+    if (from_y == to_y) return from_x < to_x ? 2 : 6;
+    if (to_x < from_x && to_y < from_y) return 7;
+    if (to_x < from_x && from_y < to_y) return 5;
+    if (from_x < to_x && to_y < from_y) return 1;
     return 3;
 }
 
-void SignsAndPorts(Context& cx) {
-    const View& v = cx.v;
-    const Map& m = v.m;
+/**
+ * @brief Signposts stand on signpost tiles and point the right way the
+ *        right distance to a real city; crossings join land and sea.
+ */
+void SignsAndPorts(Context& context) {
+    const View& view = context.view;
+    const Map& map = view.map;
     static const std::regex kLeagues("^\\s*(\\d+) leagues (\\w+)\\s*$");
     int pointing = 0;
-    for (const Sign& s : m.signs) {
-        if (v.TerrainOr(s.x, s.y, -1) != kTower)
-            cx.AddIssue("signpost", s.x, s.y, "the signpost stands on no signpost tile");
-        std::smatch g;
-        if (!std::regex_match(s.lines[1], g, kLeagues)) continue;
+    for (const Sign& sign : map.signs) {
+        if (view.TerrainOr(sign.x, sign.y, -1) != kTower)
+            context.AddIssue("signpost", sign.x, sign.y, "the signpost stands on no signpost tile");
+        std::smatch match;
+        if (!std::regex_match(sign.lines[1], match, kLeagues)) continue;
         std::vector<const City*> named;  // names may repeat; any of them will do
-        for (const City& c : m.cities)
-            if (Trim(s.lines[0]) == c.name) named.push_back(&c);
+        for (const City& city : map.cities)
+            if (Trim(sign.lines[0]) == city.name) named.push_back(&city);
         if (named.empty()) {
-            cx.AddIssue("signpost", s.x, s.y, "points to \"" + s.lines[0] + "\", which is no city");
+            context.AddIssue("signpost", sign.x, sign.y,
+                             "points to \"" + sign.lines[0] + "\", which is no city");
             continue;
         }
         pointing++;
-        int said = static_cast<int>(std::stol(g[1]));
+        int said = static_cast<int>(std::stol(match[1]));
         // any tile of the footprint will do: designers may aim at the middle
         bool way = false, far = false;
         for (const City* city : named)
             for (int dy = 0; dy <= 1; dy++)
                 for (int dx = 0; dx <= 1; dx++) {
-                    int cxx = city->x + dx, cyy = city->y + dy;
-                    bool w = kCompass[Compass(s.x, s.y, cxx, cyy)] == g[2];
-                    int truth = 2 * static_cast<int>(std::floor(std::hypot(s.x - cxx, s.y - cyy)));
-                    bool f = std::abs(said - truth) <= std::max(4, truth / 4);
-                    way = way || w;
-                    far = far || f;
+                    int city_x = city->x + dx, city_y = city->y + dy;
+                    bool right_way = kCompass[Compass(sign.x, sign.y, city_x, city_y)] == match[2];
+                    int truth = 2 * static_cast<int>(std::floor(
+                                            std::hypot(sign.x - city_x, sign.y - city_y)));
+                    bool right_distance = std::abs(said - truth) <= std::max(4, truth / 4);
+                    way = way || right_way;
+                    far = far || right_distance;
                 }
         const std::string& name = named[0]->name;
-        if (!way) cx.AddIssue("signpost", s.x, s.y, "says " + std::string(g[2]) + " for " + name);
+        if (!way)
+            context.AddIssue("signpost", sign.x, sign.y,
+                             "says " + std::string(match[2]) + " for " + name);
         if (!far)
-            cx.AddIssue("signpost", s.x, s.y, "says " + std::string(g[1]) + " leagues to " + name);
+            context.AddIssue("signpost", sign.x, sign.y,
+                             "says " + std::string(match[1]) + " leagues to " + name);
     }
     int crossings = 0;
-    for (int y = 0; y < v.h; y++)
-        for (int x = 0; x < v.w; x++) {
-            if (!v.crossing[y * v.w + x]) continue;
+    for (int y = 0; y < view.height; y++)
+        for (int x = 0; x < view.width; x++) {
+            if (!view.crossing[y * view.width + x]) continue;
             crossings++;
             bool sea = false, land = false;
-            for (int d = 0; d < 8; d++) {
-                int t = v.TerrainOr(x + kDirs[d][0], y + kDirs[d][1], -1);
-                if (t < 0) continue;
-                (t == kWater || t == kShore ? sea : land) = true;
+            for (int dir = 0; dir < 8; dir++) {
+                int neighbour = view.TerrainOr(x + kDirs[dir][0], y + kDirs[dir][1], -1);
+                if (neighbour < 0) continue;
+                (neighbour == kWater || neighbour == kShore ? sea : land) = true;
             }
             if (!sea || !land)
-                cx.AddIssue("port", x, y, "a crossing that does not join land and sea");
+                context.AddIssue("port", x, y, "a crossing that does not join land and sea");
         }
-    cx.Metric("signs", m.signs.size());
-    cx.Metric("pointingSigns", pointing);
-    cx.Metric("crossings", crossings);
+    context.Metric("signs", map.signs.size());
+    context.Metric("pointingSigns", pointing);
+    context.Metric("crossings", crossings);
 }
 
 }  // namespace
 
-double Evaluation::Metric(const std::string& key, double dflt) const {
-    for (auto& [k, v] : metrics)
-        if (k == key) return v;
-    return dflt;
+double Evaluation::Metric(const std::string& key, double fallback) const {
+    for (auto& [metric_key, value] : metrics)
+        if (metric_key == key) return value;
+    return fallback;
 }
 
 int Evaluation::Count(const std::string& check) const {
-    return static_cast<int>(std::count_if(issues.begin(), issues.end(),
-                                          [&](const Issue& i) { return i.check == check; }));
+    return static_cast<int>(std::count_if(issues.begin(), issues.end(), [&](const Issue& issue) {
+        return issue.check == check;
+    }));
 }
 
 const std::vector<std::string>& Checks() {
-    static const std::vector<std::string> kC = {
+    static const std::vector<std::string> kChecks = {
         "city-terrain", "city-gap",    "city-name",   "dead-end", "road-to-nowhere",
         "spur-road",    "unreachable", "capital-gap", "signpost", "port"};
-    return kC;
+    return kChecks;
 }
 
 bool IsHard(const std::string& check) {
@@ -720,7 +803,7 @@ bool IsHard(const std::string& check) {
 
 bool Evaluation::Passed() const {
     return std::none_of(issues.begin(), issues.end(),
-                        [](const Issue& i) { return IsHard(i.check); });
+                        [](const Issue& issue) { return IsHard(issue.check); });
 }
 
 const std::vector<std::string>& ScoredMetrics() {
@@ -757,88 +840,89 @@ const std::vector<std::string>& ScoredMetrics() {
 }
 
 Evaluation Evaluate(const Map& map, const std::string& name) {
-    Evaluation e;
-    e.name = name;
-    View v(map);
-    Context cx{v, e};
-    Cities(cx);
-    Roads(cx);
-    Reachability(cx);
-    Fairness(cx);
-    Terrain(cx);
-    SignsAndPorts(cx);
-    return e;
+    Evaluation evaluation;
+    evaluation.name = name;
+    View view(map);
+    Context context{view, evaluation};
+    Cities(context);
+    Roads(context);
+    Reachability(context);
+    Fairness(context);
+    Terrain(context);
+    SignsAndPorts(context);
+    return evaluation;
 }
 
 Reference MakeReference(const std::vector<Evaluation>& maps) {
     Reference ref;
     if (maps.empty()) return ref;
-    for (const std::string& k : ScoredMetrics()) {
-        Range r;
-        r.min = std::numeric_limits<double>::max();
-        r.max = std::numeric_limits<double>::lowest();
-        for (const Evaluation& e : maps) {
-            double x = e.Metric(k);
-            r.min = std::min(r.min, x);
-            r.max = std::max(r.max, x);
-            r.mean += x;
+    for (const std::string& key : ScoredMetrics()) {
+        Range range;
+        range.min = std::numeric_limits<double>::max();
+        range.max = std::numeric_limits<double>::lowest();
+        for (const Evaluation& evaluation : maps) {
+            double value = evaluation.Metric(key);
+            range.min = std::min(range.min, value);
+            range.max = std::max(range.max, value);
+            range.mean += value;
         }
-        r.mean /= static_cast<double>(maps.size());
-        for (const Evaluation& e : maps) r.sd += std::pow(e.Metric(k) - r.mean, 2);
-        r.sd = std::sqrt(r.sd / static_cast<double>(maps.size()));
-        ref[k] = r;
+        range.mean /= static_cast<double>(maps.size());
+        for (const Evaluation& evaluation : maps)
+            range.sd += std::pow(evaluation.Metric(key) - range.mean, 2);
+        range.sd = std::sqrt(range.sd / static_cast<double>(maps.size()));
+        ref[key] = range;
     }
     return ref;
 }
 
-Score ScoreAgainst(const Evaluation& e, const Reference& ref) {
-    Score s;
-    for (auto& [k, r] : ref) {
-        double x = e.Metric(k), out = 0;
-        if (x < r.min)
-            out = r.min - x;
-        else if (x > r.max)
-            out = x - r.max;
-        if (out <= 0) continue;
+Score ScoreAgainst(const Evaluation& evaluation, const Reference& ref) {
+    Score score;
+    for (auto& [key, range] : ref) {
+        double value = evaluation.Metric(key), outside = 0;
+        if (value < range.min)
+            outside = range.min - value;
+        else if (value > range.max)
+            outside = value - range.max;
+        if (outside <= 0) continue;
         // in standard deviations; a metric the designers never varied is measured
         // against a tenth of its size instead
-        double unit = std::max({r.sd, 0.1 * std::abs(r.mean), 1e-3});
-        double dev = out / unit;
-        s.penalty += dev;
-        s.deviations.emplace_back(k, x < r.min ? -dev : dev);
+        double unit = std::max({range.sd, 0.1 * std::abs(range.mean), 1e-3});
+        double deviation = outside / unit;
+        score.penalty += deviation;
+        score.deviations.emplace_back(key, value < range.min ? -deviation : deviation);
     }
-    return s;
+    return score;
 }
 
-Json ToJson(const Evaluation& e, const Score* s) {
-    Json j = Json::Object();
-    j.Set("name", e.name);
-    j.Set("passed", e.Passed());
+Json ToJson(const Evaluation& evaluation, const Score* score) {
+    Json json = Json::Object();
+    json.Set("name", evaluation.name);
+    json.Set("passed", evaluation.Passed());
     Json counts = Json::Object();
-    for (const std::string& c : Checks()) counts.Set(c, e.Count(c));
-    j.Set("checks", counts);
+    for (const std::string& check : Checks()) counts.Set(check, evaluation.Count(check));
+    json.Set("checks", counts);
     Json metrics = Json::Object();
-    for (auto& [k, v] : e.metrics) metrics.Set(k, v);
-    j.Set("metrics", metrics);
+    for (auto& [key, value] : evaluation.metrics) metrics.Set(key, value);
+    json.Set("metrics", metrics);
     Json issues = Json::Array();
-    for (const Issue& i : e.issues) {
-        Json o = Json::Object();
-        o.Set("check", i.check);
-        o.Set("x", i.x);
-        o.Set("y", i.y);
-        o.Set("detail", i.detail);
-        issues.Push(o);
+    for (const Issue& issue : evaluation.issues) {
+        Json entry = Json::Object();
+        entry.Set("check", issue.check);
+        entry.Set("x", issue.x);
+        entry.Set("y", issue.y);
+        entry.Set("detail", issue.detail);
+        issues.Push(entry);
     }
-    j.Set("issues", issues);
-    if (s) {
-        Json sc = Json::Object();
-        sc.Set("penalty", s->penalty);
-        Json dev = Json::Object();
-        for (auto& [k, v] : s->deviations) dev.Set(k, v);
-        sc.Set("deviations", dev);
-        j.Set("score", sc);
+    json.Set("issues", issues);
+    if (score) {
+        Json score_json = Json::Object();
+        score_json.Set("penalty", score->penalty);
+        Json deviations = Json::Object();
+        for (auto& [key, value] : score->deviations) deviations.Set(key, value);
+        score_json.Set("deviations", deviations);
+        json.Set("score", score_json);
     }
-    return j;
+    return json;
 }
 
 }  // namespace w2::mapeval

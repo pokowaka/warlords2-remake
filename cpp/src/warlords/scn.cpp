@@ -8,11 +8,11 @@
 namespace w2 {
 
 const std::vector<std::string>& Options::Names() {
-    static const std::vector<std::string> kN = {"neutralCities", "diplomacy",     "quests",
-                                                "randomTurns",   "hiddenMap",     "intenseCombat",
-                                                "quickStart",    "viewEnemies",   "militaryAdvisor",
-                                                "tutorial",      "viewProduction"};
-    return kN;
+    static const std::vector<std::string> kNames = {
+        "neutralCities",   "diplomacy",     "quests",        "randomTurns",
+        "hiddenMap",       "intenseCombat", "quickStart",    "viewEnemies",
+        "militaryAdvisor", "tutorial",      "viewProduction"};
+    return kNames;
 }
 
 int* Options::Field(const std::string& name) {
@@ -33,6 +33,7 @@ int* Options::Field(const std::string& name) {
 namespace scn {
 
 namespace {
+// Where things are in a .SCN file (docs/formats/scenario.md).
 const int kSideNames = 0, kSideStride = 20;
 // 0xa0 is the side's own colour, 0xb0 the colour it outlines things in.
 const int kSideColours = 0xa0, kSideEdges = 0xb0;
@@ -48,7 +49,7 @@ const int kItems = 3305, kItemStride = 29, kNItems = 22;
 const int kMonsters = 3943, kMonsterStride = 16, kNMonsters = 10;
 const int kCitiesCount = 5499, kCities = 5501, kCityStride = 65;
 
-// Option words. They are NOT in menu order; see docs/rules.md > Game setup.
+/// The option words. They are NOT in menu order; see docs/rules.md > Game setup.
 const std::pair<const char*, int> kOptions[] = {
     {"neutralCities", 0x11a}, {"diplomacy", 0x11c},      {"quests", 0x11e},
     {"randomTurns", 0x122},   {"hiddenMap", 0x124},      {"intenseCombat", 0x126},
@@ -56,246 +57,262 @@ const std::pair<const char*, int> kOptions[] = {
     {"tutorial", 0x12e},      {"viewProduction", 0x132},
 };
 
+/** @brief A text file's lines, or std::nullopt if it cannot be read. */
 std::optional<std::vector<std::string>> Lines(const std::string& path) {
-    auto t = ReadFile(path);
-    if (!t) return std::nullopt;
-    return SplitLines(*t);
+    auto text = ReadFile(path);
+    if (!text) return std::nullopt;
+    return SplitLines(*text);
 }
 
-long LeadingInt(const std::string& s) {
-    size_t i = 0;
-    while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) i++;
+/**
+ * @brief The whole number a string starts with, after blanks and a sign,
+ *        as C's atol reads it; 0 when there is none.
+ */
+long LeadingInt(const std::string& text) {
+    size_t pos = 0;
+    while (pos < text.size() && (text[pos] == ' ' || text[pos] == '\t')) pos++;
     bool neg = false;
-    if (i < s.size() && (s[i] == '-' || s[i] == '+')) neg = s[i++] == '-';
-    long v = 0;
+    if (pos < text.size() && (text[pos] == '-' || text[pos] == '+')) neg = text[pos++] == '-';
+    long value = 0;
     bool any = false;
-    while (i < s.size() && s[i] >= '0' && s[i] <= '9') {
-        v = v * 10 + (s[i++] - '0');
+    while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9') {
+        value = value * 10 + (text[pos++] - '0');
         any = true;
     }
-    return any ? (neg ? -v : v) : 0;
+    return any ? (neg ? -value : value) : 0;
 }
 }  // namespace
 
 std::optional<std::vector<PoolItem>> LoadItemPool(const std::string& path) {
-    auto ls = Lines(path);
-    if (!ls || ls->empty()) return std::nullopt;
-    long count = LeadingInt((*ls)[0]);
+    auto lines = Lines(path);
+    if (!lines || lines->empty()) return std::nullopt;
+    long count = LeadingInt((*lines)[0]);
     std::vector<PoolItem> pool;
-    for (size_t i = 1; i < std::min(ls->size(), static_cast<size_t>(count) + 1); i++) {
-        const std::string& line = (*ls)[i];
-        PoolItem p;
-        std::string nm = line.substr(0, std::min<size_t>(20, line.size()));
-        for (auto& c : nm)
-            if (c == '_') c = ' ';
-        p.name = TrimRight(nm);
-        p.type = line.size() > 21 ? static_cast<int>(LeadingInt(line.substr(21, 1))) : 0;
-        p.value = line.size() > 23 ? static_cast<int>(LeadingInt(line.substr(23, 1))) : 0;
-        pool.push_back(p);
+    for (size_t i = 1; i < std::min(lines->size(), static_cast<size_t>(count) + 1); i++) {
+        const std::string& line = (*lines)[i];
+        PoolItem item;
+        std::string name = line.substr(0, std::min<size_t>(20, line.size()));
+        for (auto& letter : name)
+            if (letter == '_') letter = ' ';
+        item.name = TrimRight(name);
+        item.type = line.size() > 21 ? static_cast<int>(LeadingInt(line.substr(21, 1))) : 0;
+        item.value = line.size() > 23 ? static_cast<int>(LeadingInt(line.substr(23, 1))) : 0;
+        pool.push_back(item);
     }
     return pool;
 }
 
+/**
+ * @brief Parses the lines of a .CTY or .SPC file: "#number|one|two|three|"
+ *        gives entry `number` its three lines; other lines are skipped.
+ */
 static std::map<int, std::array<std::string, 3>> ParseDescriptions(
-        const std::vector<std::string>& ls) {
+        const std::vector<std::string>& lines) {
     std::map<int, std::array<std::string, 3>> out;
-    for (auto& line : ls) {
+    for (auto& line : lines) {
         // ^#(\d+)\|(.*)$
         if (line.size() < 2 || line[0] != '#') continue;
-        size_t i = 1;
-        long n = 0;
+        size_t pos = 1;
+        long number = 0;
         bool any = false;
-        while (i < line.size() && line[i] >= '0' && line[i] <= '9') {
-            n = n * 10 + (line[i++] - '0');
+        while (pos < line.size() && line[pos] >= '0' && line[pos] <= '9') {
+            number = number * 10 + (line[pos++] - '0');
             any = true;
         }
-        if (!any || i >= line.size() || line[i] != '|') continue;
-        std::string rest = line.substr(i + 1);
+        if (!any || pos >= line.size() || line[pos] != '|') continue;
+        std::string rest = line.substr(pos + 1);
         std::vector<std::string> parts;
         std::string cur;
-        for (char c : rest) {
-            if (c == '|') {
+        for (char letter : rest) {
+            if (letter == '|') {
                 parts.push_back(cur);
                 cur.clear();
             } else
-                cur += c;
+                cur += letter;
         }
-        std::array<std::string, 3> d;
-        for (int k = 0; k < 3; k++) d[k] = k < static_cast<int>(parts.size()) ? parts[k] : "";
-        out[static_cast<int>(n)] = d;
+        std::array<std::string, 3> description;
+        for (int part = 0; part < 3; part++)
+            description[part] = part < static_cast<int>(parts.size()) ? parts[part] : "";
+        out[static_cast<int>(number)] = description;
     }
     return out;
 }
 
 std::map<int, std::array<std::string, 3>> LoadDescriptions(const std::string& path) {
-    auto ls = Lines(path);
-    if (!ls) return {};
-    return ParseDescriptions(*ls);
+    auto lines = Lines(path);
+    if (!lines) return {};
+    return ParseDescriptions(*lines);
 }
 
-static std::vector<Sign> ParseSigns(const std::string& s) {
+/**
+ * @brief Parses an .SGN file: a count, then 104-byte records of a position
+ *        and two 50-byte lines. A record cut short ends the list.
+ */
+static std::vector<Sign> ParseSigns(const std::string& bytes) {
     std::vector<Sign> out;
-    if (s.size() < 2) return out;
-    int n = U16(s, 0);
-    for (int i = 0; i < n; i++) {
-        size_t o = 2 + 104 * i;
-        if (o + 104 > s.size()) break;
-        Sign sg;
-        sg.index = i;
-        sg.x = U16(s, o);
-        sg.y = U16(s, o + 2);
-        sg.lines = {Cstr(s, o + 4, 50), Cstr(s, o + 54, 50)};
-        out.push_back(sg);
+    if (bytes.size() < 2) return out;
+    int count = U16(bytes, 0);
+    for (int i = 0; i < count; i++) {
+        size_t offset = 2 + 104 * i;
+        if (offset + 104 > bytes.size()) break;
+        Sign sign;
+        sign.index = i;
+        sign.x = U16(bytes, offset);
+        sign.y = U16(bytes, offset + 2);
+        sign.lines = {Cstr(bytes, offset + 4, 50), Cstr(bytes, offset + 54, 50)};
+        out.push_back(sign);
     }
     return out;
 }
 
 std::vector<Sign> LoadSigns(const std::string& path) {
-    auto s = ReadFile(path);
-    if (!s) return {};
-    return ParseSigns(*s);
+    auto bytes = ReadFile(path);
+    if (!bytes) return {};
+    return ParseSigns(*bytes);
 }
 
 std::unique_ptr<Map> LoadFromFiles(const std::string& dir, const std::string& name,
                                    const std::map<std::string, std::string>& files) {
     std::string base = dir + "/" + name;
     auto get_opt = [&](const char* ext) -> std::optional<std::string> {
-        auto it = files.find(ext);
-        if (it != files.end()) return it->second;
+        auto found = files.find(ext);
+        if (found != files.end()) return found->second;
         return ReadFile(base + "." + ext);
     };
     auto get_must = [&](const char* ext) -> std::string {
-        auto v = get_opt(ext);
-        if (!v) throw std::runtime_error("cannot open: " + base + "." + ext);
-        return *v;
+        auto bytes = get_opt(ext);
+        if (!bytes) throw std::runtime_error("cannot open: " + base + "." + ext);
+        return *bytes;
     };
-    std::string s = get_must("SCN");
-    if (s.size() != 12001)
-        throw std::runtime_error(Fmt("unexpected .SCN size: %d", static_cast<int>(s.size())));
-    auto m = std::make_unique<Map>();
-    m->name = name;
+    std::string scn_bytes = get_must("SCN");
+    if (scn_bytes.size() != 12001)
+        throw std::runtime_error(
+                Fmt("unexpected .SCN size: %d", static_cast<int>(scn_bytes.size())));
+    auto map = std::make_unique<Map>();
+    map->name = name;
 
-    for (auto& [k, off] : kOptions) {
-        uint16_t val = U16(s, off);
-        if (std::string(k) == "militaryAdvisor" && val == 0) val = 1;
-        *m->options.Field(k) = val;
+    for (auto& [option, offset] : kOptions) {
+        uint16_t value = U16(scn_bytes, offset);
+        if (std::string(option) == "militaryAdvisor" && value == 0) value = 1;
+        *map->options.Field(option) = value;
     }
 
     for (int i = 0; i < 8; i++) {
-        int o = kSideRecs + kSideRecStride * i;
-        Side& sd = m->sides[i];
-        sd.index = i;
-        sd.name = Cstr(s, kSideNames + kSideStride * i, kSideStride);
-        sd.colour = U16(s, kSideColours + 2 * i);
-        sd.edge = U16(s, kSideEdges + 2 * i);
-        sd.gold = U16(s, o + 2);
-        sd.cap_x = U16(s, o + 6);
-        sd.cap_y = U16(s, o + 8);
-        sd.computer = U16(s, kControllers + 2 * i) != 0;
-        sd.level = U16(s, kLevels + 2 * i);
-        sd.enhanced = U16(s, kEnhanced + 2 * i) != 0;
-        sd.observe = U16(s, kObserve + 2 * i) != 0;
-        sd.diplo_score = U16(s, kDiploScore + 2 * i);
-        sd.card = U16(s, kCards + 2 * i);
+        int record = kSideRecs + kSideRecStride * i;
+        Side& side = map->sides[i];
+        side.index = i;
+        side.name = Cstr(scn_bytes, kSideNames + kSideStride * i, kSideStride);
+        side.colour = U16(scn_bytes, kSideColours + 2 * i);
+        side.edge = U16(scn_bytes, kSideEdges + 2 * i);
+        side.gold = U16(scn_bytes, record + 2);
+        side.cap_x = U16(scn_bytes, record + 6);
+        side.cap_y = U16(scn_bytes, record + 8);
+        side.computer = U16(scn_bytes, kControllers + 2 * i) != 0;
+        side.level = U16(scn_bytes, kLevels + 2 * i);
+        side.enhanced = U16(scn_bytes, kEnhanced + 2 * i) != 0;
+        side.observe = U16(scn_bytes, kObserve + 2 * i) != 0;
+        side.diplo_score = U16(scn_bytes, kDiploScore + 2 * i);
+        side.card = U16(scn_bytes, kCards + 2 * i);
     }
 
-    int n_cities = U16(s, kCitiesCount);
-    m->cities.resize(n_cities);
-    m->city_at.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
-    m->city_tile.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
+    int n_cities = U16(scn_bytes, kCitiesCount);
+    map->cities.resize(n_cities);
+    map->city_at.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
+    map->city_tile.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
     for (int i = 0; i < n_cities; i++) {
-        int o = kCities + kCityStride * i;
-        City& c = m->cities[i];
-        c.index = i;
-        c.x = U16(s, o);
-        c.y = U16(s, o + 2);
-        c.name = Cstr(s, o + 4, 16);
-        c.income = U8(s, o + 42);
-        for (int k = 0; k < 4; k++) {
-            int t = U8(s, o + 22 + k);
+        int record = kCities + kCityStride * i;
+        City& city = map->cities[i];
+        city.index = i;
+        city.x = U16(scn_bytes, record);
+        city.y = U16(scn_bytes, record + 2);
+        city.name = Cstr(scn_bytes, record + 4, 16);
+        city.income = U8(scn_bytes, record + 42);
+        for (int slot = 0; slot < 4; slot++) {
+            int army_type = U8(scn_bytes, record + 22 + slot);
             // the game removes Navy (type 5) from every city at start
-            if (t != 255 && t != 5) c.produces.push_back(t);
+            if (army_type != 255 && army_type != 5) city.produces.push_back(army_type);
         }
-        c.defence = c.produces.size() >= 3 ? 2 : 1;
-        m->city_at[c.y * kMapW + c.x] = &c;
+        city.defence = city.produces.size() >= 3 ? 2 : 1;
+        map->city_at[city.y * kMapW + city.x] = &city;
     }
     // A city covers a 2x2 footprint; cityAt keys the top-left, cityTile every tile.
-    for (auto& c : m->cities) {
+    for (auto& city : map->cities) {
         for (int dx = 0; dx <= 1; dx++) {
             for (int dy = 0; dy <= 1; dy++) {
-                int k = (c.y + dy) * kMapW + (c.x + dx);
-                if (k >= 0 && k < kMapW * kMapH) m->city_tile[k] = &c;
+                int tile = (city.y + dy) * kMapW + (city.x + dx);
+                if (tile >= 0 && tile < kMapW * kMapH) map->city_tile[tile] = &city;
             }
         }
     }
     // Ownership is derived: at scenario start a side owns only its capital.
-    for (auto& sd : m->sides) {
-        int k = sd.cap_y * kMapW + sd.cap_x;
-        City* c = k >= 0 && k < kMapW * kMapH ? m->city_at[k] : nullptr;
-        sd.in_use = c != nullptr;
-        sd.capital = c;
-        if (c) c->owner = &sd;
+    for (auto& side : map->sides) {
+        int tile = side.cap_y * kMapW + side.cap_x;
+        City* capital = tile >= 0 && tile < kMapW * kMapH ? map->city_at[tile] : nullptr;
+        side.in_use = capital != nullptr;
+        side.capital = capital;
+        if (capital) capital->owner = &side;
     }
 
     // fight order: 29 bytes per player, row 8 for neutral
-    m->fight_order.assign(kFightRows, std::vector<int>(kFightTypes, 0));
+    map->fight_order.assign(kFightRows, std::vector<int>(kFightTypes, 0));
     for (int row = 0; row < kFightRows; row++)
-        for (int t = 0; t < kFightTypes; t++)
-            m->fight_order[row][t] = U8(s, kFightOrder + row * kFightTypes + t);
+        for (int type = 0; type < kFightTypes; type++)
+            map->fight_order[row][type] = U8(scn_bytes, kFightOrder + row * kFightTypes + type);
 
-    int n_sites = U16(s, kSitesCount);
+    int n_sites = U16(scn_bytes, kSitesCount);
     for (int i = 0; i < n_sites; i++) {
-        int o = kSites + kSiteStride * i;
-        Site st;
-        st.index = i;
-        st.x = U16(s, o);
-        st.y = U16(s, o + 2);
-        st.name = Cstr(s, o + 4, 20);
-        st.type = U16(s, o + 24);
-        m->sites.push_back(st);
+        int record = kSites + kSiteStride * i;
+        Site site;
+        site.index = i;
+        site.x = U16(scn_bytes, record);
+        site.y = U16(scn_bytes, record + 2);
+        site.name = Cstr(scn_bytes, record + 4, 20);
+        site.type = U16(scn_bytes, record + 24);
+        map->sites.push_back(site);
     }
 
     for (int i = 0; i < kNItems; i++) {
-        int o = kItems + kItemStride * i;
-        std::string nm = Cstr(s, o, 20);
-        if (!nm.empty()) {
-            Item it;
-            it.index = i;
-            it.name = nm;
-            it.type = U8(s, o + 20);
-            it.value = U8(s, o + 21);
-            m->items.push_back(it);
+        int record = kItems + kItemStride * i;
+        std::string item_name = Cstr(scn_bytes, record, 20);
+        if (!item_name.empty()) {
+            Item item;
+            item.index = i;
+            item.name = item_name;
+            item.type = U8(scn_bytes, record + 20);
+            item.value = U8(scn_bytes, record + 21);
+            map->items.push_back(item);
         }
     }
 
     for (int i = 0; i < kNMonsters; i++) {
-        std::string nm = Cstr(s, kMonsters + kMonsterStride * i, 12);
+        std::string monster_name = Cstr(scn_bytes, kMonsters + kMonsterStride * i, 12);
         // keyed by slot: a site's guardian byte indexes this directly
-        if (!nm.empty()) m->monsters[i] = Monster{i, nm, U16(s, kMonsterStrength + 2 * i)};
+        if (!monster_name.empty())
+            map->monsters[i] = Monster{i, monster_name, U16(scn_bytes, kMonsterStrength + 2 * i)};
     }
 
-    // tile index -> terrain type id, the same table WARLORD2.EXE reads
-    for (int i = 0; i < kTerrainCount; i++) m->terrain_type[i] = U8(s, kTerrainTable + i);
+    // tile index -> terrain type id, the same table the original reads
+    for (int i = 0; i < kTerrainCount; i++) map->terrain_type[i] = U8(scn_bytes, kTerrainTable + i);
 
     // terrain grid + road overlay; bit 15 of a map word marks a crossing
-    std::string mp = get_must("MAP");
-    m->tiles.resize(static_cast<size_t>(kMapW) * kMapH);
-    m->crossing.resize(static_cast<size_t>(kMapW) * kMapH);
+    std::string map_bytes = get_must("MAP");
+    map->tiles.resize(static_cast<size_t>(kMapW) * kMapH);
+    map->crossing.resize(static_cast<size_t>(kMapW) * kMapH);
     for (int i = 0; i < kMapW * kMapH; i++) {
-        int w = U16(mp, static_cast<size_t>(i) * 2);
-        m->tiles[i] = w % 0x8000;
-        m->crossing[i] = w >= 0x8000;
+        int word = U16(map_bytes, static_cast<size_t>(i) * 2);
+        map->tiles[i] = word % 0x8000;
+        map->crossing[i] = word >= 0x8000;
     }
-    m->roads = get_must("RD");
-    if (static_cast<int>(m->roads.size()) < kMapW * kMapH)
-        m->roads.resize(static_cast<size_t>(kMapW) * kMapH, '\0');
+    map->roads = get_must("RD");
+    if (static_cast<int>(map->roads.size()) < kMapW * kMapH)
+        map->roads.resize(static_cast<size_t>(kMapW) * kMapH, '\0');
 
-    m->item_pool = LoadItemPool(base + ".ITM");
-    if (auto cty = get_opt("CTY")) m->city_text = ParseDescriptions(SplitLines(*cty));
-    if (auto spc = get_opt("SPC")) m->site_text = ParseDescriptions(SplitLines(*spc));
-    if (auto sgn = get_opt("SGN")) m->signs = ParseSigns(*sgn);
-    m->combat_cap = U16(s, kCombatCap);
-    return m;
+    map->item_pool = LoadItemPool(base + ".ITM");
+    if (auto cty = get_opt("CTY")) map->city_text = ParseDescriptions(SplitLines(*cty));
+    if (auto spc = get_opt("SPC")) map->site_text = ParseDescriptions(SplitLines(*spc));
+    if (auto sgn = get_opt("SGN")) map->signs = ParseSigns(*sgn);
+    map->combat_cap = U16(scn_bytes, kCombatCap);
+    return map;
 }
 
 std::unique_ptr<Map> Load(const std::string& dir, const std::string& name) {
@@ -304,23 +321,23 @@ std::unique_ptr<Map> Load(const std::string& dir, const std::string& name) {
 
 int CityTileBase(const City& city) {
     if (city.razed) return 0xa0 + 2 * (city.razed_by == kNone ? 0 : city.razed_by);
-    int o = city.owner_index;
-    if (o == kNone) return 96;  // the original passes owner -1
-    if (o < 6) return 0x62 + 2 * o;
-    return 0x80 + 2 * (o - 6);
+    int owner = city.owner_index;
+    if (owner == kNone) return 96;  // the original passes owner -1
+    if (owner < 6) return 0x62 + 2 * owner;
+    return 0x80 + 2 * (owner - 6);
 }
 
 void SetCityTiles(Map& map, const City& city) {
-    int t = CityTileBase(city);
-    int i = city.y * kMapW + city.x;
-    map.tiles[i] = t;
-    map.tiles[i + 1] = t + 1;
-    map.tiles[i + kMapW] = t + 16;
-    map.tiles[i + kMapW + 1] = t + 17;
+    int base_tile = CityTileBase(city);
+    int top_left = city.y * kMapW + city.x;
+    map.tiles[top_left] = base_tile;
+    map.tiles[top_left + 1] = base_tile + 1;
+    map.tiles[top_left + kMapW] = base_tile + 16;
+    map.tiles[top_left + kMapW + 1] = base_tile + 17;
 }
 
 void RefreshCityTiles(Map& map) {
-    for (auto& c : map.cities) SetCityTiles(map, c);
+    for (auto& city : map.cities) SetCityTiles(map, city);
 }
 
 }  // namespace scn
