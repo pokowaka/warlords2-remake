@@ -1,0 +1,80 @@
+# Use the Google style in this project.
+BasedOnStyle: Google
+
+# c++03:                          latest:
+# vector<set<int> > x;    vs.     vector<set<int>> x;
+Standard: Latest
+
+# We will take the android approach of using 4 spaces, and
+# we will never allow tabs.
+TabWidth: 4
+UseTab: Never
+IndentWidth: 4
+BreakBeforeBraces: Attach
+ContinuationIndentWidth: 8
+ConstructorInitializerIndentWidth: 8
+BracedInitializerIndentWidth: 4
+BreakConstructorInitializers: BeforeComma
+AccessModifierOffset: -2
+IndentCaseLabels: false
+IndentGotoLabels: false
+AllowShortFunctionsOnASingleLine: Inline
+
+# Most monitors can easily display more than 80 chars.
+ColumnLimit: 100
+CommentPragmas: '(@copydoc|@copybrief|@see|@overload|@snippet|NOLINT:)'
+
+# Some folks prefer to write "int& foo" while others prefer "int &foo".  The
+# Google Style Guide only asks for consistency within a project, we chose
+# "int& foo" for this project:
+DerivePointerAlignment: false
+PointerAlignment: Left
+
+# The Google Style Guide only asks for consistency w.r.t. "east const" vs.
+# "const west" alignment of cv-qualifiers. It encourages const west.
+QualifierAlignment: Left
+
+IncludeBlocks: Regroup
+IncludeCategories:
+  # The library carve-outs come first in this list: clang-format takes the
+  # first regex that matches, and <gtest/gtest.h> would otherwise match the
+  # C system headers' '^<.*\.' below. Sorted below C++, before "" files.
+  - Regex: '^<(openssl/|gmock/|gtest/|zlib|zconf|benchmark/|google/|absl|grpc|SDL|vorbis/)'
+    Priority: 30
+  # Frequently we include these like "..."
+  - Regex: '^"(openssl/|gmock/|gtest/|zlib|zconf|benchmark/|google/|absl|grpc)'
+    Priority: 31
+  # Some platforms (namely msys) need wchar to be included BEFORE
+  # anything else, especially strsafe.h.
+  - Regex: '^<wchar.h>'
+    Priority: 5
+  # first C system headers - they have a . in the filename
+  - Regex: '^<.*\.'
+    Priority: 10
+  # then C++ system headers - no ., the only thing that will match now
+  - Regex: '^<'
+    Priority: 20
+    #
+  # finally other "" includes go between system headers and our headers
+  - Regex: '^"'
+    Priority: 40
+
+# Format raw string literals with a `pb` or `proto` tag as proto.
+RawStringFormats:
+- Language: TextProto
+  Delimiters:
+  - 'pb'
+  - 'proto'
+  BasedOnStyle: Google
+
+---
+Language: ObjC
+BasedOnStyle: Google
+ColumnLimit: 100
+ObjCBlockIndentWidth: 2
+---
+Language: Proto
+BasedOnStyle: Google
+ColumnLimit: 100
+...
+
