@@ -192,26 +192,49 @@ cc_library(
     visibility = ["//cpp:__subpackages__"],
 )
 
-# The game: the slim layer over SDL2, the front end and the dialogs.
-cc_binary(
-    name = "warlords2",
+# Layer 8: SDL2 UI front-end and modal dialogs.
+cc_library(
+    name = "ui_front",
     copts = W2_COPTS,
     srcs = glob(
         [
             "src/ui/*.cpp",
-            "src/ui/*.hpp",
             "src/front/*.cpp",
-            "src/front/*.hpp",
         ],
         exclude = [
             "src/front/prefs.cpp",
+        ],
+    ),
+    hdrs = glob(
+        [
+            "src/ui/*.hpp",
+            "src/front/*.hpp",
+        ],
+        exclude = [
             "src/front/prefs.hpp",
         ],
-    ) + ["src/main.cpp"],
+    ),
     defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
         ":platform",
+        ":w2core",
+        "@sdl2",
+        "@sdl2//:sdl2_headers_flat",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# The game: the slim entry point over :ui_front.
+cc_binary(
+    name = "warlords2",
+    copts = W2_COPTS,
+    srcs = ["src/main.cpp"],
+    defines = ["W2_VORBIS=1"],
+    includes = ["src"],
+    deps = [
+        ":platform",
+        ":ui_front",
         ":w2core",
         "@sdl2",
         "@sdl2//:sdl2_headers_flat",
