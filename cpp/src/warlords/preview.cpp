@@ -112,7 +112,41 @@ std::string encode(const Canvas& cv, const std::vector<std::array<uint8_t, 3>>& 
 
 }  // namespace
 
+Canvas draw(const Map& map, const std::string& dataDir, int scale);
+
 std::string png(const Map& map, const std::string& dataDir, int scale) {
+  Canvas cv = draw(map, dataDir, scale);
+  std::vector<std::array<uint8_t, 3>> palette;
+  for (auto& c : pal::load(dataDir + "/TERRAIN0/WAR2.PAL"))
+    palette.push_back({(uint8_t)(c[0] * 255 + 0.5), (uint8_t)(c[1] * 255 + 0.5), (uint8_t)(c[2] * 255 + 0.5)});
+  palette.resize(16, {0, 0, 0});
+  palette.push_back({110, 60, 20});   // ROAD
+  palette.push_back({32, 32, 32});    // BACK
+  return encode(cv, palette);
+}
+
+pck::Pixels menuPicture(const Map& map, const std::string& dataDir) {
+  constexpr int MW = 264, MH = 225;
+  constexpr uint8_t SEA = 5, DARK_ROAD = 14;   // WAR2.PAL: light blue, dark brown
+  Canvas big = draw(map, dataDir, 2);
+  pck::Pixels out;
+  out.w = MW;
+  out.h = MH;
+  out.px.assign((size_t)MW * MH, SEA);
+  double k = (double)big.h / MH;
+  int w = std::min(MW, (int)(big.w / k)), x0 = (MW - w) / 2;
+  for (int y = 0; y < MH; y++)
+    for (int x = 0; x < w; x++) {
+      int sx = std::min(big.w - 1, (int)(x * k)), sy = std::min(big.h - 1, (int)(y * k));
+      uint8_t c = big.px[(size_t)sy * big.w + sx];
+      if (c == ROAD) c = DARK_ROAD;
+      if (c == BACK) c = SEA;
+      out.px[(size_t)y * MW + x0 + x] = c;
+    }
+  return out;
+}
+
+Canvas draw(const Map& map, const std::string& dataDir, int scale) {
   scale = std::clamp(scale, 1, CELL);
   const int step = std::max(1, CELL / scale);
   std::string terrain = dataDir + "/TERRAIN0/";
@@ -170,13 +204,7 @@ std::string png(const Map& map, const std::string& dataDir, int scale) {
       cv.outline(c.x * s - 2, c.y * s - 2, 2 * s + 4, 2 * s + 4, WHITE);
     }
   }
-  std::vector<std::array<uint8_t, 3>> palette;
-  for (auto& c : pal::load(terrain + "WAR2.PAL"))
-    palette.push_back({(uint8_t)(c[0] * 255 + 0.5), (uint8_t)(c[1] * 255 + 0.5), (uint8_t)(c[2] * 255 + 0.5)});
-  palette.resize(16, {0, 0, 0});
-  palette.push_back({110, 60, 20});   // ROAD
-  palette.push_back({32, 32, 32});    // BACK
-  return encode(cv, palette);
+  return cv;
 }
 
 }  // namespace w2::preview

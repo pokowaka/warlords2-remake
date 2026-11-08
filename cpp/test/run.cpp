@@ -39,11 +39,13 @@
 #include "warlords/mapeval.hpp"
 #include "warlords/move.hpp"
 #include "warlords/pck.hpp"
+#include "warlords/preview.hpp"
 #include "warlords/quest.hpp"
 #include "warlords/randommap.hpp"
 #include "warlords/report.hpp"
 #include "warlords/rules.hpp"
 #include "warlords/save.hpp"
+#include "warlords/scenarios.hpp"
 #include "warlords/scn.hpp"
 #include "warlords/site.hpp"
 #include "warlords/slots.hpp"
@@ -2542,6 +2544,44 @@ static void testMapEval() {
       ok(e.metric("cityRoadCoverage") >= 0.74, e.name + " puts its cities on roads, as the designers do");
       eq(world->options.militaryAdvisor, 1, e.name + " reads as an ordinary scenario");
     }
+  }
+  // New Scenario's list: SCENARIO.DAT's six, then a generated world's folder
+  // with its NAME.INF (warlords/scenarios), in a data folder of its own
+  {
+    namespace fs = std::filesystem;
+    fs::path tmp = fs::temp_directory_path() / "w2test-scenarios";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp / "DATA");
+    fs::create_directories(tmp / "GEN7");
+    fs::create_directories(tmp / "NOINFO");
+    fs::copy_file(DATA + "/DATA/SCENARIO.DAT", tmp / "DATA" / "SCENARIO.DAT");
+    scenarios::Entry made{"Continents 7", "GEN7", "A new world, seed 7", 80, 40, 8, true};
+    writeFile((tmp / "GEN7" / "GEN7.INF").string(), scenarios::info(made));
+    writeFile((tmp / "GEN7" / "GEN7.SCN").string(), "");
+    writeFile((tmp / "NOINFO" / "NOINFO.SCN").string(), "");
+    auto list = scenarios::list(tmp.string());
+    eq((int)list.size(), 7, "SCENARIO.DAT's six and the one generated world with a NAME.INF");
+    eq(list[3].dir, std::string("Erythea"), "SCENARIO.DAT's own order first");
+    eq(list.back().name, std::string("Continents 7"), "the generated world after them, by its NAME.INF");
+    eq(list.back().cities, 80, "with its cities");
+    ok(list.back().generated && !list[0].generated, "and marked as generated");
+    auto back = scenarios::parseInfo(scenarios::info(made), "GEN7");
+    ok(back && back->text == made.text && back->players == 8, "NAME.INF reads back as written");
+    fs::remove_all(tmp);
+  }
+  // the start menu's picture for a generated world: a .PCK the game reads
+  {
+    auto map = scn::load(DATA + "/ERYTHEA", "ERYTHEA");
+    auto pic = preview::menuPicture(*map, DATA);
+    eq(pic.w, 264, "the menu picture fills the frame's width");
+    eq(pic.h, 225, "and its height");
+    std::string path = (std::filesystem::temp_directory_path() / "w2test-SCENARIO.PCK").string();
+    writeFile(path, pck::encode(pic));
+    auto read = pck::decode(path);
+    ok(read->w == pic.w && read->h == pic.h && read->px == pic.px, "the .PCK it is written as decodes to the same picture");
+    std::filesystem::remove(path);
+    std::string png = preview::png(*map, DATA);
+    ok(png.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0, "the preview is a PNG");
   }
 }
 

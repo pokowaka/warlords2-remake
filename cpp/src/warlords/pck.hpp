@@ -31,4 +31,9 @@ struct Pixels {
 /** Decode a .PCK; decoded sheets are kept, as they never change. */
 std::shared_ptr<const Pixels> decode(const std::string& path);
 
+/** Encode a sheet as a .PCK (its width a multiple of 8; colours 0-15): each
+ *  plane as literal runs, a run of one byte as a match a byte back. Not the
+ *  original's compressor, but anything decode() and the game read. */
+std::string encode(const Pixels& p);
+
 }  // namespace w2::pck

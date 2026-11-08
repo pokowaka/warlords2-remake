@@ -21,9 +21,13 @@
 //
 // Every world gets DATA/NAME/NAME.png: the map in the game's own tiles, with
 // roads, cities, capitals (in their sides' colours) and sites drawn over it.
-// Then play it:  cpp/build/warlords2 --window --scenario NAME
+// It also gets NAME.INF and PICS/SCENARIO.PCK, which put it in the game's
+// New Scenario list, after the shipped scenarios, with its picture on the
+// start menu (warlords/scenarios). Or play it straight away:
+//   cpp/build/warlords2 --window --scenario NAME
 
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
@@ -34,6 +38,7 @@
 #include "warlords/preview.hpp"
 #include "warlords/randommap.hpp"
 #include "warlords/rng.hpp"
+#include "warlords/scenarios.hpp"
 #include "warlords/scn.hpp"
 
 using namespace w2;
@@ -58,6 +63,29 @@ std::string writePreview(const std::string& data, const std::string& name) {
   std::string path = data + "/" + name + "/" + name + ".png";
   if (!writeFile(path, preview::png(*map, data))) throw std::runtime_error("could not write " + path);
   return path;
+}
+
+/** What puts a world in New Scenario's list: NAME.INF, and the start menu's
+ *  picture, PICS/SCENARIO.PCK (warlords/scenarios). */
+void writeListing(const std::string& data, const std::string& dir, const std::string& title, const std::string& text) {
+  auto map = scn::load(data + "/" + dir, dir);
+  scenarios::Entry e;
+  e.name = title;
+  e.text = text;
+  e.cities = (int)map->cities.size();
+  e.ruins = (int)map->sites.size();
+  for (auto& sd : map->sides) e.players += sd.capital != nullptr;
+  std::string base = data + "/" + dir + "/";
+  std::filesystem::create_directories(base + "PICS");
+  if (!writeFile(base + dir + ".INF", scenarios::info(e)) ||
+      !writeFile(base + "PICS/SCENARIO.PCK", pck::encode(preview::menuPicture(*map, data))))
+    throw std::runtime_error("could not write the listing in " + base);
+}
+
+/** "continents" -> "Continents". */
+std::string titled(std::string s) {
+  if (!s.empty()) s[0] = (char)std::toupper((unsigned char)s[0]);
+  return s;
 }
 
 }  // namespace
@@ -173,8 +201,10 @@ int main(int argc, char** argv) {
     try {
       picture = writePreview(data, n);
       pictures.push_back(picture);
+      std::string title = name.empty() ? titled(scengen::shapeName(world.shape)) + " " + std::to_string(used) : n;
+      writeListing(data, n, title, "A new world, seed " + std::to_string(used));
     } catch (const std::exception& ex) {
-      fprintf(stderr, "%s: no preview: %s\n", n.c_str(), ex.what());
+      fprintf(stderr, "%s: no preview or listing: %s\n", n.c_str(), ex.what());
     }
     if (!quiet) {
       printf("%s: seed %ld, %s, %s the hard rules\n", dir.c_str(), used, scengen::shapeName(world.shape),

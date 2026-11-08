@@ -1,5 +1,6 @@
 #include "warlords/pck.hpp"
 
+#include <algorithm>
 #include <map>
 #include <mutex>
 #include <stdexcept>
@@ -76,6 +77,55 @@ std::shared_ptr<const Pixels> decode(const std::string& path) {
   std::lock_guard<std::mutex> g(lock);
   cache[upper(path)] = p;
   return p;
+}
+
+namespace {
+void encodePlane(const std::vector<uint8_t>& plane, std::string& out) {
+  size_t n = 0, size = plane.size();
+  std::string lit;
+  auto flush = [&]() {
+    for (size_t at = 0; at < lit.size(); at += 128) {
+      size_t k = std::min<size_t>(128, lit.size() - at);
+      out += (char)(k - 1);
+      out.append(lit, at, k);
+    }
+    lit.clear();
+  };
+  while (n < size) {
+    // a run of the byte just written: a match one byte back
+    size_t run = 0;
+    if (n > 0)
+      while (n + run < size && run < 256 && plane[n + run] == plane[n - 1]) run++;
+    if (run >= 3) {
+      flush();
+      out += (char)0xff;   // offset 0xffff: one byte back
+      out += (char)0xff;
+      out += (char)(run - 1);
+      n += run;
+    } else {
+      lit += (char)plane[n++];
+    }
+  }
+  flush();
+}
+}  // namespace
+
+std::string encode(const Pixels& p) {
+  if (p.w % 8 != 0) throw std::runtime_error("pck: width must be a multiple of 8");
+  std::string out;
+  auto put16 = [&](int v) { out += (char)(v & 0xff); out += (char)((v >> 8) & 0xff); };
+  put16(1);
+  put16(p.w);
+  put16(p.h);
+  size_t rowbytes = p.w / 8;
+  for (int b = 0; b < 4; b++) {
+    std::vector<uint8_t> plane(rowbytes * p.h, 0);
+    for (int y = 0; y < p.h; y++)
+      for (int x = 0; x < p.w; x++)
+        if (p.at(x, y) & (1 << b)) plane[y * rowbytes + x / 8] |= (uint8_t)(0x80 >> (x % 8));
+    encodePlane(plane, out);
+  }
+  return out;
 }
 
 }  // namespace w2::pck

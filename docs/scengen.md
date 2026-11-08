@@ -34,6 +34,33 @@ tile, with roads, cities, capitals (in their sides' colours) and ruins and
 temples drawn over it (`cpp/src/warlords/preview.{hpp,cpp}`, a plain PNG with
 no image library needed).
 
+## In the game's scenario list
+
+Every world `w2scengen` makes appears in the game's **New Scenario** list,
+after the shipped scenarios, as "Continents 11", "Pangaea 21" and so on (or
+under its `--name`). Choosing it shows its name, cities, ruins and players
+on the crystal ball. Back on the start menu, its map stands where the
+shipped scenarios show their artwork. **Begin** sets it up like any other
+scenario.
+
+`SCENARIO.DAT` is left as shipped. The list reads it first, then every folder
+in the data directory that holds `NAME/NAME.SCN` together with `NAME/NAME.INF`
+(`cpp/src/warlords/scenarios.{hpp,cpp}`). `NAME.INF` is a few `key=value` lines:
+
+```
+name=Continents 11
+text=A new world, seed 11
+cities=80
+ruins=40
+players=8
+```
+
+The start menu's picture is `NAME/PICS/SCENARIO.PCK`, as the shipped
+scenarios have it: the map at 264 × 225 in the game's 16 colours, centred on
+the sea (`preview::menuPicture`, written with `pck::encode`). To take a world
+out of the list, delete its folder. Only the C++ game reads generated
+scenarios. The web and Lua versions list the shipped ones only.
+
 ## How a world is made
 
 The code is in `cpp/src/warlords/scengen.{hpp,cpp}` (the planners) and the

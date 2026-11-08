@@ -16,7 +16,8 @@
 //
 // New Scenario (7f77:058d, 0725): popup 19, NEWSCEN.PCK, dialog 29 -- the
 // scenarios of SCENARIO.DAT in a black box, seven rows, and on the crystal
-// ball the chosen one's name, description, cities, ruins and players.
+// ball the chosen one's name, description, cities, ruins and players. Not
+// the original's: generated worlds follow SCENARIO.DAT's (w2scengen).
 //
 // Begin (7bab:0000) sets the sides up on the main screen's own frame,
 // dialog 3: a box a side with its face, its button -- Human, Knight, Lord,
@@ -48,6 +49,7 @@
 #include "warlords/bytes.hpp"
 #include "warlords/cues.hpp"
 #include "warlords/randommap.hpp"
+#include "warlords/scenarios.hpp"
 #include "warlords/scn.hpp"
 
 namespace start {
@@ -101,16 +103,11 @@ struct Scenario {
   int cities = 0, ruins = 0, players = 0;
 };
 
-// SCENARIO.DAT's records.
+// SCENARIO.DAT's records, and after them the worlds the scenario generator
+// made (not the original's; warlords/scenarios, docs/scengen.md).
 std::vector<Scenario> scenarios() {
   std::vector<Scenario> out;
-  auto s = w2::readFile(G.dataDir + "/DATA/SCENARIO.DAT");
-  if (!s) return out;
-  for (size_t i = 0; i < s->size() / 84; i++) {
-    size_t o = 84 * i;
-    out.push_back(Scenario{w2::cstr(*s, o, 20), w2::cstr(*s, o + 20, 8), w2::cstr(*s, o + 28, 30), w2::u16(*s, o + 76),
-                           w2::u16(*s, o + 78), w2::u16(*s, o + 80)});
-  }
+  for (auto& e : w2::scenarios::list(G.dataDir)) out.push_back(Scenario{e.name, e.dir, e.text, e.cities, e.ruins, e.players});
   return out;
 }
 
