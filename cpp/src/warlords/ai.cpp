@@ -19,9 +19,9 @@ namespace w2::ai {
 Hooks hooks;
 
 namespace {
-bool g_defaultClassicAi = true;
+bool g_default_classic_ai = true;
 // The level's built-in settings (59bf:0d7b).
-void levelDefaults(Game& g, AIData& d, int level) {
+void LevelDefaults(Game& g, AIData& d, int level) {
     Rng& r = g.rng;
     if (level == 0) {
         d.rebuildLimit = 30;
@@ -92,7 +92,7 @@ void levelDefaults(Game& g, AIData& d, int level) {
 }
 
 // Fill a computer side's AI data from its card (59bf:0d7b), dice and all.
-void fromCard(Game& g, Side& side, AIData& d, const aicard::Card& card) {
+void FromCard(Game& g, Side& side, AIData& d, const aicard::Card& card) {
     Rng& r = g.rng;
     d.dieHuman = r.dice(1, card.dieHuman, 0);
     d.dieLord = r.dice(1, card.dieLord, 0);
@@ -122,7 +122,7 @@ void fromCard(Game& g, Side& side, AIData& d, const aicard::Card& card) {
 
 // Split the cities no side starts with among the computer players, for the
 // AI to think of as its own ground (623c:010b).
-void shareOutCities(Game& g) {
+void ShareOutCities(Game& g) {
     for (auto& c : g.map->cities) c.claim = c.ownerIndex != NONE ? c.ownerIndex : core::NEUTRAL;
     bool shares[8] = {false};
     int humans = 0, computers = 0;
@@ -141,14 +141,14 @@ void shareOutCities(Game& g) {
         }
     }
     if (computers == 0 && humans != 0) {
-        int best = NONE, bestRoll = 0;
+        int best = NONE, best_roll = 0;
         for (int i = 7; i >= 0; i--) {
             if (g.map->sides[i].inUse) {
                 shares[i] = true;
                 int roll = g.rng.dice(1, 100, 0);
-                if (best == NONE || bestRoll < roll) {
+                if (best == NONE || best_roll < roll) {
                     best = i;
-                    bestRoll = roll;
+                    best_roll = roll;
                 }
             }
         }
@@ -164,14 +164,14 @@ void shareOutCities(Game& g) {
     for (;;) {
         auto [x, y] = from[turn];
         City* pick = nullptr;
-        int bestD = NONE;
+        int best_d = NONE;
         for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
             City& c = g.map->cities[i];
             if (core::standing(c) && c.claim == core::NEUTRAL) {
                 int d = core::dist(x, y, c.x, c.y);
-                if (bestD == NONE || d < bestD) {
+                if (best_d == NONE || d < best_d) {
                     pick = &c;
-                    bestD = d;
+                    best_d = d;
                 }
             }
         }
@@ -189,7 +189,7 @@ void shareOutCities(Game& g) {
 }
 
 // ai_turn_setup (5db9:0386).
-void turnSetup(Game& g, Side& side) {
+void TurnSetup(Game& g, Side& side) {
     AIData& d = core::data(g, side);
     // the side is at peace with itself, state and proposal (5db9:0000)
     g.diplomacy.state[static_cast<size_t>(side.index) * 9] = 0;
@@ -215,14 +215,14 @@ void turnSetup(Game& g, Side& side) {
 }  // namespace
 
 bool defaultClassicAi() {
-    return g_defaultClassicAi;
+    return g_default_classic_ai;
 }
 void setDefaultClassicAi(bool classic) {
-    g_defaultClassicAi = classic;
+    g_default_classic_ai = classic;
 }
 
 AIData& initSide(Game& g, Side& side) {
-    side.classicAi = g_defaultClassicAi;
+    side.classicAi = g_default_classic_ai;
     belief::ensure(side);
     side.ai = std::make_shared<AIData>(core::newData());
     AIData& d = *side.ai;
@@ -234,10 +234,10 @@ AIData& initSide(Game& g, Side& side) {
     }
     int level = 2;
     if (side.computer && (side.level == 0 || side.level == 1)) level = side.level;
-    levelDefaults(g, d, level);
+    LevelDefaults(g, d, level);
     if (side.inUse && side.computer) {
         auto card = aicard::load(g.dataDir, level, side.card);
-        if (card) fromCard(g, side, d, *card);
+        if (card) FromCard(g, side, d, *card);
     }
     return d;
 }
@@ -246,7 +246,7 @@ void startGame(Game& g) {
     // the neighbour table, from the cities as the game begins (623c:0398)
     g.aiNeighbours = core::buildNeighbours(g);
     for (auto& s : g.map->sides) initSide(g, s);
-    shareOutCities(g);
+    ShareOutCities(g);
     for (auto& s : g.map->sides) {
         s.diploScore = g.rng.dice(1, 8, 0);
         if (g.greatest && !s.computer) s.diploScore += 400;
@@ -266,7 +266,7 @@ void playTurn(Game& g, Side& side, const std::function<void(const char*)>& pause
     for (Army* a : g.armies)
         if (a->owner == side.index) a->aiMoved = false;
 
-    turnSetup(g, side);
+    TurnSetup(g, side);
     diplo::phase(g, side);
     p("diplomacy");
     heroes::phase(g, side);
@@ -315,7 +315,7 @@ City* heroCity(Game& g, Side& side, City* dflt) {
     }
     AIData& d = core::data(g, side);
     City* best = dflt;
-    int bestScore = 0;
+    int best_score = 0;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == side.index) {
@@ -327,9 +327,9 @@ City* heroCity(Game& g, Side& side, City* dflt) {
                 score = g.rng.dice(1, 100, 50);
             else if (r == core::NEAR_NEUTRAL)
                 score = g.rng.dice(1, 100, 0);
-            if (bestScore < score) {
+            if (best_score < score) {
                 best = &c;
-                bestScore = score;
+                best_score = score;
             }
         }
     }
@@ -352,18 +352,18 @@ bool questCapture(Game& g, Side& side, City& c, const std::vector<Army*>& stack)
     return false;
 }
 
-void recordBattle(Game& g, int defender, int attacker, int x, int y, int heroesLost, int armiesLost,
-                  bool allLost, bool cityTile) {
+void recordBattle(Game& g, int defender, int attacker, int x, int y, int heroes_lost,
+                  int armies_lost, bool all_lost, bool city_tile) {
     if (defender == NONE || attacker == NONE || defender == core::NEUTRAL) return;
     if (defender < 0 || defender > 7 || attacker < 0 || attacker > 7) return;
     AIData& d = core::data(g, defender);
-    d.heroesKilled[attacker] += heroesLost;
-    d.armiesKilled[attacker] += armiesLost;
+    d.heroesKilled[attacker] += heroes_lost;
+    d.armiesKilled[attacker] += armies_lost;
     d.battles[attacker]++;
-    if (allLost) d.lost[attacker]++;
-    if (cityTile) {
+    if (all_lost) d.lost[attacker]++;
+    if (city_tile) {
         d.cityBattles[attacker]++;
-        if (allLost) d.citiesLost[attacker]++;
+        if (all_lost) d.citiesLost[attacker]++;
     }
     // Update fair-information belief state for both participants
     belief::recordBattleObservation(g, defender, x, y);

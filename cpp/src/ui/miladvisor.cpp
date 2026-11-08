@@ -11,19 +11,19 @@
 namespace miladvisor {
 
 namespace {
-const kit::Rect R{176, 60, 288, 300};  // popup 12
-const int DIALOG = 25, OK = 424;
-const int TITLE = 0x7b, HAIL = 0x7c, BATTLE = 0x7d, VERDICT = 0x7e;
-const int PICTURE = 48;  // ADVISOR.PCK
+const kit::Rect kR{176, 60, 288, 300};  // popup 12
+const int kDialog = 25, kOk = 424;
+const int kTitle = 0x7b, kHail = 0x7c, kBattle = 0x7d, kVerdict = 0x7e;
+const int kPicture = 48;  // ADVISOR.PCK
 
 struct Advice : kit::Modal {
     screen::View v;
     std::string hail, battle, verdict;
     void draw() override {
-        kit::popup(R);
+        kit::popup(kR);
         gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(TITLE, 0), 320, 67);
-        if (auto art = G.screen->artFor(PICTURE)) {
+        kit::centred(kit::font(1), kit::text(kTitle, 0), 320, 67);
+        if (auto art = G.screen->artFor(kPicture)) {
             gfx::setColor(1, 1, 1);
             gfx::draw(art->image, gfx::newQuad(0, 0, 128, 130), 256, 117);
         }
@@ -36,7 +36,7 @@ struct Advice : kit::Modal {
     }
     void mousepressed(int x, int y, int) override {
         auto c = kit::controlAt(v, x, y);
-        if (c && c->id == OK) kit::pop(this);
+        if (c && c->id == kOk) kit::pop(this);
     }
     void keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter" || key == "escape") kit::pop(this);
@@ -50,12 +50,12 @@ void open(const std::vector<w2::Army*>* stack, int x, int y) {
     auto l = w2::combat::lines(g, *stack, x, y);
     int wins = w2::combat::advise(g, l.attackers, l.defenders, x, y).second;
     auto d = std::make_shared<Advice>();
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
-    d->hail = kit::text(HAIL, g.rng.dice(1, 5, -1));
-    d->battle = kit::text(BATTLE, g.rng.dice(1, 5, -1));
-    d->verdict = kit::text(VERDICT, wins / 2);
-    d->v.state[OK] = w2::uidata::NORMAL;
+    d->hail = kit::text(kHail, g.rng.dice(1, 5, -1));
+    d->battle = kit::text(kBattle, g.rng.dice(1, 5, -1));
+    d->verdict = kit::text(kVerdict, wins / 2);
+    d->v.state[kOk] = w2::uidata::NORMAL;
     kit::push(d);
 }
 

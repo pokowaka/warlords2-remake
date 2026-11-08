@@ -22,30 +22,30 @@ namespace honours {
 using w2::format;
 
 namespace {
-const kit::Rect R{160, 90, 320, 200};
-const int PROMOTION_GROUP = 101, MEDAL_FOR = 158, MEDAL_UNIT = 159, MEDAL_GIVEN = 160;
-const int MEDAL_NAME = 161, MEDAL_GREW = 162;
+const kit::Rect kR{160, 90, 320, 200};
+const int kPromotionGroup = 101, kMedalFor = 158, kMedalUnit = 159, kMedalGiven = 160;
+const int kMedalName = 161, kMedalGrew = 162;
 
 struct Popup : kit::Modal {
     gfx::ImageP pic;
     std::function<void()> lines;
     kit::Done after;
-    void close() {
+    void Close() {
         auto a = after;
         kit::pop(this);
         if (a) a();
     }
     void draw() override {
-        kit::popupFrame(R);
+        kit::popupFrame(kR);
         gfx::setColor(1, 1, 1);
-        if (pic) gfx::draw(pic, R.x, R.y);
+        if (pic) gfx::draw(pic, kR.x, kR.y);
         lines();
     }
-    void mousepressed(int, int, int) override { close(); }
-    void keypressed(const std::string&) override { close(); }
+    void mousepressed(int, int, int) override { Close(); }
+    void keypressed(const std::string&) override { Close(); }
 };
 
-void show(gfx::ImageP pic, std::function<void()> lines, kit::Done after) {
+void Show(gfx::ImageP pic, std::function<void()> lines, kit::Done after) {
     auto d = std::make_shared<Popup>();
     d->pic = pic;
     d->lines = std::move(lines);
@@ -53,7 +53,7 @@ void show(gfx::ImageP pic, std::function<void()> lines, kit::Done after) {
     kit::push(d);
 }
 
-void promotion(std::vector<w2::Promotion> list, size_t i, kit::Done after) {
+void Promotion(std::vector<w2::Promotion> list, size_t i, kit::Done after) {
     if (i >= list.size()) {
         if (after) after();
         return;
@@ -61,13 +61,13 @@ void promotion(std::vector<w2::Promotion> list, size_t i, kit::Done after) {
     w2::Army* hero = list[i].hero;
     int gain = list[i].gain;
     int level = hero->level ? hero->level : 2;  // the new level, 2-4
-    int group = PROMOTION_GROUP + level - 2;
+    int group = kPromotionGroup + level - 2;
     int base = hero->female ? 6 : 0;
     std::string name = hero->name;
     int strength = hero->strength, moves = hero->maxMoves;
     sound::music(w2::cues::PROMOTION);
     auto pic = G.levelPic.count(level) ? G.levelPic[level] : nullptr;
-    show(
+    Show(
             pic,
             [=]() {
                 kit::centred(kit::font(1), kit::text(group, base), 320, 93);
@@ -80,36 +80,36 @@ void promotion(std::vector<w2::Promotion> list, size_t i, kit::Done after) {
                 kit::centred(f, format(kit::text(group, base + 5), level, strength, gain, moves, 2),
                              320, 252);
             },
-            [list, i, after]() { promotion(list, i + 1, after); });
+            [list, i, after]() { Promotion(list, i + 1, after); });
 }
 }  // namespace
 
 void promotions(const std::vector<w2::Promotion>& list, kit::Done after) {
-    promotion(list, 0, after);
+    Promotion(list, 0, after);
 }
 
 void medal(w2::Army* a, kit::Done after) {
     int n = a->medals ? a->medals : 1;
-    bool grewMove = a->strength >= 15;
-    int now = grewMove ? a->maxMoves : a->strength;
+    bool grew_move = a->strength >= 15;
+    int now = grew_move ? a->maxMoves : a->strength;
     auto pick = [](int group, int count) { return kit::text(group, G.g->rng.dice(1, count, -1)); };
-    std::string line1 = pick(MEDAL_FOR, 7), line3 = pick(MEDAL_GIVEN, 4);
+    std::string line1 = pick(kMedalFor, 7), line3 = pick(kMedalGiven, 4);
     const w2::ArmyType* t = G.g->types.byId(a->type);
     std::string tname = t ? t->name : "";
     int type = a->type, owner = a->owner;
     sound::music(w2::cues::MEDAL);
-    show(
+    Show(
             G.medalPic[n - 1],
             [=]() {
                 kit::army(type, owner, 176, 155, 0);
                 gfx::setColor(1, 1, 1);
                 const Font& f = kit::font(2);
                 f.draw(line1, 216, 155);
-                f.draw(format(kit::text(MEDAL_UNIT, 0), tname), 216, 175);
+                f.draw(format(kit::text(kMedalUnit, 0), tname), 216, 175);
                 f.draw(line3, 176, 195);
-                f.draw(kit::text(MEDAL_NAME, n - 1), 176, 215);
-                f.draw(kit::text(MEDAL_GREW, grewMove ? 1 : 0), 176, 245);
-                f.draw(format(kit::text(MEDAL_GREW, 2), now - 1, now), 176, 265);
+                f.draw(kit::text(kMedalName, n - 1), 176, 215);
+                f.draw(kit::text(kMedalGrew, grew_move ? 1 : 0), 176, 245);
+                f.draw(format(kit::text(kMedalGrew, 2), now - 1, now), 176, 265);
             },
             [after]() {
                 sound::music(w2::cues::PLAY);

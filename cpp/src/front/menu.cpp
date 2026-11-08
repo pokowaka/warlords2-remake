@@ -59,7 +59,7 @@ const std::vector<Menu> MENUS = {
 };
 
 // A scale as the menu shows it: 1.67, 1.6, 2.
-static std::string scaleName(double s) {
+static std::string ScaleName(double s) {
     char b[16];
     snprintf(b, sizeof b, "%.2f", s);
     std::string t = b;
@@ -68,7 +68,7 @@ static std::string scaleName(double s) {
     return t;
 }
 
-std::vector<Menu> withZooms(int maxUI, int maxMap, double smoothUI, double mapShrink) {
+std::vector<Menu> withZooms(int max_ui, int max_map, double smooth_ui, double map_shrink) {
     std::vector<Menu> out;
     for (const Menu& m : MENUS) {
         Menu n{m.title, {}};
@@ -88,16 +88,16 @@ std::vector<Menu> withZooms(int maxUI, int maxMap, double smoothUI, double mapSh
         } else if (m.title == "View") {
             n.items = m.items;
             n.items.push_back({"-", "", ""});
-            for (int z = 1; z <= maxMap; z++)
-                n.items.push_back({"Map " + scaleName(z * mapShrink) + "x", "",
+            for (int z = 1; z <= max_map; z++)
+                n.items.push_back({"Map " + ScaleName(z * map_shrink) + "x", "",
                                    "map zoom " + std::to_string(z)});
             n.items.push_back({"-", "", ""});
-            for (int s = 1; s <= maxUI; s++)
+            for (int s = 1; s <= max_ui; s++)
                 n.items.push_back({"Interface " + std::to_string(s) + "x", "",
                                    "ui scale " + std::to_string(s)});
-            if (smoothUI > 0)
+            if (smooth_ui > 0)
                 n.items.push_back(
-                        {"Interface " + scaleName(smoothUI) + "x smooth", "", "ui scale smooth"});
+                        {"Interface " + ScaleName(smooth_ui) + "x smooth", "", "ui scale smooth"});
             n.items.push_back({"-", "", ""});
             n.items.push_back({"Full screen", "", "screen full"});
             n.items.push_back({"Window", "", "screen window"});
@@ -116,37 +116,37 @@ std::vector<Menu> withZooms(int maxUI, int maxMap, double smoothUI, double mapSh
 
 // The settings the menus tick when in use (not the original's): their tick
 // is a diamond 5 pixels wide in the key column.
-static const int TICK_W = 5;
-static bool tickable(const std::string& act) {
+static const int kTickW = 5;
+static bool Tickable(const std::string& act) {
     for (const char* p : {"map zoom ", "ui scale ", "screen ", "music ", "ai "})
         if (act.rfind(p, 0) == 0) return true;
     return false;
 }
 
-Layout layout(const Font& font, int screenWidth, const std::vector<Menu>& menus) {
+Layout layout(const Font& font, int screen_width, const std::vector<Menu>& menus) {
     Layout out;
     int x = BAR_X;
     int lh = font.lineHeight;
     for (const Menu& m : menus) {
         int tw = (font.width(m.title) + 7) / 8 * 8;
-        int w = 0, keyCol = 0, keyW = 0;
+        int w = 0, key_col = 0, key_w = 0;
         bool ticked = false;
         for (const Item& it : m.items) {
             if (it.label != "-") {
                 int lw = 12 + font.width(it.label);
                 if (!it.key.empty()) {
-                    keyCol = std::max(keyCol, lw + 5);
-                    keyW = std::max(keyW, font.width(it.key));
-                    lw = keyCol + keyW;
-                } else if (tickable(it.act)) {
+                    key_col = std::max(key_col, lw + 5);
+                    key_w = std::max(key_w, font.width(it.key));
+                    lw = key_col + key_w;
+                } else if (Tickable(it.act)) {
                     // a setting's tick goes in the key column: keep it clear of the label
-                    keyCol = std::max(keyCol, lw + 5);
+                    key_col = std::max(key_col, lw + 5);
                     ticked = true;
                 }
                 w = std::max(w, lw + 5);
             }
         }
-        if (ticked) w = std::max(w, keyCol + std::max(keyW, TICK_W) + 5);
+        if (ticked) w = std::max(w, key_col + std::max(key_w, kTickW) + 5);
         int y = BAR_H + 1;
         Title t;
         t.title = m.title;
@@ -158,13 +158,13 @@ Layout layout(const Font& font, int screenWidth, const std::vector<Menu>& menus)
             t.drop.rows.push_back(Row{it.label, it.key, it.act, x, y + at, w, h});
             at += h;
         }
-        int dropX = std::min(x, screenWidth - w);
-        for (Row& r : t.drop.rows) r.x = dropX;
-        t.drop.x = dropX;
+        int drop_x = std::min(x, screen_width - w);
+        for (Row& r : t.drop.rows) r.x = drop_x;
+        t.drop.x = drop_x;
         t.drop.y = y;
         t.drop.w = w;
         t.drop.h = at + 1;
-        t.drop.keyCol = keyCol;
+        t.drop.keyCol = key_col;
         out.push_back(t);
         x += tw + 16;
     }

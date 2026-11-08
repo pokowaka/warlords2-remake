@@ -14,12 +14,12 @@ int main(int argc, char** argv) {
     w2::AilFm drv(w2::mustRead("original/ADLIB.ADV"), w2::mustRead("original/MIDPAK.AD"));
     drv.play(&*seq, false);
     int secs = atoi(argv[2]);
-    const int N = 49716;
-    std::vector<int16_t> buf(N);
+    const int opl_rate = 49716;
+    std::vector<int16_t> buf(opl_rate);
     for (int s = 0; s < secs; s++) {
-        drv.render(buf.data(), N);
+        drv.render(buf.data(), opl_rate);
         long sum = 0, peak = 0;
-        for (int i = 0; i < N; i++) {
+        for (int i = 0; i < opl_rate; i++) {
             sum = (sum * 31 + buf[i] + 65536) % 1000000007;
             peak = std::max(peak, static_cast<long>(std::abs(buf[i])));
         }

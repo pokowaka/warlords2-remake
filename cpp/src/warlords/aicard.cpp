@@ -5,14 +5,14 @@
 
 namespace w2::aicard {
 
-std::string path(const std::string& dataDir, int level, int number, const std::string& ext) {
-    static const char* LETTERS[3] = {"K", "L", "W"};  // "KLW", 7bab:21c1
-    const char* l = level >= 0 && level < 3 ? LETTERS[level] : "W";
-    return fmt("%s/CARDS/%s%03d.%s", dataDir.c_str(), l, number, ext.c_str());
+std::string path(const std::string& data_dir, int level, int number, const std::string& ext) {
+    static const char* letters[3] = {"K", "L", "W"};  // "KLW", 7bab:21c1
+    const char* l = level >= 0 && level < 3 ? letters[level] : "W";
+    return fmt("%s/CARDS/%s%03d.%s", data_dir.c_str(), l, number, ext.c_str());
 }
 
-std::optional<Card> load(const std::string& dataDir, int level, int number) {
-    auto f = readFile(path(dataDir, level, number, "CRD"));
+std::optional<Card> load(const std::string& data_dir, int level, int number) {
+    auto f = readFile(path(data_dir, level, number, "CRD"));
     if (!f || f->size() < static_cast<size_t>(RECORD)) return std::nullopt;
     const std::string& s = *f;
     Card c;
@@ -42,9 +42,9 @@ std::optional<Card> load(const std::string& dataDir, int level, int number) {
     return c;
 }
 
-std::optional<std::pair<std::string, std::vector<std::string>>> describe(const std::string& dataDir,
-                                                                         int level, int number) {
-    auto s = readFile(path(dataDir, level, number, "DSC"));
+std::optional<std::pair<std::string, std::vector<std::string>>> describe(
+        const std::string& data_dir, int level, int number) {
+    auto s = readFile(path(data_dir, level, number, "DSC"));
     if (!s) return std::nullopt;
     std::vector<std::string> lines;
     std::string cur;
@@ -64,10 +64,10 @@ std::optional<std::pair<std::string, std::vector<std::string>>> describe(const s
     return std::make_pair(name, lines);
 }
 
-std::vector<std::string> deck(const std::string& dataDir, int level) {
+std::vector<std::string> deck(const std::string& data_dir, int level) {
     std::vector<std::string> out;
     for (int n = 0; n < 30; n++) {
-        auto s = readFile(path(dataDir, level, n, "DSC"));
+        auto s = readFile(path(data_dir, level, n, "DSC"));
         if (!s) break;
         std::string name = s->substr(0, 40);
         out.push_back(name.substr(0, name.find('\r')));
@@ -75,9 +75,9 @@ std::vector<std::string> deck(const std::string& dataDir, int level) {
     return out;
 }
 
-int count(const std::string& dataDir, int level) {
+int count(const std::string& data_dir, int level) {
     int n = 0;
-    while (n < 100 && fileExists(path(dataDir, level, n, "CRD"))) n++;
+    while (n < 100 && fileExists(path(data_dir, level, n, "CRD"))) n++;
     return n;
 }
 

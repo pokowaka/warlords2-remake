@@ -8,11 +8,11 @@
 namespace w2 {
 
 const std::vector<std::string>& Options::names() {
-    static const std::vector<std::string> n = {"neutralCities", "diplomacy",     "quests",
-                                               "randomTurns",   "hiddenMap",     "intenseCombat",
-                                               "quickStart",    "viewEnemies",   "militaryAdvisor",
-                                               "tutorial",      "viewProduction"};
-    return n;
+    static const std::vector<std::string> kN = {"neutralCities", "diplomacy",     "quests",
+                                                "randomTurns",   "hiddenMap",     "intenseCombat",
+                                                "quickStart",    "viewEnemies",   "militaryAdvisor",
+                                                "tutorial",      "viewProduction"};
+    return kN;
 }
 
 int* Options::field(const std::string& name) {
@@ -33,36 +33,36 @@ int* Options::field(const std::string& name) {
 namespace scn {
 
 namespace {
-const int SIDE_NAMES = 0, SIDE_STRIDE = 20;
+const int kSideNames = 0, kSideStride = 20;
 // 0xa0 is the side's own colour, 0xb0 the colour it outlines things in.
-const int SIDE_COLOURS = 0xa0, SIDE_EDGES = 0xb0;
-const int SIDE_RECS = 387, SIDE_REC_STRIDE = 20;
-const int LEVELS = 0xc0, CONTROLLERS = 0xd0, ENHANCED = 0xf0;
-const int OBSERVE = 0x147, CARDS = 0xe0;
-const int MONSTER_STRENGTH = 0x1007;
-const int FIGHT_ORDER = 0x60b, FIGHT_ROWS = 9, FIGHT_TYPES = 29;
-const int COMBAT_CAP = 0x112, DIPLO_SCORE = 0x10e3;
-const int TERRAIN_TABLE = 0x710, TERRAIN_COUNT = 255;
-const int SITES_COUNT = 0x80f, SITES = 0x811, SITE_STRIDE = 31;
-const int ITEMS = 3305, ITEM_STRIDE = 29, N_ITEMS = 22;
-const int MONSTERS = 3943, MONSTER_STRIDE = 16, N_MONSTERS = 10;
-const int CITIES_COUNT = 5499, CITIES = 5501, CITY_STRIDE = 65;
+const int kSideColours = 0xa0, kSideEdges = 0xb0;
+const int kSideRecs = 387, kSideRecStride = 20;
+const int kLevels = 0xc0, kControllers = 0xd0, kEnhanced = 0xf0;
+const int kObserve = 0x147, kCards = 0xe0;
+const int kMonsterStrength = 0x1007;
+const int kFightOrder = 0x60b, kFightRows = 9, kFightTypes = 29;
+const int kCombatCap = 0x112, kDiploScore = 0x10e3;
+const int kTerrainTable = 0x710, kTerrainCount = 255;
+const int kSitesCount = 0x80f, kSites = 0x811, kSiteStride = 31;
+const int kItems = 3305, kItemStride = 29, kNItems = 22;
+const int kMonsters = 3943, kMonsterStride = 16, kNMonsters = 10;
+const int kCitiesCount = 5499, kCities = 5501, kCityStride = 65;
 
 // Option words. They are NOT in menu order; see docs/rules.md > Game setup.
-const std::pair<const char*, int> OPTIONS[] = {
+const std::pair<const char*, int> kOptions[] = {
     {"neutralCities", 0x11a}, {"diplomacy", 0x11c},      {"quests", 0x11e},
     {"randomTurns", 0x122},   {"hiddenMap", 0x124},      {"intenseCombat", 0x126},
     {"quickStart", 0x128},    {"viewEnemies", 0x12a},    {"militaryAdvisor", 0x12c},
     {"tutorial", 0x12e},      {"viewProduction", 0x132},
 };
 
-std::optional<std::vector<std::string>> lines(const std::string& path) {
+std::optional<std::vector<std::string>> Lines(const std::string& path) {
     auto t = readFile(path);
     if (!t) return std::nullopt;
     return splitLines(*t);
 }
 
-long leadingInt(const std::string& s) {
+long LeadingInt(const std::string& s) {
     size_t i = 0;
     while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) i++;
     bool neg = false;
@@ -78,9 +78,9 @@ long leadingInt(const std::string& s) {
 }  // namespace
 
 std::optional<std::vector<PoolItem>> loadItemPool(const std::string& path) {
-    auto ls = lines(path);
+    auto ls = Lines(path);
     if (!ls || ls->empty()) return std::nullopt;
-    long count = leadingInt((*ls)[0]);
+    long count = LeadingInt((*ls)[0]);
     std::vector<PoolItem> pool;
     for (size_t i = 1; i < std::min(ls->size(), static_cast<size_t>(count) + 1); i++) {
         const std::string& line = (*ls)[i];
@@ -89,14 +89,14 @@ std::optional<std::vector<PoolItem>> loadItemPool(const std::string& path) {
         for (auto& c : nm)
             if (c == '_') c = ' ';
         p.name = trimRight(nm);
-        p.type = line.size() > 21 ? static_cast<int>(leadingInt(line.substr(21, 1))) : 0;
-        p.value = line.size() > 23 ? static_cast<int>(leadingInt(line.substr(23, 1))) : 0;
+        p.type = line.size() > 21 ? static_cast<int>(LeadingInt(line.substr(21, 1))) : 0;
+        p.value = line.size() > 23 ? static_cast<int>(LeadingInt(line.substr(23, 1))) : 0;
         pool.push_back(p);
     }
     return pool;
 }
 
-static std::map<int, std::array<std::string, 3>> parseDescriptions(
+static std::map<int, std::array<std::string, 3>> ParseDescriptions(
         const std::vector<std::string>& ls) {
     std::map<int, std::array<std::string, 3>> out;
     for (auto& line : ls) {
@@ -128,12 +128,12 @@ static std::map<int, std::array<std::string, 3>> parseDescriptions(
 }
 
 std::map<int, std::array<std::string, 3>> loadDescriptions(const std::string& path) {
-    auto ls = lines(path);
+    auto ls = Lines(path);
     if (!ls) return {};
-    return parseDescriptions(*ls);
+    return ParseDescriptions(*ls);
 }
 
-static std::vector<Sign> parseSigns(const std::string& s) {
+static std::vector<Sign> ParseSigns(const std::string& s) {
     std::vector<Sign> out;
     if (s.size() < 2) return out;
     int n = u16(s, 0);
@@ -153,58 +153,58 @@ static std::vector<Sign> parseSigns(const std::string& s) {
 std::vector<Sign> loadSigns(const std::string& path) {
     auto s = readFile(path);
     if (!s) return {};
-    return parseSigns(*s);
+    return ParseSigns(*s);
 }
 
 std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& name,
                                    const std::map<std::string, std::string>& files) {
     std::string base = dir + "/" + name;
-    auto getOpt = [&](const char* ext) -> std::optional<std::string> {
+    auto get_opt = [&](const char* ext) -> std::optional<std::string> {
         auto it = files.find(ext);
         if (it != files.end()) return it->second;
         return readFile(base + "." + ext);
     };
-    auto getMust = [&](const char* ext) -> std::string {
-        auto v = getOpt(ext);
+    auto get_must = [&](const char* ext) -> std::string {
+        auto v = get_opt(ext);
         if (!v) throw std::runtime_error("cannot open: " + base + "." + ext);
         return *v;
     };
-    std::string s = getMust("SCN");
+    std::string s = get_must("SCN");
     if (s.size() != 12001)
         throw std::runtime_error(fmt("unexpected .SCN size: %d", static_cast<int>(s.size())));
     auto m = std::make_unique<Map>();
     m->name = name;
 
-    for (auto& [k, off] : OPTIONS) {
+    for (auto& [k, off] : kOptions) {
         uint16_t val = u16(s, off);
         if (std::string(k) == "militaryAdvisor" && val == 0) val = 1;
         *m->options.field(k) = val;
     }
 
     for (int i = 0; i < 8; i++) {
-        int o = SIDE_RECS + SIDE_REC_STRIDE * i;
+        int o = kSideRecs + kSideRecStride * i;
         Side& sd = m->sides[i];
         sd.index = i;
-        sd.name = cstr(s, SIDE_NAMES + SIDE_STRIDE * i, SIDE_STRIDE);
-        sd.colour = u16(s, SIDE_COLOURS + 2 * i);
-        sd.edge = u16(s, SIDE_EDGES + 2 * i);
+        sd.name = cstr(s, kSideNames + kSideStride * i, kSideStride);
+        sd.colour = u16(s, kSideColours + 2 * i);
+        sd.edge = u16(s, kSideEdges + 2 * i);
         sd.gold = u16(s, o + 2);
         sd.capX = u16(s, o + 6);
         sd.capY = u16(s, o + 8);
-        sd.computer = u16(s, CONTROLLERS + 2 * i) != 0;
-        sd.level = u16(s, LEVELS + 2 * i);
-        sd.enhanced = u16(s, ENHANCED + 2 * i) != 0;
-        sd.observe = u16(s, OBSERVE + 2 * i) != 0;
-        sd.diploScore = u16(s, DIPLO_SCORE + 2 * i);
-        sd.card = u16(s, CARDS + 2 * i);
+        sd.computer = u16(s, kControllers + 2 * i) != 0;
+        sd.level = u16(s, kLevels + 2 * i);
+        sd.enhanced = u16(s, kEnhanced + 2 * i) != 0;
+        sd.observe = u16(s, kObserve + 2 * i) != 0;
+        sd.diploScore = u16(s, kDiploScore + 2 * i);
+        sd.card = u16(s, kCards + 2 * i);
     }
 
-    int nCities = u16(s, CITIES_COUNT);
-    m->cities.resize(nCities);
+    int n_cities = u16(s, kCitiesCount);
+    m->cities.resize(n_cities);
     m->cityAt.assign(static_cast<size_t>(MAP_W) * MAP_H, nullptr);
     m->cityTile.assign(static_cast<size_t>(MAP_W) * MAP_H, nullptr);
-    for (int i = 0; i < nCities; i++) {
-        int o = CITIES + CITY_STRIDE * i;
+    for (int i = 0; i < n_cities; i++) {
+        int o = kCities + kCityStride * i;
         City& c = m->cities[i];
         c.index = i;
         c.x = u16(s, o);
@@ -238,14 +238,14 @@ std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& na
     }
 
     // fight order: 29 bytes per player, row 8 for neutral
-    m->fightOrder.assign(FIGHT_ROWS, std::vector<int>(FIGHT_TYPES, 0));
-    for (int row = 0; row < FIGHT_ROWS; row++)
-        for (int t = 0; t < FIGHT_TYPES; t++)
-            m->fightOrder[row][t] = u8(s, FIGHT_ORDER + row * FIGHT_TYPES + t);
+    m->fightOrder.assign(kFightRows, std::vector<int>(kFightTypes, 0));
+    for (int row = 0; row < kFightRows; row++)
+        for (int t = 0; t < kFightTypes; t++)
+            m->fightOrder[row][t] = u8(s, kFightOrder + row * kFightTypes + t);
 
-    int nSites = u16(s, SITES_COUNT);
-    for (int i = 0; i < nSites; i++) {
-        int o = SITES + SITE_STRIDE * i;
+    int n_sites = u16(s, kSitesCount);
+    for (int i = 0; i < n_sites; i++) {
+        int o = kSites + kSiteStride * i;
         Site st;
         st.index = i;
         st.x = u16(s, o);
@@ -255,8 +255,8 @@ std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& na
         m->sites.push_back(st);
     }
 
-    for (int i = 0; i < N_ITEMS; i++) {
-        int o = ITEMS + ITEM_STRIDE * i;
+    for (int i = 0; i < kNItems; i++) {
+        int o = kItems + kItemStride * i;
         std::string nm = cstr(s, o, 20);
         if (!nm.empty()) {
             Item it;
@@ -268,17 +268,17 @@ std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& na
         }
     }
 
-    for (int i = 0; i < N_MONSTERS; i++) {
-        std::string nm = cstr(s, MONSTERS + MONSTER_STRIDE * i, 12);
+    for (int i = 0; i < kNMonsters; i++) {
+        std::string nm = cstr(s, kMonsters + kMonsterStride * i, 12);
         // keyed by slot: a site's guardian byte indexes this directly
-        if (!nm.empty()) m->monsters[i] = Monster{i, nm, u16(s, MONSTER_STRENGTH + 2 * i)};
+        if (!nm.empty()) m->monsters[i] = Monster{i, nm, u16(s, kMonsterStrength + 2 * i)};
     }
 
     // tile index -> terrain type id, the same table WARLORD2.EXE reads
-    for (int i = 0; i < TERRAIN_COUNT; i++) m->terrainType[i] = u8(s, TERRAIN_TABLE + i);
+    for (int i = 0; i < kTerrainCount; i++) m->terrainType[i] = u8(s, kTerrainTable + i);
 
     // terrain grid + road overlay; bit 15 of a map word marks a crossing
-    std::string mp = getMust("MAP");
+    std::string mp = get_must("MAP");
     m->tiles.resize(static_cast<size_t>(MAP_W) * MAP_H);
     m->crossing.resize(static_cast<size_t>(MAP_W) * MAP_H);
     for (int i = 0; i < MAP_W * MAP_H; i++) {
@@ -286,15 +286,15 @@ std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& na
         m->tiles[i] = w % 0x8000;
         m->crossing[i] = w >= 0x8000;
     }
-    m->roads = getMust("RD");
+    m->roads = get_must("RD");
     if (static_cast<int>(m->roads.size()) < MAP_W * MAP_H)
         m->roads.resize(static_cast<size_t>(MAP_W) * MAP_H, '\0');
 
     m->itemPool = loadItemPool(base + ".ITM");
-    if (auto cty = getOpt("CTY")) m->cityText = parseDescriptions(splitLines(*cty));
-    if (auto spc = getOpt("SPC")) m->siteText = parseDescriptions(splitLines(*spc));
-    if (auto sgn = getOpt("SGN")) m->signs = parseSigns(*sgn);
-    m->combatCap = u16(s, COMBAT_CAP);
+    if (auto cty = get_opt("CTY")) m->cityText = ParseDescriptions(splitLines(*cty));
+    if (auto spc = get_opt("SPC")) m->siteText = ParseDescriptions(splitLines(*spc));
+    if (auto sgn = get_opt("SGN")) m->signs = ParseSigns(*sgn);
+    m->combatCap = u16(s, kCombatCap);
     return m;
 }
 

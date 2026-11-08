@@ -58,9 +58,9 @@ void Game::remove(const Army* a) {
 
 namespace game {
 
-static const int TRANSIT_TURNS = 2;  // a vectored army arrives two turns later
+static const int kTransitTurns = 2;  // a vectored army arrives two turns later
 
-static int key(const Game& g, int x, int y) {
+static int Key(const Game& g, int x, int y) {
     return y * g.map->width + x;
 }
 
@@ -75,11 +75,11 @@ std::vector<Army*> armiesAt(const Game& g, int x, int y) {
 
 City* cityAt(const Game& g, int x, int y) {
     if (x < 0 || y < 0 || x >= g.map->width || y >= g.map->height) return nullptr;
-    return g.map->cityTile[key(g, x, y)];
+    return g.map->cityTile[Key(g, x, y)];
 }
 
-void setCityOwner(Game& g, City& city, int sideIndex) {
-    city.ownerIndex = sideIndex;
+void setCityOwner(Game& g, City& city, int side_index) {
+    city.ownerIndex = side_index;
     move::invalidate(g);
 }
 
@@ -97,20 +97,20 @@ std::vector<Army*> sideArmies(const Game& g, const Side& side) {
     return out;
 }
 
-int itemBonus(const Game& g, const Side& side, int itemType) {
+int itemBonus(const Game& g, const Side& side, int item_type) {
     int total = 0;
     for (Army* a : g.armies) {
         if (a->owner == side.index) {
             for (Item* it : a->items)
-                if (it->type == itemType) total += std::max(1, it->value);
+                if (it->type == item_type) total += std::max(1, it->value);
         }
     }
     return total;
 }
 
 std::pair<int, int> freeTileIn(Game& g, const City& city, bool spill, std::pair<int, int>* last) {
-    static const int D[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
-    for (auto& d : D) {
+    static const int kD[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+    for (auto& d : kD) {
         int x = city.x + d[0], y = city.y + d[1];
         if (x < g.map->width && y < g.map->height &&
             static_cast<int>(armiesAt(g, x, y).size()) < rules::MAX_STACK) {
@@ -136,8 +136,8 @@ int income(const Game& g, const Side& side) {
     int total = 0;
     auto cities = sideCities(g, side);
     for (City* c : cities) total += c->income;
-    int perCity = itemBonus(g, side, rules::ITEM_GOLD_PER_CITY);
-    return total + static_cast<int>(cities.size()) * perCity;
+    int per_city = itemBonus(g, side, rules::ITEM_GOLD_PER_CITY);
+    return total + static_cast<int>(cities.size()) * per_city;
 }
 
 int upkeep(const Game& g, const Side& side) {
@@ -154,7 +154,7 @@ int upkeep(const Game& g, const Side& side) {
 
 // One starting army per city (setup_garrisons, 6bd8:00cc), the last city
 // first (docs/rules.md > Starting garrisons).
-static void setupGarrisons(Game& g) {
+static void SetupGarrisons(Game& g) {
     Side* setup = g.map->side(SETUP_PLAYER);
     bool enhanced = setup && setup->enhanced;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
@@ -195,7 +195,7 @@ static void setupGarrisons(Game& g) {
 
 // Quick Start: deal every neutral city out to the sides (setup_capitals,
 // 79fa:07ca).
-static void dealCities(Game& g) {
+static void DealCities(Game& g) {
     std::map<int, std::pair<int, int>> from;
     int turn = NONE;
     for (int i = 7; i >= 0; i--) {
@@ -237,7 +237,7 @@ static void dealCities(Game& g) {
 // Optional scale reduction for curriculum training & fast small-map benchmarks:
 // keeps `activeSides` nearest capitals (preferring land-connected neighbours)
 // and crops the world to a padded island around them without changing MAP_W/H.
-static void applyScaleAndCrop(Map& m, const NewGameOptions& opts) {
+static void ApplyScaleAndCrop(Map& m, const NewGameOptions& opts) {
     std::vector<int> avail;
     for (int i = 0; i < 8; i++) {
         if (m.sides[i].inUse && m.sides[i].capital) avail.push_back(i);
@@ -247,25 +247,25 @@ static void applyScaleAndCrop(Map& m, const NewGameOptions& opts) {
         int s0 = avail[h % avail.size()];
         int ax = m.sides[s0].capX, ay = m.sides[s0].capY;
 
-        std::vector<int> landDist(static_cast<size_t>(MAP_W) * MAP_H, INT_MAX);
+        std::vector<int> land_dist(static_cast<size_t>(MAP_W) * MAP_H, INT_MAX);
         std::queue<std::pair<int, int>> q;
         if (ax >= 0 && ay >= 0 && ax < MAP_W && ay < MAP_H) {
-            landDist[ay * MAP_W + ax] = 0;
+            land_dist[ay * MAP_W + ax] = 0;
             q.push({ax, ay});
         }
         while (!q.empty()) {
             auto [cx, cy] = q.front();
             q.pop();
-            int cd = landDist[cy * MAP_W + cx];
+            int cd = land_dist[cy * MAP_W + cx];
             for (int dy = -1; dy <= 1; dy++) {
                 for (int dx = -1; dx <= 1; dx++) {
                     if (dx == 0 && dy == 0) continue;
                     int nx = cx + dx, ny = cy + dy;
                     if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
                     int nk = ny * MAP_W + nx;
-                    if (landDist[nk] != INT_MAX) continue;
+                    if (land_dist[nk] != INT_MAX) continue;
                     if (scn::terrainAt(m, nx, ny) == move::WATER) continue;
-                    landDist[nk] = cd + 1;
+                    land_dist[nk] = cd + 1;
                     q.push({nx, ny});
                 }
             }
@@ -274,7 +274,7 @@ static void applyScaleAndCrop(Map& m, const NewGameOptions& opts) {
         auto metric = [&](int s) -> std::tuple<int, int, int, int> {
             if (s == s0) return {0, 0, 0, s};
             int sx = m.sides[s].capX, sy = m.sides[s].capY;
-            int ld = (sx >= 0 && sy >= 0 && sx < MAP_W && sy < MAP_H) ? landDist[sy * MAP_W + sx]
+            int ld = (sx >= 0 && sy >= 0 && sx < MAP_W && sy < MAP_H) ? land_dist[sy * MAP_W + sx]
                                                                       : INT_MAX;
             int dx = sx - ax, dy = sy - ay;
             int d2 = dx * dx + dy * dy;
@@ -291,59 +291,59 @@ static void applyScaleAndCrop(Map& m, const NewGameOptions& opts) {
 
     if (opts.cropMargin <= 0) return;
 
-    int minX = MAP_W, maxX = 0, minY = MAP_H, maxY = 0;
-    bool anySide = false;
+    int min_x = MAP_W, max_x = 0, min_y = MAP_H, max_y = 0;
+    bool any_side = false;
     for (const auto& sd : m.sides) {
         if (!sd.inUse) continue;
-        minX = std::min(minX, sd.capX);
-        maxX = std::max(maxX, sd.capX + 1);
-        minY = std::min(minY, sd.capY);
-        maxY = std::max(maxY, sd.capY + 1);
-        anySide = true;
+        min_x = std::min(min_x, sd.capX);
+        max_x = std::max(max_x, sd.capX + 1);
+        min_y = std::min(min_y, sd.capY);
+        max_y = std::max(max_y, sd.capY + 1);
+        any_side = true;
     }
-    if (!anySide) return;
+    if (!any_side) return;
 
-    int x0 = std::max(2, minX - opts.cropMargin);
-    int x1 = std::min(MAP_W - 3, maxX + opts.cropMargin);
-    int y0 = std::max(2, minY - opts.cropMargin);
-    int y1 = std::min(MAP_H - 3, maxY + opts.cropMargin);
+    int x0 = std::max(2, min_x - opts.cropMargin);
+    int x1 = std::min(MAP_W - 3, max_x + opts.cropMargin);
+    int y0 = std::max(2, min_y - opts.cropMargin);
+    int y1 = std::min(MAP_H - 3, max_y + opts.cropMargin);
     m.activeX0 = x0;
     m.activeY0 = y0;
     m.activeX1 = x1;
     m.activeY1 = y1;
 
-    int plainTile = 0, waterTile = 0;
+    int plain_tile = 0, water_tile = 0;
     for (int t = 0; t < 255; t++) {
         if (m.terrainType[t] == move::PLAIN) {
-            plainTile = t;
+            plain_tile = t;
             break;
         }
     }
     for (int t = 0; t < 255; t++) {
         if (m.terrainType[t] == move::WATER) {
-            waterTile = t;
+            water_tile = t;
             break;
         }
     }
 
-    std::vector<City> keptCities;
+    std::vector<City> kept_cities;
     for (auto& c : m.cities) {
         if (c.x >= x0 && c.x + 1 <= x1 && c.y >= y0 && c.y + 1 <= y1) {
-            c.index = static_cast<int>(keptCities.size());
+            c.index = static_cast<int>(kept_cities.size());
             c.owner = nullptr;
-            keptCities.push_back(std::move(c));
+            kept_cities.push_back(std::move(c));
         } else {
             for (int dy = 0; dy <= 1; dy++) {
                 for (int dx = 0; dx <= 1; dx++) {
                     int tx = c.x + dx, ty = c.y + dy;
                     if (tx >= 0 && ty >= 0 && tx < MAP_W && ty < MAP_H) {
-                        m.tiles[ty * MAP_W + tx] = plainTile;
+                        m.tiles[ty * MAP_W + tx] = plain_tile;
                     }
                 }
             }
         }
     }
-    m.cities = std::move(keptCities);
+    m.cities = std::move(kept_cities);
     m.cityAt.assign(static_cast<size_t>(MAP_W) * MAP_H, nullptr);
     m.cityTile.assign(static_cast<size_t>(MAP_W) * MAP_H, nullptr);
     for (auto& c : m.cities) {
@@ -366,25 +366,25 @@ static void applyScaleAndCrop(Map& m, const NewGameOptions& opts) {
         }
     }
 
-    std::vector<Site> keptSites;
+    std::vector<Site> kept_sites;
     for (auto& st : m.sites) {
         if (st.x >= x0 && st.x <= x1 && st.y >= y0 && st.y <= y1) {
-            st.index = static_cast<int>(keptSites.size());
-            keptSites.push_back(std::move(st));
+            st.index = static_cast<int>(kept_sites.size());
+            kept_sites.push_back(std::move(st));
         } else if (st.x >= 0 && st.y >= 0 && st.x < MAP_W && st.y < MAP_H) {
-            m.tiles[st.y * MAP_W + st.x] = plainTile;
+            m.tiles[st.y * MAP_W + st.x] = plain_tile;
         }
     }
-    m.sites = std::move(keptSites);
+    m.sites = std::move(kept_sites);
 
-    std::vector<Sign> keptSigns;
+    std::vector<Sign> kept_signs;
     for (auto& sg : m.signs) {
         if (sg.x >= x0 && sg.x <= x1 && sg.y >= y0 && sg.y <= y1) {
-            sg.index = static_cast<int>(keptSigns.size());
-            keptSigns.push_back(std::move(sg));
+            sg.index = static_cast<int>(kept_signs.size());
+            kept_signs.push_back(std::move(sg));
         }
     }
-    m.signs = std::move(keptSigns);
+    m.signs = std::move(kept_signs);
 
     // Leave a 2-tile natural terrain ring around [x0..x1]x[y0..y1] so border
     // cities do not artificially become coastal ports, then convert outer tiles to ocean.
@@ -394,7 +394,7 @@ static void applyScaleAndCrop(Map& m, const NewGameOptions& opts) {
         for (int x = 0; x < MAP_W; x++) {
             if (x < bx0 || x > bx1 || y < by0 || y > by1) {
                 int k = y * MAP_W + x;
-                m.tiles[k] = waterTile;
+                m.tiles[k] = water_tile;
                 m.roads[k] = '\0';
                 m.crossing[k] = false;
             }
@@ -402,16 +402,16 @@ static void applyScaleAndCrop(Map& m, const NewGameOptions& opts) {
     }
 }
 
-std::unique_ptr<Game> newGame(const std::string& dataDir, const std::string& scenario,
+std::unique_ptr<Game> newGame(const std::string& data_dir, const std::string& scenario,
                               const NewGameOptions& opts) {
     auto gp = std::make_unique<Game>();
     Game& g = *gp;
     g.rng = Rng(opts.seed);
-    g.dataDir = dataDir;
-    armytype::load(dataDir + "/TERRAIN0/ARMYTYPE.DAT", g.types);
+    g.dataDir = data_dir;
+    armytype::load(data_dir + "/TERRAIN0/ARMYTYPE.DAT", g.types);
     g.map = opts.memoryFiles
-                    ? scn::loadFromFiles(dataDir + "/" + scenario, scenario, *opts.memoryFiles)
-                    : scn::load(dataDir + "/" + scenario, scenario);
+                    ? scn::loadFromFiles(data_dir + "/" + scenario, scenario, *opts.memoryFiles)
+                    : scn::load(data_dir + "/" + scenario, scenario);
     g.greatest = opts.greatest;
     for (auto& [k, v] : opts.options) {
         if (int* f = g.map->options.field(k)) *f = v;
@@ -432,7 +432,7 @@ std::unique_ptr<Game> newGame(const std::string& dataDir, const std::string& sce
         }
     }
     if ((opts.activeSides > 0 && opts.activeSides < 8) || opts.cropMargin > 0) {
-        applyScaleAndCrop(*g.map, opts);
+        ApplyScaleAndCrop(*g.map, opts);
     }
 
     for (auto& s : g.map->sides) {
@@ -448,7 +448,7 @@ std::unique_ptr<Game> newGame(const std::string& dataDir, const std::string& sce
     for (Side* s : g.sides) s->observe = observed;
 
     for (auto& c : g.map->cities) c.ownerIndex = c.owner ? c.owner->index : NONE;
-    if (g.map->options.quickStart != 0) dealCities(g);
+    if (g.map->options.quickStart != 0) DealCities(g);
 
     for (auto& c : g.map->cities) {
         c.slots = rules::citySlots(c.produces, g.types, g.rng);
@@ -466,7 +466,7 @@ std::unique_ptr<Game> newGame(const std::string& dataDir, const std::string& sce
     }
 
     diplomacy::init(g);
-    setupGarrisons(g);
+    SetupGarrisons(g);
     site::setup(g);
     for (Side* s : g.sides) {
         revealStart(g, *s);
@@ -500,7 +500,7 @@ std::unique_ptr<Game> newGame(const std::string& dataDir, const std::string& sce
 // Put a side with no city left out of the game (8065:18ab): its heroes drop
 // what they carry, its armies are gone, it is vanquished, and its gold is 0.
 // Every side then stands uneasy with it, both ways, state and proposal.
-static Fallen eliminate(Game& g, Side& side, bool boxed) {
+static Fallen Eliminate(Game& g, Side& side, bool boxed) {
     std::vector<Army*> mine;
     for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         if (g.armies[i]->owner == side.index) mine.push_back(g.armies[i]);
@@ -528,12 +528,12 @@ std::vector<Fallen> eliminateFallen(Game& g) {
     std::vector<Fallen> fallen;
     for (Side* s : g.sides) {
         if (s->alive && sideCities(g, *s).empty())
-            fallen.push_back(eliminate(g, *s, human || !s->computer));
+            fallen.push_back(Eliminate(g, *s, human || !s->computer));
     }
     return fallen;
 }
 
-static void applyIncome(Game& g, Side& side) {
+static void ApplyIncome(Game& g, Side& side) {
     side.income = income(g, side);
     side.upkeepTotal = upkeep(g, side);
     side.gold = std::max(0, side.gold + side.income - side.upkeepTotal);
@@ -544,13 +544,13 @@ static void applyIncome(Game& g, Side& side) {
 // there is no spilling round a full city -- and the city must still be the
 // side's (6f8c:0d4f). One sent back that fails again, at home, is
 // disbanded. It keeps the moves it set off with.
-static bool deliver(Game& g, Army* army, City& city) {
+static bool Deliver(Game& g, Army* army, City& city) {
     auto [x, y] = freeTileIn(g, city, false);
     if (x == NONE || city.ownerIndex != army->owner) {
         if (army->returning || army->homeCity == city.index) return false;
         City* home = g.map->city(army->homeCity);
         army->returning = true;
-        army->transit = Transit{TRANSIT_TURNS, home ? home->index : NONE};
+        army->transit = Transit{kTransitTurns, home ? home->index : NONE};
         return true;
     }
     army->x = x;
@@ -568,7 +568,7 @@ static bool deliver(Game& g, Army* army, City& city) {
 // otherwise stays at 0 -- idle until its production is set again. A new
 // army has its full move (6f8c:0dd7). Whether the city starts the next one
 // is the caller's: a human's do (6f8c:06bd), a computer's wait for its AI.
-static std::vector<Produced> runProduction(Game& g, Side& side) {
+static std::vector<Produced> RunProduction(Game& g, Side& side) {
     std::vector<Produced> arrived, built;
     for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
@@ -586,12 +586,12 @@ static std::vector<Produced> runProduction(Game& g, Side& side) {
                         arrived.push_back(Produced{"arrived", a->type, NONE, true});
                     } else {
                         a->returning = true;
-                        a->transit = Transit{TRANSIT_TURNS, a->homeCity};
+                        a->transit = Transit{kTransitTurns, a->homeCity};
                     }
                 } else {
                     City* dest = g.map->city(a->transit->dest);
                     a->transit.reset();
-                    if (!dest || !deliver(g, a, *dest))
+                    if (!dest || !Deliver(g, a, *dest))
                         a->disbanded = true;
                     else if (!a->transit)
                         arrived.push_back(Produced{"arrived", a->type, dest->index, false});
@@ -617,7 +617,7 @@ static std::vector<Produced> runProduction(Game& g, Side& side) {
                         a.x = x;
                         a.y = y;
                         if (vectored) {
-                            a.transit = Transit{TRANSIT_TURNS, c->vectorTo};
+                            a.transit = Transit{kTransitTurns, c->vectorTo};
                             a.x = NONE;
                             a.y = NONE;
                         }
@@ -643,7 +643,7 @@ static std::vector<Produced> runProduction(Game& g, Side& side) {
 // forgotten; every hero carrying double movement adds each army's maximum
 // again to every army on its tile -- a second such hero there adds it
 // again; then 99 at most. 8c07:0113 wipes the turn's marks.
-static void resetMovement(Game& g, Side& side) {
+static void ResetMovement(Game& g, Side& side) {
     for (Army* a : g.armies) {
         if (a->owner == side.index) {
             a->done = false;
@@ -662,10 +662,10 @@ static void resetMovement(Game& g, Side& side) {
     for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* h = g.armies[i];
         if (h->owner != side.index || h->type != armytype::HERO || h->transit) continue;
-        bool doubleMove = false;
+        bool double_move = false;
         for (Item* it : h->items)
-            if (it->type == rules::ITEM_DOUBLE_MOVE) doubleMove = true;
-        if (!doubleMove) continue;
+            if (it->type == rules::ITEM_DOUBLE_MOVE) double_move = true;
+        if (!double_move) continue;
         auto here = armiesAt(g, h->x, h->y);
         if (static_cast<int>(here.size()) > rules::MAX_STACK) here.resize(rules::MAX_STACK);
         for (Army* a : here) a->moves += a->maxMoves;
@@ -679,14 +679,14 @@ static void resetMovement(Game& g, Side& side) {
 // (8c07:0000): its tile gets the tower flag when it still has its full
 // movement and stands on plain, forest, hills, a bridge, marsh, the tower
 // terrain or a road.
-static void encamp(Game& g, Side& side) {
-    static const std::set<int> ENCAMP_ON = {move::PLAIN,  move::FOREST, move::HILLS,
+static void Encamp(Game& g, Side& side) {
+    static const std::set<int> kEncampOn = {move::PLAIN,  move::FOREST, move::HILLS,
                                             move::BRIDGE, move::MARSH,  move::TOWER};
     for (Army* a : g.armies) {
         if (a->owner == side.index && a->fortified && !a->transit && a->x != NONE &&
             a->moves >= a->maxMoves) {
             bool road = scn::roadAt(*g.map, a->x, a->y) % 32 != 0;
-            if (road || ENCAMP_ON.count(scn::terrainAt(*g.map, a->x, a->y))) {
+            if (road || kEncampOn.count(scn::terrainAt(*g.map, a->x, a->y))) {
                 g.towers.insert(a->y * g.map->width + a->x);
             }
         }
@@ -726,7 +726,7 @@ bool heroWithDoubleMoveAt(const Game& g, const Side& side, int x, int y) {
 // (8cc6:089d, from 8065:2123). It costs no movement: the reset that follows
 // sees them ashore. A stack that took a city from the sea stays at sea until
 // then.
-static void comeAshore(Game& g, Side& side) {
+static void ComeAshore(Game& g, Side& side) {
     for (Army* a : g.armies) {
         if (a->owner == side.index && a->atSea && !a->transit && a->x != NONE &&
             cityAt(g, a->x, a->y))
@@ -762,14 +762,14 @@ void followCapital(Game& g, Side& side) {
     side.capNowY = side.capY;
 }
 
-static void turnQuest(Game& g, Side& side) {
-    auto questResult = quest::event(g, side, "turn");
-    if (questResult && !questResult->failed.empty())
-        g.log.push_back("Quest abandoned: " + questResult->failed + ".");
+static void TurnQuest(Game& g, Side& side) {
+    auto quest_result = quest::event(g, side, "turn");
+    if (quest_result && !quest_result->failed.empty())
+        g.log.push_back("Quest abandoned: " + quest_result->failed + ".");
 }
 
 bool startTurn(Game& g, Side& side) {
-    comeAshore(g, side);
+    ComeAshore(g, side);
     followCapital(g, side);
     tidyExplored(g, side.index);
     side.diploNews = diplomacy::apply(g, side);
@@ -781,21 +781,21 @@ bool startTurn(Game& g, Side& side) {
         auto offer = hero::offer(g, side);
         if (offer) hero::recruit(g, side, *offer);
         hero::checkPromotions(g, side);
-        applyIncome(g, side);
-        runProduction(g, side);
-        resetMovement(g, side);
+        ApplyIncome(g, side);
+        RunProduction(g, side);
+        ResetMovement(g, side);
         tidyTowers(g);
-        encamp(g, side);
+        Encamp(g, side);
         // the army cycle's cursor goes back to the capital (8c07:0113)
         if (side.ai) side.ai->cursor = std::make_pair(side.capNowX, side.capNowY);
-        turnQuest(g, side);
+        TurnQuest(g, side);
         return true;
     }
-    resetMovement(g, side);
+    ResetMovement(g, side);
     tidyTowers(g);
-    encamp(g, side);
-    applyIncome(g, side);
-    turnQuest(g, side);
+    Encamp(g, side);
+    ApplyIncome(g, side);
+    TurnQuest(g, side);
     side.promoted = hero::checkPromotions(g, side);
     side.heroOffer = hero::offer(g, side);
     side.productionDue = true;
@@ -806,7 +806,7 @@ void humanProduction(Game& g, Side& side) {
     if (!side.productionDue) return;
     side.productionDue = false;
     if (g.turn == 1) return;
-    for (auto& e : runProduction(g, side)) {
+    for (auto& e : RunProduction(g, side)) {
         City* c = g.map->city(e.city);
         if (c && c->producing != NONE && c->producing < static_cast<int>(c->slots.size()))
             c->countdown = c->slots[c->producing].time;
@@ -819,7 +819,7 @@ bool producing(const City& c) {
 
 // The turn order for the next round (turn_order, 8065:1732): with Random
 // Turns, 20 swaps of two sides picked by dice.
-static void turnOrder(Game& g) {
+static void TurnOrder(Game& g) {
     g.turnOrder = {0, 1, 2, 3, 4, 5, 6, 7};
     if (g.map->options.randomTurns != 0) {
         for (int i = 0; i < 20; i++) {
@@ -829,14 +829,14 @@ static void turnOrder(Game& g) {
     }
 }
 
-static Side* nextSide(Game& g, Side* leaving) {
+static Side* NextSide(Game& g, Side* leaving) {
     for (int n = 0; n < 3 * 8 + 1; n++) {
         if (g.orderAt >= 7) {
             g.orderAt = -1;
             g.turn++;
             // the round's end: the order, the fallen put out of the game, the end
             // looked for, the neutral cities' production, then the history
-            turnOrder(g);
+            TurnOrder(g);
             endRound(g, leaving);
             if (g.ending.over) {
                 g.side = nullptr;
@@ -863,13 +863,13 @@ Side* endTurn(Game& g) {
         diplomacy::scoreUpdate(g, *leaving);
     // what the last round's end found is for the turn that followed it only
     g.ending = Ending{};
-    return nextSide(g, leaving);
+    return NextSide(g, leaving);
 }
 
 Side* begin(Game& g) {
     g.orderAt = -1;
     g.ending = Ending{};
-    return nextSide(g, nullptr);
+    return NextSide(g, nullptr);
 }
 
 Side* nextHuman(Game& g) {
@@ -882,7 +882,7 @@ Side* nextHuman(Game& g) {
     return nullptr;
 }
 
-static void removeArmies(Game& g, const std::vector<Army*>& dead) {
+static void RemoveArmies(Game& g, const std::vector<Army*>& dead) {
     std::set<const Army*> gone(dead.begin(), dead.end());
     for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         if (gone.count(g.armies[i])) g.armies.erase(g.armies.begin() + i);
@@ -892,19 +892,19 @@ static void removeArmies(Game& g, const std::vector<Army*>& dead) {
 // Could these armies fly off together (1c8c:07fa)? A hero's flight item
 // carries them all; else every army flies and none is at sea, or every army
 // but the heroes flies and one of the fliers is not at sea.
-static bool canFlyOff(const Game& g, const std::vector<Army*>& armies) {
-    bool heroFlight = false, allFly = true, nonHeroesFly = true, freeFlier = false;
+static bool CanFlyOff(const Game& g, const std::vector<Army*>& armies) {
+    bool hero_flight = false, all_fly = true, non_heroes_fly = true, free_flier = false;
     for (Army* a : armies) {
         bool flies = g.types.byId(a->type)->flies;
         if (a->type == armytype::HERO) {
             for (Item* it : a->items)
-                if (it->type == rules::ITEM_FLIGHT) heroFlight = true;
+                if (it->type == rules::ITEM_FLIGHT) hero_flight = true;
         }
-        if (!flies || a->atSea) allFly = false;
-        if (a->type != armytype::HERO && !flies) nonHeroesFly = false;
-        if (flies && !a->atSea) freeFlier = true;
+        if (!flies || a->atSea) all_fly = false;
+        if (a->type != armytype::HERO && !flies) non_heroes_fly = false;
+        if (flies && !a->atSea) free_flier = true;
     }
-    return heroFlight || allFly || (nonHeroesFly && freeFlier);
+    return hero_flight || all_fly || (non_heroes_fly && free_flier);
 }
 
 int sinkStranded(Game& g, Side& side, int x, int y) {
@@ -919,13 +919,13 @@ int sinkStranded(Game& g, Side& side, int x, int y) {
     }
     std::vector<Army*> dead;
     for (auto& [k, here] : tiles) {
-        if (canFlyOff(g, here)) continue;
+        if (CanFlyOff(g, here)) continue;
         for (Army* a : here) {
             if (!a->atSea && a->type != armytype::HERO && !g.types.byId(a->type)->flies)
                 dead.push_back(a);
         }
     }
-    removeArmies(g, dead);
+    RemoveArmies(g, dead);
     return static_cast<int>(dead.size());
 }
 
@@ -942,7 +942,7 @@ void disband(Game& g, Side& side, const std::vector<Army*>& armies) {
             if (side.quest && side.quest->hero == a) side.quest.reset();
         }
     }
-    removeArmies(g, armies);
+    RemoveArmies(g, armies);
 }
 
 int loot(const Game& g, const Side* loser) {
@@ -1004,47 +1004,47 @@ Battle resolveAttack(Game& g, const std::vector<Army*>& stack, int x, int y) {
     return b;
 }
 
-static Army* medal(Game& g, const Battle& result, int side);
+static Army* Medal(Game& g, const Battle& result, int side);
 
 Battle& applyAttack(Game& g, Battle& result) {
     if (!result.fought) return result;
     Battle::Fought f = *result.fought;
     result.fought.reset();
     const auto& stack = f.stack;
-    int x = f.x, y = f.y, defOwner = f.defOwner;
+    int x = f.x, y = f.y, def_owner = f.defOwner;
     const auto& attackers = result.lines.attackers;
     const auto& defenders = result.lines.defenders;
     City* city = result.lines.city;
     // the city on the tile, ruins too (828e:044a)
-    City* tileCity = g.map->cityTile[y * g.map->width + x];
+    City* tile_city = g.map->cityTile[y * g.map->width + x];
     const auto& boats = result.boats;
 
     auto fallen = [&](Army* h) {
         history::deed(g, g.map->side(h->owner == NONE ? 8 : h->owner), DeedType::HERO_KILLED,
-                      tileCity ? tileCity->index : history::KILLED_IN_BATTLE, 0, h->name);
+                      tile_city ? tile_city->index : history::KILLED_IN_BATTLE, 0, h->name);
     };
     int mine = stack.empty() ? NONE : stack[0]->owner;
     {
-        int heroesLost = 0;
+        int heroes_lost = 0;
         for (Army* dd : result.deadDefenders)
-            if (dd->type == armytype::HERO) heroesLost++;
-        ai::recordBattle(g, defOwner, mine, x, y, heroesLost,
+            if (dd->type == armytype::HERO) heroes_lost++;
+        ai::recordBattle(g, def_owner, mine, x, y, heroes_lost,
                          static_cast<int>(result.deadDefenders.size()),
                          result.won && !defenders.empty(), city != nullptr);
     }
-    for (Army* a : result.deadAttackers) history::tally(g, a, defOwner, boats.count(a) > 0);
+    for (Army* a : result.deadAttackers) history::tally(g, a, def_owner, boats.count(a) > 0);
     for (Army* d : result.deadDefenders) history::tally(g, d, mine, boats.count(d) > 0);
     // a big battle won at a city goes down in history (67cc:0af5): eight
     // armies or more, four of them defending -- by the hero's name when a hero
     // led the stack
-    if (tileCity && result.won && mine != NONE && attackers.size() + defenders.size() >= 8 &&
+    if (tile_city && result.won && mine != NONE && attackers.size() + defenders.size() >= 8 &&
         defenders.size() >= 4) {
         Side* side = g.map->side(mine);
         if (result.hero)
-            history::deed(g, side, DeedType::CITY_WON, history::WON_BY_NAME, tileCity->index,
+            history::deed(g, side, DeedType::CITY_WON, history::WON_BY_NAME, tile_city->index,
                           result.hero->name);
         else
-            history::deed(g, side, DeedType::CITY_WON, mine, tileCity->index, "");
+            history::deed(g, side, DeedType::CITY_WON, mine, tile_city->index, "");
     }
     // the fallen heroes' items drop on the tile fought for, attacker's too
     // (67cc:16cd with after_battle's x, y)
@@ -1061,21 +1061,22 @@ Battle& applyAttack(Game& g, Battle& result) {
         }
     }
     hero::battleExperience(g, attackers, defenders, result, city != nullptr);
-    Side* mySide = g.map->side(stack.empty() ? 0 : (stack[0]->owner == NONE ? 0 : stack[0]->owner));
+    Side* my_side =
+            g.map->side(stack.empty() ? 0 : (stack[0]->owner == NONE ? 0 : stack[0]->owner));
     {
         quest::Event ev;
         ev.stack = attackers;
         ev.killed = result.deadDefenders;
-        result.quest = quest::event(g, *mySide, "battle", ev);
+        result.quest = quest::event(g, *my_side, "battle", ev);
     }
 
-    removeArmies(g, result.deadAttackers);
-    removeArmies(g, result.deadDefenders);
+    RemoveArmies(g, result.deadAttackers);
+    RemoveArmies(g, result.deadDefenders);
     tidyTowers(g);
 
     if (result.won && city) {
         Side* winner = g.map->side(stack[0]->owner);
-        Side* loser = defOwner != NONE ? g.map->side(defOwner) : nullptr;
+        Side* loser = def_owner != NONE ? g.map->side(def_owner) : nullptr;
         if (loser) {
             int l = result.loot;
             winner->gold += l;
@@ -1136,12 +1137,12 @@ Battle& applyAttack(Game& g, Battle& result) {
             if (found > 0) move::invalidate(g);
         }
     }
-    result.medal = medal(g, result, mine);
+    result.medal = Medal(g, result, mine);
     return result;
 }
 
 // An ordinary army: not a hero, not a magical creature.
-static bool ordinary(const Game& g, const Army* a) {
+static bool Ordinary(const Game& g, const Army* a) {
     return a->type != armytype::HERO && g.types.byId(a->type)->bonus[48] == 0;
 }
 
@@ -1151,22 +1152,22 @@ static bool ordinary(const Game& g, const Army* a) {
 // its ordinary armies a medal, 40% of the time less 5 for each of the side's
 // ordinary armies with one already, 12% at least. A medal is +1 strength
 // (9 at most), or +1 move past strength 14; four at most. Returns the army.
-static Army* medal(Game& g, const Battle& result, int side) {
+static Army* Medal(Game& g, const Battle& result, int side) {
     if (side == NONE || !result.won) return nullptr;
     const auto& survivors = result.attackers;
     for (Army* a : survivors)
         if (a->atSea) return nullptr;
-    size_t nAtk = result.lines.attackers.size(), nDef = result.lines.defenders.size();
+    size_t n_atk = result.lines.attackers.size(), n_def = result.lines.defenders.size();
     bool counted =
-            (nAtk >= 2 && nDef >= 2) || (g.turn < 20 && nDef >= 1 && result.defStrength0 > 3);
+            (n_atk >= 2 && n_def >= 2) || (g.turn < 20 && n_def >= 1 && result.defStrength0 > 3);
     if (!counted) return nullptr;
     std::vector<Army*> plain;
     for (Army* a : survivors)
-        if (ordinary(g, a)) plain.push_back(a);
+        if (Ordinary(g, a)) plain.push_back(a);
     if (plain.empty()) return nullptr;
     int decorated = 0;
     for (Army* a : g.armies)
-        if (a->owner == side && ordinary(g, a) && a->medals > 0) decorated++;
+        if (a->owner == side && Ordinary(g, a) && a->medals > 0) decorated++;
     int chance = std::max(12, 40 - 5 * decorated);
     if (!(g.rng.dice(1, 100, 0) < chance) || !result.hero) return nullptr;
     Army* a = plain[g.rng.dice(1, static_cast<int>(plain.size()), -1)];
@@ -1180,11 +1181,11 @@ static Army* medal(Game& g, const Battle& result, int side) {
 }
 
 // A production type's "value" is half its purchase price (ARMYTYPE +30).
-static int slotValue(const Game& g, const Slot& slot) {
+static int SlotValue(const Game& g, const Slot& slot) {
     return std::abs(g.types.byId(slot.type)->price) / 2;
 }
 
-static void recompute(Game& g, City& city) {
+static void Recompute(Game& g, City& city) {
     city.defence = rules::cityDefence(static_cast<int>(city.slots.size()));
     if (city.producing != NONE && city.producing >= static_cast<int>(city.slots.size())) {
         city.producing = NONE;
@@ -1209,12 +1210,12 @@ Spoils pillage(Game& g, Side& side, City& city, const std::vector<Army*>& stack)
     if (city.slots.empty()) return out;
     Slot slot = city.slots.back();  // slots are sorted cheapest first
     city.slots.pop_back();
-    int gold = slotValue(g, slot);
+    int gold = SlotValue(g, slot);
     out.gold = gold;
     out.lost.emplace_back(slot.type, gold);
     side.gold += gold;
     addDiploScore(g, side, g.rng.dice(1, 5, 0));
-    recompute(g, city);
+    Recompute(g, city);
     quest::Event ev;
     ev.city = &city;
     ev.gold = gold;
@@ -1228,7 +1229,7 @@ Spoils sack(Game& g, Side& side, City& city, const std::vector<Army*>& stack) {
     if (city.slots.size() < 2) return out;
     int gold = 0;
     for (size_t i = 1; i < city.slots.size(); i++) {
-        int v = slotValue(g, city.slots[i]);
+        int v = SlotValue(g, city.slots[i]);
         out.lost.emplace_back(city.slots[i].type, v);
         gold += v;
     }
@@ -1236,7 +1237,7 @@ Spoils sack(Game& g, Side& side, City& city, const std::vector<Army*>& stack) {
     out.gold = gold;
     side.gold += gold;
     addDiploScore(g, side, g.rng.dice(1, 10, 5));
-    recompute(g, city);
+    Recompute(g, city);
     quest::Event ev;
     ev.city = &city;
     ev.gold = gold;
@@ -1246,7 +1247,7 @@ Spoils sack(Game& g, Side& side, City& city, const std::vector<Army*>& stack) {
 }
 
 // The city becomes ruins (649c:016b).
-static void makeRuins(Game& g, City& city) {
+static void MakeRuins(Game& g, City& city) {
     city.razed = true;
     city.razedBy = city.ownerIndex == NONE ? 0 : city.ownerIndex;
     city.ownerIndex = NONE;
@@ -1270,9 +1271,9 @@ static void makeRuins(Game& g, City& city) {
     move::invalidate(g);
 }
 
-void raze(Game& g, Side& side, City& city, const std::vector<Army*>& stack, bool ownCity) {
-    makeRuins(g, city);
-    if (ownCity) {
+void raze(Game& g, Side& side, City& city, const std::vector<Army*>& stack, bool own_city) {
+    MakeRuins(g, city);
+    if (own_city) {
         addDiploScore(g, side, g.rng.dice(1, 25, 25));
         return;
     }
@@ -1285,7 +1286,7 @@ void raze(Game& g, Side& side, City& city, const std::vector<Army*>& stack, bool
 
 void resign(Game& g, Side& side) {
     for (auto& c : g.map->cities) {
-        if (!c.razed && c.ownerIndex == side.index) makeRuins(g, c);
+        if (!c.razed && c.ownerIndex == side.index) MakeRuins(g, c);
     }
     disband(g, side, sideArmies(g, side));
     if (g.map->options.hiddenMap != 0) {
@@ -1295,7 +1296,7 @@ void resign(Game& g, Side& side) {
 
 // Tiles a side has seen: a mask per side.
 
-static std::vector<uint8_t>* maskFor(Game& g, int side, bool make) {
+static std::vector<uint8_t>* MaskFor(Game& g, int side, bool make) {
     auto it = g.explored.find(side);
     if (it != g.explored.end()) return &it->second;
     if (!make) return nullptr;
@@ -1336,10 +1337,10 @@ bool seen(const Game& g, int side, int x, int y) {
 
 int reveal(Game& g, int side, int x, int y, bool flying) {
     if (g.map->options.hiddenMap == 0) return 0;
-    auto& mask = *maskFor(g, side, true);
-    bool onCity = x >= 0 && y >= 0 && x < g.map->width && y < g.map->height &&
-                  g.map->cityTile[y * g.map->width + x];
-    int r = (flying || onCity) ? 2 : 1;
+    auto& mask = *MaskFor(g, side, true);
+    bool on_city = x >= 0 && y >= 0 && x < g.map->width && y < g.map->height &&
+                   g.map->cityTile[y * g.map->width + x];
+    int r = (flying || on_city) ? 2 : 1;
     int found = 0;
     for (int ty = y - r; ty <= y + r; ty++) {
         for (int tx = x - r; tx <= x + r; tx++) {
@@ -1388,17 +1389,18 @@ int fogCell(const Game& g, int side, int x, int y) {
 
 void tidyExplored(Game& g, int side) {
     if (g.map->options.hiddenMap == 0) return;
-    auto& mask = *maskFor(g, side, true);
-    int W = g.map->width, H = g.map->height;
+    auto& mask = *MaskFor(g, side, true);
+    int map_width = g.map->width, map_height = g.map->height;
     for (int pass = 0; pass < 2; pass++) {
-        for (int x = 0; x < W; x++) {
-            for (int y = 0; y < H; y++) {
-                int k = y * W + x;
+        for (int x = 0; x < map_width; x++) {
+            for (int y = 0; y < map_height; y++) {
+                int k = y * map_width + x;
                 if (!mask[k]) {
                     int bits = 0;
                     for (int i = 0; i < 8; i++) {
                         int nx = x + FOG_DX[i], ny = y + FOG_DY[i];
-                        if (nx < 0 || ny < 0 || nx >= W || ny >= H || !mask[ny * W + nx])
+                        if (nx < 0 || ny < 0 || nx >= map_width || ny >= map_height ||
+                            !mask[ny * map_width + nx])
                             bits += 1 << i;
                     }
                     if (FOG_CELL[bits] == FOG_NONE) mask[k] = 1;
@@ -1447,7 +1449,7 @@ bool setCityProduction(Game& g, const Side* who, City& c, int slot) {
 // A neutral city's garrison is built (produce_garrison, 6bd8:0381): on its
 // top-left tile, room or not, with no moves, and the city builds nothing
 // more until it is set to again.
-static void produceGarrison(Game& g, City& c, const Side* who) {
+static void ProduceGarrison(Game& g, City& c, const Side* who) {
     if (c.producing != NONE && c.producing < static_cast<int>(c.slots.size())) {
         Army a = rules::armyFromSlot(c.slots[c.producing], who && who->enhanced);
         a.x = c.x;
@@ -1468,7 +1470,7 @@ void neutralProduction(Game& g, const Side* who) {
         if (c.ownerIndex == NONE && !c.razed && c.attacked) {
             if (c.countdown != 0) {
                 c.countdown--;
-                if (c.countdown == 0) produceGarrison(g, c, who);
+                if (c.countdown == 0) ProduceGarrison(g, c, who);
             }
             const Slot* slot = c.producing != NONE && c.producing < static_cast<int>(c.slots.size())
                                        ? &c.slots[c.producing]
@@ -1487,13 +1489,13 @@ Ending checkEnd(Game& g) {
     // a human side out of the game is the computer's from now on, so that its
     // fall is told only once
     std::vector<Side*> humans, computers;
-    bool fallenHuman = false;
+    bool fallen_human = false;
     for (Side* s : g.sides) {
         if (s->alive) {
             (s->computer ? computers : humans).push_back(s);
         } else if (!s->computer) {
             s->computer = true;
-            fallenHuman = true;
+            fallen_human = true;
         }
     }
     int standing = 0;
@@ -1509,7 +1511,7 @@ Ending checkEnd(Game& g) {
     }
     // the last human has fallen and the computers fight on (8065:1c6f); a game
     // that never had a human said so as it began (group 14) instead
-    if (!g.won && humans.empty() && fallenHuman && !g.noHumansSaid) {
+    if (!g.won && humans.empty() && fallen_human && !g.noHumansSaid) {
         g.noHumansSaid = true;
         e.noHumans = true;
     }
@@ -1580,10 +1582,10 @@ std::string describeSearch(const SearchResult* r) {
     return name + " holds nothing.";
 }
 
-void setProduction(Game& g, City& city, int slotIndex) {
-    city.producing = slotIndex;
-    city.countdown = slotIndex != NONE ? city.slots[slotIndex].time : 0;
-    if (slotIndex == NONE) city.vectorTo = NONE;  // vectoring only sticks while building
+void setProduction(Game& g, City& city, int slot_index) {
+    city.producing = slot_index;
+    city.countdown = slot_index != NONE ? city.slots[slot_index].time : 0;
+    if (slot_index == NONE) city.vectorTo = NONE;  // vectoring only sticks while building
 }
 
 std::vector<City*> vectoredTo(Game& g, const City* dest, const Side* side) {
@@ -1634,19 +1636,19 @@ bool vectorToStandard(Game& g, City& city, const Side& side) {
     return true;
 }
 
-bool vector(Game& g, City& city, City* destCity) {
-    if (destCity == &city) destCity = nullptr;
-    if (destCity && city.vectorTo != destCity->index &&
-        static_cast<int>(vectoredTo(g, destCity).size()) >= MAX_VECTORED_TO) {
+bool vector(Game& g, City& city, City* dest_city) {
+    if (dest_city == &city) dest_city = nullptr;
+    if (dest_city && city.vectorTo != dest_city->index &&
+        static_cast<int>(vectoredTo(g, dest_city).size()) >= MAX_VECTORED_TO) {
         return false;
     }
-    city.vectorTo = destCity ? destCity->index : NONE;
+    city.vectorTo = dest_city ? dest_city->index : NONE;
     return true;
 }
 
 City* nearestCity(Game& g, int x, int y, const Side* side, const Side* seer) {
     City* best = nullptr;
-    int bestD = NONE;
+    int best_d = NONE;
     for (auto& c : g.map->cities) {
         bool ok = !side || c.ownerIndex == side->index;
         if (ok && seer) {
@@ -1656,9 +1658,9 @@ City* nearestCity(Game& g, int x, int y, const Side* side, const Side* seer) {
         }
         if (ok) {
             int d = move::distance(x, y, c.x, c.y);
-            if (bestD == NONE || d < bestD) {
+            if (best_d == NONE || d < best_d) {
                 best = &c;
-                bestD = d;
+                best_d = d;
             }
         }
     }
@@ -1685,8 +1687,8 @@ int buySlot(const City& city) {
     return 0;
 }
 
-void buyProduction(Game& g, Side& side, City& city, int n, int typeId) {
-    const ArmyType* a = g.types.byId(typeId);
+void buyProduction(Game& g, Side& side, City& city, int n, int type_id) {
+    const ArmyType* a = g.types.byId(type_id);
     bool building = city.producing != NONE;
     int was = city.producing;
     Slot s{a->id, a->name, a->strength, a->time, a->cost, a->move, std::abs(a->price)};

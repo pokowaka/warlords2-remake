@@ -12,11 +12,11 @@
 namespace levels {
 
 namespace {
-const kit::Rect R{80, 60, 480, 320};  // popup 0
-const int DIALOG = 28, DONE = 469;
-const int S = 0x68, S_MALE = 0x63, S_FEMALE = 0x64;
+const kit::Rect kR{80, 60, 480, 320};  // popup 0
+const int kDialog = 28, kDone = 469;
+const int kS = 0x68, kSMale = 0x63, kSFemale = 0x64;
 
-int needs(int level) {
+int Needs(int level) {
     return level == 1 ? 15 : level == 2 ? 30 : level == 3 ? 60 : w2::NONE;
 }
 
@@ -26,14 +26,14 @@ struct Levels : kit::Modal {
     void draw() override {
         w2::Side* side = G.player;
         const Font& f = kit::font(2);
-        kit::popup(R);
+        kit::popup(kR);
         gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(S, 0), 320, 63);
+        kit::centred(kit::font(1), kit::text(kS, 0), 320, 63);
         const Font& head = f.colours(side->colour, side->edge);
-        head.draw(kit::text(S, 1), 128, 105);
-        head.draw(kit::text(S, 2), 272, 105);
+        head.draw(kit::text(kS, 1), 128, 105);
+        head.draw(kit::text(kS, 2), 272, 105);
         const int xs[4] = {392, 440, 488, 536};
-        for (int k = 0; k < 4; k++) kit::centred(head, kit::text(S, k + 3), xs[k], 105);
+        for (int k = 0; k < 4; k++) kit::centred(head, kit::text(kS, k + 3), xs[k], 105);
         for (size_t i = 0; i < rows.size(); i++) {
             w2::Army* h = rows[i];
             int y = 128 + 30 * static_cast<int>(i);
@@ -41,9 +41,9 @@ struct Levels : kit::Modal {
             kit::army(w2::armytype::HERO, side->index, 88, y, level == 4 ? side->index + 2 : 1);
             gfx::setColor(1, 1, 1);
             f.draw(h->name, 128, y + 6);
-            f.draw(kit::text(h->female ? S_FEMALE : S_MALE, level - 1), 272, y + 6);
+            f.draw(kit::text(h->female ? kSFemale : kSMale, level - 1), 272, y + 6);
             kit::centred(f, w2::fmt("%d", h->experience), 392, y + 6);
-            kit::centred(f, needs(level) != w2::NONE ? w2::fmt("%d", needs(level)) : "-", 440,
+            kit::centred(f, Needs(level) != w2::NONE ? w2::fmt("%d", Needs(level)) : "-", 440,
                          y + 6);
             kit::centred(f, w2::fmt("%d", h->strength), 488, y + 6);
             kit::centred(f, w2::fmt("%d", h->maxMoves), 536, y + 6);
@@ -54,7 +54,7 @@ struct Levels : kit::Modal {
     }
     void mousepressed(int x, int y, int) override {
         auto c = kit::controlAt(v, x, y);
-        if (c && c->id == DONE) kit::pop(this);
+        if (c && c->id == kDone) kit::pop(this);
     }
     void keypressed(const std::string& key) override {
         if (key == "escape" || key == "return" || key == "kpenter") kit::pop(this);
@@ -64,9 +64,9 @@ struct Levels : kit::Modal {
 
 void open() {
     auto d = std::make_shared<Levels>();
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
-    d->v.state[DONE] = w2::uidata::NORMAL;
+    d->v.state[kDone] = w2::uidata::NORMAL;
     for (int level = 4; level >= 1; level--) {
         for (int i = static_cast<int>(G.g->armies.size()) - 1; i >= 0; i--) {
             w2::Army* a = G.g->armies[i];

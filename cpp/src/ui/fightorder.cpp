@@ -13,97 +13,97 @@
 namespace fightorder {
 
 namespace {
-const kit::Rect R{80, 60, 480, 350};  // popup 11
-const int DIALOG = 26;
-const int OK = 425, CANCEL = 426, DEFAULT = 427, EARLIER = 428, LATER = 429, PLACE = 430;
-const int PLACES = 27;
-const int S = 0x7f;
-const int NEUTRAL = 8;
+const kit::Rect kR{80, 60, 480, 350};  // popup 11
+const int kDialog = 26;
+const int kOk = 425, kCancel = 426, kDefault = 427, kEarlier = 428, kLater = 429, kPlace = 430;
+const int kPlaces = 27;
+const int kS = 0x7f;
+const int kNeutral = 8;
 
 struct Order : kit::Modal {
     screen::View v;
     std::vector<int> backup;
     int chosen = -1;
-    std::vector<int>& row() { return G.g->map->fightOrder[G.player->index]; }
-    int typeAt(int rank) {
-        auto& r = row();
+    std::vector<int>& Row() { return G.g->map->fightOrder[G.player->index]; }
+    int TypeAt(int rank) {
+        auto& r = Row();
         for (int t = 0; t <= 28 && t < static_cast<int>(r.size()); t++)
             if (r[t] == rank) return t;
         return w2::NONE;
     }
-    void swap(int a, int b) {
-        int ta = typeAt(a), tb = typeAt(b);
-        if (ta != w2::NONE) row()[ta] = b;
-        if (tb != w2::NONE) row()[tb] = a;
+    void Swap(int a, int b) {
+        int ta = TypeAt(a), tb = TypeAt(b);
+        if (ta != w2::NONE) Row()[ta] = b;
+        if (tb != w2::NONE) Row()[tb] = a;
     }
-    void refresh() {
+    void Refresh() {
         auto& st = v.state;
-        st[OK] = st[CANCEL] = st[DEFAULT] = w2::uidata::NORMAL;
-        st[EARLIER] = chosen > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        st[LATER] =
-                (chosen >= 0 && chosen < PLACES - 1) ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        for (int i = 0; i < PLACES; i++) st[PLACE + i] = w2::uidata::NORMAL;
+        st[kOk] = st[kCancel] = st[kDefault] = w2::uidata::NORMAL;
+        st[kEarlier] = chosen > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        st[kLater] =
+                (chosen >= 0 && chosen < kPlaces - 1) ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        for (int i = 0; i < kPlaces; i++) st[kPlace + i] = w2::uidata::NORMAL;
     }
-    void close(bool keep) {
-        if (!keep) row() = backup;
+    void Close(bool keep) {
+        if (!keep) Row() = backup;
         kit::pop(this);
     }
     void draw() override {
         w2::Side* side = G.player;
-        kit::popup(R);
+        kit::popup(kR);
         gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(S, 0), 320, 64);
+        kit::centred(kit::font(1), kit::text(kS, 0), 320, 64);
         kit::shield(side->index, 88, 64);
         kit::shield(side->index, 512, 64);
         const Font& f = kit::font(2);
         gfx::setColor(1, 1, 1);
-        kit::centred(f, w2::format(kit::text(S, 1), side->name), 320, 104);
-        kit::centred(f, kit::text(S, 2), 320, 348);
-        kit::centred(f, kit::text(S, 3), 320, 368);
-        kit::centred(f, kit::text(S, 4), 320, 388);
-        for (int i = 0; i < PLACES; i++) {
+        kit::centred(f, w2::format(kit::text(kS, 1), side->name), 320, 104);
+        kit::centred(f, kit::text(kS, 2), 320, 348);
+        kit::centred(f, kit::text(kS, 3), 320, 368);
+        kit::centred(f, kit::text(kS, 4), 320, 388);
+        for (int i = 0; i < kPlaces; i++) {
             int x = 120 * (i % 4), y = 31 * (i / 4);
-            int t = typeAt(i);
+            int t = TypeAt(i);
             if (t != w2::NONE)
                 kit::army(t, side->index, 88 + x, 128 + y, i == chosen ? side->index + 2 : 1);
             gfx::setColor(1, 1, 1);
             f.draw(w2::fmt("%d.", i + 1), 128 + x, 134 + y);  // 4125:0d5c
         }
         std::set<int> h;
-        for (int i = 0; i < PLACES; i++) h.insert(PLACE + i);
+        for (int i = 0; i < kPlaces; i++) h.insert(kPlace + i);
         kit::drawControls(v, h);
     }
     void mousepressed(int x, int y, int) override {
         auto c = kit::controlAt(v, x, y);
         if (!c) return;
         int id = c->id;
-        if (id == OK) return close(true);
-        if (id == CANCEL) return close(false);
-        if (id == DEFAULT) {
-            row() = G.g->map->fightOrder[NEUTRAL];
+        if (id == kOk) return Close(true);
+        if (id == kCancel) return Close(false);
+        if (id == kDefault) {
+            Row() = G.g->map->fightOrder[kNeutral];
             chosen = -1;
-        } else if (id == EARLIER && chosen > 0) {
-            swap(chosen, chosen - 1);
+        } else if (id == kEarlier && chosen > 0) {
+            Swap(chosen, chosen - 1);
             chosen--;
-        } else if (id == LATER && chosen >= 0 && chosen < PLACES - 1) {
-            swap(chosen, chosen + 1);
+        } else if (id == kLater && chosen >= 0 && chosen < kPlaces - 1) {
+            Swap(chosen, chosen + 1);
             chosen++;
-        } else if (id >= PLACE && id < PLACE + PLACES) {
-            int i = id - PLACE;
+        } else if (id >= kPlace && id < kPlace + kPlaces) {
+            int i = id - kPlace;
             if (chosen == i)
                 chosen = -1;
             else if (chosen < 0)
                 chosen = i;
             else {
-                swap(chosen, i);
+                Swap(chosen, i);
                 chosen = -1;
             }
         }
-        refresh();
+        Refresh();
     }
     // the right button on a place (sub-ids 45-71, 6a89:1475)
     bool info(int sub, int sx, int sy) override {
-        int t = typeAt(sub - 45);
+        int t = TypeAt(sub - 45);
         const w2::ArmyType* rec = t != w2::NONE ? G.g->types.byId(t) : nullptr;
         if (!rec) return false;
         infobox::armyType(sx, sy, t,
@@ -114,9 +114,9 @@ struct Order : kit::Modal {
     }
     void keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
-            close(true);
+            Close(true);
         else if (key == "escape")
-            close(false);
+            Close(false);
     }
 };
 }  // namespace
@@ -124,9 +124,9 @@ struct Order : kit::Modal {
 void open() {
     auto d = std::make_shared<Order>();
     d->backup = G.g->map->fightOrder[G.player->index];
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
-    d->refresh();
+    d->Refresh();
     kit::push(d);
 }
 

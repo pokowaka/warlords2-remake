@@ -9,8 +9,8 @@ namespace spoils {
 using w2::format;
 
 namespace {
-const kit::Rect R{176, 60, 288, 300};  // popup 12
-const int TITLE = 0x44, LINE = 0x45, GOLD = 0x46, LOST = 0x47, LEFT = 0x48;
+const kit::Rect kR{176, 60, 288, 300};  // popup 12
+const int kTitle = 0x44, kLine = 0x45, kGold = 0x46, kLost = 0x47, kLeft = 0x48;
 
 struct Spoils : kit::Modal {
     bool sacked = false;
@@ -18,28 +18,29 @@ struct Spoils : kit::Modal {
     int gold = 0, left = 0;
     std::vector<std::pair<int, int>> lost;
     kit::Done after;
-    void close() {
+    void Close() {
         auto a = after;
         kit::pop(this);
         if (a) a();
     }
     void draw() override {
         int which = sacked ? 1 : 0;
-        kit::popup(R);
+        kit::popup(kR);
         gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(TITLE, which), 320, 64);
+        kit::centred(kit::font(1), kit::text(kTitle, which), 320, 64);
         const Font& f = kit::font(2);
-        kit::centred(f, format(kit::text(LINE, which), city->name), 320, 115);
-        kit::centred(f, format(kit::text(GOLD, 0), gold), 320, 135);
+        kit::centred(f, format(kit::text(kLine, which), city->name), 320, 115);
+        kit::centred(f, format(kit::text(kGold, 0), gold), 320, 135);
         kit::centred(
-                f, format(kit::text(LOST, lost.size() == 1 ? 0 : 1), static_cast<int>(lost.size())),
+                f,
+                format(kit::text(kLost, lost.size() == 1 ? 0 : 1), static_cast<int>(lost.size())),
                 320, 165);
-        kit::centred(f, format(kit::text(LEFT, left == 1 ? 0 : 1), left), 320, 185);
+        kit::centred(f, format(kit::text(kLeft, left == 1 ? 0 : 1), left), 320, 185);
         kit::bevel(184, 220, 272, 130, 4, 2);
         kit::bevel(185, 221, 270, 128, 2, 4);
         gfx::setColor(1, 1, 1);
-        f.draw(kit::text(TITLE, 2), 192, 230);
-        f.draw(kit::text(TITLE, 3), 368, 230);
+        f.draw(kit::text(kTitle, 2), 192, 230);
+        f.draw(kit::text(kTitle, 3), 368, 230);
         for (int i = 0; i <= 2; i++) {
             int y = 250 + 30 * i;
             bool have = i < static_cast<int>(lost.size());
@@ -52,8 +53,8 @@ struct Spoils : kit::Modal {
             }
         }
     }
-    void mousepressed(int, int, int) override { close(); }
-    void keypressed(const std::string&) override { close(); }
+    void mousepressed(int, int, int) override { Close(); }
+    void keypressed(const std::string&) override { Close(); }
 };
 }  // namespace
 

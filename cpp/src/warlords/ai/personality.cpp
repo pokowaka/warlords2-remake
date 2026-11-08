@@ -9,7 +9,7 @@ namespace {
 // Trait order:
 // [0] AGGRESSION, [1] HONOUR, [2] AVARICE, [3] SCORCHED_EARTH, [4] HERO_FOCUS,
 // [5] COALITION_DRIVE, [6] CAVALRY_AFFINITY, [7] FLIER_AFFINITY, [8] SIEGE_AFFINITY, [9] CAUTION
-const Profile PROFILES[3][9] = {
+const Profile kProfiles[3][9] = {
     // Knights (Level 0)
     {
         {0,
@@ -188,7 +188,7 @@ const Profile PROFILES[3][9] = {
 const Profile& profileFor(int level, int card) {
     int lv = std::clamp(level, 0, 2);
     int cd = std::clamp(card, 0, 8);
-    return PROFILES[lv][cd];
+    return kProfiles[lv][cd];
 }
 
 const Profile& forSide(const Side& side) {

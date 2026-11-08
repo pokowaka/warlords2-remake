@@ -10,14 +10,14 @@
 namespace about {
 
 namespace {
-const kit::Rect R{160, 55, 336, 347};  // popup 23
+const kit::Rect kR{160, 55, 336, 347};  // popup 23
 gfx::ImageP bscroll;
 
 struct About : kit::Modal {
     std::vector<std::string> lines;
     void draw() override {
         gfx::setColor(1, 1, 1);
-        gfx::draw(bscroll, gfx::newQuad(0, 0, R.w, R.h), R.x, R.y);
+        gfx::draw(bscroll, gfx::newQuad(0, 0, kR.w, kR.h), kR.x, kR.y);
         const Font& f = kit::font(2).colours(0, 7);
         for (size_t i = 0; i < lines.size(); i++)
             if (!lines[i].empty())

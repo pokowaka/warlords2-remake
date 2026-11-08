@@ -39,6 +39,10 @@ CheckOptions:
   # --- Symbol & Variable Naming Rules (Google Style) ---
   - key:    readability-identifier-naming.VariableCase
     value:  'lower_case'
+  # G, the front end's shared state, goes away when the front end is
+  # restructured (docs: code quality plan, phase 5)
+  - key:    readability-identifier-naming.VariableIgnoredRegexp
+    value:  '^G$'
   - key:    readability-identifier-naming.ParameterCase
     value:  'lower_case'
   - key:    readability-identifier-naming.LocalConstantCase
@@ -61,6 +65,10 @@ CheckOptions:
     value:  'CamelCase'
   - key:    readability-identifier-naming.MethodCase
     value:  'CamelCase'
+  # the standard container interface, so our types work with range-for and
+  # the standard algorithms
+  - key:    readability-identifier-naming.MethodIgnoredRegexp
+    value:  '^(size|begin|end|empty|data)$'
   - key:    readability-identifier-naming.GlobalConstantCase
     value:  'CamelCase'
   - key:    readability-identifier-naming.GlobalConstantPrefix

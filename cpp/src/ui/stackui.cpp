@@ -19,11 +19,12 @@
 namespace stackui {
 
 namespace {
-const kit::Rect R{80, 60, 480, 320};  // popup 0
-const int DIALOG = 18, OK = 332, CANCEL = 333, GROUP = 334, UNGROUP = 335, ARMY = 336, MARK = 344;
-const int ROWS = 8;
+const kit::Rect kR{80, 60, 480, 320};  // popup 0
+const int kDialog = 18, kOk = 332, kCancel = 333, kGroup = 334, kUngroup = 335, kArmy = 336,
+          kMark = 344;
+const int kRows = 8;
 
-bool flies(const w2::Army* a, const w2::ArmyType* t) {
+bool Flies(const w2::Army* a, const w2::ArmyType* t) {
     if (t->flies) return true;
     if (!a->hero()) return false;
     for (w2::Item* it : a->items)
@@ -34,19 +35,19 @@ bool flies(const w2::Army* a, const w2::ArmyType* t) {
 struct Stack : kit::Modal {
     screen::View v;
     w2::slots::Slots s;
-    void refresh() {
+    void Refresh() {
         auto& st = v.state;
-        st[OK] = st[CANCEL] = w2::uidata::NORMAL;
-        st[GROUP] = s.n > 1 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        st[UNGROUP] = st[GROUP];
-        for (int i = 0; i < ROWS; i++) {
-            st[ARMY + i] = i < s.n ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-            st[MARK + i] = st[ARMY + i];
+        st[kOk] = st[kCancel] = w2::uidata::NORMAL;
+        st[kGroup] = s.n > 1 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        st[kUngroup] = st[kGroup];
+        for (int i = 0; i < kRows; i++) {
+            st[kArmy + i] = i < s.n ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kMark + i] = st[kArmy + i];
         }
     }
     void draw() override {
         w2::Side* side = G.player;
-        kit::popup(R);
+        kit::popup(kR);
         gfx::setColor(1, 1, 1);
         if (auto head = G.screen->artFor(46))
             gfx::draw(head->image, gfx::newQuad(0, 0, 400, 23), 80, 62);
@@ -62,7 +63,7 @@ struct Stack : kit::Modal {
         w2::Army* a1 = s.n > 0 ? s.army[0] : nullptr;
         auto fight = a1 ? w2::combat::stackStrengths(*G.g, moving, a1->x, a1->y)
                         : std::map<const w2::Army*, int>{};
-        for (int i = 0; i < ROWS; i++) {
+        for (int i = 0; i < kRows; i++) {
             int x = 112, y = 90 + 30 * i;
             if (i < s.n && s.army[i]) {
                 w2::Army* a = s.army[i];
@@ -81,7 +82,7 @@ struct Stack : kit::Modal {
                     f.draw(w2::fmt("(%d)", fi->second), x + 184, y + 5);
                 f.draw(w2::fmt("%d", a->moves), x + 232, y + 5);
                 int src = -1;
-                if (flies(a, t))
+                if (Flies(a, t))
                     src = 184;
                 else if (a->atSea)
                     src = 424;
@@ -99,13 +100,13 @@ struct Stack : kit::Modal {
             }
         }
         std::set<int> h;
-        for (int i = 0; i < ROWS; i++) {
-            h.insert(ARMY + i);
-            h.insert(MARK + i);
+        for (int i = 0; i < kRows; i++) {
+            h.insert(kArmy + i);
+            h.insert(kMark + i);
         }
         kit::drawControls(v, h);
     }
-    void keep() {
+    void Keep() {
         w2::slots::Slots kept = s;
         kit::pop(this);
         if (G.selection) G.selection->slots = kept;
@@ -115,20 +116,20 @@ struct Stack : kit::Modal {
         auto c = kit::controlAt(v, x, y);
         if (!c || v.stateOf(c->id) == w2::uidata::DISABLED) return;
         int id = c->id;
-        if (id == OK) return keep();
-        if (id == CANCEL) {
+        if (id == kOk) return Keep();
+        if (id == kCancel) {
             kit::pop(this);
             return;
         }
-        if (id == GROUP)
+        if (id == kGroup)
             w2::slots::all(s, *G.g);
-        else if (id == UNGROUP)
+        else if (id == kUngroup)
             w2::slots::single(s, *G.g);
-        else if (id >= ARMY && id < ARMY + ROWS)
-            w2::slots::toggle(s, *G.g, id - ARMY);
-        else if (id >= MARK && id < MARK + ROWS)
-            w2::slots::pickGroup(s, *G.g, id - MARK);
-        refresh();
+        else if (id >= kArmy && id < kArmy + kRows)
+            w2::slots::toggle(s, *G.g, id - kArmy);
+        else if (id >= kMark && id < kMark + kRows)
+            w2::slots::pickGroup(s, *G.g, id - kMark);
+        Refresh();
     }
     // the right button on a row (sub-ids 37-44, 89e0:1747)
     bool info(int sub, int sx, int sy) override {
@@ -141,7 +142,7 @@ struct Stack : kit::Modal {
     }
     void keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
-            keep();
+            Keep();
         else if (key == "escape")
             kit::pop(this);
     }
@@ -152,9 +153,9 @@ void open() {
     if (!G.selection) return;
     auto d = std::make_shared<Stack>();
     d->s = G.selection->slots;
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
-    d->refresh();
+    d->Refresh();
     kit::push(d);
 }
 

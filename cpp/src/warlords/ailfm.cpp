@@ -8,62 +8,62 @@ namespace w2 {
 namespace {
 
 // ADLIB.ADV file offsets (it loads at offset 0 of its segment)
-constexpr size_t ADV_FREQ = 0x101;       // 192 words: 12 half-tones x 16 fine steps of F-number
-constexpr size_t ADV_OCTAVE = 0x281;     // 96 bytes: the octave of each note from C-2
-constexpr size_t ADV_HALFTONE = 0x2e1;   // 96 bytes: its half-tone
-constexpr size_t ADV_RESET = 0x340;      // register values written to 1..0xF5 at start-up
-constexpr size_t ADV_VELOCITY = 0x52b;   // 16 bytes: velocity / 8 -> sensitivity, 82..127
-constexpr size_t ADV_PROGRAMS = 0x2203;  // the program each channel 1..8 starts on
+constexpr size_t kAdvFreq = 0x101;       // 192 words: 12 half-tones x 16 fine steps of F-number
+constexpr size_t kAdvOctave = 0x281;     // 96 bytes: the octave of each note from C-2
+constexpr size_t kAdvHalftone = 0x2e1;   // 96 bytes: its half-tone
+constexpr size_t kAdvReset = 0x340;      // register values written to 1..0xF5 at start-up
+constexpr size_t kAdvVelocity = 0x52b;   // 16 bytes: velocity / 8 -> sensitivity, 82..127
+constexpr size_t kAdvPrograms = 0x2203;  // the program each channel 1..8 starts on
 
 // operator register offsets of voice v's modulator; the carrier is +3
-const int OPREG[9] = {0, 1, 2, 8, 9, 10, 16, 17, 18};
+const int kOpreg[9] = {0, 1, 2, 8, 9, 10, 16, 17, 18};
 
-int byteAt(const std::string& s, size_t i) {
+int ByteAt(const std::string& s, size_t i) {
     return i < s.size() ? static_cast<uint8_t>(s[i]) : 0;
 }
-int u16(const std::string& s, size_t i) {
-    return byteAt(s, i) + byteAt(s, i + 1) * 256;
+int U16(const std::string& s, size_t i) {
+    return ByteAt(s, i) + ByteAt(s, i + 1) * 256;
 }
-int s16(const std::string& s, size_t i) {
-    int v = u16(s, i);
+int S16(const std::string& s, size_t i) {
+    int v = U16(s, i);
     return v >= 0x8000 ? v - 0x10000 : v;
 }
-int s8(int v) {
+int S8(int v) {
     return v >= 0x80 ? v - 0x100 : v;
 }
 
 // hi8(a * b * 2), then one more unless it came to 0: the driver's product
-int scale(int a, int b) {
+int Scale(int a, int b) {
     int v = (a * b * 2 / 256) % 256;
     return v == 0 ? 0 : v + 1;
 }
 
-inline int floorDiv(int a, int b) {
+inline int FloorDiv(int a, int b) {
     return static_cast<int>(std::floor(static_cast<double>(a) / b));
 }
 
 }  // namespace
 
 AilFm::AilFm(const std::string& adv, const std::string& ad) {
-    for (int i = 0; i < 192; i++) freq_[i] = s16(adv, ADV_FREQ + static_cast<size_t>(i) * 2);
+    for (int i = 0; i < 192; i++) freq_[i] = S16(adv, kAdvFreq + static_cast<size_t>(i) * 2);
     for (int i = 0; i < 96; i++) {
-        octave_[i] = byteAt(adv, ADV_OCTAVE + i);
-        halftone_[i] = byteAt(adv, ADV_HALFTONE + i);
+        octave_[i] = ByteAt(adv, kAdvOctave + i);
+        halftone_[i] = ByteAt(adv, kAdvHalftone + i);
     }
-    for (int r = 1; r <= 0xf5; r++) reset_[r] = byteAt(adv, ADV_RESET + r);
-    for (int i = 0; i < 16; i++) velocity_[i] = byteAt(adv, ADV_VELOCITY + i);
-    for (int ch = 1; ch <= 8; ch++) programs_[ch] = byteAt(adv, ADV_PROGRAMS + ch);
+    for (int r = 1; r <= 0xf5; r++) reset_[r] = ByteAt(adv, kAdvReset + r);
+    for (int i = 0; i < 16; i++) velocity_[i] = ByteAt(adv, kAdvVelocity + i);
+    for (int ch = 1; ch <= 8; ch++) programs_[ch] = ByteAt(adv, kAdvPrograms + ch);
     // The Global Timbre Library: a directory of 6-byte entries { patch, bank,
     // offset:u32 } ended by bank 0xFF, and at each offset a timbre -- a u16
     // length then the bytes.
     for (size_t p = 0; p + 6 <= ad.size(); p += 6) {
-        int patch = byteAt(ad, p), bank = byteAt(ad, p + 1);
+        int patch = ByteAt(ad, p), bank = ByteAt(ad, p + 1);
         if (bank == 0xff) break;
         size_t off =
-                static_cast<size_t>(u16(ad, p + 2)) + static_cast<size_t>(u16(ad, p + 4)) * 65536;
-        int len = u16(ad, off);
+                static_cast<size_t>(U16(ad, p + 2)) + static_cast<size_t>(U16(ad, p + 4)) * 65536;
+        int len = U16(ad, off);
         Timbre t;
-        for (int i = 2; i < len; i++) t.push_back(static_cast<uint8_t>(byteAt(ad, off + i)));
+        for (int i = 2; i < len; i++) t.push_back(static_cast<uint8_t>(ByteAt(ad, off + i)));
         lib_[bank * 128 + patch] = t;
     }
     for (int r = 1; r <= 0xf5; r++) chip_.write(r, reset_[r]);
@@ -88,7 +88,7 @@ void AilFm::update(Slot& s) {
     if (v < 0) return;
     int f = s.flags;
     Chan& c = chans_[s.ch];
-    int m = OPREG[v], k = OPREG[v] + 3;
+    int m = kOpreg[v], k = kOpreg[v] + 3;
     if (f >= 0x80) {
         int vib = c.mod >= 64 ? 0x40 : 0;
         chip_.write(0x20 + m, s.modMult + s.modAvek + (s.modAvek % 0x80 >= 0x40 ? 0 : vib));
@@ -96,7 +96,7 @@ void AilFm::update(Slot& s) {
         f -= 0x80;
     }
     if (f >= 0x40) {
-        int vol = scale(scale(c.vol, c.expr), s.vel);
+        int vol = Scale(Scale(c.vol, c.expr), s.vel);
         int ml = s.modLevel;
         if (s.scaleMod) ml = ml * vol / 127;
         int cl = s.carLevel * vol / 127;
@@ -139,8 +139,8 @@ int AilFm::frequency(const Slot& s, const Chan& c) {
     int n = s.note + s.transpose - 24;
     while (n < 0) n += 12;
     while (n > 95) n -= 12;
-    int bend = floorDiv(c.bend, 32) * 12;  // +-12 half-tones over the range
-    int x = floorDiv(n * 256 + bend + 8, 16);
+    int bend = FloorDiv(c.bend, 32) * 12;  // +-12 half-tones over the range
+    int x = FloorDiv(n * 256 + bend + 8, 16);
     while (x < 0) x += 192;
     while (x > 0x5ff) x -= 192;
     int semi = x / 16;
@@ -150,7 +150,7 @@ int AilFm::frequency(const Slot& s, const Chan& c) {
     if (fw < 0) block++;
     if (block < 0) {
         block++;
-        fw = floorDiv(fw, 2);
+        fw = FloorDiv(fw, 2);
     }
     if (fw < 0) fw += 0x10000;
     fw_ = fw;
@@ -194,22 +194,22 @@ void AilFm::steal() {
         }
     }
     while (n > 0) {
-        int best = -1, bestP = 0, worst = -1, worstP = 0xffff;
+        int best = -1, best_p = 0, worst = -1, worst_p = 0xffff;
         for (int i = 0; i < 16; i++) {
             Slot& s = slots_[i];
             if (!s.active) continue;
             int p = prio[i];
             if (s.voice < 0) {
-                if (p >= bestP) {
+                if (p >= best_p) {
                     best = i;
-                    bestP = p;
+                    best_p = p;
                 }
-            } else if (p <= worstP) {
+            } else if (p <= worst_p) {
                 worst = i;
-                worstP = p;
+                worst_p = p;
             }
         }
-        if (bestP < worstP || bestP == 0 || best < 0 || worst < 0) return;
+        if (best_p < worst_p || best_p == 0 || best < 0 || worst < 0) return;
         Slot& w = slots_[worst];
         Slot& b = slots_[best];
         int v = w.voice;
@@ -259,16 +259,16 @@ void AilFm::noteOn(int ch, int key, int vel) {
         }
     if (!sp) return;
     Slot& s = *sp;
-    const Timbre& T = *t;
+    const Timbre& timbre = *t;
     s.ch = ch;
     s.key = key;
     // a drum plays at the pitch its timbre's transpose byte names
     if (ch == 9) {
-        s.note = T[0];
+        s.note = timbre[0];
         s.transpose = 0;
     } else {
         s.note = key;
-        s.transpose = s8(T[0]);
+        s.transpose = S8(timbre[0]);
     }
     s.vel = velocity_[vel / 8];
     s.active = true;
@@ -278,22 +278,22 @@ void AilFm::noteOn(int ch, int key, int vel) {
     // transpose, then the modulator's 20/40/60/80/E0 registers, C0, and the
     // carrier's 20/40/60/80/E0.
     s.keyon = 0x20;
-    s.fbc = T[6];
-    s.conn = T[6] % 2;
-    s.modKsl = T[2] - T[2] % 64;
-    s.modLevel = 63 - T[2] % 64;
-    s.carKsl = T[8] - T[8] % 64;
-    s.carLevel = 63 - T[8] % 64;
-    s.modAvek = T[1] - T[1] % 16;
-    s.modMult = T[1] % 16;
-    s.carAvek = T[7] - T[7] % 16;
-    s.carMult = T[7] % 16;
-    s.modAD = T[3];
-    s.modSR = T[4];
-    s.modWS = T[5];
-    s.carAD = T[9];
-    s.carSR = T[10];
-    s.carWS = T[11];
+    s.fbc = timbre[6];
+    s.conn = timbre[6] % 2;
+    s.modKsl = timbre[2] - timbre[2] % 64;
+    s.modLevel = 63 - timbre[2] % 64;
+    s.carKsl = timbre[8] - timbre[8] % 64;
+    s.carLevel = 63 - timbre[8] % 64;
+    s.modAvek = timbre[1] - timbre[1] % 16;
+    s.modMult = timbre[1] % 16;
+    s.carAvek = timbre[7] - timbre[7] % 16;
+    s.carMult = timbre[7] % 16;
+    s.modAD = timbre[3];
+    s.modSR = timbre[4];
+    s.modWS = timbre[5];
+    s.carAD = timbre[9];
+    s.carSR = timbre[10];
+    s.carWS = timbre[11];
     // which operators follow the volume: the carrier always, the modulator
     // only when it is heard directly (additive)
     s.scaleMod = s.conn == 1;

@@ -17,16 +17,16 @@
 namespace input {
 
 namespace {
-const kit::Rect R{160, 90, 320, 200};  // popup 1
-const int DIALOG = 5;
-const int OK = 189, CANCEL = 190, FIELD = 191;
-const int TITLE_Y = 92;
+const kit::Rect kR{160, 90, 320, 200};  // popup 1
+const int kDialog = 5;
+const int kOk = 189, kCancel = 190, kField = 191;
+const int kTitleY = 92;
 // Where the prompt goes, by how many lines there are (4125:2316). The
 // text-entry form counts two more lines than it has, for the field.
-const std::map<int, std::vector<int>> ROWS = {
+const std::map<int, std::vector<int>> kRows = {
     {1, {150}}, {2, {150, 173}}, {3, {150, 173, 196}}, {4, {140, 163, 186, 209}}};
-const kit::Rect BOX{184, 197, 256, 20};
-const double BLINK = 0.25;
+const kit::Rect kBox{184, 197, 256, 20};
+const double kBlink = 0.25;
 
 struct Dialog : kit::Modal {
     Options opts;
@@ -34,7 +34,7 @@ struct Dialog : kit::Modal {
     std::string value;
     std::optional<Editor> editing;
 
-    void finish(bool ok) {
+    void Finish(bool ok) {
         auto self = kit::top();
         (void)self;
         Options o = opts;
@@ -47,21 +47,21 @@ struct Dialog : kit::Modal {
     }
 
     void draw() override {
-        kit::popup(R);
+        kit::popup(kR);
         gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), opts.title, 320, TITLE_Y);
+        kit::centred(kit::font(1), opts.title, 320, kTitleY);
         int n = static_cast<int>(opts.lines.size()) + (opts.confirm ? 0 : 2);
-        auto ys = ROWS.find(n);
-        if (ys != ROWS.end())
+        auto ys = kRows.find(n);
+        if (ys != kRows.end())
             for (size_t i = 0; i < opts.lines.size() && i < ys->second.size(); i++)
                 kit::centred(kit::font(2), opts.lines[i], 320, ys->second[i]);
         if (opts.confirm) {
-            std::set<int> h{FIELD};
+            std::set<int> h{kField};
             kit::drawControls(v, h);
             return;
         }
-        kit::field(BOX.x, BOX.y, BOX.w, BOX.h, editing ? editing->text : value, &kit::font(2));
-        if (editing) editing->drawCursor(BOX.x, BOX.y);
+        kit::field(kBox.x, kBox.y, kBox.w, kBox.h, editing ? editing->text : value, &kit::font(2));
+        if (editing) editing->drawCursor(kBox.x, kBox.y);
         kit::drawControls(v);
     }
 
@@ -71,14 +71,14 @@ struct Dialog : kit::Modal {
             editing.reset();
         }
         std::set<int> h;
-        if (opts.confirm) h.insert(FIELD);
+        if (opts.confirm) h.insert(kField);
         auto c = kit::controlAt(v, x, y, h);
         if (!c) return;
-        if (c->id == OK)
-            finish(true);
-        else if (c->id == CANCEL)
-            finish(false);
-        else if (c->id == FIELD) {
+        if (c->id == kOk)
+            Finish(true);
+        else if (c->id == kCancel)
+            Finish(false);
+        else if (c->id == kField) {
             editing = Editor();
             editing->maxChars = opts.maxChars;
             editing->maxWidth = opts.maxWidth;
@@ -96,9 +96,9 @@ struct Dialog : kit::Modal {
             return;
         }
         if (key == "return" || key == "kpenter")
-            finish(true);
-        else if (key == "escape" && v.stateOf(CANCEL) != w2::uidata::DISABLED)
-            finish(false);
+            Finish(true);
+        else if (key == "escape" && v.stateOf(kCancel) != w2::uidata::DISABLED)
+            Finish(false);
     }
 
     void textinput(const std::string& t) override {
@@ -125,7 +125,7 @@ void Editor::input(const std::string& t) {
 
 void Editor::drawCursor(double x, double y) const {
     const Font& f = kit::font(2);
-    if (static_cast<long>(std::floor(kit::now() / BLINK)) % 2 == 0)
+    if (static_cast<long>(std::floor(kit::now() / kBlink)) % 2 == 0)
         kit::setPal(9);
     else
         gfx::setColor(1, 1, 1);
@@ -135,11 +135,11 @@ void Editor::drawCursor(double x, double y) const {
 void open(const Options& opts) {
     auto d = std::make_shared<Dialog>();
     d->opts = opts;
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
     d->value = opts.text;
-    d->v.state[OK] = w2::uidata::NORMAL;
-    d->v.state[CANCEL] = opts.cancel ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+    d->v.state[kOk] = w2::uidata::NORMAL;
+    d->v.state[kCancel] = opts.cancel ? w2::uidata::NORMAL : w2::uidata::DISABLED;
     kit::push(d);
 }
 

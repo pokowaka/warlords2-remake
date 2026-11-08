@@ -17,18 +17,18 @@ namespace w2::ai::groups {
 using namespace core;
 
 // roles a rally city may be picked from (DS:0940, DS:094c)
-static const std::set<int> RALLY_ROLES = {5, 8, 6, 4, 14};
+static const std::set<int> kRallyRoles = {5, 8, 6, 4, 14};
 
-static std::vector<City*> own(const Game& g, const Side& side) {
+static std::vector<City*> Own(const Game& g, const Side& side) {
     return cities::own(g, side);
 }
 
-static City* city(Game& g, int i) {
+static City* CityOrNull(Game& g, int i) {
     return i != NONE ? g.map->city(i) : nullptr;
 }
-static City* city(Game& g, const std::map<int, int>& m, int k) {
+static City* CityOrNull(Game& g, const std::map<int, int>& m, int k) {
     auto it = m.find(k);
-    return it == m.end() ? nullptr : city(g, it->second);
+    return it == m.end() ? nullptr : CityOrNull(g, it->second);
 }
 
 bool free(Game& g, Side& side, const City& c, bool members) {
@@ -54,10 +54,10 @@ bool isRally(Game& g, Side& side, const City& c) {
 void cancel(Game& g, Side& side, int gi) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
-    City* r = city(g, grp->rally);
+    City* r = CityOrNull(g, grp->rally);
     if (r) setRole(d, *r, STOP);
     for (int k = 4; k >= 1; k--) {
-        City* m = city(g, grp->members, k);
+        City* m = CityOrNull(g, grp->members, k);
         if (m) setRole(d, *m, STOP);
     }
     d.groups[gi] = emptyGroup();
@@ -116,7 +116,7 @@ bool earlyVengeance(Game& g, int me, City& c, int was) {
 }
 
 // What the group will do to the cities it takes (5f19:06a0).
-static void rollSpoils(Game& g, Side& side, Group& grp) {
+static void RollSpoils(Game& g, Side& side, Group& grp) {
     AIData& d = data(g, side);
     int bias = d.own * d.perCity;
     if (!side.computer)
@@ -150,14 +150,14 @@ void prepare(Game& g, Side& side) {
     d.strongCities = 0;
     d.fastCities = 0;
     std::vector<int> top;
-    for (City* c : own(g, side)) {
+    for (City* c : Own(g, side)) {
         clearCflag(d, *c, CF_MOVE12);
         clearCflag(d, *c, CF_FLYGROUP);
         clearCflag(d, *c, CF_MOVE16);
         if (role(d, *c) != RALLY) {
-            auto [good, slotI] = cities::buildsWell(g, side, *c);
+            auto [good, slot_i] = cities::buildsWell(g, side, *c);
             if (good) {
-                const Slot& slot = c->slots[slotI];
+                const Slot& slot = c->slots[slot_i];
                 top.push_back(slot.strength + (g.types.byId(slot.type)->siege ? 2 : 0));
             }
         }
@@ -173,7 +173,7 @@ void prepare(Game& g, Side& side) {
     };
 
     if (active == 4) {
-        for (City* c : own(g, side)) {
+        for (City* c : Own(g, side)) {
             if (free(g, side, *c, true) && cflag(d, *c, CF_FLIER)) {
                 bool ok = false;
                 for (auto& slot : c->slots)
@@ -185,10 +185,10 @@ void prepare(Game& g, Side& side) {
             }
         }
     }
-    bool flyEnough = d.flyCities >= 4;
-    int left = flyEnough ? d.flyCities - 4 : d.flyCities;
+    bool fly_enough = d.flyCities >= 4;
+    int left = fly_enough ? d.flyCities - 4 : d.flyCities;
     if (active > 2) {
-        for (City* c : own(g, side)) {
+        for (City* c : Own(g, side)) {
             if (free(g, side, *c, true)) {
                 bool skip = false;
                 if (cflag(d, *c, CF_FLYGROUP)) {
@@ -211,12 +211,12 @@ void prepare(Game& g, Side& side) {
             }
         }
     }
-    bool manyStrong = d.strongCities > 7;
-    int fastBuilders = 0;
-    bool strongEnough = d.strongCities >= 4;
-    left = strongEnough ? d.strongCities - 4 : d.strongCities;
+    bool many_strong = d.strongCities > 7;
+    int fast_builders = 0;
+    bool strong_enough = d.strongCities >= 4;
+    left = strong_enough ? d.strongCities - 4 : d.strongCities;
     if (active > 1) {
-        for (City* c : own(g, side)) {
+        for (City* c : Own(g, side)) {
             if (free(g, side, *c, true) && !cflag(d, *c, CF_FLYGROUP)) {
                 bool skip = false;
                 if (cflag(d, *c, CF_MOVE16)) {
@@ -231,8 +231,8 @@ void prepare(Game& g, Side& side) {
                     bool ok = false;
                     for (auto& slot : c->slots) {
                         if (strong(slot) && slot.move > 11) {
-                            fastBuilders++;
-                            if (!manyStrong || slot.move > 15) ok = true;
+                            fast_builders++;
+                            if (!many_strong || slot.move > 15) ok = true;
                         }
                     }
                     if (ok) {
@@ -243,8 +243,8 @@ void prepare(Game& g, Side& side) {
             }
         }
     }
-    bool fastEnough = d.fastCities >= 4;
-    left = fastEnough ? d.fastCities - 4 : d.fastCities;
+    bool fast_enough = d.fastCities >= 4;
+    left = fast_enough ? d.fastCities - 4 : d.fastCities;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == side.index && !cflag(d, c, CF_FLYGROUP) && !cflag(d, c, CF_MOVE16) &&
@@ -258,22 +258,22 @@ void prepare(Game& g, Side& side) {
         if (grp->active != 0 && gi <= 4) {
             grp->size = 8;
             if (gi == 1) {
-                grp->size = fastBuilders < 8 ? 8 : 12;
+                grp->size = fast_builders < 8 ? 8 : 12;
             } else if (gi == 2) {
                 grp->flags = clear(grp->flags, GF_MOVE12);
-                if (fastEnough) {
+                if (fast_enough) {
                     grp->flags = set(grp->flags, GF_MOVE12);
                     grp->size = 12;
                 }
             } else if (gi == 3) {
                 grp->flags = clear(grp->flags, GF_MOVE16);
-                if (strongEnough) {
+                if (strong_enough) {
                     grp->flags = set(grp->flags, GF_MOVE16);
                     grp->size = 16;
                 }
             } else if (gi == 4) {
                 grp->flags = clear(grp->flags, GF_FLY);
-                if (flyEnough) {
+                if (fly_enough) {
                     grp->flags = set(grp->flags, GF_FLY);
                     grp->size = 12;
                 }
@@ -283,7 +283,7 @@ void prepare(Game& g, Side& side) {
 }
 
 // Drop staged stacks that are gone or have left the group (563e:1251).
-static void cleanStaged(Game& g, Side& side, int gi) {
+static void CleanStaged(Game& g, Side& side, int gi) {
     auto grp = data(g, side).groups[gi];
     for (int s = 1; s <= 4; s++) {
         auto it = grp->staged.find(s);
@@ -295,12 +295,12 @@ static void cleanStaged(Game& g, Side& side, int gi) {
 }
 
 // Re-check the plan (563e:041c). Returns the number of targets.
-static int checkPlan(Game& g, Side& side, int gi) {
+static int CheckPlan(Game& g, Side& side, int gi) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
     int n = 0;
     for (int k = 1; k <= 6; k++) {
-        City* t = city(g, grp->cities, k);
+        City* t = CityOrNull(g, grp->cities, k);
         if (t) {
             if (d.questCity == t->index || owner(*t) != grp->target)
                 grp->cities.erase(k);
@@ -308,7 +308,7 @@ static int checkPlan(Game& g, Side& side, int gi) {
                 n++;
         }
     }
-    City* rally = city(g, grp->rally);
+    City* rally = CityOrNull(g, grp->rally);
     if (!rally) return n;
     auto [nb, nd] = neighbours(g, *rally);
     for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
@@ -320,19 +320,19 @@ static int checkPlan(Game& g, Side& side, int gi) {
             if (!have) {
                 n++;
                 int slot = NONE;
-                bool worstSet = false;
+                bool worst_set = false;
                 int worst = 0;
                 for (int k = 6; k >= 1; k--) {
                     if (!hasKey(grp->cities, k)) {
                         slot = k;
                         worst = -1;
-                        worstSet = true;
+                        worst_set = true;
                         break;
                     }
-                    if ((worstSet ? worst : 0) < get(grp->dist, k)) {
+                    if ((worst_set ? worst : 0) < get(grp->dist, k)) {
                         slot = k;
                         worst = get(grp->dist, k);
-                        worstSet = true;
+                        worst_set = true;
                     }
                 }
                 if (slot != NONE && (worst == -1 || nd[j] < worst)) {
@@ -347,7 +347,7 @@ static int checkPlan(Game& g, Side& side, int gi) {
 
 // With one target left, add its neighbours of the target side, and move the
 // rally to one of the side's own cities next to it (563e:1579).
-static void adjustRally(Game& g, Side& side, int gi) {
+static void AdjustRally(Game& g, Side& side, int gi) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
     int only = NONE, count = 0;
@@ -357,11 +357,11 @@ static void adjustRally(Game& g, Side& side, int gi) {
             count++;
         }
     if (count != 1) return;
-    City* oc = city(g, only);
+    City* oc = CityOrNull(g, only);
     if (!oc) return;
     auto nb = neighbours(g, *oc).first;
     City* next = nullptr;
-    bool rallyNear = false;
+    bool rally_near = false;
     for (size_t j = 0; j < nb.size(); j++) {
         City* m = nb[j];
         if (!cflag(d, *m, CF_UNSEEN)) {
@@ -373,31 +373,31 @@ static void adjustRally(Game& g, Side& side, int gi) {
                     }
                 }
             } else if (m->ownerIndex == side.index) {
-                if (m->index == grp->rally) rallyNear = true;
+                if (m->index == grp->rally) rally_near = true;
                 if (!isRally(g, side, *m) && !next) next = m;
             }
         }
     }
-    if (!rallyNear && next) grp->rally = next->index;
+    if (!rally_near && next) grp->rally = next->index;
 }
 
 // Move the rally to the side's nearest neighbouring city that is no other
 // group's rally (563e:02ed); cancel the group when there is none.
-static bool relocate(Game& g, Side& side, int gi) {
+static bool Relocate(Game& g, Side& side, int gi) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
-    City* r = city(g, grp->rally);
+    City* r = CityOrNull(g, grp->rally);
     City* best = nullptr;
     if (r) {
         auto nb = neighbours(g, *r).first;
-        int bestD = 1000;
+        int best_d = 1000;
         for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
             City* m = nb[j];
             if (m->ownerIndex == side.index && !isRally(g, side, *m)) {
                 int dd = dist(m->x, m->y, r->x, r->y);
-                if (dd < bestD) {
+                if (dd < best_d) {
                     best = m;
-                    bestD = dd;
+                    best_d = dd;
                 }
             }
         }
@@ -411,7 +411,7 @@ static bool relocate(Game& g, Side& side, int gi) {
 }
 
 // A city the group has taken (563e:134c).
-static bool takeCity(Game& g, Side& side, int gi, City& c) {
+static bool TakeCity(Game& g, Side& side, int gi, City& c) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
     if (grp->rally == c.index) return false;
@@ -436,7 +436,7 @@ static bool takeCity(Game& g, Side& side, int gi, City& c) {
         return n;
     };
     int here = near(c);
-    City* rally = city(g, grp->rally);
+    City* rally = CityOrNull(g, grp->rally);
     int there = rally ? near(*rally) : 0;
     City* pick = there < here ? &c : rally;
     if (pick) {
@@ -468,14 +468,14 @@ int march(Game& g, Side& side, int gi, std::vector<Army*> list, City* c) {
     Army* lead = list.empty() ? nullptr : list[0];
     if (lead && alive(g, lead) && !standing(*c)) {
         City* best = nullptr;
-        int bestD = 1000;
+        int best_d = 1000;
         for (int k = 1; k <= 6; k++) {
-            City* t = city(g, grp->cities, k);
+            City* t = CityOrNull(g, grp->cities, k);
             if (t) {
                 int dd = dist(lead->x, lead->y, t->x, t->y);
-                if (dd < bestD && standing(*t)) {
+                if (dd < best_d && standing(*t)) {
                     best = t;
-                    bestD = dd;
+                    best_d = dd;
                 }
             }
         }
@@ -492,31 +492,31 @@ int march(Game& g, Side& side, int gi, std::vector<Army*> list, City* c) {
         int was = owner(*c);
         auto sel = order(g, list, ORDER_CITY, c->index, 0);
         if (!sel) {
-            cleanStaged(g, side, gi);
+            CleanStaged(g, side, gi);
             return 3;
         }
         int r = moveTo(g, *sel, sel->leader->target->first, sel->leader->target->second);
         if (r == 1) {
             game::disband(g, side, sel->armies);
-            cleanStaged(g, side, gi);
+            CleanStaged(g, side, gi);
             return 3;
         }
-        cleanStaged(g, side, gi);
+        CleanStaged(g, side, gi);
         if (c->ownerIndex != side.index) return 3;
         if (was == side.index) return 3;
         bool capital = side.capital == c;
         int flags = grp->flags;
         if (!capital && n >= 2 && has(flags, GF_RAZE)) {
-            City* nextCity = raze(g, side, *c, false, &*sel);
-            if (!nextCity) return 1;
-            c = nextCity;
+            City* next_city = raze(g, side, *c, false, &*sel);
+            if (!next_city) return 1;
+            c = next_city;
             list = sel->armies;
         } else {
             if (!capital && has(flags, GF_SACK))
                 sack(g, side, *c);
             else if (!capital && has(flags, GF_PILLAGE))
                 pillage(g, side, *c);
-            takeCity(g, side, gi, *c);
+            TakeCity(g, side, gi, *c);
             return 1;
         }
     }
@@ -524,11 +524,11 @@ int march(Game& g, Side& side, int gi, std::vector<Army*> list, City* c) {
 
 // Look for a stack of the target side worth hitting near a staged stack
 // (563e:0c32). Returns 2 if it went.
-static int hitArmies(Game& g, Side& side, int gi, std::vector<Army*>& list, int target, int range,
+static int HitArmies(Game& g, Side& side, int gi, std::vector<Army*>& list, int target, int range,
                      const Flood& flood, const Sel& sel) {
     Army* lead = list.empty() ? nullptr : list[0];
     if (!lead || lead->atSea) return 0;
-    int bx = NONE, by = NONE, bestOdds = 0;
+    int bx = NONE, by = NONE, best_odds = 0;
     for (int x = lead->x - range; x <= lead->x + range - 1; x++) {
         for (int y = lead->y - range; y <= lead->y + range - 1; y++) {
             if (x >= 0 && y >= 0 && x < g.map->width && y < g.map->height) {
@@ -544,10 +544,10 @@ static int hitArmies(Game& g, Side& side, int gi, std::vector<Army*>& list, int 
                         if (isHero(a)) heroes++;
                     }
                     int o = odds(g, sel, x, y);
-                    if (o > 75 && ((count > 2 && strength > 10) || heroes != 0) && bestOdds < o) {
+                    if (o > 75 && ((count > 2 && strength > 10) || heroes != 0) && best_odds < o) {
                         bx = x;
                         by = y;
-                        bestOdds = o;
+                        best_odds = o;
                     }
                 }
             }
@@ -570,7 +570,7 @@ static int hitArmies(Game& g, Side& side, int gi, std::vector<Army*>& list, int 
 }
 
 // A staged stack's step (563e:0b49).
-static int stagedStep(Game& g, Side& side, int gi, std::vector<Army*>& list, int target,
+static int StagedStep(Game& g, Side& side, int gi, std::vector<Army*>& list, int target,
                       const Flood& flood, const Sel& sel) {
     City* nearest = nullptr;
     int nd = 1000;
@@ -587,20 +587,20 @@ static int stagedStep(Game& g, Side& side, int gi, std::vector<Army*>& list, int
             }
         }
     }
-    int r = hitArmies(g, side, gi, list, target, 15, flood, sel);
+    int r = HitArmies(g, side, gi, list, target, 15, flood, sel);
     if (r != 0 && nearest) r = march(g, side, gi, list, nearest);
     return r;
 }
 
 // Move the group's staged stacks on (563e:0996).
-static void gather(Game& g, Side& side, int gi) {
+static void Gather(Game& g, Side& side, int gi) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
     for (int s = 4; s >= 1; s--) {
         bool again = true;
         while (again) {
             again = false;
-            cleanStaged(g, side, gi);
+            CleanStaged(g, side, gi);
             auto it = grp->staged.find(s);
             Army* a = it == grp->staged.end() ? nullptr : it->second;
             if (!a) break;
@@ -611,12 +611,12 @@ static void gather(Game& g, Side& side, int gi) {
             std::vector<std::array<int, 3>> was;
             for (Army* b : list) was.push_back({b->x, b->y, b->moves});
             size_t armies = g.armies.size();
-            int r = stagedStep(g, side, gi, list, grp->target, flood, sel);
+            int r = StagedStep(g, side, gi, list, grp->target, flood, sel);
             if (r == 0) {
                 Army* last = list.empty() ? nullptr : list.back();
                 if (last && alive(g, last) && last->aiOrder == ORDER_CITY &&
-                    city(g, last->aiDest)) {
-                    march(g, side, gi, list, city(g, last->aiDest));
+                    CityOrNull(g, last->aiDest)) {
+                    march(g, side, gi, list, CityOrNull(g, last->aiDest));
                 }
             } else if (r == 2) {
                 // The original goes round again for as long as a stack is found to
@@ -635,19 +635,19 @@ static void gather(Game& g, Side& side, int gi) {
 }
 
 // Strike from the rally city (563e:06e9).
-static bool strike(Game& g, Side& side, int gi) {
+static bool Strike(Game& g, Side& side, int gi) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
-    City* r = city(g, grp->rally);
+    City* r = CityOrNull(g, grp->rally);
     if (!r) return false;
     auto list = collect(g, side.index, r->x + 1, r->y, 0);
     int n = static_cast<int>(list.size());
     if (n == 0) return false;
     Sel sel = select(g, list);
     City* best = nullptr;
-    int bestScore = -1;
+    int best_score = -1;
     for (int k = 1; k <= 6; k++) {
-        City* t = city(g, grp->cities, k);
+        City* t = CityOrNull(g, grp->cities, k);
         if (t) {
             int dk = hasKey(grp->dist, k) ? grp->dist[k] : -1;
             int turns =
@@ -656,9 +656,9 @@ static bool strike(Game& g, Side& side, int gi) {
             int score =
                     (turns < 11 ? 10 - turns : 0) + o + get(grp->bonus, k) + g.rng.dice(1, 4, 0);
             if (turns == 1) score += 100;
-            if ((o > 75 || n > 7) && bestScore < score) {
+            if ((o > 75 || n > 7) && best_score < score) {
                 best = t;
-                bestScore = score;
+                best_score = score;
             }
         }
     }
@@ -697,7 +697,7 @@ void followUp(Game& g, Side& side, int gi) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
     for (int k = 1; k <= 6; k++) {
-        City* t = city(g, grp->taken, k);
+        City* t = CityOrNull(g, grp->taken, k);
         if (t && t->index != grp->rally && t->ownerIndex == side.index) {
             auto [nb, nd] = neighbours(g, *t);
             int near = 0;
@@ -719,7 +719,7 @@ void followUp(Game& g, Side& side, int gi) {
 }
 
 // Cancel the longest-running group (563e:0607).
-static void cancelOldest(Game& g, Side& side) {
+static void CancelOldest(Game& g, Side& side) {
     AIData& d = data(g, side);
     int oldest = NONE, age = -1;
     for (int gi = d.maxGroups; gi >= 1; gi--) {
@@ -733,7 +733,7 @@ static void cancelOldest(Game& g, Side& side) {
 }
 
 // A group's turn (563e:00ca).
-static bool runGroup(Game& g, Side& side, int gi) {
+static bool RunGroup(Game& g, Side& side, int gi) {
     AIData& d = data(g, side);
     auto grp = d.groups[gi];
     City* cap = side.capital;
@@ -744,28 +744,28 @@ static bool runGroup(Game& g, Side& side, int gi) {
             if (o->active != 0 && o->target == cap->ownerIndex) going = true;
         }
         if (!going) {
-            cancelOldest(g, side);
+            CancelOldest(g, side);
             return false;
         }
     }
-    if (checkPlan(g, side, gi) == 0) {
+    if (CheckPlan(g, side, gi) == 0) {
         cancel(g, side, gi);
         return false;
     }
-    adjustRally(g, side, gi);
+    AdjustRally(g, side, gi);
     bool shared = false;
     for (int k = d.maxGroups; k >= 1; k--) {
         auto o = d.groups[k];
         if (o->active != 0 && k != gi && o->rally == grp->rally) shared = true;
     }
-    City* r = city(g, grp->rally);
-    if ((!shared && r && r->ownerIndex == side.index) || relocate(g, side, gi)) {
-        gather(g, side, gi);
+    City* r = CityOrNull(g, grp->rally);
+    if ((!shared && r && r->ownerIndex == side.index) || Relocate(g, side, gi)) {
+        Gather(g, side, gi);
         if (d.groups[gi]->active != 0) {
-            City* rc = city(g, d.groups[gi]->rally);
+            City* rc = CityOrNull(g, d.groups[gi]->rally);
             if (rc) cities::garrison(g, side, *rc, true);
-            if (strike(g, side, gi)) {
-                rc = city(g, d.groups[gi]->rally);
+            if (Strike(g, side, gi)) {
+                rc = CityOrNull(g, d.groups[gi]->rally);
                 if (rc) cities::garrison(g, side, *rc, true);
             }
             if (d.groups[gi]->active != 0) {
@@ -781,21 +781,21 @@ void assault(Game& g, Side& side) {
     AIData& d = data(g, side);
     if (d.turns == 0) return;
     prepare(g, side);
-    for (City* c : own(g, side)) {
+    for (City* c : Own(g, side)) {
         if (role(d, *c) == RALLY) setRole(d, *c, STOP);
     }
     for (int gi = 1; gi <= d.maxGroups; gi++) {
         auto grp = d.groups[gi];
         if (grp->active != 0) {
-            City* r = city(g, grp->rally);
+            City* r = CityOrNull(g, grp->rally);
             if (r) setRole(d, *r, RALLY);
-            if (runGroup(g, side, gi)) d.groups[gi]->active++;
+            if (RunGroup(g, side, gi)) d.groups[gi]->active++;
         }
     }
 }
 
 // The enemy city with most of its own side's cities round it (5f19:04d2).
-static City* hub(Game& g, int enemy) {
+static City* Hub(Game& g, int enemy) {
     City* best = nullptr;
     int most = 0;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
@@ -815,7 +815,7 @@ static City* hub(Game& g, int enemy) {
 }
 
 // Distances over the neighbour graph from a city (5f19:058a).
-static void spread(Game& g, const City& from, std::vector<char>& reached, std::vector<int>& dist) {
+static void Spread(Game& g, const City& from, std::vector<char>& reached, std::vector<int>& dist) {
     size_t n = g.map->cities.size();
     reached.assign(n, 0);
     dist.assign(n, 0);
@@ -847,32 +847,32 @@ static void spread(Game& g, const City& from, std::vector<char>& reached, std::v
 }
 
 // Plan a group against a side (5f19:01bb); the rally city, or null.
-static City* plan(Game& g, Side& side, Group& grp, int enemy) {
+static City* Plan(Game& g, Side& side, Group& grp, int enemy) {
     AIData& d = data(g, side);
     grp.cities.clear();
     grp.dist.clear();
-    City* h = hub(g, enemy);
+    City* h = Hub(g, enemy);
     if (!h) return nullptr;
     std::vector<char> reached;
     std::vector<int> dist;
-    spread(g, *h, reached, dist);
+    Spread(g, *h, reached, dist);
     City* rally = nullptr;
     long best = 1000000000;
-    for (City* c : own(g, side)) {
-        if (RALLY_ROLES.count(role(d, *c)) && reached[c->index] && dist[c->index] < best) {
+    for (City* c : Own(g, side)) {
+        if (kRallyRoles.count(role(d, *c)) && reached[c->index] && dist[c->index] < best) {
             rally = c;
             best = dist[c->index];
         }
     }
     if (!rally) {
         if (!cflag(d, *h, CF_UNSEEN)) {
-            long bestD = 1000000000;
-            for (City* c : own(g, side)) {
-                if (RALLY_ROLES.count(role(d, *c))) {
+            long best_d = 1000000000;
+            for (City* c : Own(g, side)) {
+                if (kRallyRoles.count(role(d, *c))) {
                     int dd = core::dist(c->x, c->y, h->x, h->y);
-                    if (dd < bestD) {
+                    if (dd < best_d) {
                         rally = c;
-                        bestD = dd;
+                        best_d = dd;
                     }
                 }
             }
@@ -883,7 +883,7 @@ static City* plan(Game& g, Side& side, Group& grp, int enemy) {
         }
         return rally;
     }
-    spread(g, *rally, reached, dist);
+    Spread(g, *rally, reached, dist);
     int n = 0;
     for (int k = 1; k <= 6; k++) {
         City* pick = nullptr;
@@ -915,14 +915,14 @@ int pickEnemy(Game& g, Side& side) {
     AIData& d = data(g, side);
     int me = side.index;
     City* cap = side.capital;
-    int capOwner = cap ? owner(*cap) : NEUTRAL;
-    int held[8], score[8], count[8], capHeld[8], fromThem[8], targeted[8], rnd[8];
+    int cap_owner = cap ? owner(*cap) : NEUTRAL;
+    int held[8], score[8], count[8], cap_held[8], from_them[8], targeted[8], rnd[8];
     for (int s = 0; s < 8; s++) {
         held[s] = 0;
         score[s] = 0;
         count[s] = 0;
-        capHeld[s] = 0;
-        fromThem[s] = 0;
+        cap_held[s] = 0;
+        from_them[s] = 0;
         targeted[s] = 0;
         rnd[s] = g.rng.dice(1, 10, 0);
     }
@@ -933,24 +933,24 @@ int pickEnemy(Game& g, Side& side) {
             count[o]++;
             if (!cflag(d, c, CF_UNSEEN)) held[o]++;
             if (o == me && c.claim != NONE && c.claim != NEUTRAL && c.claim >= 0 && c.claim < 8)
-                fromThem[c.claim]++;
+                from_them[c.claim]++;
         }
     }
-    int nGroups = 0;
+    int n_groups = 0;
     for (int gi = d.maxGroups; gi >= 1; gi--) {
         auto grp = d.groups[gi];
         if (grp->active != 0 && grp->target != NONE) {
             if (grp->target >= 0 && grp->target < 8) targeted[grp->target]++;
-            nGroups++;
+            n_groups++;
         }
     }
-    if (capOwner != NEUTRAL && capOwner != me) score[capOwner] += 20;
+    if (cap_owner != NEUTRAL && cap_owner != me) score[cap_owner] += 20;
     int others = 0;
     for (int s = 7; s >= 0; s--) {
         if (count[s] != 0) {
             if (s != me) others++;
             City* theirs = g.map->sides[s].capital;
-            if (theirs && theirs->ownerIndex == me) capHeld[s] = 1;
+            if (theirs && theirs->ownerIndex == me) cap_held[s] = 1;
         }
     }
     int constant;
@@ -964,15 +964,15 @@ int pickEnemy(Game& g, Side& side) {
         constant = d.dieKnight;
     for (int s = 7; s >= 0; s--) {
         const Side& o = g.map->sides[s];
-        score[s] += rnd[s] + capHeld[s] * 15 + fromThem[s] * 4 + d.heroesKilled[s] * 4 +
+        score[s] += rnd[s] + cap_held[s] * 15 + from_them[s] * 4 + d.heroesKilled[s] * 4 +
                     d.armiesKilled[s] + d.battles[s] + d.lost[s] * 2 + d.cityBattles[s] * 2 +
                     d.citiesLost[s] * 2 + constant;
         score[s] += std::abs(side.diploScore - o.diploScore) / 8;
         score[s] += std::abs(count[me] - count[s]) / 4;
     }
-    bool proposingWar = false;
+    bool proposing_war = false;
     for (int s = 7; s >= 0; s--) {
-        if (inPlay(g, s) && s != me && proposal(g, me, s) == 2) proposingWar = true;
+        if (inPlay(g, s) && s != me && proposal(g, me, s) == 2) proposing_war = true;
     }
     if (g.greatest && side.computer) {
         auto fights = fightingHumans(g);
@@ -984,8 +984,8 @@ int pickEnemy(Game& g, Side& side) {
     for (int s = 7; s >= 0; s--) {
         int fought = d.battles[s] + d.cityBattles[s];
         if (diplo::spared(g, side, s)) score[s] = 0;
-        if (proposingWar && proposal(g, me, s) == 0) score[s] = 0;
-        if (nGroups == 0 && held[s] == 0) score[s] = 0;
+        if (proposing_war && proposal(g, me, s) == 0) score[s] = 0;
+        if (n_groups == 0 && held[s] == 0) score[s] = 0;
         if (g.turn < early && fought == 0) score[s] = 0;
         if (others > 1 && count[s] / 4 < targeted[s]) score[s] = 0;
     }
@@ -997,13 +997,13 @@ int pickEnemy(Game& g, Side& side) {
             top = score[s];
         }
     }
-    if (capOwner != NEUTRAL && capOwner != me) {
+    if (cap_owner != NEUTRAL && cap_owner != me) {
         // 5f19:1393 compares the capital's holder with the groups-per-side
         // counts, not with the groups' targets: kept as it is
         bool found = false;
         for (int gi = d.maxGroups - 1; gi >= 0; gi--)
-            if (gi < 8 && capOwner == targeted[gi]) found = true;
-        if (!found) pick = capOwner;
+            if (gi < 8 && cap_owner == targeted[gi]) found = true;
+        if (!found) pick = cap_owner;
     }
     if (pick != NONE && held[pick] == 0) pick = NONE;
     return pick;
@@ -1025,7 +1025,7 @@ void assaultXX(Game& g, Side& side) {
     AIData& d = data(g, side);
     if (d.turns == 0) return;
     int quiet = 0;
-    for (City* c : own(g, side)) {
+    for (City* c : Own(g, side)) {
         int r = role(d, *c);
         if (r == BUILDING || r == STOP) quiet++;
     }
@@ -1041,7 +1041,7 @@ void assaultXX(Game& g, Side& side) {
     int enemy = pickEnemy(g, side);
     if (enemy == NONE) return;
     auto grp = d.groups[slot];
-    City* rally = plan(g, side, *grp, enemy);
+    City* rally = Plan(g, side, *grp, enemy);
     if (!rally) {
         d.groups[slot] = emptyGroup();
         return;
@@ -1050,7 +1050,7 @@ void assaultXX(Game& g, Side& side) {
     grp->target = enemy;
     grp->rally = rally->index;
     setRole(d, *rally, RALLY);
-    rollSpoils(g, side, *grp);
+    RollSpoils(g, side, *grp);
     propose(g, side.index, enemy, 2);
     // the rally city is no group's member any more (5f19:083e)
     for (int gi = d.maxGroups; gi >= 1; gi--) {
@@ -1066,7 +1066,7 @@ void assaultXX(Game& g, Side& side) {
     }
     // each target's bonus: its own side's cities round it (5f19:09ca)
     for (int k = 1; k <= 6; k++) {
-        City* t = city(g, grp->cities, k);
+        City* t = CityOrNull(g, grp->cities, k);
         if (t) {
             int n = 0;
             for (City* m : neighbours(g, *t).first)

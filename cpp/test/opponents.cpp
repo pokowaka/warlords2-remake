@@ -14,7 +14,7 @@ namespace w2::opponents {
 namespace {
 
 // Armies of `owner` standing on the city's 2x2 tiles.
-int defenders(Game& g, const City& c) {
+int Defenders(Game& g, const City& c) {
     int n = 0;
     for (int dy = 0; dy <= 1; dy++) {
         for (int dx = 0; dx <= 1; dx++) {
@@ -27,19 +27,19 @@ int defenders(Game& g, const City& c) {
 }
 
 // May `me` walk into `c` right now without breaking a treaty?
-bool raidable(Game& g, int me, const City& c) {
+bool Raidable(Game& g, int me, const City& c) {
     if (c.razed || c.ownerIndex < 0 || c.ownerIndex >= 8 || c.ownerIndex == me) return false;
     if (!g.map->sides[c.ownerIndex].alive) return false;
     if (diplomacy::isAllied(g, me, c.ownerIndex)) return false;
     if (diplomacy::mustDeclare(g, me, c.ownerIndex, &c)) return false;
-    return defenders(g, c) == 0;
+    return Defenders(g, c) == 0;
 }
 
 // Would moving `a` away leave one of `me`'s cities without defenders?
-bool lastDefender(Game& g, int me, Army* a) {
+bool LastDefender(Game& g, int me, Army* a) {
     City* home = game::cityAt(g, a->x, a->y);
     if (!home || home->ownerIndex != me) return false;
-    return defenders(g, *home) <= 1;
+    return Defenders(g, *home) <= 1;
 }
 
 }  // namespace
@@ -51,25 +51,25 @@ int raidEmptyCities(Game& g, Side& side) {
 
     std::vector<City*> targets;
     for (auto& c : g.map->cities) {
-        if (raidable(g, me, c)) targets.push_back(&c);
+        if (Raidable(g, me, c)) targets.push_back(&c);
     }
     // The learner's (non-Classic) cities first, then the richest
-    auto learnerOwned = [&](const City* c) { return !g.map->sides[c->ownerIndex].classicAi; };
+    auto learner_owned = [&](const City* c) { return !g.map->sides[c->ownerIndex].classicAi; };
     std::sort(targets.begin(), targets.end(), [&](City* a, City* b) {
-        if (learnerOwned(a) != learnerOwned(b)) return learnerOwned(a);
+        if (learner_owned(a) != learner_owned(b)) return learner_owned(a);
         return a->income > b->income;
     });
 
     int taken = 0;
     for (City* c : targets) {
-        if (!raidable(g, me, *c)) continue;
+        if (!Raidable(g, me, *c)) continue;
         std::vector<Army*> raiders;
         for (Army* a : g.armies) {
             if (a->owner != me || a->x == NONE || a->transit || a->moves <= 0 || a->hero())
                 continue;
             int d = move::distance(a->x, a->y, c->x, c->y);
             if (d * kMoveCostPerTile > a->moves + 2) continue;
-            if (lastDefender(g, me, a)) continue;
+            if (LastDefender(g, me, a)) continue;
             raiders.push_back(a);
         }
         // weakest first: a raid needs a body, not strength
@@ -81,8 +81,8 @@ int raidEmptyCities(Game& g, Side& side) {
         for (Army* a : raiders) {
             if (tries++ >= kMaxTriesPerCity || c->ownerIndex == me) break;
             if (!g.alive(a) || a->moves <= 0) continue;
-            int destX = c->x + (c->x < a->x ? 1 : 0), destY = c->y + (c->y < a->y ? 1 : 0);
-            auto path = move::findPath(g, {a}, a->x, a->y, destX, destY);
+            int dest_x = c->x + (c->x < a->x ? 1 : 0), dest_y = c->y + (c->y < a->y ? 1 : 0);
+            auto path = move::findPath(g, {a}, a->x, a->y, dest_x, dest_y);
             if (!path || path->empty()) continue;
             move::WalkResult r = move::walk(g, {a}, *path);
             if (r.steps > 0) ai::walked(g, {a}, r);

@@ -12,55 +12,55 @@
 namespace signpost {
 
 namespace {
-const kit::Rect R{160, 90, 320, 200};  // popup 1
-const int DIALOG = 24, DONE = 421, LINE1 = 422, LINE2 = 423;
-const int FIELD_X[2] = {200, 200}, FIELD_Y[2] = {190, 215};
-const int FIELD_W = 240, FIELD_H = 22;
-const int MAX_CHARS = 30, MAX_WIDTH = 216;
+const kit::Rect kR{160, 90, 320, 200};  // popup 1
+const int kDialog = 24, kDone = 421, kLinE1 = 422, kLinE2 = 423;
+const int kFieldX[2] = {200, 200}, kFieldY[2] = {190, 215};
+const int kFieldW = 240, kFieldH = 22;
+const int kMaxChars = 30, kMaxWidth = 216;
 
 struct Sign : kit::Modal {
     screen::View v;
     w2::Sign* sign = nullptr;
     std::optional<input::Editor> editing;
     int line = 0;
-    void keep() {
+    void Keep() {
         if (editing) {
             sign->lines[line] = editing->text;
             editing.reset();
         }
     }
     void draw() override {
-        kit::popup(R);
+        kit::popup(kR);
         gfx::setColor(1, 1, 1);
         kit::centred(kit::font(1), "A Signpost!", 320, 94);  // 4125:03eb
         kit::centred(kit::font(2), "Type the new message for", 320, 140);
         kit::centred(kit::font(2), "this signpost!", 320, 160);
         for (int i = 0; i < 2; i++) {
             const std::string& text = (editing && line == i) ? editing->text : sign->lines[i];
-            kit::field(FIELD_X[i], FIELD_Y[i], FIELD_W, FIELD_H, text, &kit::font(2));
-            if (editing && line == i) editing->drawCursor(FIELD_X[i], FIELD_Y[i]);
+            kit::field(kFieldX[i], kFieldY[i], kFieldW, kFieldH, text, &kit::font(2));
+            if (editing && line == i) editing->drawCursor(kFieldX[i], kFieldY[i]);
         }
-        std::set<int> h{LINE1, LINE2};
+        std::set<int> h{kLinE1, kLinE2};
         kit::drawControls(v, h);
     }
     void mousepressed(int x, int y, int) override {
-        keep();
+        Keep();
         auto c = kit::controlAt(v, x, y);
         if (!c) return;
-        if (c->id == DONE) {
+        if (c->id == kDone) {
             kit::pop(this);
-        } else if (c->id == LINE1 || c->id == LINE2) {
-            line = c->id - LINE1;
+        } else if (c->id == kLinE1 || c->id == kLinE2) {
+            line = c->id - kLinE1;
             editing = input::Editor();
-            editing->maxChars = MAX_CHARS;
-            editing->maxWidth = MAX_WIDTH;
+            editing->maxChars = kMaxChars;
+            editing->maxWidth = kMaxWidth;
         }
     }
     void keypressed(const std::string& key) override {
         if (editing) {
             std::string r = editing->key(key);
             if (r == "keep")
-                keep();
+                Keep();
             else if (r == "undo")
                 editing.reset();
             return;
@@ -82,9 +82,9 @@ void open(const std::vector<w2::Army*>& stack) {
     if (!sign) return;
     auto d = std::make_shared<Sign>();
     d->sign = sign;
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
-    for (int id : {DONE, LINE1, LINE2}) d->v.state[id] = w2::uidata::NORMAL;
+    for (int id : {kDone, kLinE1, kLinE2}) d->v.state[id] = w2::uidata::NORMAL;
     kit::push(d);
 }
 

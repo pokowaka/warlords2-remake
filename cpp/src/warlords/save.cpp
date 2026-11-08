@@ -18,7 +18,7 @@ namespace w2::save {
 namespace {
 // A random world has no files to reload, so its save carries them, as the
 // original's saves carry the map: in hex, as the Lua's does.
-std::string hex(const std::string& b) {
+std::string Hex(const std::string& b) {
     static const char* digits = "0123456789abcdef";
     std::string out;
     out.reserve(b.size() * 2);
@@ -28,42 +28,42 @@ std::string hex(const std::string& b) {
     }
     return out;
 }
-std::string unhex(const std::string& h) {
+std::string Unhex(const std::string& h) {
     std::string out;
     for (size_t i = 0; i + 1 < h.size(); i += 2)
         out += static_cast<char>(std::stoi(h.substr(i, 2), nullptr, 16));
     return out;
 }
 
-Json intMap(const std::map<int, int>& m) {
+Json IntMap(const std::map<int, int>& m) {
     Json o = Json::object();
     for (auto& [k, v] : m) o.set(std::to_string(k), v);
     return o;
 }
-std::map<int, int> readIntMap(const Json& j) {
+std::map<int, int> ReadIntMap(const Json& j) {
     std::map<int, int> m;
     for (auto& [k, v] : j.entries()) m[std::stoi(k)] = static_cast<int>(v.integer());
     return m;
 }
 template <typename T, size_t N>
-Json intArray(const std::array<T, N>& a) {
+Json IntArray(const std::array<T, N>& a) {
     Json o = Json::array();
     for (T v : a) o.push(static_cast<int>(v));
     return o;
 }
 template <typename T, size_t N>
-void readIntArray(const Json& j, std::array<T, N>& a) {
+void ReadIntArray(const Json& j, std::array<T, N>& a) {
     for (size_t i = 0; i < N && i < j.size(); i++) a[i] = static_cast<T>(j[i].integer());
 }
-Json optInt(int v) {
+Json OptInt(int v) {
     return v == NONE ? Json() : Json(v);
 }
-int readOpt(const Json& j) {
+int ReadOpt(const Json& j) {
     return j.isNull() ? NONE : static_cast<int>(j.integer());
 }
 
 // the hidden map, a side's mask as runs of seen and unseen tiles
-Json packMask(const std::vector<uint8_t>& mask) {
+Json PackMask(const std::vector<uint8_t>& mask) {
     Json runs = Json::array();
     int cur = 0, n = 0;
     for (uint8_t m : mask) {
@@ -79,7 +79,7 @@ Json packMask(const std::vector<uint8_t>& mask) {
     runs.push(n);
     return runs;
 }
-std::vector<uint8_t> unpackMask(const Json& runs, size_t size) {
+std::vector<uint8_t> UnpackMask(const Json& runs, size_t size) {
     std::vector<uint8_t> mask(size, 0);
     size_t i = 0;
     int v = 0;
@@ -90,7 +90,7 @@ std::vector<uint8_t> unpackMask(const Json& runs, size_t size) {
     return mask;
 }
 
-Json saveAI(const AIData& d, const std::map<const Army*, int>& ids) {
+Json SaveAi(const AIData& d, const std::map<const Army*, int>& ids) {
     Json o = Json::object();
     o.set("turns", d.turns);
     o.set("own", d.own);
@@ -126,22 +126,22 @@ Json saveAI(const AIData& d, const std::map<const Army*, int>& ids) {
     o.set("fastCities", d.fastCities);
     o.set("early", d.early);
     o.set("humanShare", d.humanShare);
-    o.set("questCity", optInt(d.questCity));
+    o.set("questCity", OptInt(d.questCity));
     o.set("cautious", d.cautious);
     o.set("questsDone", d.questsDone);
     o.set("itemsPassed", d.itemsPassed);
     o.set("maxGroups", d.maxGroups);
-    o.set("roles", intMap(d.roles));
-    o.set("held", intMap(d.held));
-    o.set("flags", intMap(d.flags));
-    o.set("garrison", intMap(d.garrison));
-    o.set("keep", intMap(d.keep));
-    o.set("heroesKilled", intArray(d.heroesKilled));
-    o.set("armiesKilled", intArray(d.armiesKilled));
-    o.set("battles", intArray(d.battles));
-    o.set("lost", intArray(d.lost));
-    o.set("cityBattles", intArray(d.cityBattles));
-    o.set("citiesLost", intArray(d.citiesLost));
+    o.set("roles", IntMap(d.roles));
+    o.set("held", IntMap(d.held));
+    o.set("flags", IntMap(d.flags));
+    o.set("garrison", IntMap(d.garrison));
+    o.set("keep", IntMap(d.keep));
+    o.set("heroesKilled", IntArray(d.heroesKilled));
+    o.set("armiesKilled", IntArray(d.armiesKilled));
+    o.set("battles", IntArray(d.battles));
+    o.set("lost", IntArray(d.lost));
+    o.set("cityBattles", IntArray(d.cityBattles));
+    o.set("citiesLost", IntArray(d.citiesLost));
     if (d.cursor) {
         Json c = Json::array();
         c.push(d.cursor->first);
@@ -153,13 +153,13 @@ Json saveAI(const AIData& d, const std::map<const Army*, int>& ids) {
         const Group& grp = *d.groups[gi];
         Json gr = Json::object();
         gr.set("active", grp.active);
-        gr.set("target", optInt(grp.target));
-        gr.set("rally", optInt(grp.rally));
-        gr.set("members", intMap(grp.members));
-        gr.set("cities", intMap(grp.cities));
-        gr.set("dist", intMap(grp.dist));
-        gr.set("bonus", intMap(grp.bonus));
-        gr.set("taken", intMap(grp.taken));
+        gr.set("target", OptInt(grp.target));
+        gr.set("rally", OptInt(grp.rally));
+        gr.set("members", IntMap(grp.members));
+        gr.set("cities", IntMap(grp.cities));
+        gr.set("dist", IntMap(grp.dist));
+        gr.set("bonus", IntMap(grp.bonus));
+        gr.set("taken", IntMap(grp.taken));
         Json staged = Json::object();
         for (auto& [k, a] : grp.staged) {
             auto it = ids.find(a);
@@ -174,60 +174,60 @@ Json saveAI(const AIData& d, const std::map<const Army*, int>& ids) {
     return o;
 }
 
-void loadAI(AIData& d, const Json& o, const std::vector<Army*>& armies) {
-    auto I = [&](const char* k, int& v) {
+void LoadAi(AIData& d, const Json& o, const std::vector<Army*>& armies) {
+    auto read_int = [&](const char* k, int& v) {
         if (o.has(k)) v = static_cast<int>(o[k].integer());
     };
-    I("turns", d.turns);
-    I("own", d.own);
-    I("enemy", d.enemy);
-    I("neutral", d.neutral);
-    I("unseen", d.unseen);
-    I("rebuildLimit", d.rebuildLimit);
+    read_int("turns", d.turns);
+    read_int("own", d.own);
+    read_int("enemy", d.enemy);
+    read_int("neutral", d.neutral);
+    read_int("unseen", d.unseen);
+    read_int("rebuildLimit", d.rebuildLimit);
     d.bold = o["bold"].boolean();
-    I("heroes", d.heroes);
-    I("rebuildType", d.rebuildType);
-    I("rebuildTypeRich", d.rebuildTypeRich);
-    I("bought", d.bought);
-    I("dieHuman", d.dieHuman);
-    I("dieLord", d.dieLord);
-    I("dieKnight", d.dieKnight);
-    I("dieWarlord", d.dieWarlord);
-    I("sims", d.sims);
-    I("searchers", d.searchers);
-    I("explorers", d.explorers);
-    I("raze", d.raze);
-    I("sack", d.sack);
-    I("pillage", d.pillage);
-    I("perCity", d.perCity);
-    I("bonusHuman", d.bonusHuman);
-    I("bonusWarlord", d.bonusWarlord);
-    I("bonusLord", d.bonusLord);
-    I("bonusKnight", d.bonusKnight);
-    I("poor", d.poor);
-    I("solidarity", d.solidarity);
-    I("minStrength", d.minStrength);
-    I("flyCities", d.flyCities);
-    I("strongCities", d.strongCities);
-    I("fastCities", d.fastCities);
-    I("early", d.early);
-    I("humanShare", d.humanShare);
-    d.questCity = readOpt(o["questCity"]);
-    I("cautious", d.cautious);
-    I("questsDone", d.questsDone);
-    I("itemsPassed", d.itemsPassed);
-    I("maxGroups", d.maxGroups);
-    d.roles = readIntMap(o["roles"]);
-    d.held = readIntMap(o["held"]);
-    d.flags = readIntMap(o["flags"]);
-    d.garrison = readIntMap(o["garrison"]);
-    d.keep = readIntMap(o["keep"]);
-    readIntArray(o["heroesKilled"], d.heroesKilled);
-    readIntArray(o["armiesKilled"], d.armiesKilled);
-    readIntArray(o["battles"], d.battles);
-    readIntArray(o["lost"], d.lost);
-    readIntArray(o["cityBattles"], d.cityBattles);
-    readIntArray(o["citiesLost"], d.citiesLost);
+    read_int("heroes", d.heroes);
+    read_int("rebuildType", d.rebuildType);
+    read_int("rebuildTypeRich", d.rebuildTypeRich);
+    read_int("bought", d.bought);
+    read_int("dieHuman", d.dieHuman);
+    read_int("dieLord", d.dieLord);
+    read_int("dieKnight", d.dieKnight);
+    read_int("dieWarlord", d.dieWarlord);
+    read_int("sims", d.sims);
+    read_int("searchers", d.searchers);
+    read_int("explorers", d.explorers);
+    read_int("raze", d.raze);
+    read_int("sack", d.sack);
+    read_int("pillage", d.pillage);
+    read_int("perCity", d.perCity);
+    read_int("bonusHuman", d.bonusHuman);
+    read_int("bonusWarlord", d.bonusWarlord);
+    read_int("bonusLord", d.bonusLord);
+    read_int("bonusKnight", d.bonusKnight);
+    read_int("poor", d.poor);
+    read_int("solidarity", d.solidarity);
+    read_int("minStrength", d.minStrength);
+    read_int("flyCities", d.flyCities);
+    read_int("strongCities", d.strongCities);
+    read_int("fastCities", d.fastCities);
+    read_int("early", d.early);
+    read_int("humanShare", d.humanShare);
+    d.questCity = ReadOpt(o["questCity"]);
+    read_int("cautious", d.cautious);
+    read_int("questsDone", d.questsDone);
+    read_int("itemsPassed", d.itemsPassed);
+    read_int("maxGroups", d.maxGroups);
+    d.roles = ReadIntMap(o["roles"]);
+    d.held = ReadIntMap(o["held"]);
+    d.flags = ReadIntMap(o["flags"]);
+    d.garrison = ReadIntMap(o["garrison"]);
+    d.keep = ReadIntMap(o["keep"]);
+    ReadIntArray(o["heroesKilled"], d.heroesKilled);
+    ReadIntArray(o["armiesKilled"], d.armiesKilled);
+    ReadIntArray(o["battles"], d.battles);
+    ReadIntArray(o["lost"], d.lost);
+    ReadIntArray(o["cityBattles"], d.cityBattles);
+    ReadIntArray(o["citiesLost"], d.citiesLost);
     if (o["cursor"].isArray())
         d.cursor = std::make_pair(static_cast<int>(o["cursor"][0].integer()),
                                   static_cast<int>(o["cursor"][1].integer()));
@@ -239,13 +239,13 @@ void loadAI(AIData& d, const Json& o, const std::vector<Army*>& armies) {
         const Json& gr = groups[gi - 1];
         if (gr.isObject()) {
             grp->active = static_cast<int>(gr["active"].integer());
-            grp->target = readOpt(gr["target"]);
-            grp->rally = readOpt(gr["rally"]);
-            grp->members = readIntMap(gr["members"]);
-            grp->cities = readIntMap(gr["cities"]);
-            grp->dist = readIntMap(gr["dist"]);
-            grp->bonus = readIntMap(gr["bonus"]);
-            grp->taken = readIntMap(gr["taken"]);
+            grp->target = ReadOpt(gr["target"]);
+            grp->rally = ReadOpt(gr["rally"]);
+            grp->members = ReadIntMap(gr["members"]);
+            grp->cities = ReadIntMap(gr["cities"]);
+            grp->dist = ReadIntMap(gr["dist"]);
+            grp->bonus = ReadIntMap(gr["bonus"]);
+            grp->taken = ReadIntMap(gr["taken"]);
             for (auto& [k, v] : gr["staged"].entries()) {
                 long id = v.integer();
                 if (id >= 0 && id < static_cast<long>(armies.size()))
@@ -258,7 +258,7 @@ void loadAI(AIData& d, const Json& o, const std::vector<Army*>& armies) {
     }
 }
 
-Json slotJson(const Slot& s) {
+Json SlotJson(const Slot& s) {
     Json o = Json::object();
     o.set("type", s.type);
     o.set("name", s.name);
@@ -269,7 +269,7 @@ Json slotJson(const Slot& s) {
     o.set("price", s.price);
     return o;
 }
-Slot readSlot(const Json& o) {
+Slot ReadSlot(const Json& o) {
     return Slot{static_cast<int>(o["type"].integer()),     o["name"].str(),
                 static_cast<int>(o["strength"].integer()), static_cast<int>(o["time"].integer()),
                 static_cast<int>(o["cost"].integer()),     static_cast<int>(o["move"].integer()),
@@ -280,7 +280,7 @@ Slot readSlot(const Json& o) {
 std::string encode(const Game& g) {
     std::map<const Army*, int> ids;
     for (size_t i = 0; i < g.armies.size(); i++) ids[g.armies[i]] = static_cast<int>(i);
-    auto idOf = [&](const Army* a) -> Json {
+    auto id_of = [&](const Army* a) -> Json {
         auto it = ids.find(a);
         return it == ids.end() ? Json() : Json(it->second);
     };
@@ -289,9 +289,9 @@ std::string encode(const Game& g) {
     for (Army* a : g.armies) {
         Json o = Json::object();
         o.set("slot", a->slot);
-        o.set("x", optInt(a->x));
-        o.set("y", optInt(a->y));
-        o.set("owner", optInt(a->owner));
+        o.set("x", OptInt(a->x));
+        o.set("y", OptInt(a->y));
+        o.set("owner", OptInt(a->owner));
         o.set("type", a->type);
         o.set("name", a->name);
         if (a->female) o.set("female", true);
@@ -300,7 +300,7 @@ std::string encode(const Game& g) {
         o.set("moves", a->moves);
         o.set("maxMoves", a->maxMoves);
         o.set("upkeep", a->upkeep);
-        o.set("homeCity", optInt(a->homeCity));
+        o.set("homeCity", OptInt(a->homeCity));
         if (a->atSea) o.set("atSea", true);
         if (a->group) o.set("group", a->group);
         if (a->target) {
@@ -367,17 +367,17 @@ std::string encode(const Game& g) {
         adv.set("dir", s->advisor.dir);
         adv.set("mark", s->advisor.mark);
         o.set("advisor", adv);
-        if (s->ai) o.set("ai", saveAI(*s->ai, ids));
+        if (s->ai) o.set("ai", SaveAi(*s->ai, ids));
         if (s->quest) {
             const Quest& q = *s->quest;
             Json qq = Json::object();
             qq.set("type", q.type);
-            qq.set("hero", idOf(q.hero));
+            qq.set("hero", id_of(q.hero));
             qq.set("done", q.done);
-            qq.set("required", optInt(q.required));
+            qq.set("required", OptInt(q.required));
             qq.set("targetKind", q.targetKind);
             if (q.targetKind == "army")
-                qq.set("target", idOf(q.army));
+                qq.set("target", id_of(q.army));
             else if (q.targetKind == "armytype" && q.armyType)
                 qq.set("target", q.armyType->id);
             else if (q.targetKind == "city" && q.city)
@@ -396,18 +396,18 @@ std::string encode(const Game& g) {
         Json o = Json::object();
         o.set("index", c.index);
         o.set("name", c.name);
-        o.set("ownerIndex", optInt(c.ownerIndex));
-        o.set("producing", optInt(c.producing));
+        o.set("ownerIndex", OptInt(c.ownerIndex));
+        o.set("producing", OptInt(c.producing));
         o.set("countdown", c.countdown);
         if (c.vectorTo != NONE) o.set("vectorTo", c.vectorTo);
         if (c.razed) o.set("razed", true);
         o.set("defence", c.defence);
         o.set("income", c.income);
-        o.set("claim", optInt(c.claim));
-        o.set("razedBy", optInt(c.razedBy));
+        o.set("claim", OptInt(c.claim));
+        o.set("razedBy", OptInt(c.razedBy));
         if (c.attacked) o.set("attacked", c.attacked);
         Json slots = Json::array();
-        for (auto& s : c.slots) slots.push(slotJson(s));
+        for (auto& s : c.slots) slots.push(SlotJson(s));
         o.set("slots", slots);
         cities.push(o);
     }
@@ -417,14 +417,14 @@ std::string encode(const Game& g) {
         Json o = Json::object();
         o.set("index", s.index);
         o.set("content", s.content);
-        o.set("item", optInt(s.item));
-        o.set("guardian", optInt(s.guardian));
-        o.set("allyType", optInt(s.allyType));
+        o.set("item", OptInt(s.item));
+        o.set("guardian", OptInt(s.guardian));
+        o.set("allyType", OptInt(s.allyType));
         if (s.rich) o.set("rich", true);
         o.set("revealed", s.revealed);
         if (s.searched) o.set("searched", true);
         o.set("band", s.band);
-        o.set("templeIndex", optInt(s.templeIndex));
+        o.set("templeIndex", OptInt(s.templeIndex));
         sites.push(o);
     }
 
@@ -436,10 +436,10 @@ std::string encode(const Game& g) {
         o.set("type", it.type);
         o.set("value", it.value);
         o.set("status", it.status);
-        o.set("x", optInt(it.x));
-        o.set("y", optInt(it.y));
+        o.set("x", OptInt(it.x));
+        o.set("y", OptInt(it.y));
         if (it.planted) o.set("planted", true);
-        o.set("standardOf", optInt(it.standardOf));
+        o.set("standardOf", OptInt(it.standardOf));
         items.push(o);
     }
 
@@ -453,31 +453,31 @@ std::string encode(const Game& g) {
     Json towers = Json::array();
     for (int k : g.towers) towers.push(k);
     Json explored = Json::object();
-    for (auto& [k, m] : g.explored) explored.set(std::to_string(k), packMask(m));
+    for (auto& [k, m] : g.explored) explored.set(std::to_string(k), PackMask(m));
 
     Json opts = Json::object();
     for (auto& n : Options::names()) opts.set(n, *const_cast<Options&>(g.map->options).field(n));
 
     Json dip = Json::object();
-    dip.set("state", intArray(g.diplomacy.state));
-    dip.set("proposal", intArray(g.diplomacy.proposal));
-    auto hasNonDefault = [](const auto& arr, int dflt) {
+    dip.set("state", IntArray(g.diplomacy.state));
+    dip.set("proposal", IntArray(g.diplomacy.proposal));
+    auto has_non_default = [](const auto& arr, int dflt) {
         for (int v : arr)
             if (v != dflt) return true;
         return false;
     };
-    if (hasNonDefault(g.diplomacy.allied, 0)) dip.set("allied", intArray(g.diplomacy.allied));
-    if (hasNonDefault(g.diplomacy.proposeAllied, 0))
-        dip.set("proposeAllied", intArray(g.diplomacy.proposeAllied));
-    if (hasNonDefault(g.diplomacy.truceTurns, 0))
-        dip.set("truceTurns", intArray(g.diplomacy.truceTurns));
-    if (hasNonDefault(g.diplomacy.goldOffer, 0))
-        dip.set("goldOffer", intArray(g.diplomacy.goldOffer));
-    if (hasNonDefault(g.diplomacy.warTarget, NONE))
-        dip.set("warTarget", intArray(g.diplomacy.warTarget));
-    if (hasNonDefault(g.diplomacy.trust, 0)) dip.set("trust", intArray(g.diplomacy.trust));
-    if (hasNonDefault(g.diplomacy.alliedTargetCity, NONE))
-        dip.set("alliedTargetCity", intArray(g.diplomacy.alliedTargetCity));
+    if (has_non_default(g.diplomacy.allied, 0)) dip.set("allied", IntArray(g.diplomacy.allied));
+    if (has_non_default(g.diplomacy.proposeAllied, 0))
+        dip.set("proposeAllied", IntArray(g.diplomacy.proposeAllied));
+    if (has_non_default(g.diplomacy.truceTurns, 0))
+        dip.set("truceTurns", IntArray(g.diplomacy.truceTurns));
+    if (has_non_default(g.diplomacy.goldOffer, 0))
+        dip.set("goldOffer", IntArray(g.diplomacy.goldOffer));
+    if (has_non_default(g.diplomacy.warTarget, NONE))
+        dip.set("warTarget", IntArray(g.diplomacy.warTarget));
+    if (has_non_default(g.diplomacy.trust, 0)) dip.set("trust", IntArray(g.diplomacy.trust));
+    if (has_non_default(g.diplomacy.alliedTargetCity, NONE))
+        dip.set("alliedTargetCity", IntArray(g.diplomacy.alliedTargetCity));
 
     Json fight = Json::array();
     for (auto& row : g.map->fightOrder) {
@@ -487,7 +487,7 @@ std::string encode(const Game& g) {
     }
 
     Json history = Json::array();
-    auto deedJson = [](const Deed& e) {
+    auto deed_json = [](const Deed& e) {
         Json o = Json::object();
         o.set("side", e.side);
         o.set("type", static_cast<int>(e.type));
@@ -498,27 +498,27 @@ std::string encode(const Game& g) {
     };
     for (auto& r : g.history) {
         Json o = Json::object();
-        o.set("gold", intArray(r.gold));
-        o.set("score", intArray(r.score));
-        o.set("cities", intArray(r.cities));
+        o.set("gold", IntArray(r.gold));
+        o.set("score", IntArray(r.score));
+        o.set("cities", IntArray(r.cities));
         Json owners = Json::array();
         for (int v : r.owners) owners.push(v);
         o.set("owners", owners);
         Json ev = Json::array();
-        for (auto& e : r.events) ev.push(deedJson(e));
+        for (auto& e : r.events) ev.push(deed_json(e));
         o.set("events", ev);
         history.push(o);
     }
     Json deeds = Json::object();
     for (auto& [k, list] : g.deeds) {
         Json l = Json::array();
-        for (auto& e : list) l.push(deedJson(e));
+        for (auto& e : list) l.push(deed_json(e));
         deeds.set(std::to_string(k), l);
     }
     Json triumphs = Json::object();
     for (auto& [me, row] : g.triumphs) {
         Json r = Json::object();
-        for (auto& [opp, counts] : row) r.set(std::to_string(opp), intArray(counts));
+        for (auto& [opp, counts] : row) r.set(std::to_string(opp), IntArray(counts));
         triumphs.set(std::to_string(me), r);
     }
     Json seen = Json::array();
@@ -576,20 +576,20 @@ std::string encode(const Game& g) {
     out.set("log", log);
     if (g.map->name == randommap::DIR) {
         Json world = Json::object();
-        for (auto& [ext, b] : randommap::installed(g.dataDir)) world.set(ext, hex(b));
+        for (auto& [ext, b] : randommap::installed(g.dataDir)) world.set(ext, Hex(b));
         out.set("randomWorld", world);
     }
     return out.dump();
 }
 
-std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir) {
+std::unique_ptr<Game> decode(const std::string& text, const std::string& data_dir) {
     Json state = Json::parse(text);
     if (state["version"].integer() != VERSION) throw std::runtime_error("unsupported save version");
 
     if (state.has("randomWorld")) {
         randommap::Files files;
-        for (auto& [ext, h] : state["randomWorld"].entries()) files[ext] = unhex(h.str());
-        randommap::install(dataDir, files);
+        for (auto& [ext, h] : state["randomWorld"].entries()) files[ext] = Unhex(h.str());
+        randommap::install(data_dir, files);
     }
 
     game::NewGameOptions opts;
@@ -607,7 +607,7 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         o.level = static_cast<int>(saved["level"].integer());
         o.card = static_cast<int>(saved["card"].integer());
     }
-    auto gp = game::newGame(dataDir, state["scenario"].str(), opts);
+    auto gp = game::newGame(data_dir, state["scenario"].str(), opts);
     Game& g = *gp;
     g.armies.clear();
     g.turn = static_cast<int>(state["turn"].integer());
@@ -636,26 +636,26 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     g.surrenderShown = state["surrenderShown"].boolean();
     g.noHumansSaid = state["noHumansSaid"].boolean();
     g.greatest = state["greatest"].boolean();
-    readIntArray(state["diplomacy"]["state"], g.diplomacy.state);
-    readIntArray(state["diplomacy"]["proposal"], g.diplomacy.proposal);
+    ReadIntArray(state["diplomacy"]["state"], g.diplomacy.state);
+    ReadIntArray(state["diplomacy"]["proposal"], g.diplomacy.proposal);
     if (state["diplomacy"].has("allied"))
-        readIntArray(state["diplomacy"]["allied"], g.diplomacy.allied);
+        ReadIntArray(state["diplomacy"]["allied"], g.diplomacy.allied);
     if (state["diplomacy"].has("proposeAllied"))
-        readIntArray(state["diplomacy"]["proposeAllied"], g.diplomacy.proposeAllied);
+        ReadIntArray(state["diplomacy"]["proposeAllied"], g.diplomacy.proposeAllied);
     if (state["diplomacy"].has("truceTurns"))
-        readIntArray(state["diplomacy"]["truceTurns"], g.diplomacy.truceTurns);
+        ReadIntArray(state["diplomacy"]["truceTurns"], g.diplomacy.truceTurns);
     if (state["diplomacy"].has("goldOffer"))
-        readIntArray(state["diplomacy"]["goldOffer"], g.diplomacy.goldOffer);
+        ReadIntArray(state["diplomacy"]["goldOffer"], g.diplomacy.goldOffer);
     if (state["diplomacy"].has("warTarget"))
-        readIntArray(state["diplomacy"]["warTarget"], g.diplomacy.warTarget);
+        ReadIntArray(state["diplomacy"]["warTarget"], g.diplomacy.warTarget);
     if (state["diplomacy"].has("trust"))
-        readIntArray(state["diplomacy"]["trust"], g.diplomacy.trust);
+        ReadIntArray(state["diplomacy"]["trust"], g.diplomacy.trust);
     if (state["diplomacy"].has("alliedTargetCity"))
-        readIntArray(state["diplomacy"]["alliedTargetCity"], g.diplomacy.alliedTargetCity);
+        ReadIntArray(state["diplomacy"]["alliedTargetCity"], g.diplomacy.alliedTargetCity);
     g.log.clear();
     for (auto& l : state["log"].items()) g.log.push_back(l.str());
 
-    std::map<int, Item*> itemByIndex;
+    std::map<int, Item*> item_by_index;
     for (auto& saved : state["items"].items()) {
         for (auto& it : g.map->items) {
             if (it.index == saved["index"].integer()) {
@@ -663,11 +663,11 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
                 it.type = static_cast<int>(saved["type"].integer());
                 it.value = static_cast<int>(saved["value"].integer());
                 it.status = static_cast<int>(saved["status"].integer());
-                it.x = readOpt(saved["x"]);
-                it.y = readOpt(saved["y"]);
+                it.x = ReadOpt(saved["x"]);
+                it.y = ReadOpt(saved["y"]);
                 it.planted = saved["planted"].boolean();
-                it.standardOf = readOpt(saved["standardOf"]);
-                itemByIndex[it.index] = &it;
+                it.standardOf = ReadOpt(saved["standardOf"]);
+                item_by_index[it.index] = &it;
             }
         }
     }
@@ -675,17 +675,17 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     for (auto& saved : state["cities"].items()) {
         City* c = g.map->city(static_cast<int>(saved["index"].integer()));
         if (!c) continue;
-        c->ownerIndex = readOpt(saved["ownerIndex"]);
-        c->producing = readOpt(saved["producing"]);
+        c->ownerIndex = ReadOpt(saved["ownerIndex"]);
+        c->producing = ReadOpt(saved["producing"]);
         c->countdown = static_cast<int>(saved["countdown"].integer());
         c->vectorTo = saved.has("vectorTo") ? static_cast<int>(saved["vectorTo"].integer()) : NONE;
         c->razed = saved["razed"].boolean();
         c->defence = static_cast<int>(saved["defence"].integer());
         c->income = static_cast<int>(saved["income"].integer());
         c->slots.clear();
-        for (auto& s : saved["slots"].items()) c->slots.push_back(readSlot(s));
+        for (auto& s : saved["slots"].items()) c->slots.push_back(ReadSlot(s));
         if (!saved["claim"].isNull()) c->claim = static_cast<int>(saved["claim"].integer());
-        c->razedBy = readOpt(saved["razedBy"]);
+        c->razedBy = ReadOpt(saved["razedBy"]);
         c->attacked = static_cast<int>(saved["attacked"].integer());
         if (!saved["name"].str().empty()) c->name = saved["name"].str();
         // ruins belong to nobody; older saves can have them won in a fight
@@ -698,14 +698,14 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         if (i < 0 || i >= static_cast<int>(g.map->sites.size())) continue;
         Site& s = g.map->sites[i];
         s.content = static_cast<int>(saved["content"].integer());
-        s.item = readOpt(saved["item"]);
-        s.guardian = readOpt(saved["guardian"]);
-        s.allyType = readOpt(saved["allyType"]);
+        s.item = ReadOpt(saved["item"]);
+        s.guardian = ReadOpt(saved["guardian"]);
+        s.allyType = ReadOpt(saved["allyType"]);
         s.rich = saved["rich"].boolean();
         s.revealed = static_cast<int>(saved["revealed"].integer());
         s.searched = saved["searched"].boolean();
         s.band = saved["band"].str();
-        s.templeIndex = readOpt(saved["templeIndex"]);
+        s.templeIndex = ReadOpt(saved["templeIndex"]);
     }
     if (state["fightOrder"].isArray()) {
         g.map->fightOrder.clear();
@@ -716,27 +716,27 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         }
     }
     g.history.clear();
-    auto readDeed = [](const Json& o) {
+    auto read_deed = [](const Json& o) {
         return Deed{static_cast<int>(o["side"].integer()),
                     static_cast<DeedType>(o["type"].integer()), static_cast<int>(o["v1"].integer()),
                     static_cast<int>(o["v2"].integer()), o["name"].str()};
     };
     for (auto& r : state["history"].items()) {
         HistoryRecord rec;
-        readIntArray(r["gold"], rec.gold);
-        readIntArray(r["score"], rec.score);
-        readIntArray(r["cities"], rec.cities);
+        ReadIntArray(r["gold"], rec.gold);
+        ReadIntArray(r["score"], rec.score);
+        ReadIntArray(r["cities"], rec.cities);
         for (auto& v : r["owners"].items()) rec.owners.push_back(static_cast<int>(v.integer()));
-        for (auto& e : r["events"].items()) rec.events.push_back(readDeed(e));
+        for (auto& e : r["events"].items()) rec.events.push_back(read_deed(e));
         g.history.push_back(rec);
     }
     g.deeds.clear();
     for (auto& [k, list] : state["deeds"].entries())
-        for (auto& e : list.items()) g.deeds[std::stoi(k)].push_back(readDeed(e));
+        for (auto& e : list.items()) g.deeds[std::stoi(k)].push_back(read_deed(e));
     g.triumphs.clear();
     for (auto& [me, row] : state["triumphs"].entries())
         for (auto& [opp, counts] : row.entries())
-            readIntArray(counts, g.triumphs[std::stoi(me)][std::stoi(opp)]);
+            ReadIntArray(counts, g.triumphs[std::stoi(me)][std::stoi(opp)]);
     g.tutorialSeen.clear();
     for (auto& m : state["tutorialSeen"].items()) g.tutorialSeen.insert(m.str());
     g.towers.clear();
@@ -748,14 +748,14 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     g.explored.clear();
     for (auto& [k, runs] : state["explored"].entries())
         g.explored[std::stoi(k)] =
-                unpackMask(runs, static_cast<size_t>(g.map->width) * g.map->height);
+                UnpackMask(runs, static_cast<size_t>(g.map->width) * g.map->height);
 
     std::vector<Army*> armies;
     for (auto& saved : state["armies"].items()) {
         Army a;
-        a.x = readOpt(saved["x"]);
-        a.y = readOpt(saved["y"]);
-        a.owner = readOpt(saved["owner"]);
+        a.x = ReadOpt(saved["x"]);
+        a.y = ReadOpt(saved["y"]);
+        a.owner = ReadOpt(saved["owner"]);
         a.type = static_cast<int>(saved["type"].integer());
         a.name = saved["name"].str();
         a.female = saved["female"].boolean();
@@ -764,7 +764,7 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         a.moves = static_cast<int>(saved["moves"].integer());
         a.maxMoves = static_cast<int>(saved["maxMoves"].integer());
         a.upkeep = static_cast<int>(saved["upkeep"].integer());
-        a.homeCity = readOpt(saved["homeCity"]);
+        a.homeCity = ReadOpt(saved["homeCity"]);
         a.atSea = saved["atSea"].boolean();
         a.group = static_cast<int>(saved["group"].integer());
         if (saved["target"].isArray())
@@ -775,8 +775,8 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         a.experience = static_cast<int>(saved["experience"].integer());
         a.title = saved["title"].str("");
         for (auto& idx : saved["items"].items()) {
-            auto it = itemByIndex.find(static_cast<int>(idx.integer()));
-            if (it != itemByIndex.end()) a.items.push_back(it->second);
+            auto it = item_by_index.find(static_cast<int>(idx.integer()));
+            if (it != item_by_index.end()) a.items.push_back(it->second);
         }
         for (auto& t : saved["blessings"].items())
             a.blessings.insert(static_cast<int>(t.integer()));
@@ -825,7 +825,7 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         s->advisor.mark = static_cast<int>(saved["advisor"]["mark"].integer());
         if (saved["ai"].isObject()) {
             s->ai = std::make_shared<AIData>(ai::core::newData());
-            loadAI(*s->ai, saved["ai"], armies);
+            LoadAi(*s->ai, saved["ai"], armies);
         }
         s->quest.reset();
         if (saved["quest"].isObject()) {
@@ -833,7 +833,7 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
             auto q = std::make_shared<Quest>();
             q->type = static_cast<int>(qs["type"].integer());
             q->done = static_cast<int>(qs["done"].integer());
-            q->required = readOpt(qs["required"]);
+            q->required = ReadOpt(qs["required"]);
             long hero = qs["hero"].integer(-1);
             q->hero = hero >= 0 && hero < static_cast<long>(armies.size()) ? armies[hero] : nullptr;
             q->targetKind = qs["targetKind"].str();
@@ -843,7 +843,7 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
             else if (q->targetKind == "side")
                 q->side = g.map->side(ref);
             else if (q->targetKind == "item")
-                q->item = itemByIndex.count(ref) ? itemByIndex[ref] : nullptr;
+                q->item = item_by_index.count(ref) ? item_by_index[ref] : nullptr;
             else if (q->targetKind == "armytype")
                 q->armyType = g.types.byId(ref);
             else if (q->targetKind == "army")

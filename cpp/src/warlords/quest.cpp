@@ -26,14 +26,14 @@ const char* const DESCRIPTIONS[7] = {
 const char* const TARGET_KIND[7] = {"army", "item", "armytype", "side", "city", "city", "none"};
 
 namespace {
-int dist(int x1, int y1, int x2, int y2) {
+int Dist(int x1, int y1, int x2, int y2) {
     double dx = x1 - x2, dy = y1 - y2;
     return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
 }
 
 // Pick a target for a quest of this type into q (quest_assign, 4976:0d7a);
 // false if there is none. `computer` is quest_assign(1): shorter ranges.
-bool pickTarget(Game& g, const Side& side, int type, Army* h, Quest& q, bool computer,
+bool PickTarget(Game& g, const Side& side, int type, Army* h, Quest& q, bool computer,
                 bool flying) {
     if (type == SLAY_HERO) {
         // another side's hero, counted from the top of the army table down
@@ -101,7 +101,7 @@ bool pickTarget(Game& g, const Side& side, int type, Army* h, Quest& q, bool com
         for (int t = 0; t < 200; t++) {
             City* c = g.map->city(g.rng.dice(1, static_cast<int>(g.map->cities.size()), -1));
             if (c && c->ownerIndex != side.index && !c->razed &&
-                (dist(h->x, h->y, c->x, c->y) <= range || t > 99)) {
+                (Dist(h->x, h->y, c->x, c->y) <= range || t > 99)) {
                 q.city = c;
                 return true;
             }
@@ -116,20 +116,20 @@ bool pickTarget(Game& g, const Side& side, int type, Army* h, Quest& q, bool com
 // The type of a quest's `n`th try (from 1). A human's is rolled from the
 // table; a computer's (quest_assign(1)) is raze or occupy first, then
 // slaughter, then pillage gold.
-int questType(Game& g, int n, bool computer) {
+int QuestType(Game& g, int n, bool computer) {
     if (!computer) return TYPE_TABLE[g.rng.dice(1, 10, -1)];
     if (n == 1) return g.rng.dice(1, 5, -1) == 0 ? RAZE : OCCUPY;
     if (n == 2) return SLAUGHTER;
     return PILLAGE_GOLD;
 }
 
-bool heroInStack(const Quest& q, const std::vector<Army*>& stack) {
+bool HeroInStack(const Quest& q, const std::vector<Army*>& stack) {
     return std::find(stack.begin(), stack.end(), q.hero) != stack.end();
 }
 
 // The quest is over. A failure carries the STRING.DAT group quest_check tells
 // a human it with; a human side keeps the outcome as `questNews`.
-std::shared_ptr<QuestResult> finish(Game& g, Side& side, const std::string& reason, int why = 0) {
+std::shared_ptr<QuestResult> Finish(Game& g, Side& side, const std::string& reason, int why = 0) {
     auto q = side.quest;
     side.quest.reset();
     if (!q) return nullptr;
@@ -154,9 +154,9 @@ std::shared_ptr<Quest> assign(Game& g, Side& side, Army* h, bool computer, bool 
     if (g.map->options.quests == 0) return nullptr;
     history::deed(g, &side, DeedType::QUEST_RECEIVED, 0, 0, h ? h->name : "");  // 4976:0dae
     for (int n = 1;; n++) {
-        int type = questType(g, n, computer);
+        int type = QuestType(g, n, computer);
         Quest q;
-        if (pickTarget(g, side, type, h, q, computer, flying)) {
+        if (PickTarget(g, side, type, h, q, computer, flying)) {
             q.type = type;
             q.hero = h;
             q.done = 0;
@@ -189,33 +189,33 @@ std::shared_ptr<QuestResult> event(Game& g, Side& side, const std::string& ev, c
         bool alive = false;
         for (Army* a : g.armies)
             if (a == q.hero && a->owner == side.index) alive = true;
-        if (!alive) return finish(g, side, "the hero is lost", 0x20);
+        if (!alive) return Finish(g, side, "the hero is lost", 0x20);
         if (q.type == OCCUPY || q.type == RAZE) {
-            if (q.city->razed) return finish(g, side, "the city is ruins", 0x21);
+            if (q.city->razed) return Finish(g, side, "the city is ruins", 0x21);
             if (q.city->ownerIndex == side.index)
-                return finish(g, side, "another took the city", 0x2a);
+                return Finish(g, side, "another took the city", 0x2a);
         } else if (q.type == SLAUGHTER) {
-            if (!q.side->alive) return finish(g, side, "that side is gone", 0x27);
+            if (!q.side->alive) return Finish(g, side, "that side is gone", 0x27);
         } else if (q.type == SLAY_HERO) {
-            if (!g.alive(q.army)) return finish(g, side, "the quarry is gone", 0x29);
+            if (!g.alive(q.army)) return Finish(g, side, "the quarry is gone", 0x29);
         } else if (q.type == RETRIEVE_ITEM) {
-            if (q.item->status == 0) return finish(g, side, "the item is lost", 0x28);
+            if (q.item->status == 0) return Finish(g, side, "the item is lost", 0x28);
         }
         return nullptr;
     }
 
     if (ev == "battle") {
-        if (!heroInStack(q, data.stack)) return nullptr;
+        if (!HeroInStack(q, data.stack)) return nullptr;
         if (q.type == SLAY_HERO) {
             for (Army* d : data.killed)
-                if (d == q.army) return finish(g, side, "done");
+                if (d == q.army) return Finish(g, side, "done");
         } else if (q.type == SLAY_TYPE) {
             for (Army* d : data.killed)
-                if (d->type == q.armyType->id) return finish(g, side, "done");
+                if (d->type == q.armyType->id) return Finish(g, side, "done");
         } else if (q.type == SLAUGHTER) {
             for (Army* d : data.killed)
                 if (d->owner == q.side->index) q.done++;
-            if (q.done >= q.required) return finish(g, side, "done");
+            if (q.done >= q.required) return Finish(g, side, "done");
         }
     } else if (ev == "item") {
         if (q.type == RETRIEVE_ITEM && q.hero) {
@@ -225,29 +225,29 @@ std::shared_ptr<QuestResult> event(Game& g, Side& side, const std::string& ev, c
                 Item* it = *i;
                 items.erase(i);  // the priests take it away
                 it->status = 0;
-                return finish(g, side, "done");
+                return Finish(g, side, "done");
             }
         }
     } else if (ev == "pillage") {
-        if (q.type == PILLAGE_GOLD && heroInStack(q, data.stack)) {
+        if (q.type == PILLAGE_GOLD && HeroInStack(q, data.stack)) {
             q.done += data.gold;
-            if (q.done >= q.required) return finish(g, side, "done");
+            if (q.done >= q.required) return Finish(g, side, "done");
         } else if ((q.type == OCCUPY || q.type == RAZE) && data.city == q.city) {
-            return finish(g, side, "that was not to pillage", 0x24);
+            return Finish(g, side, "that was not to pillage", 0x24);
         }
     } else if (ev == "occupy") {
         if (q.type == OCCUPY && data.city == q.city) {
-            if (heroInStack(q, data.stack)) return finish(g, side, "done");
-            return finish(g, side, "the hero was not there", 0x22);
+            if (HeroInStack(q, data.stack)) return Finish(g, side, "done");
+            return Finish(g, side, "the hero was not there", 0x22);
         } else if (q.type == RAZE && data.city == q.city) {
-            return finish(g, side, "the quest was to raze it", 0x23);
+            return Finish(g, side, "the quest was to raze it", 0x23);
         }
     } else if (ev == "raze") {
         if (q.type == RAZE && data.city == q.city) {
-            if (heroInStack(q, data.stack)) return finish(g, side, "done");
-            return finish(g, side, "the hero was not there", 0x25);
+            if (HeroInStack(q, data.stack)) return Finish(g, side, "done");
+            return Finish(g, side, "the hero was not there", 0x25);
         } else if (q.type == OCCUPY && data.city == q.city) {
-            return finish(g, side, "the quest was to keep it", 0x26);
+            return Finish(g, side, "the quest was to keep it", 0x26);
         }
     }
     return nullptr;
@@ -311,12 +311,12 @@ std::shared_ptr<Reward> reward(Game& g, Side& side, const Quest* q) {
     if (unused.empty() && !unknown.empty() && g.rng.dice(1, 3, 0) < 3) {
         // the nearest to the hero, the first of equals
         Site* best = nullptr;
-        int bestD = 10000;
+        int best_d = 10000;
         for (Site* s : unknown) {
             int d = h ? std::max(std::abs(s->x - h->x), std::abs(s->y - h->y)) : 0;
-            if (d < bestD) {
+            if (d < best_d) {
                 best = s;
-                bestD = d;
+                best_d = d;
             }
         }
         best->revealed |= 1 << side.index;

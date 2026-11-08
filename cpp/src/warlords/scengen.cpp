@@ -16,7 +16,7 @@ namespace {
 
 using namespace w2::move;  // terrain type ids
 
-constexpr int DX4[4] = {0, 1, 0, -1}, DY4[4] = {-1, 0, 1, 0};
+constexpr int kDX4[4] = {0, 1, 0, -1}, kDY4[4] = {-1, 0, 1, 0};
 
 // The JavaScript and Lua ports make the same worlds from the same seed, byte
 // for byte, so everything here keeps to arithmetic IEEE doubles give alike
@@ -24,13 +24,13 @@ constexpr int DX4[4] = {0, 1, 0, -1}, DY4[4] = {-1, 0, 1, 0};
 // differ between libraries), sorts with no ties, and queues ordered by
 // (cost, tile), so any heap pops them in the same order.
 
-double uniform(Rng& rng) {
+double Uniform(Rng& rng) {
     return rng.below(65536) / 65536.0;
 }
-double mix(double a, double b, double t) {
+double Mix(double a, double b, double t) {
     return a + t * (b - a);
 }
-double dist(double dx, double dy) {
+double Dist(double dx, double dy) {
     return std::sqrt(dx * dx + dy * dy);
 }
 
@@ -44,10 +44,10 @@ class Noise {
         for (int i = 0; i < 512; i++) perm_[i] = p[i & 255];
     }
     /** About -1..1. */
-    double at(double x, double y) const {
+    double At(double x, double y) const {
         int xi = static_cast<int>(std::floor(x)), yi = static_cast<int>(std::floor(y));
         double xf = x - xi, yf = y - yi;
-        int X = xi & 255, Y = yi & 255;
+        int cell_x = xi & 255, cell_y = yi & 255;
         auto fade = [](double t) { return t * t * t * (t * (t * 6 - 15) + 10); };
         auto grad = [&](int h, double dx, double dy) {
             switch (h & 7) {
@@ -70,17 +70,17 @@ class Noise {
             }
         };
         double u = fade(xf), v = fade(yf);
-        int aa = perm_[perm_[X] + Y], ab = perm_[perm_[X] + Y + 1];
-        int ba = perm_[perm_[X + 1] + Y], bb = perm_[perm_[X + 1] + Y + 1];
-        double x1 = mix(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
-        double x2 = mix(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
-        return mix(x1, x2, v);
+        int aa = perm_[perm_[cell_x] + cell_y], ab = perm_[perm_[cell_x] + cell_y + 1];
+        int ba = perm_[perm_[cell_x + 1] + cell_y], bb = perm_[perm_[cell_x + 1] + cell_y + 1];
+        double x1 = Mix(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
+        double x2 = Mix(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
+        return Mix(x1, x2, v);
     }
     /** Fractal Brownian motion: octaves of the noise, each twice as fine. */
-    double fbm(double x, double y, int octaves = 5) const {
+    double Fbm(double x, double y, int octaves = 5) const {
         double sum = 0, amp = 1, norm = 0;
         for (int o = 0; o < octaves; o++) {
-            sum += amp * at(x, y);
+            sum += amp * At(x, y);
             norm += amp;
             amp *= 0.5;
             x *= 2.03;
@@ -94,7 +94,7 @@ class Noise {
 };
 
 /** The value at quantile q (0..1) of the listed values. */
-double cut(std::vector<double> v, double q) {
+double Cut(std::vector<double> v, double q) {
     if (v.empty()) return 0;
     double at = std::max(
             0.0, q * static_cast<double>(v.size() - 1));  // a share above 1 asks for the lowest
@@ -105,9 +105,9 @@ double cut(std::vector<double> v, double q) {
 
 struct Grid {
     int w, h;
-    bool in(int x, int y) const { return x >= 0 && y >= 0 && x < w && y < h; }
+    bool In(int x, int y) const { return x >= 0 && y >= 0 && x < w && y < h; }
     /** The 8-connected (or 4-connected) parts of the tiles that pass `test`. */
-    std::vector<std::vector<int>> parts(const std::function<bool(int)>& test,
+    std::vector<std::vector<int>> Parts(const std::function<bool(int)>& test,
                                         bool eight = true) const {
         std::vector<int> seen(static_cast<size_t>(w) * h, 0);
         std::vector<std::vector<int>> out;
@@ -118,9 +118,9 @@ struct Grid {
             for (size_t k = 0; k < part.size(); k++) {
                 int i = part[k], x = i % w, y = i / w;
                 for (int d = 0; d < (eight ? 8 : 4); d++) {
-                    int nx = x + (eight ? DIRS[d][0] : DX4[d]),
-                        ny = y + (eight ? DIRS[d][1] : DY4[d]);
-                    if (!in(nx, ny)) continue;
+                    int nx = x + (eight ? DIRS[d][0] : kDX4[d]),
+                        ny = y + (eight ? DIRS[d][1] : kDY4[d]);
+                    if (!In(nx, ny)) continue;
                     int j = ny * w + nx;
                     if (!seen[j] && test(j)) {
                         seen[j] = 1;
@@ -133,7 +133,7 @@ struct Grid {
         return out;
     }
     /** Steps (4-connected) from the nearest tile passing `from`. */
-    std::vector<int> distance(const std::function<bool(int)>& from) const {
+    std::vector<int> Distance(const std::function<bool(int)>& from) const {
         std::vector<int> d(static_cast<size_t>(w) * h, -1);
         std::deque<int> q;
         for (int i = 0; i < w * h; i++)
@@ -146,8 +146,8 @@ struct Grid {
             q.pop_front();
             int x = i % w, y = i / w;
             for (int k = 0; k < 4; k++) {
-                int nx = x + DX4[k], ny = y + DY4[k];
-                if (!in(nx, ny)) continue;
+                int nx = x + kDX4[k], ny = y + kDY4[k];
+                if (!In(nx, ny)) continue;
                 int j = ny * w + nx;
                 if (d[j] < 0) {
                     d[j] = d[i] + 1;
@@ -159,7 +159,7 @@ struct Grid {
     }
 };
 
-double defaultLand(Shape s) {
+double DefaultLand(Shape s) {
     switch (s) {
     case Shape::Pangaea:
         return 0.60;
@@ -173,7 +173,7 @@ double defaultLand(Shape s) {
 // ------------------------------------------------------------------ land
 
 /** Step 1: where the land is (true) and its height (0..1 inland). */
-std::vector<bool> land(const Settings& s, Rng& rng, const Grid& g, std::vector<double>& height) {
+std::vector<bool> Land(const Settings& s, Rng& rng, const Grid& g, std::vector<double>& height) {
     int w = g.w, h = g.h, n = w * h;
     Noise base(rng), warp1(rng), warp2(rng), channel(rng);
     double f = s.shape == Shape::Islands ? 1.0 / 26 : 1.0 / 42;
@@ -182,15 +182,15 @@ std::vector<bool> land(const Settings& s, Rng& rng, const Grid& g, std::vector<d
         for (int x = 0; x < w; x++) {
             double px = x * f, py = y * f;
             // domain warping: the noise read where another noise points
-            double qx = warp1.fbm(px + 5.2, py + 1.3, 4), qy = warp2.fbm(px + 1.7, py + 9.2, 4);
-            double v = base.fbm(px + 1.6 * qx, py + 1.6 * qy, 5);
+            double qx = warp1.Fbm(px + 5.2, py + 1.3, 4), qy = warp2.Fbm(px + 1.7, py + 9.2, 4);
+            double v = base.Fbm(px + 1.6 * qx, py + 1.6 * qy, 5);
             // the sea closes in at the map's edges
             double edge = std::min({x, w - 1 - x, y, h - 1 - y}) / 14.0;
             edge = std::min(1.0, edge);
             v -= (1 - edge) * (1 - edge) * 0.9;
             if (s.shape == Shape::Continents) {
                 // straits along the zero lines of a slow noise split the land
-                double c = std::abs(channel.fbm(x / 70.0 + 3.1, y / 70.0 + 7.7, 3));
+                double c = std::abs(channel.Fbm(x / 70.0 + 3.1, y / 70.0 + 7.7, 3));
                 if (c < 0.09) v -= 0.45 * (0.09 - c) / 0.09;
             } else if (s.shape == Shape::Pangaea) {
                 double dx = (x - w / 2.0) / (w / 2.0), dy = (y - h / 2.0) / (h / 2.0);
@@ -198,74 +198,74 @@ std::vector<bool> land(const Settings& s, Rng& rng, const Grid& g, std::vector<d
             }
             e[y * w + x] = v;
         }
-    double share = s.land >= 0 ? s.land : defaultLand(s.shape);
-    double sea = cut(e, 1 - share);
-    std::vector<bool> isLand(n);
-    for (int i = 0; i < n; i++) isLand[i] = e[i] > sea;
+    double share = s.land >= 0 ? s.land : DefaultLand(s.shape);
+    double sea = Cut(e, 1 - share);
+    std::vector<bool> is_land(n);
+    for (int i = 0; i < n; i++) is_land[i] = e[i] > sea;
     // smooth the coast so the tile set can draw it: a tile goes with most of
     // its neighbours
     for (int pass = 0; pass < 2; pass++) {
-        auto next = isLand;
+        auto next = is_land;
         for (int y = 0; y < h; y++)
             for (int x = 0; x < w; x++) {
                 int k = 0;
                 for (int d = 0; d < 8; d++) {
                     int nx = x + DIRS[d][0], ny = y + DIRS[d][1];
-                    k += g.in(nx, ny) && isLand[ny * w + nx];
+                    k += g.In(nx, ny) && is_land[ny * w + nx];
                 }
                 if (k >= 5)
                     next[y * w + x] = true;
                 else if (k <= 3)
                     next[y * w + x] = false;
             }
-        isLand = next;
+        is_land = next;
     }
     // no land on the map's outermost two rows
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++)
-            if (x < 2 || y < 2 || x >= w - 2 || y >= h - 2) isLand[y * w + x] = false;
+            if (x < 2 || y < 2 || x >= w - 2 || y >= h - 2) is_land[y * w + x] = false;
     // specks of land go under; small lakes fill in
-    int minIsland = s.shape == Shape::Islands ? 40 : 70;
-    for (auto& part : g.parts([&](int i) { return isLand[i]; }))
-        if (static_cast<int>(part.size()) < minIsland)
-            for (int i : part) isLand[i] = false;
-    for (auto& part : g.parts([&](int i) { return !isLand[i]; }, false))
+    int min_island = s.shape == Shape::Islands ? 40 : 70;
+    for (auto& part : g.Parts([&](int i) { return is_land[i]; }))
+        if (static_cast<int>(part.size()) < min_island)
+            for (int i : part) is_land[i] = false;
+    for (auto& part : g.Parts([&](int i) { return !is_land[i]; }, false))
         if (static_cast<int>(part.size()) < 30)
-            for (int i : part) isLand[i] = true;
+            for (int i : part) is_land[i] = true;
     // the height inland: distance from the coast, roughened by the noise
-    auto coast = g.distance([&](int i) { return !isLand[i]; });
+    auto coast = g.Distance([&](int i) { return !is_land[i]; });
     height.assign(n, 0);
     for (int i = 0; i < n; i++)
-        if (isLand[i])
+        if (is_land[i])
             height[i] = 0.65 * std::min(1.0, coast[i] / 14.0) +
                         0.35 * (e[i] - sea) / std::max(1e-6, 1 - sea);
-    return isLand;
+    return is_land;
 }
 
 // ------------------------------------------------------------------ relief
 
 /** Step 2: ranges along ridged noise, hills round them, and a pass into
  *  every pocket of ground the mountains would wall off. */
-void relief(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
+void Relief(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
             const std::vector<double>& height) {
     int w = g.w, n = w * g.h;
     Noise ridges(rng), lumps(rng);
-    auto coast = g.distance([&](int i) { return t[i] == WATER; });
+    auto coast = g.Distance([&](int i) { return t[i] == WATER; });
     std::vector<double> score(n, -1), eligible;
     for (int i = 0; i < n; i++) {
         if (t[i] == WATER) continue;
         int x = i % w, y = i / w;
-        double r = 1 - std::abs(ridges.fbm(x / 30.0, y / 30.0, 4));  // ridged: high along lines
+        double r = 1 - std::abs(ridges.Fbm(x / 30.0, y / 30.0, 4));  // ridged: high along lines
         score[i] = r * r + 0.35 * height[i];
         if (coast[i] >= 2) eligible.push_back(score[i]);
     }
-    int landTiles = 0;
-    for (int i = 0; i < n; i++) landTiles += t[i] != WATER;
+    int land_tiles = 0;
+    for (int i = 0; i < n; i++) land_tiles += t[i] != WATER;
     // the crests first, at a third of the share, then the ranges widened
     // round them onto the next-highest ground, so they are thick enough to
     // draw as ranges rather than lines
-    double mShare = std::min(0.9, s.mountains * landTiles / std::max<size_t>(1, eligible.size()));
-    double crest = cut(eligible, 1 - mShare / 3), flank = cut(eligible, 1 - mShare * 1.6);
+    double m_share = std::min(0.9, s.mountains * land_tiles / std::max<size_t>(1, eligible.size()));
+    double crest = Cut(eligible, 1 - m_share / 3), flank = Cut(eligible, 1 - m_share * 1.6);
     for (int i = 0; i < n; i++)
         if (score[i] >= crest && coast[i] >= 2) t[i] = MOUNTAINS;
     for (int pass = 0; pass < 2; pass++) {
@@ -275,7 +275,7 @@ void relief(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
             int x = i % w, y = i / w;
             for (int d = 0; d < 8; d++) {
                 int nx = x + DIRS[d][0], ny = y + DIRS[d][1];
-                if (g.in(nx, ny) && t[ny * w + nx] == MOUNTAINS) {
+                if (g.In(nx, ny) && t[ny * w + nx] == MOUNTAINS) {
                     next[i] = MOUNTAINS;
                     break;
                 }
@@ -285,24 +285,25 @@ void relief(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
     }
     // hills: the foothills and lumps of their own
     std::vector<double> hscore(n, -1), hs;
-    auto nearMount = g.distance([&](int i) { return t[i] == MOUNTAINS; });
+    auto near_mount = g.Distance([&](int i) { return t[i] == MOUNTAINS; });
     for (int i = 0; i < n; i++) {
         if (t[i] != PLAIN) continue;
         int x = i % w, y = i / w;
-        double l = lumps.fbm(x / 13.0 + 11.3, y / 13.0 + 2.9, 3);
-        double foot = nearMount[i] >= 0 && nearMount[i] <= 2 ? 0.6 - 0.2 * nearMount[i] : 0;
+        double l = lumps.Fbm(x / 13.0 + 11.3, y / 13.0 + 2.9, 3);
+        double foot = near_mount[i] >= 0 && near_mount[i] <= 2 ? 0.6 - 0.2 * near_mount[i] : 0;
         hscore[i] = l + foot + 0.2 * score[i];
         hs.push_back(hscore[i]);
     }
-    double hCut = cut(hs, 1 - std::min(0.9, s.hills * landTiles / std::max<size_t>(1, hs.size())));
+    double h_cut =
+            Cut(hs, 1 - std::min(0.9, s.hills * land_tiles / std::max<size_t>(1, hs.size())));
     for (int i = 0; i < n; i++)
-        if (t[i] == PLAIN && hscore[i] >= hCut) t[i] = HILLS;
+        if (t[i] == PLAIN && hscore[i] >= h_cut) t[i] = HILLS;
     // passes: on each landmass, every pocket of open ground the mountains cut
     // off gets the cheapest way through them to the landmass's largest one
-    for (auto& mass : g.parts([&](int i) { return t[i] != WATER; })) {
-        std::vector<uint8_t> onMass(n, 0);
-        for (int i : mass) onMass[i] = 1;
-        auto pockets = g.parts([&](int i) { return onMass[i] && t[i] != MOUNTAINS; });
+    for (auto& mass : g.Parts([&](int i) { return t[i] != WATER; })) {
+        std::vector<uint8_t> on_mass(n, 0);
+        for (int i : mass) on_mass[i] = 1;
+        auto pockets = g.Parts([&](int i) { return on_mass[i] && t[i] != MOUNTAINS; });
         if (pockets.size() < 2) continue;
         std::sort(pockets.begin(), pockets.end(), [](auto& a, auto& b) {
             return a.size() != b.size() ? a.size() > b.size() : a[0] < b[0];
@@ -319,10 +320,10 @@ void relief(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
             q.pop_front();
             int x = i % w, y = i / w;
             for (int d = 0; d < 4; d++) {
-                int nx = x + DX4[d], ny = y + DY4[d];
-                if (!g.in(nx, ny)) continue;
+                int nx = x + kDX4[d], ny = y + kDY4[d];
+                if (!g.In(nx, ny)) continue;
                 int j = ny * w + nx;
-                if (!onMass[j]) continue;
+                if (!on_mass[j]) continue;
                 int c = cost[i] + (t[j] == MOUNTAINS);
                 if (c < cost[j]) {
                     cost[j] = c;
@@ -345,11 +346,11 @@ void relief(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
 /** Step 3: rivers from the feet of the hills down to the sea (or into
  *  another river), along the cheapest path over a noise field, so they wind
  *  along its valleys. Two tiles wide, as the tile set draws rivers best. */
-void rivers(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t) {
+void Rivers(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t) {
     int w = g.w, n = w * g.h;
     Noise wander(rng);
-    auto coast = g.distance([&](int i) { return t[i] == WATER; });
-    auto mount = g.distance([&](int i) { return t[i] == MOUNTAINS || t[i] == HILLS; });
+    auto coast = g.Distance([&](int i) { return t[i] == WATER; });
+    auto mount = g.Distance([&](int i) { return t[i] == MOUNTAINS || t[i] == HILLS; });
     // sources: well inland, by the high ground, apart from each other
     std::vector<int> sources;
     for (int i = 0; i < n; i++)
@@ -364,14 +365,14 @@ void rivers(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t)
     // the noise is high, so the river follows the noise's valleys and winds
     std::vector<double> cost(n);
     for (int i = 0; i < n; i++) {
-        double v = 0.5 + 0.5 * wander.fbm((i % w) / 12.0 + 3.3, (i / w) / 12.0 + 1.1, 3);
+        double v = 0.5 + 0.5 * wander.Fbm((i % w) / 12.0 + 3.3, (i / w) / 12.0 + 1.1, 3);
         cost[i] = 1 + 14 * v * v;
     }
     for (int src : sources) {
         if (static_cast<int>(started.size()) >= want) break;
         bool apart = true;
         for (int o : started)
-            if (dist(o % w - src % w, o / w - src / w) < 22) apart = false;
+            if (Dist(o % w - src % w, o / w - src / w) < 22) apart = false;
         if (!apart) continue;
         std::vector<double> best(n, 1e18);
         std::vector<int> from(n, -1);
@@ -390,8 +391,8 @@ void rivers(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t)
             }
             int x = i % w, y = i / w;
             for (int d = 0; d < 4; d++) {
-                int nx = x + DX4[d], ny = y + DY4[d];
-                if (!g.in(nx, ny)) continue;
+                int nx = x + kDX4[d], ny = y + kDY4[d];
+                if (!g.In(nx, ny)) continue;
                 int j = ny * w + nx;
                 if (t[j] == MOUNTAINS || t[j] == HILLS) continue;
                 double nc = c + cost[j];
@@ -413,9 +414,9 @@ void rivers(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t)
             river[i] = 1;
             // the second tile: beside it, across the way the river runs
             int j = k + 1 < path.size() ? path[k + 1] : (k > 0 ? path[k - 1] : i);
-            bool alongX = std::abs(j - i) == 1;
-            int ox = alongX ? 0 : 1, oy = alongX ? 1 : 0;
-            if (g.in(x + ox, y + oy) && t[(y + oy) * w + x + ox] != MOUNTAINS)
+            bool along_x = std::abs(j - i) == 1;
+            int ox = along_x ? 0 : 1, oy = along_x ? 1 : 0;
+            if (g.In(x + ox, y + oy) && t[(y + oy) * w + x + ox] != MOUNTAINS)
                 river[(y + oy) * w + x + ox] = 1;
         }
     }
@@ -426,38 +427,38 @@ void rivers(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t)
 // ------------------------------------------------------------------ growth
 
 /** Step 4: forest where it is wet, marsh where it is wet and low. */
-void growth(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
+void Growth(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
             const std::vector<double>& height) {
     int w = g.w, n = w * g.h;
     Noise wet(rng);
-    auto water = g.distance([&](int i) { return t[i] == WATER; });
+    auto water = g.Distance([&](int i) { return t[i] == WATER; });
     std::vector<double> m(n, -9), ms;
-    int landTiles = 0;
+    int land_tiles = 0;
     for (int i = 0; i < n; i++) {
         if (t[i] == WATER) continue;
-        landTiles++;
+        land_tiles++;
         if (t[i] != PLAIN) continue;
         int x = i % w, y = i / w;
-        m[i] = wet.fbm(x / 26.0 + 4.4, y / 26.0 + 8.8, 4) +
+        m[i] = wet.Fbm(x / 26.0 + 4.4, y / 26.0 + 8.8, 4) +
                (water[i] <= 3 ? 0.08 * (4 - water[i]) : 0);
         ms.push_back(m[i]);
     }
     if (ms.empty()) return;
-    double fCut = cut(ms, 1 - std::min(0.9, s.forest * landTiles / ms.size()));
+    double f_cut = Cut(ms, 1 - std::min(0.9, s.forest * land_tiles / ms.size()));
     for (int i = 0; i < n; i++)
-        if (t[i] == PLAIN && m[i] >= fCut) t[i] = FOREST;
+        if (t[i] == PLAIN && m[i] >= f_cut) t[i] = FOREST;
     // marsh: a few small patches on the wettest low ground by the water
     std::vector<double> low;
     for (int i = 0; i < n; i++)
         if (t[i] == PLAIN && water[i] <= 2) low.push_back(m[i] - height[i]);
-    double mCut = cut(low, 0.97);
+    double m_cut = Cut(low, 0.97);
     for (int i = 0; i < n; i++)
-        if (t[i] == PLAIN && water[i] <= 2 && m[i] - height[i] >= mCut) t[i] = MARSH;
+        if (t[i] == PLAIN && water[i] <= 2 && m[i] - height[i] >= m_cut) t[i] = MARSH;
 }
 
 // ------------------------------------------------------------------ cities, sites
 
-bool footprintOk(const Grid& g, const std::vector<uint8_t>& t, int x, int y) {
+bool FootprintOk(const Grid& g, const std::vector<uint8_t>& t, int x, int y) {
     if (x < 3 || y < 3 || x + 1 >= g.w - 3 || y + 1 >= g.h - 3) return false;
     for (int dy = 0; dy <= 1; dy++)
         for (int dx = 0; dx <= 1; dx++) {
@@ -470,32 +471,32 @@ bool footprintOk(const Grid& g, const std::vector<uint8_t>& t, int x, int y) {
 /** Best-candidate sampling (Mitchell): each new point the best of a few
  *  random candidates, the best being the furthest from the points already
  *  placed, plus `bonus`. Gives an even spread with no clumps. */
-std::vector<std::pair<int, int>> spread(Rng& rng, const std::vector<int>& spots, int count, int w,
+std::vector<std::pair<int, int>> Spread(Rng& rng, const std::vector<int>& spots, int count, int w,
                                         const std::vector<std::pair<int, int>>& avoid,
-                                        double minDist, const std::function<double(int)>& bonus,
+                                        double min_dist, const std::function<double(int)>& bonus,
                                         int candidates) {
     std::vector<std::pair<int, int>> out;
     if (spots.empty()) return out;
     auto nearest = [&](int x, int y) {
         double best = 1e9;
-        for (auto& [ax, ay] : out) best = std::min(best, dist(ax - x, ay - y));
-        for (auto& [ax, ay] : avoid) best = std::min(best, dist(ax - x, ay - y));
+        for (auto& [ax, ay] : out) best = std::min(best, Dist(ax - x, ay - y));
+        for (auto& [ax, ay] : avoid) best = std::min(best, Dist(ax - x, ay - y));
         return best;
     };
     for (int k = 0; k < count; k++) {
         int pick = -1;
-        double pickScore = -1e9;
+        double pick_score = -1e9;
         // `candidates` that keep their distance; on crowded land it may take
         // many draws to find them
         for (int c = 0, found = 0; found < candidates && c < 600; c++) {
             int s = spots[rng.below(static_cast<int>(spots.size()))];
             int x = s % w, y = s / w;
             double d = nearest(x, y);
-            if (d < minDist) continue;
+            if (d < min_dist) continue;
             found++;
             double score = std::min(d, 12.0) + bonus(s);
-            if (score > pickScore) {
-                pickScore = score;
+            if (score > pick_score) {
+                pick_score = score;
                 pick = s;
             }
         }
@@ -506,52 +507,52 @@ std::vector<std::pair<int, int>> spread(Rng& rng, const std::vector<int>& spots,
 }
 
 // the words a world's name is made of
-const char* const ADJECTIVES[] = {
+const char* const kAdjectives[] = {
     "Shattered", "Sundered", "Burning", "Frozen",  "Whispering", "Forgotten", "Gilded",  "Crimson",
     "Iron",      "Silver",   "Hollow",  "Endless", "Drowned",    "Ashen",     "Emerald", "Howling",
     "Sunken",    "Twilight", "Broken",  "Haunted", "Golden",     "Bitter",    "Wild",    "Lost"};
-const char* const FIRST[] = {"Thorn",  "Dusk",   "Ember", "Raven", "Storm", "Frost",
-                             "Gold",   "Wolf",   "Mist",  "Drake", "Shade", "Iron",
-                             "Bright", "Grim",   "Moon",  "Star",  "Oak",   "Black",
-                             "Red",    "Winter", "Wyrm",  "Ash",   "Salt",  "Hawk"};
-const char* const SECOND[] = {"mere",  "hold",  "vale", "fell",  "wick", "haven", "march", "moor",
-                              "crest", "reach", "gard", "shire", "fall", "wood",  "spire", "ford"};
-const char* const NOUNS[3][8] = {{"Kingdoms", "Marches", "Dominions", "Realms", "Baronies", "Lands",
-                                  "Reaches", "Shires"},  // continents
-                                 {"Realm", "Expanse", "Heartland", "Empire", "Dominion", "Wilds",
-                                  "Steppe", "Highlands"},  // pangaea
-                                 {"Isles", "Archipelago", "Atolls", "Shoals", "Skerries", "Islands",
-                                  "Straits", "Sea Lords"}};  // islands
-const char* const LINES[] = {"Eight warlords, one throne",    "Where empires rise and fall",
-                             "Dragons stir beyond the hills", "Gold, steel and treachery",
-                             "A land waiting for a king",     "Fortune favours the bold",
-                             "Old ruins, older magic",        "Heroes wanted. Apply within",
-                             "The war begins at dawn",        "Every road leads to war",
-                             "Crowns are won, not given",     "Banners over every hill",
-                             "Beware the dark between towns", "Here be monsters (and loot)",
-                             "Many cities, one Warlord",      "Sharpen your swords"};
+const char* const kFirst[] = {"Thorn",  "Dusk",   "Ember", "Raven", "Storm", "Frost",
+                              "Gold",   "Wolf",   "Mist",  "Drake", "Shade", "Iron",
+                              "Bright", "Grim",   "Moon",  "Star",  "Oak",   "Black",
+                              "Red",    "Winter", "Wyrm",  "Ash",   "Salt",  "Hawk"};
+const char* const kSecond[] = {"mere",  "hold",  "vale", "fell",  "wick", "haven", "march", "moor",
+                               "crest", "reach", "gard", "shire", "fall", "wood",  "spire", "ford"};
+const char* const kNouns[3][8] = {{"Kingdoms", "Marches", "Dominions", "Realms", "Baronies",
+                                   "Lands", "Reaches", "Shires"},  // continents
+                                  {"Realm", "Expanse", "Heartland", "Empire", "Dominion", "Wilds",
+                                   "Steppe", "Highlands"},  // pangaea
+                                  {"Isles", "Archipelago", "Atolls", "Shoals", "Skerries",
+                                   "Islands", "Straits", "Sea Lords"}};  // islands
+const char* const kLines[] = {"Eight warlords, one throne",    "Where empires rise and fall",
+                              "Dragons stir beyond the hills", "Gold, steel and treachery",
+                              "A land waiting for a king",     "Fortune favours the bold",
+                              "Old ruins, older magic",        "Heroes wanted. Apply within",
+                              "The war begins at dawn",        "Every road leads to war",
+                              "Crowns are won, not given",     "Banners over every hill",
+                              "Beware the dark between towns", "Here be monsters (and loot)",
+                              "Many cities, one Warlord",      "Sharpen your swords"};
 
 template <class T, size_t N>
-const char* pickWord(Rng& rng, const T (&list)[N]) {
+const char* PickWord(Rng& rng, const T (&list)[N]) {
     return list[rng.below(static_cast<int>(N))];
 }
 
 // How far each letter moves the pen in CHANCE17, the font New Scenario's
 // list draws names in (CHANCE17.FIN), and the widest name the list's box
 // holds: "The Frozen Steppe", 140 pixels; the shipped names reach 130.
-constexpr int UPPER_WIDTH[26] = {15, 16, 13, 17, 15, 18, 15, 16, 12, 14, 15, 14, 18,
+constexpr int kUpperWidth[26] = {15, 16, 13, 17, 15, 18, 15, 16, 12, 14, 15, 14, 18,
                                  16, 15, 15, 15, 16, 14, 13, 16, 17, 24, 16, 13, 14};
-constexpr int LOWER_WIDTH[26] = {7, 6, 7, 9, 6, 8, 6, 7, 4, 7,  7, 4, 12,
+constexpr int kLowerWidth[26] = {7, 6, 7, 9, 6, 8, 6, 7, 4, 7,  7, 4, 12,
                                  8, 7, 8, 6, 6, 6, 5, 9, 9, 14, 9, 9, 8};
-constexpr int NAME_WIDTH = 140, NAME_CHARS = 20;
+constexpr int kNameWidth = 140, kNameChars = 20;
 
-int nameWidth(const std::string& s) {
+int NameWidth(const std::string& s) {
     int n = 0;
     for (char c : s) {
         if (c >= 'A' && c <= 'Z')
-            n += UPPER_WIDTH[c - 'A'];
+            n += kUpperWidth[c - 'A'];
         else if (c >= 'a' && c <= 'z')
-            n += LOWER_WIDTH[c - 'a'];
+            n += kLowerWidth[c - 'a'];
         else if (c == ' ')
             n += 7;
         else if (c == '\'')
@@ -561,8 +562,8 @@ int nameWidth(const std::string& s) {
     }
     return n;
 }
-bool fits(const std::string& s) {
-    return static_cast<int>(s.size()) <= NAME_CHARS && nameWidth(s) <= NAME_WIDTH;
+bool Fits(const std::string& s) {
+    return static_cast<int>(s.size()) <= kNameChars && NameWidth(s) <= kNameWidth;
 }
 
 }  // namespace
@@ -570,14 +571,14 @@ bool fits(const std::string& s) {
 Title title(Shape shape, long seed) {
     Rng rng(static_cast<double>(seed) +
             1000003.0);  // its own dice: naming never touches the world's
-    const auto& nouns = NOUNS[shape == Shape::Pangaea ? 1 : shape == Shape::Islands ? 2 : 0];
+    const auto& nouns = kNouns[shape == Shape::Pangaea ? 1 : shape == Shape::Islands ? 2 : 0];
     Title t;
     std::string noun;
     for (int tries = 0; tries < 50; tries++) {
-        std::string place = pickWord(rng, FIRST);  // two statements: the dice in a fixed order
-        place += pickWord(rng, SECOND);
-        noun = pickWord(rng, nouns);
-        std::string adj = pickWord(rng, ADJECTIVES);
+        std::string place = PickWord(rng, kFirst);  // two statements: the dice in a fixed order
+        place += PickWord(rng, kSecond);
+        noun = PickWord(rng, nouns);
+        std::string adj = PickWord(rng, kAdjectives);
         int form = rng.below(3);
         if (form == 0)
             t.name = "The " + adj + " " + noun;
@@ -585,10 +586,10 @@ Title title(Shape shape, long seed) {
             t.name = noun + " of " + place;
         else
             t.name = place + " " + noun;
-        if (fits(t.name)) break;
+        if (Fits(t.name)) break;
     }
-    if (!fits(t.name)) t.name = "The " + noun;  // fits whatever the noun
-    t.text = pickWord(rng, LINES);
+    if (!Fits(t.name)) t.name = "The " + noun;  // fits whatever the noun
+    t.text = PickWord(rng, kLines);
     return t;
 }
 
@@ -620,23 +621,23 @@ World makeWorld(const Settings& s, Rng& rng, int w, int h) {
     int n = w * h;
     World world;
     std::vector<double> height;
-    auto isLand = land(s, rng, g, height);
+    auto is_land = Land(s, rng, g, height);
     auto& t = world.terrain;
     t.assign(n, WATER);
     for (int i = 0; i < n; i++)
-        if (isLand[i]) t[i] = PLAIN;
-    relief(s, rng, g, t, height);
-    rivers(s, rng, g, t);
-    growth(s, rng, g, t, height);
+        if (is_land[i]) t[i] = PLAIN;
+    Relief(s, rng, g, t, height);
+    Rivers(s, rng, g, t);
+    Growth(s, rng, g, t, height);
 
     // cities: on open ground with room round them, rather by water
-    auto water = g.distance([&](int i) { return t[i] == WATER; });
+    auto water = g.Distance([&](int i) { return t[i] == WATER; });
     std::vector<int> spots;
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++)
-            if (footprintOk(g, t, x, y)) spots.push_back(y * w + x);
+            if (FootprintOk(g, t, x, y)) spots.push_back(y * w + x);
     int want = std::clamp(s.cities, 8, 100);
-    world.cities = spread(
+    world.cities = Spread(
             rng, spots, want, w, {}, 2.9,
             [&](int i) {
                 int d = water[i];
@@ -648,7 +649,7 @@ World makeWorld(const Settings& s, Rng& rng, int w, int h) {
             for (int dx = 0; dx <= 1; dx++) t[(y + dy) * w + x + dx] = CITY;
 
     // sites: in the wilds, on ground an army can walk to from a city
-    auto open = g.parts([&](int i) { return t[i] != WATER && t[i] != MOUNTAINS; });
+    auto open = g.Parts([&](int i) { return t[i] != WATER && t[i] != MOUNTAINS; });
     std::vector<int> part(n, -1);
     std::vector<bool> settled(open.size(), false);
     for (size_t k = 0; k < open.size(); k++)
@@ -663,12 +664,12 @@ World makeWorld(const Settings& s, Rng& rng, int w, int h) {
         bool clear = true;
         for (int dy = -2; dy <= 2 && clear; dy++)
             for (int dx = -2; dx <= 2 && clear; dx++)
-                if (g.in(x + dx, y + dy) && t[(y + dy) * w + x + dx] == CITY) clear = false;
+                if (g.In(x + dx, y + dy) && t[(y + dy) * w + x + dx] == CITY) clear = false;
         if (clear) wild.push_back(i);
     }
     std::vector<std::pair<int, int>> avoid;
     for (auto& [x, y] : world.cities) avoid.push_back({x, y});
-    world.sites = spread(rng, wild, s.sites, w, avoid, 3.0, [](int) { return 0.0; }, 20);
+    world.sites = Spread(rng, wild, s.sites, w, avoid, 3.0, [](int) { return 0.0; }, 20);
     for (auto& [x, y] : world.sites) t[y * w + x] = SITE;
     return world;
 }
@@ -705,7 +706,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         auto& sp = spans[k];
         int ax = sp.ew ? sp.x - 1 : sp.x, ay = sp.ew ? sp.y : sp.y - 1;
         int bx = sp.ew ? sp.x + 2 : sp.x, by = sp.ew ? sp.y : sp.y + 2;
-        if (!g.in(ax, ay) || !g.in(bx, by)) continue;
+        if (!g.In(ax, ay) || !g.In(bx, by)) continue;
         int a = ay * w + ax, b = by * w + bx;
         leap[a].push_back({b, static_cast<int>(k)});
         leap[b].push_back({a, static_cast<int>(k)});
@@ -717,16 +718,16 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         const int ring[8][2] = {{0, -1}, {1, -1}, {2, 0}, {2, 1}, {1, 2}, {0, 2}, {-1, 1}, {-1, 0}};
         for (auto& r : ring) {
             int dx = x + r[0], dy = y + r[1];
-            if (g.in(dx, dy) && build(dy * w + dx) > 0 && terrain[dy * w + dx] != MOUNTAINS)
+            if (g.In(dx, dy) && build(dy * w + dx) > 0 && terrain[dy * w + dx] != MOUNTAINS)
                 d.push_back(dy * w + dx);
         }
         return d;
     };
     std::vector<std::vector<int>> door(cities.size());
-    std::vector<int> doorOf(n, -1);
+    std::vector<int> door_of(n, -1);
     for (size_t c = 0; c < cities.size(); c++) {
         door[c] = doors(static_cast<int>(c));
-        for (int i : door[c]) doorOf[i] = static_cast<int>(c);
+        for (int i : door[c]) door_of[i] = static_cast<int>(c);
     }
     // A*: the cheapest road from any door of a to any door of b, existing
     // roads cheap so new ones join them; returns its cost and tiles
@@ -737,7 +738,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         auto guess = [&](int i) { return 0.5 * (std::abs(i % w - bx) + std::abs(i / w - by)); };
         // a little extra the further a tile is off the straight line, so a road
         // runs as a staircase along it rather than as one long L
-        double lx = bx - ax0, ly = by - ay0, len = std::max(1.0, dist(lx, ly));
+        double lx = bx - ax0, ly = by - ay0, len = std::max(1.0, Dist(lx, ly));
         auto off = [&](int i) {
             return 0.08 * std::abs((i % w - ax0) * ly - (i / w - ay0) * lx) / len;
         };
@@ -754,7 +755,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
             auto [f, i] = q.top();
             q.pop();
             if (f - guess(i) > cost[i] + 1e-9) continue;
-            if (doorOf[i] == b) {
+            if (door_of[i] == b) {
                 end = i;
                 break;
             }
@@ -768,8 +769,8 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
                 }
             };
             for (int d = 0; d < 4; d++) {
-                int nx = x + DX4[d], ny = y + DY4[d];
-                if (!g.in(nx, ny)) continue;
+                int nx = x + kDX4[d], ny = y + kDY4[d];
+                if (!g.In(nx, ny)) continue;
                 int j = ny * w + nx;
                 double c = build(j);
                 if (c < 0) continue;
@@ -797,7 +798,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         std::vector<std::pair<double, int>> near;
         for (int b = 0; b < m; b++)
             if (b != a)
-                near.push_back({dist(cities[a].first - cities[b].first,
+                near.push_back({Dist(cities[a].first - cities[b].first,
                                      cities[a].second - cities[b].second),
                                 b});
         std::sort(near.begin(), near.end());
@@ -830,7 +831,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         tree[l.a].push_back({l.b, l.cost});
         tree[l.b].push_back({l.a, l.cost});
     }
-    auto treeCost = [&](int a, int b) {
+    auto tree_cost = [&](int a, int b) {
         std::vector<double> d(m, -1);
         std::deque<int> q{a};
         d[a] = 0;
@@ -846,8 +847,8 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         return d[b];
     };
     for (auto& l : links) {
-        double t = treeCost(l.a, l.b);
-        if (t > 2.2 * l.cost && l.cost <= 24 && uniform(rng) < 0.7) {
+        double t = tree_cost(l.a, l.b);
+        if (t > 2.2 * l.cost && l.cost <= 24 && Uniform(rng) < 0.7) {
             chosen.push_back(l);
             tree[l.a].push_back({l.b, l.cost});
             tree[l.b].push_back({l.a, l.cost});

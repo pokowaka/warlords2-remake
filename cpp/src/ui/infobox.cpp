@@ -32,8 +32,8 @@ const Board POPUP2{36, "POPUP2.PCK", 256, 75, 1};
 namespace {
 std::map<int, gfx::ImageP> boards;
 
-const int MOVE_FLY[2] = {184, 30}, MOVE_BOTH[2] = {216, 30}, MOVE_WOODS[2] = {248, 30},
-          MOVE_HILLS[2] = {152, 30};
+const int kMoveFly[2] = {184, 30}, kMoveBoth[2] = {216, 30}, kMoveWoods[2] = {248, 30},
+          kMoveHills[2] = {152, 30};
 
 struct Box : kit::Modal {
     Board which;
@@ -54,7 +54,7 @@ struct Box : kit::Modal {
     void keypressed(const std::string&) override { kit::pop(this); }
 };
 
-void show(const Board& which, int sx, int sy, std::function<void(int, int)> paint) {
+void Show(const Board& which, int sx, int sy, std::function<void(int, int)> paint) {
     auto d = std::make_shared<Box>();
     d->which = which;
     auto [bx, by] = place(which, sx, sy);
@@ -65,28 +65,28 @@ void show(const Board& which, int sx, int sy, std::function<void(int, int)> pain
     kit::push(d);
 }
 
-void armyBoard(int x, int y, const std::string& name, int typeId, int side, int medals) {
+void ArmyBoard(int x, int y, const std::string& name, int type_id, int side, int medals) {
     const Font& f = kit::font(2);
     kit::centred(f, name, x + 112, y + 8);
-    kit::army(typeId, side, x + 96, y + 31, 1);
+    kit::army(type_id, side, x + 96, y + 31, 1);
     (void)medals;  // the remake keeps no medals yet
-    const w2::ArmyType* t = G.g->types.byId(typeId);
+    const w2::ArmyType* t = G.g->types.byId(type_id);
     const int* src = nullptr;
     if (t && t->flies)
-        src = MOVE_FLY;
+        src = kMoveFly;
     else if (t && t->woodsMove && t->hillsMove)
-        src = MOVE_BOTH;
+        src = kMoveBoth;
     else if (t && t->woodsMove)
-        src = MOVE_WOODS;
+        src = kMoveWoods;
     else if (t && t->hillsMove)
-        src = MOVE_HILLS;
+        src = kMoveHills;
     if (src) {
         gfx::setColor(1, 1, 1);
         gfx::draw(G.abits, gfx::newQuad(src[0], src[1], 32, 10), x + 96, y + 103);
     }
 }
 
-void numbers(int x, int y, const std::string& a, const std::string& b, const std::string& c,
+void Numbers(int x, int y, const std::string& a, const std::string& b, const std::string& c,
              const std::string& d) {
     const Font& f = kit::font(2);
     gfx::setColor(1, 1, 1);
@@ -100,7 +100,7 @@ struct HelpRecord {
     int sub = 0;
     std::string title, text;
 };
-std::map<int, HelpRecord>& helpFile() {
+std::map<int, HelpRecord>& HelpFile() {
     static std::map<int, HelpRecord> out;
     static bool loaded = false;
     if (loaded) return out;
@@ -135,16 +135,16 @@ gfx::ImageP board(const Board& which) {
 }
 
 std::pair<int, int> place(const Board& which, int sx, int sy) {
-    const auto& L = G.layout;
+    const auto& l = G.layout;
     int hw = which.w / 2, hh = which.h / 2;
     int cx = (sx + 4) / 8 * 8;
-    cx = std::max(hw, std::min(L.w - hw, cx));
-    int cy = std::max(hh, std::min(L.h - 2 - hh, sy));
-    return {cx - hw - L.dialog.x, cy - hh - L.dialog.y};
+    cx = std::max(hw, std::min(l.w - hw, cx));
+    int cy = std::max(hh, std::min(l.h - 2 - hh, sy));
+    return {cx - hw - l.dialog.x, cy - hh - l.dialog.y};
 }
 
 void lines(int sx, int sy, const std::string& title, const std::string& text) {
-    show(LINES, sx, sy, [title, text](int x, int y) {
+    Show(LINES, sx, sy, [title, text](int x, int y) {
         const Font& f = kit::font(2);
         kit::centred(f.colours(7, 0), title, x + LINES.w / 2 - 8, y + 11);
         kit::centred(f, text, x + LINES.w / 2 - 8, y + 35);
@@ -157,23 +157,23 @@ void army(int sx, int sy, const w2::Army* a) {
     std::string name = hero ? a->name : (t ? t->name : "");
     w2::Army copy = *a;
     int side = G.player->index;
-    show(ARMY, sx, sy, [name, copy, side](int x, int y) {
-        armyBoard(x, y, name, copy.type, side, 0);
-        numbers(x, y, w2::fmt("Strength: %d", copy.strength),  // 4125:10a8
+    Show(ARMY, sx, sy, [name, copy, side](int x, int y) {
+        ArmyBoard(x, y, name, copy.type, side, 0);
+        Numbers(x, y, w2::fmt("Strength: %d", copy.strength),  // 4125:10a8
                 w2::fmt("Movement: %d", copy.maxMoves),        // 4125:10b5
                 w2::fmt("Remain: %d", copy.moves),             // 4125:10c2
                 w2::fmt("Upkeep: %d", copy.upkeep));           // 4125:10cd
     });
 }
 
-void armyType(int sx, int sy, int typeId, const w2::Slot& s, int side) {
-    const w2::ArmyType* t = G.g->types.byId(typeId);
+void armyType(int sx, int sy, int type_id, const w2::Slot& s, int side) {
+    const w2::ArmyType* t = G.g->types.byId(type_id);
     std::string name = t ? t->name : "";
     int sd = side == w2::NONE ? G.player->index : side;
     w2::Slot slot = s;
-    show(ARMY, sx, sy, [name, typeId, sd, slot](int x, int y) {
-        armyBoard(x, y, name, typeId, sd, 0);
-        numbers(x, y, w2::fmt("Strength: %d", slot.strength),  // 4125:107c
+    Show(ARMY, sx, sy, [name, type_id, sd, slot](int x, int y) {
+        ArmyBoard(x, y, name, type_id, sd, 0);
+        Numbers(x, y, w2::fmt("Strength: %d", slot.strength),  // 4125:107c
                 w2::fmt("Movement: %d", slot.move),            // 4125:1089
                 w2::fmt("Time: %d", slot.time),                // 4125:1096
                 w2::fmt("Cost: %d", slot.cost));               // 4125:109f
@@ -181,7 +181,7 @@ void armyType(int sx, int sy, int typeId, const w2::Slot& s, int side) {
 }
 
 bool control(int sx, int sy, int id, kit::Modal* d) {
-    auto& recs = helpFile();
+    auto& recs = HelpFile();
     auto it = recs.find(id);
     if (it == recs.end()) return false;
     const HelpRecord& rec = it->second;

@@ -9,16 +9,16 @@ namespace w2::cues {
 
 namespace {
 // FILE.DAT group and index of each cue's song; index -1 is a random entry.
-const std::map<int, std::pair<int, int>> SONG = {
+const std::map<int, std::pair<int, int>> kSong = {
     {0, {8, 0}},  {1, {10, -1}}, {3, {9, -1}}, {4, {12, 0}},  {5, {13, -1}}, {6, {14, -1}},
     {7, {15, 0}}, {8, {16, 0}},  {9, {17, 0}}, {10, {18, 0}}, {11, {19, 0}},
 };
-const std::map<int, int> LOSING = {{5, 40}, {10, 41}, {15, 42}, {20, 43}, {25, 44}, {30, 45}};
-const std::map<int, int> WINNING = {{10, 48}, {15, 49}, {20, 50}, {25, 51}, {30, 52}, {35, 53}};
+const std::map<int, int> kLosing = {{5, 40}, {10, 41}, {15, 42}, {20, 43}, {25, 44}, {30, 45}};
+const std::map<int, int> kWinning = {{10, 48}, {15, 49}, {20, 50}, {25, 51}, {30, 52}, {35, 53}};
 
-std::string entry(const uidata::Strings& files, int group, int index, const Roll& roll) {
-    static const std::vector<std::string> none;
-    const auto& g = group >= 0 && group < static_cast<int>(files.size()) ? files[group] : none;
+std::string Entry(const uidata::Strings& files, int group, int index, const Roll& roll) {
+    static const std::vector<std::string> kNone;
+    const auto& g = group >= 0 && group < static_cast<int>(files.size()) ? files[group] : kNone;
     if (index < 0) index = roll(static_cast<int>(g.size())) - 1;
     if (index > static_cast<int>(g.size()) - 1) index = static_cast<int>(g.size()) - 1;
     if (index < 0 || index >= static_cast<int>(g.size())) return "";
@@ -46,11 +46,11 @@ std::pair<std::string, bool> song(const uidata::Strings& files, int cue,
             else if (r >= 53)
                 group = 10;
         }
-        return {entry(files, group, -1, roll), false};
+        return {Entry(files, group, -1, roll), false};
     }
-    auto s = SONG.find(cue);
-    if (s == SONG.end()) return {"", false};
-    return {entry(files, s->second.first, s->second.second, roll), true};
+    auto s = kSong.find(cue);
+    if (s == kSong.end()) return {"", false};
+    return {Entry(files, s->second.first, s->second.second, roll), true};
 }
 
 int advisor(const Game& g, Side& side, const Roll& roll) {
@@ -66,14 +66,14 @@ int advisor(const Game& g, Side& side, const Roll& roll) {
         int m = (cities / 5) * 5;
         adv.dir = 2;
         adv.mark = m;
-        auto it = LOSING.find(m + 5);
-        group = it != LOSING.end() ? it->second : 46;
+        auto it = kLosing.find(m + 5);
+        group = it != kLosing.end() ? it->second : 46;
     } else if (adv.mark + 5 <= cities) {
         int m = (cities / 5) * 5;
         adv.dir = 1;
         adv.mark = m;
-        auto it = WINNING.find(m);
-        group = it != WINNING.end() ? it->second : 47;
+        auto it = kWinning.find(m);
+        group = it != kWinning.end() ? it->second : 47;
     } else {
         if (g.turn % 7 != 0) return NONE;
         if (side.gold < 100)
@@ -95,11 +95,11 @@ int advisor(const Game& g, Side& side, const Roll& roll) {
 
 std::pair<std::string, std::string> clip(const uidata::Strings& files, int group,
                                          const Roll& roll) {
-    if (group >= GREET) return {entry(files, group, 0, roll), entry(files, group, 1, roll)};
-    static const std::vector<std::string> none;
-    const auto& g = group >= 0 && group < static_cast<int>(files.size()) ? files[group] : none;
+    if (group >= GREET) return {Entry(files, group, 0, roll), Entry(files, group, 1, roll)};
+    static const std::vector<std::string> kNone;
+    const auto& g = group >= 0 && group < static_cast<int>(files.size()) ? files[group] : kNone;
     int i = roll(static_cast<int>(g.size()));
-    const auto& t = group + 30 < static_cast<int>(files.size()) ? files[group + 30] : none;
+    const auto& t = group + 30 < static_cast<int>(files.size()) ? files[group + 30] : kNone;
     std::string sample = i >= 1 && i <= static_cast<int>(g.size()) ? g[i - 1] : "";
     int ti = std::min(i, static_cast<int>(t.size())) - 1;
     std::string text = ti >= 0 && ti < static_cast<int>(t.size()) ? t[ti] : "";

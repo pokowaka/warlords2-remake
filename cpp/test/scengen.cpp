@@ -51,7 +51,7 @@ using namespace w2;
 namespace {
 
 /** Show a picture in the system's viewer. */
-void openPicture(const std::string& path) {
+void OpenPicture(const std::string& path) {
 #if defined(__APPLE__)
     std::string cmd = "open \"" + path + "\"";
 #elif defined(_WIN32)
@@ -64,7 +64,7 @@ void openPicture(const std::string& path) {
 }
 
 /** The preview picture beside a scenario's files; its path. */
-std::string writePreview(const std::string& data, const std::string& name) {
+std::string WritePreview(const std::string& data, const std::string& name) {
     auto map = scn::load(data + "/" + name, name);
     std::string path = data + "/" + name + "/" + name + ".png";
     if (!writeFile(path, preview::png(*map, data)))
@@ -74,7 +74,7 @@ std::string writePreview(const std::string& data, const std::string& name) {
 
 /** What puts a world in New Scenario's list: NAME.INF, and the start menu's
  *  picture, PICS/SCENARIO.PCK (warlords/scenarios). */
-void writeListing(const std::string& data, const std::string& dir, const std::string& title,
+void WriteListing(const std::string& data, const std::string& dir, const std::string& title,
                   const std::string& text) {
     auto map = scn::load(data + "/" + dir, dir);
     scenarios::Entry e;
@@ -94,10 +94,10 @@ void writeListing(const std::string& data, const std::string& dir, const std::st
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string data = "original", name, previewOnly, dumpDir;
+    std::string data = "original", name, preview_only, dump_dir;
     long seed = 1;
     int tries = 20, count = 1;
-    bool keepFailures = false, quiet = false, open = false;
+    bool keep_failures = false, quiet = false, open = false;
     scengen::Settings world;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -130,31 +130,31 @@ int main(int argc, char** argv) {
         else if (a == "--tries")
             tries = std::max(1, std::stoi(next()));
         else if (a == "--keep-failures")
-            keepFailures = true;
+            keep_failures = true;
         else if (a == "--open")
             open = true;
         else if (a == "--quiet")
             quiet = true;
         else if (a == "--preview")
-            previewOnly = upper(next());
+            preview_only = upper(next());
         else if (a == "--dump")
-            dumpDir = next();
+            dump_dir = next();
         else {
             fprintf(stderr, "unknown argument: %s (see the top of cpp/test/scengen.cpp)\n",
                     a.c_str());
             return 2;
         }
     }
-    if (!previewOnly.empty()) {
-        if (!fileExists(data + "/" + previewOnly + "/" + previewOnly + ".SCN")) {
-            fprintf(stderr, "no scenario '%s/%s/%s.SCN'\n", data.c_str(), previewOnly.c_str(),
-                    previewOnly.c_str());
+    if (!preview_only.empty()) {
+        if (!fileExists(data + "/" + preview_only + "/" + preview_only + ".SCN")) {
+            fprintf(stderr, "no scenario '%s/%s/%s.SCN'\n", data.c_str(), preview_only.c_str(),
+                    preview_only.c_str());
             return 1;
         }
         try {
-            std::string path = writePreview(data, previewOnly);
+            std::string path = WritePreview(data, preview_only);
             printf("%s\n", path.c_str());
-            if (open) openPicture(path);
+            if (open) OpenPicture(path);
             return 0;
         } catch (const std::exception& ex) {
             fprintf(stderr, "could not draw the preview: %s\n", ex.what());
@@ -177,7 +177,7 @@ int main(int argc, char** argv) {
                 data.c_str());
         return 1;
     }
-    if (!dumpDir.empty()) {
+    if (!dump_dir.empty()) {
         for (int k = 0; k < count; k++) {
             long s0 = seed + k;
             Rng r(static_cast<double>(s0));
@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
             o.world = world;
             auto files = randommap::generateNow(o);
             std::string dir =
-                    dumpDir + "/" + scengen::shapeName(world.shape) + "-" + std::to_string(s0);
+                    dump_dir + "/" + scengen::shapeName(world.shape) + "-" + std::to_string(s0);
             std::filesystem::create_directories(dir);
             for (auto& [ext, bytes] : files)
                 writeFile(dir + "/" + randommap::DIR + "." + ext, bytes);
@@ -213,7 +213,7 @@ int main(int argc, char** argv) {
             files = randommap::generateNow(o);
             auto map = scn::loadFromFiles(data + "/" + randommap::DIR, randommap::DIR, files);
             eval = mapeval::evaluate(*map, "scenario#" + std::to_string(used));
-            if (eval.passed() || keepFailures) break;
+            if (eval.passed() || keep_failures) break;
             if (!quiet) {
                 for (auto& is : eval.issues)
                     if (mapeval::isHard(is.check)) {
@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
                     }
             }
         }
-        if (!eval.passed() && !keepFailures) {
+        if (!eval.passed() && !keep_failures) {
             fprintf(stderr,
                     "no world from seed %ld on passed the hard rules; --keep-failures writes the "
                     "last anyway\n",
@@ -249,10 +249,10 @@ int main(int argc, char** argv) {
             writeFile(dir + "/" + n + ".ITM", *itm);
         std::string picture;
         try {
-            picture = writePreview(data, n);
+            picture = WritePreview(data, n);
             pictures.push_back(picture);
             auto fun = scengen::title(world.shape, used);
-            writeListing(data, n, name.empty() ? fun.name : n, fun.text);
+            WriteListing(data, n, name.empty() ? fun.name : n, fun.text);
         } catch (const std::exception& ex) {
             fprintf(stderr, "%s: no preview or listing: %s\n", n.c_str(), ex.what());
         }
@@ -270,6 +270,6 @@ int main(int argc, char** argv) {
         }
     }
     if (open)
-        for (auto& p : pictures) openPicture(p);
+        for (auto& p : pictures) OpenPicture(p);
     return 0;
 }

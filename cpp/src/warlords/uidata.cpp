@@ -7,13 +7,13 @@
 
 namespace w2::uidata {
 
-static const int MAGIC = 0x7d00;
+static const int kMagic = 0x7d00;
 
 Strings strings(const std::string& path) {
     std::string s = mustRead(path);
-    int nGroups = u16(s, 0) / 4;  // the first offset IS the index size
+    int n_groups = u16(s, 0) / 4;  // the first offset IS the index size
     Strings groups;
-    for (int g = 0; g < nGroups; g++) {
+    for (int g = 0; g < n_groups; g++) {
         int off = u16(s, static_cast<size_t>(g) * 4), count = u16(s, g * 4 + 2);
         std::vector<std::string> out;
         for (int i = 0; i < count; i++) {
@@ -40,7 +40,7 @@ std::map<int, Area> areas(const std::string& path) {
     std::map<int, Area> out;
     size_t at = 0;
     while (at + 13 < s.size()) {
-        if (u16(s, at) != MAGIC) throw std::runtime_error("AREA.DAT: lost the record boundary");
+        if (u16(s, at) != kMagic) throw std::runtime_error("AREA.DAT: lost the record boundary");
         Area a;
         a.id = u16(s, at + 2);
         a.enabled = u16(s, at + 4);
@@ -61,7 +61,7 @@ std::map<int, ButtonGroup> buttons(const std::string& path) {
     std::map<int, ButtonGroup> out;
     size_t at = 0;
     while (at + 32 < s.size()) {
-        if (u16(s, at) != MAGIC) throw std::runtime_error("BUTTON.DAT: lost the record boundary");
+        if (u16(s, at) != kMagic) throw std::runtime_error("BUTTON.DAT: lost the record boundary");
         ButtonGroup b;
         b.id = u16(s, at + 2);
         int count = u16(s, at + 4);
@@ -113,16 +113,16 @@ std::map<int, int> shortcuts(const std::string& path) {
     return out;
 }
 
-UI load(const std::string& dataDir) {
-    std::string d = dataDir + "/DATA/";
+UI load(const std::string& data_dir) {
+    std::string d = data_dir + "/DATA/";
     UI ui;
     ui.files = strings(d + "FILE.DAT");
     if (ui.files.size() > 3)
         for (size_t i = 0; i < ui.files[3].size(); i++)
             ui.bitmaps[static_cast<int>(i)] = lower(ui.files[3][i]);
     try {
-        ui.shortcutItems = shortcutItems(dataDir + "/UDB/UDB.DAT");
-        ui.shortcuts = shortcuts(dataDir + "/UDB/UDB.CUR");
+        ui.shortcutItems = shortcutItems(data_dir + "/UDB/UDB.DAT");
+        ui.shortcuts = shortcuts(data_dir + "/UDB/UDB.CUR");
     } catch (const std::exception&) {
         ui.shortcutItems.clear();
         ui.shortcuts.clear();

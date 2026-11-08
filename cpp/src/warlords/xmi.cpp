@@ -6,7 +6,7 @@ namespace w2::xmi {
 
 namespace {
 
-uint32_t u32be(const std::string& s, size_t i) {
+uint32_t U32be(const std::string& s, size_t i) {
     return (static_cast<uint32_t>(static_cast<uint8_t>(s[i])) << 24) |
            (static_cast<uint32_t>(static_cast<uint8_t>(s[i + 1])) << 16) |
            (static_cast<uint32_t>(static_cast<uint8_t>(s[i + 2])) << 8) |
@@ -14,13 +14,13 @@ uint32_t u32be(const std::string& s, size_t i) {
 }
 
 // the EVNT chunk of the first sequence: {start, length}
-bool walk(const std::string& s, size_t from, size_t to, size_t& at, size_t& len) {
+bool Walk(const std::string& s, size_t from, size_t to, size_t& at, size_t& len) {
     size_t p = from;
     while (p + 8 <= to) {
         std::string id = s.substr(p, 4);
-        size_t n = u32be(s, p + 4);
+        size_t n = U32be(s, p + 4);
         if (id == "FORM" || id == "CAT ") {
-            if (walk(s, p + 12, std::min(to, p + 8 + n), at, len)) return true;
+            if (Walk(s, p + 12, std::min(to, p + 8 + n), at, len)) return true;
         } else if (id == "EVNT") {
             at = p + 8;
             len = n;
@@ -41,7 +41,7 @@ struct Raw {
 
 std::optional<Sequence> parse(const std::string& s) {
     size_t start, len;
-    if (!walk(s, 0, s.size(), start, len)) return std::nullopt;
+    if (!Walk(s, 0, s.size(), start, len)) return std::nullopt;
     size_t stop = std::min(s.size(), start + len);
     std::vector<Raw> raw;
     size_t p = start;

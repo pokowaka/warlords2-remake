@@ -51,8 +51,8 @@ namespace {
 using Generator = std::function<randommap::Files(const randommap::Options&)>;
 
 /** The generators to choose from. A new one goes here. */
-const std::map<std::string, Generator>& generators() {
-    static const std::map<std::string, Generator> g = {
+const std::map<std::string, Generator>& Generators() {
+    static const std::map<std::string, Generator> kG = {
         {"classic", [](const randommap::Options& o) { return randommap::generateNow(o); }},
         {"fair",
          [](const randommap::Options& o) {
@@ -67,10 +67,10 @@ const std::map<std::string, Generator>& generators() {
              return randommap::generateNow(f);
          }},
     };
-    return g;
+    return kG;
 }
 
-std::vector<std::string> splitList(const std::string& s) {
+std::vector<std::string> SplitList(const std::string& s) {
     std::vector<std::string> out;
     std::stringstream in(s);
     std::string part;
@@ -79,9 +79,9 @@ std::vector<std::string> splitList(const std::string& s) {
     return out;
 }
 
-std::vector<int> parseSeeds(const std::string& s) {
+std::vector<int> ParseSeeds(const std::string& s) {
     std::vector<int> out;
-    for (const std::string& part : splitList(s)) {
+    for (const std::string& part : SplitList(s)) {
         auto dash = part.find('-');
         if (dash == std::string::npos) {
             out.push_back(std::stoi(part));
@@ -93,7 +93,7 @@ std::vector<int> parseSeeds(const std::string& s) {
     return out;
 }
 
-double quantile(std::vector<double> v, double q) {
+double Quantile(std::vector<double> v, double q) {
     if (v.empty()) return 0;
     std::sort(v.begin(), v.end());
     double at = q * static_cast<double>(v.size() - 1);
@@ -101,13 +101,13 @@ double quantile(std::vector<double> v, double q) {
     return v[lo] + (v[hi] - v[lo]) * (at - static_cast<double>(lo));
 }
 
-mapeval::Evaluation evaluateScenario(const std::string& data, const std::string& name) {
+mapeval::Evaluation EvaluateScenario(const std::string& data, const std::string& name) {
     auto map = scn::load(data + "/" + name, name);
     return mapeval::evaluate(*map, name);
 }
 
 /** The maps' hard-rule failures and metric spread, against the reference. */
-void report(const std::string& title, const std::vector<mapeval::Evaluation>& maps,
+void Report(const std::string& title, const std::vector<mapeval::Evaluation>& maps,
             const mapeval::Reference& ref) {
     if (maps.empty()) return;
     printf("\n== %s: %zu map(s) ==\n", title.c_str(), maps.size());
@@ -119,8 +119,8 @@ void report(const std::string& title, const std::vector<mapeval::Evaluation>& ma
     }
     printf("passed every hard rule: %d of %zu (%.0f%%)\n", passed, maps.size(),
            100.0 * passed / maps.size());
-    printf("penalty against the reference: median %.2f, p95 %.2f\n", quantile(penalties, 0.5),
-           quantile(penalties, 0.95));
+    printf("penalty against the reference: median %.2f, p95 %.2f\n", Quantile(penalties, 0.5),
+           Quantile(penalties, 0.95));
     printf("\n%-16s %5s %10s %12s %12s\n", "rule", "kind", "maps hit", "mean issues", "max issues");
     for (const std::string& c : mapeval::checks()) {
         int hit = 0, max = 0;
@@ -148,12 +148,12 @@ void report(const std::string& title, const std::vector<mapeval::Evaluation>& ma
         }
         char out[16] = "";
         if (r != ref.end()) snprintf(out, sizeof out, "%.0f%%", 100.0 * outside / xs.size());
-        printf("%-26s %19s %10.2f %10.2f %10.2f %8s\n", key.c_str(), range, quantile(xs, 0.05),
-               quantile(xs, 0.5), quantile(xs, 0.95), out);
+        printf("%-26s %19s %10.2f %10.2f %10.2f %8s\n", key.c_str(), range, Quantile(xs, 0.05),
+               Quantile(xs, 0.5), Quantile(xs, 0.95), out);
     }
 }
 
-void printIssues(const mapeval::Evaluation& e, int limit) {
+void PrintIssues(const mapeval::Evaluation& e, int limit) {
     if (limit <= 0 || e.issues.empty()) return;
     printf("\n%s: %zu issue(s)\n", e.name.c_str(), e.issues.size());
     for (int i = 0; i < static_cast<int>(e.issues.size()) && i < limit; i++) {
@@ -165,14 +165,14 @@ void printIssues(const mapeval::Evaluation& e, int limit) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    std::string data = "original", generator = "classic", jsonPath, exportDir;
-    std::string referenceList = "ERYTHEA,HADESHA,ISLADIA,DRAGON,SORCERY";
+    std::string data = "original", generator = "classic", json_path, export_dir;
+    std::string reference_list = "ERYTHEA,HADESHA,ISLADIA,DRAGON,SORCERY";
     std::vector<std::string> scenarios;
-    std::vector<int> seeds = parseSeeds("1-50");
+    std::vector<int> seeds = ParseSeeds("1-50");
     std::array<int, 4> sliders{{3, 3, 2, 3}};
     bool allies = false;
     scengen::Shape shape = scengen::Shape::Continents;
-    int issueLimit = 0;
+    int issue_limit = 0;
     int threads = static_cast<int>(std::max(1U, std::thread::hardware_concurrency()));
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -188,17 +188,17 @@ int main(int argc, char** argv) {
         else if (a == "--generator")
             generator = next();
         else if (a == "--seeds")
-            seeds = parseSeeds(next());
+            seeds = ParseSeeds(next());
         else if (a == "--scenarios")
-            scenarios = splitList(next());
+            scenarios = SplitList(next());
         else if (a == "--reference")
-            referenceList = next();
+            reference_list = next();
         else if (a == "--json")
-            jsonPath = next();
+            json_path = next();
         else if (a == "--export")
-            exportDir = next();
+            export_dir = next();
         else if (a == "--issues")
-            issueLimit = std::stoi(next());
+            issue_limit = std::stoi(next());
         else if (a == "--threads")
             threads = std::max(1, std::stoi(next()));
         else if (a == "--allies")
@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
                 return 2;
             }
         } else if (a == "--sliders") {
-            auto v = splitList(next());
+            auto v = SplitList(next());
             if (v.size() != 4) {
                 fprintf(stderr, "--sliders takes Water,Hills,Cities,Forest (0-6, 7 for chance)\n");
                 return 2;
@@ -231,32 +231,32 @@ int main(int argc, char** argv) {
     }
 
     // the reference: the designers' own maps
-    std::vector<mapeval::Evaluation> refMaps;
-    for (const std::string& s : splitList(referenceList))
-        refMaps.push_back(evaluateScenario(data, s));
-    auto ref = mapeval::reference(refMaps);
-    report("reference (hand-made)", refMaps, ref);
-    for (auto& e : refMaps) printIssues(e, issueLimit);
+    std::vector<mapeval::Evaluation> ref_maps;
+    for (const std::string& s : SplitList(reference_list))
+        ref_maps.push_back(EvaluateScenario(data, s));
+    auto ref = mapeval::reference(ref_maps);
+    Report("reference (hand-made)", ref_maps, ref);
+    for (auto& e : ref_maps) PrintIssues(e, issue_limit);
 
     std::vector<mapeval::Evaluation> extra;
-    for (const std::string& s : scenarios) extra.push_back(evaluateScenario(data, s));
-    report("scenarios", extra, ref);
-    for (auto& e : extra) printIssues(e, issueLimit);
+    for (const std::string& s : scenarios) extra.push_back(EvaluateScenario(data, s));
+    Report("scenarios", extra, ref);
+    for (auto& e : extra) PrintIssues(e, issue_limit);
 
     std::vector<mapeval::Evaluation> made;
     if (generator != "none") {
-        auto g = generators().find(generator);
-        if (g == generators().end()) {
+        auto g = Generators().find(generator);
+        if (g == Generators().end()) {
             fprintf(stderr, "unknown generator '%s'; known:", generator.c_str());
-            for (auto& [k, _] : generators()) fprintf(stderr, " %s", k.c_str());
+            for (auto& [k, _] : Generators()) fprintf(stderr, " %s", k.c_str());
             fprintf(stderr, "\n");
             return 2;
         }
         made.resize(seeds.size());
-        std::atomic<size_t> nextJob{0};
+        std::atomic<size_t> next_job{0};
         std::mutex errors;
         auto work = [&]() {
-            for (size_t k; (k = nextJob++) < seeds.size();) {
+            for (size_t k; (k = next_job++) < seeds.size();) {
                 try {
                     Rng r(seeds[k]);
                     randommap::Options o;
@@ -266,9 +266,9 @@ int main(int argc, char** argv) {
                     o.allies = allies;
                     o.world.shape = shape;
                     auto files = g->second(o);
-                    if (!exportDir.empty()) {
+                    if (!export_dir.empty()) {
                         std::string dir =
-                                exportDir + "/" + generator + "-" + std::to_string(seeds[k]);
+                                export_dir + "/" + generator + "-" + std::to_string(seeds[k]);
                         std::filesystem::create_directories(dir);
                         for (auto& [ext, bytes] : files)
                             if (!writeFile(dir + "/" + randommap::DIR + "." + ext, bytes))
@@ -290,34 +290,34 @@ int main(int argc, char** argv) {
         for (int t = 0; t < std::min<int>(threads, static_cast<int>(seeds.size())); t++)
             pool.emplace_back(work);
         for (auto& t : pool) t.join();
-        report("generator " + generator, made, ref);
-        for (auto& e : made) printIssues(e, issueLimit);
+        Report("generator " + generator, made, ref);
+        for (auto& e : made) PrintIssues(e, issue_limit);
     }
 
-    if (!jsonPath.empty()) {
+    if (!json_path.empty()) {
         Json out = Json::object();
-        Json refJson = Json::object();
+        Json ref_json = Json::object();
         for (auto& [k, r] : ref) {
             Json o = Json::object();
             o.set("min", r.min);
             o.set("max", r.max);
             o.set("mean", r.mean);
             o.set("sd", r.sd);
-            refJson.set(k, o);
+            ref_json.set(k, o);
         }
-        out.set("reference", refJson);
+        out.set("reference", ref_json);
         Json maps = Json::array();
-        for (auto* list : {&refMaps, &extra, &made})
+        for (auto* list : {&ref_maps, &extra, &made})
             for (auto& e : *list) {
                 auto s = mapeval::score(e, ref);
                 maps.push(mapeval::toJson(e, &s));
             }
         out.set("maps", maps);
-        if (!writeFile(jsonPath, out.dump())) {
-            fprintf(stderr, "could not write %s\n", jsonPath.c_str());
+        if (!writeFile(json_path, out.dump())) {
+            fprintf(stderr, "could not write %s\n", json_path.c_str());
             return 1;
         }
-        printf("\nwrote %s\n", jsonPath.c_str());
+        printf("\nwrote %s\n", json_path.c_str());
     }
     return 0;
 }

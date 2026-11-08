@@ -65,7 +65,7 @@ std::pair<std::string, bool> rollName(Game& g, const Side& side) {
     return list.back();
 }
 
-static std::pair<int, int> countHeroes(const Game& g, const Side* side) {
+static std::pair<int, int> CountHeroes(const Game& g, const Side* side) {
     int all = 0, mine = 0;
     for (Army* a : g.armies) {
         if (a->type == armytype::HERO) {
@@ -87,7 +87,7 @@ std::shared_ptr<HeroOffer> offer(Game& g, Side& side) {
     if (g.surrenderOffered) return nullptr;
     if (g.turn == 1) return named(HeroOffer{0, side.capital, true, "", false});
 
-    auto [all, mine] = countHeroes(g, &side);
+    auto [all, mine] = CountHeroes(g, &side);
     if (all >= MAX_IN_GAME) return nullptr;
     auto cities = game::sideCities(g, side);
     int limit =
@@ -228,19 +228,19 @@ std::vector<Promotion> checkPromotions(Game& g, const Side& side) {
 }
 
 void battleExperience(Game& g, const std::vector<Army*>& attackers,
-                      const std::vector<Army*>& defenders, const Battle& result, bool wasCity) {
+                      const std::vector<Army*>& defenders, const Battle& result, bool was_city) {
     for (Army* a : attackers) {
         if (a->type == armytype::HERO && !result.deadByArmy.count(a))
-            addExperience(g, a, wasCity ? 2 : 1);
+            addExperience(g, a, was_city ? 2 : 1);
     }
     for (size_t i = 0; i < defenders.size(); i++) {
         Army* d = defenders[i];
         if (!result.deadByArmy.count(d)) {
             bool counts;
             if (rules::bugs.heroExperienceReadsAttackerTypes) {
-                Army* sameSlot = i < attackers.size() ? attackers[i]
-                                                      : nullptr;  // the wrong line, on purpose
-                counts = sameSlot && sameSlot->type == armytype::HERO;
+                Army* same_slot = i < attackers.size() ? attackers[i]
+                                                       : nullptr;  // the wrong line, on purpose
+                counts = same_slot && same_slot->type == armytype::HERO;
             } else {
                 counts = true;
             }
@@ -254,9 +254,9 @@ std::vector<Item*> itemsHere(Game& g, const Army* h) {
     std::vector<Item*> ground;
     for (auto& it : g.map->items)
         if (it.status == 1 && it.x == h->x && it.y == h->y) ground.push_back(&it);
-    auto byIndex = [](Item* a, Item* b) { return a->index < b->index; };
-    luaSort(carried, byIndex);
-    luaSort(ground, byIndex);
+    auto by_index = [](Item* a, Item* b) { return a->index < b->index; };
+    luaSort(carried, by_index);
+    luaSort(ground, by_index);
     carried.insert(carried.end(), ground.begin(), ground.end());
     return carried;
 }

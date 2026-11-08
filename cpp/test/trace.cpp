@@ -16,7 +16,7 @@
 
 using namespace w2;
 
-static void trace(const Game& g, const Side& side) {
+static void Trace(const Game& g, const Side& side) {
     long long h = 0;
     for (Army* a : g.armies) {
         h = (h * 31 + static_cast<int64_t>(a->x == NONE ? 999 : a->x) * 7 +
@@ -39,13 +39,13 @@ int main(int argc, char** argv) {
     std::string scen = argc > 1 ? argv[1] : "ERYTHEA";
     double seed = argc > 2 ? atof(argv[2]) : 1;
     int turns = argc > 3 ? atoi(argv[3]) : 10;
-    bool hidden = false, roundTrip = false, diplo = false;
+    bool hidden = false, round_trip = false, diplo = false;
     for (int i = 4; i < argc; i++) {
         if (!strcmp(argv[i], "hidden")) hidden = true;
         // "save": write the game out and read it back after every turn, which
         // must change nothing but the route cache -- a load empties it, as the
         // original's does (623c:0dff)
-        if (!strcmp(argv[i], "save")) roundTrip = true;
+        if (!strcmp(argv[i], "save")) round_trip = true;
         // "diplo": with Diplomacy on, so that sides make peace
         if (!strcmp(argv[i], "diplo")) diplo = true;
     }
@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
     Side* side = game::begin(*g);
     while (side && g->turn <= turns) {
         ai::playTurn(*g, *side);
-        trace(*g, *side);
+        Trace(*g, *side);
         if (getenv("DUMP")) {
             int i = 1;
             for (Army* a : g->armies) {
@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
             }
         }
         side = game::endTurn(*g);
-        if (roundTrip && side) {
+        if (round_trip && side) {
             g = save::decode(save::encode(*g), "original");
             side = g->side;
         }

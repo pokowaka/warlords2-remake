@@ -17,14 +17,14 @@ namespace questui {
 using w2::format;
 
 namespace {
-const kit::Rect R{80, 60, 480, 312};  // popup 2
-const int MAP_X = 80, MAP_Y = 60;
-const int DIALOG = 16, DONE = 330;
-const char* const COMPASS[8] = {"north", "northeast", "east", "southeast",
-                                "south", "southwest", "west", "northwest"};
+const kit::Rect kR{80, 60, 480, 312};  // popup 2
+const int kMapX = 80, kMapY = 60;
+const int kDialog = 16, kDone = 330;
+const char* const kCompass[8] = {"north", "northeast", "east", "southeast",
+                                 "south", "southwest", "west", "northwest"};
 
 // 828e:0b51: the compass point from (x1, y1) to (x2, y2).
-int direction(int x1, int y1, int x2, int y2) {
+int Direction(int x1, int y1, int x2, int y2) {
     if (x1 == x2) return y1 < y2 ? 4 : 0;
     if (y1 == y2) return x1 < x2 ? 2 : 6;
     if (x2 < x1 && y2 < y1) return 7;
@@ -35,7 +35,7 @@ int direction(int x1, int y1, int x2, int y2) {
 }
 
 // Where an item is: its carrier, the ruin it lies in, or the ground.
-std::pair<int, int> itemPlace(const w2::Game& g, const w2::Item* it) {
+std::pair<int, int> ItemPlace(const w2::Game& g, const w2::Item* it) {
     if (it->status == 3) {
         for (w2::Army* a : g.armies)
             for (w2::Item* c : a->items)
@@ -52,7 +52,7 @@ struct QuestText {
     int tx = w2::NONE, ty = w2::NONE;
 };
 
-QuestText questText(const w2::Game& g, const w2::Side& side, const w2::Quest& q) {
+QuestText DescribeQuest(const w2::Game& g, const w2::Side& side, const w2::Quest& q) {
     auto t = [](int grp, int i) { return kit::text(grp, i); };
     QuestText out;
     auto add = [&](int y, const std::string& s) { out.lines.emplace_back(y, s); };
@@ -75,16 +75,16 @@ QuestText questText(const w2::Game& g, const w2::Side& side, const w2::Quest& q)
         add(265, t(0x15, 3));
         out.tx = foe->x;
         out.ty = foe->y;
-        add(285, COMPASS[direction(h->x, h->y, out.tx, out.ty)]);
+        add(285, kCompass[Direction(h->x, h->y, out.tx, out.ty)]);
     } else if (q.type == RETRIEVE_ITEM && q.item) {
         add(175, t(0x16, 0));
         add(195, t(0x16, 1));
         add(215, q.item->name);
         add(245, t(0x16, 2));
-        auto [x, y] = itemPlace(g, q.item);
+        auto [x, y] = ItemPlace(g, q.item);
         out.tx = x;
         out.ty = y;
-        if (x != w2::NONE) add(265, COMPASS[direction(h->x, h->y, x, y)]);
+        if (x != w2::NONE) add(265, kCompass[Direction(h->x, h->y, x, y)]);
     } else if (q.type == SLAY_TYPE && q.armyType) {
         add(175, t(0x17, 0));
         add(195, t(0x17, 1));
@@ -106,7 +106,7 @@ QuestText questText(const w2::Game& g, const w2::Side& side, const w2::Quest& q)
         add(265, t(grp, 5));
         out.tx = c->x;
         out.ty = c->y;
-        add(285, COMPASS[direction(h->x, h->y, out.tx, out.ty)]);
+        add(285, kCompass[Direction(h->x, h->y, out.tx, out.ty)]);
     } else if (q.type == PILLAGE_GOLD) {
         add(175, t(0x1b, 0));
         add(195, format(t(0x1b, 1), q.required));
@@ -121,10 +121,10 @@ QuestText questText(const w2::Game& g, const w2::Side& side, const w2::Quest& q)
 struct QuestDialog : kit::Modal {
     screen::View v;
     std::shared_ptr<w2::Quest> q;
-    std::string noQuest;
-    void mapMarks(int tx, int ty) {
+    std::string no_quest;
+    void MapMarks(int tx, int ty) {
         using namespace w2::quest;
-        gfx::setScissor(MAP_X, MAP_Y, 224, 312);
+        gfx::setScissor(kMapX, kMapY, 224, 312);
         if (q->type == SLAY_TYPE || q->type == SLAUGHTER) {
             std::set<int> done;
             int viewer = w2::game::viewerSide(*G.g, G.player);
@@ -137,37 +137,37 @@ struct QuestDialog : kit::Modal {
                     gfx::setColor(1, 1, 1);
                     int owner = a->owner == w2::NONE ? 8 : a->owner;
                     gfx::draw(G.atransShields, gfx::newQuad(owner * 16, 164, 16, 10),
-                              MAP_X + std::max(0, a->x * 2 - 1), MAP_Y + std::max(0, a->y * 2 - 1));
+                              kMapX + std::max(0, a->x * 2 - 1), kMapY + std::max(0, a->y * 2 - 1));
                 }
             }
         }
         gfx::setScissor();
         if (tx != w2::NONE && q->type != SLAY_TYPE && q->type != SLAUGHTER)
-            kit::mapTarget(MAP_X, MAP_Y, q->hero->x, q->hero->y, tx, ty);
+            kit::mapTarget(kMapX, kMapY, q->hero->x, q->hero->y, tx, ty);
     }
     void draw() override {
-        kit::popup(R);
-        front::drawStrategicMap(MAP_X, MAP_Y, nullptr, true);
+        kit::popup(kR);
+        front::drawStrategicMap(kMapX, kMapY, nullptr, true);
         gfx::setColor(1, 1, 1);
         kit::centred(kit::font(1), "Quest", 432, 62);  // 4125:00b4
         if (!q) {
-            kit::centred(kit::font(2), noQuest, 432, 134);
+            kit::centred(kit::font(2), no_quest, 432, 134);
         } else {
             gfx::draw(G.scrollPic, 304, 95);
             const Font& f = kit::font(2).colours(0, 7);
             kit::centred(f, q->hero->name + "'s Quest", 432, 145);
             kit::setPal(0);
             gfx::rectangle(gfx::FILL, 360, 165, 160, 1);
-            QuestText t = questText(*G.g, *G.player, *q);
+            QuestText t = DescribeQuest(*G.g, *G.player, *q);
             for (auto& l : t.lines) kit::centred(f, l.second, 432, l.first);
-            mapMarks(t.tx, t.ty);
-            front::drawHeroFigure(MAP_X, MAP_Y, q->hero->x, q->hero->y);
+            MapMarks(t.tx, t.ty);
+            front::drawHeroFigure(kMapX, kMapY, q->hero->x, q->hero->y);
         }
         kit::drawControls(v);
     }
     void mousepressed(int x, int y, int) override {
         auto c = kit::controlAt(v, x, y);
-        if (c && c->id == DONE) kit::pop(this);
+        if (c && c->id == kDone) kit::pop(this);
     }
     void keypressed(const std::string& key) override {
         if (key == "escape" || key == "return" || key == "kpenter") kit::pop(this);
@@ -177,12 +177,12 @@ struct QuestDialog : kit::Modal {
 
 void open() {
     auto d = std::make_shared<QuestDialog>();
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
-    d->v.state[DONE] = w2::uidata::NORMAL;
+    d->v.state[kDone] = w2::uidata::NORMAL;
     auto q = G.player->quest;
     if (q && q->hero && G.g->alive(q->hero) && q->hero->x != w2::NONE) d->q = q;
-    d->noQuest = kit::text(0x14, G.g->rng.dice(1, 4, -1));
+    d->no_quest = kit::text(0x14, G.g->rng.dice(1, 4, -1));
     kit::push(d);
 }
 

@@ -18,7 +18,7 @@ void deed(Game& g, const Side* side, DeedType type, int v1, int v2, const std::s
     if (d[worse].type > type) d[worse] = e;
 }
 
-static void bump(Game& g, int side, int opp, Loss kind, int n = 1) {
+static void Bump(Game& g, int side, int opp, Loss kind, int n = 1) {
     if (side < 0 || opp < 0 || side > 7 || opp > 7) return;
     auto& row = g.triumphs[side].try_emplace(opp, std::array<int, 5>{0, 0, 0, 0, 0}).first->second;
     row[static_cast<int>(kind)] += n;
@@ -38,9 +38,9 @@ void tally(Game& g, const Army* army, int killer, bool boat) {
         if (it->index < 8) std++;
     int rows[2][2] = {{loser, loser}, {killer, loser}};
     for (auto& row : rows) {
-        bump(g, row[0], row[1], kind);
-        if (boat) bump(g, row[0], row[1], Loss::NAVIES);
-        if (std > 0) bump(g, row[0], row[1], Loss::STANDARDS, std);
+        Bump(g, row[0], row[1], kind);
+        if (boat) Bump(g, row[0], row[1], Loss::NAVIES);
+        if (std > 0) Bump(g, row[0], row[1], Loss::STANDARDS, std);
     }
 }
 

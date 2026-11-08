@@ -20,27 +20,27 @@ namespace report = w2::report;
 using w2::format;
 
 namespace {
-const kit::Rect R{80, 60, 480, 312};  // popup 2
-const int MAP_X = 80, MAP_Y = 60;
-const int DIALOG = 7;
-const int TAB_FIRST = 218, DONE = 223;
-const int UP = 206, DOWN = 207, PAGE_UP = 208, PAGE_DOWN = 209;
-const int S_TITLE = 0x49, S_WHAT = 0x4a;
-const int S_SUMMARY[5] = {0x4b, 0x4c, 0x4d, 0x4e, 0x4f};
-const int ROWS = 5;
+const kit::Rect kR{80, 60, 480, 312};  // popup 2
+const int kMapX = 80, kMapY = 60;
+const int kDialog = 7;
+const int kTabFirst = 218, kDone = 223;
+const int kUp = 206, kDown = 207, kPageUp = 208, kPageDown = 209;
+const int kSTitle = 0x49, kSWhat = 0x4a;
+const int kSSummary[5] = {0x4b, 0x4c, 0x4d, 0x4e, 0x4f};
+const int kRows = 5;
 
-std::string summary(int n, const report::Figures& f) {
+std::string Summary(int n, const report::Figures& f) {
     int r = f.result;
     if (n == report::ARMY || n == report::CITY)
-        return r == 1 ? kit::text(S_SUMMARY[n], 0) : format(kit::text(S_SUMMARY[n], 1), r);
-    if (n == report::GOLD) return format(kit::text(S_SUMMARY[n], 0), r);
-    if (n == report::PRODUCTION) return format(kit::text(S_SUMMARY[n], r == 1 ? 1 : 0), r);
-    return kit::text(S_SUMMARY[n], r);
+        return r == 1 ? kit::text(kSSummary[n], 0) : format(kit::text(kSSummary[n], 1), r);
+    if (n == report::GOLD) return format(kit::text(kSSummary[n], 0), r);
+    if (n == report::PRODUCTION) return format(kit::text(kSSummary[n], r == 1 ? 1 : 0), r);
+    return kit::text(kSSummary[n], r);
 }
 
-void drawArmyBanners() {
+void DrawArmyBanners() {
     std::set<int> done;
-    gfx::setScissor(MAP_X, MAP_Y, 224, 312);
+    gfx::setScissor(kMapX, kMapY, 224, 312);
     gfx::setColor(1, 1, 1);
     int viewer = w2::game::viewerSide(*G.g, G.player);
     for (w2::Army* a : G.g->armies) {
@@ -51,14 +51,14 @@ void drawArmyBanners() {
                 done.insert(k);
                 int side = a->owner == w2::NONE ? 8 : a->owner;
                 gfx::draw(G.atransShields, gfx::newQuad(side * 16, 164, 16, 10),
-                          MAP_X + std::max(0, a->x * 2 - 1), MAP_Y + std::max(0, a->y * 2 - 1));
+                          kMapX + std::max(0, a->x * 2 - 1), kMapY + std::max(0, a->y * 2 - 1));
             }
         }
     }
     gfx::setScissor();
 }
 
-void drawBars(const report::Figures& f) {
+void DrawBars(const report::Figures& f) {
     for (int i = 0; i < 8; i++) {
         if (!f.out[i]) {
             int y = 200 + 14 * i;
@@ -94,37 +94,37 @@ void drawBars(const report::Figures& f) {
 
 struct Reports : kit::Modal {
     screen::View v;
-    int n = 0, topRow = 0;
-    void refresh() {
+    int n = 0, top_row = 0;
+    void Refresh() {
         auto& st = v.state;
         for (int i = 0; i <= 4; i++)
-            st[TAB_FIRST + i] = i == n ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
-        st[DONE] = w2::uidata::NORMAL;
+            st[kTabFirst + i] = i == n ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
+        st[kDone] = w2::uidata::NORMAL;
         hidden.clear();
         if (n == report::PRODUCTION) {
             int count = static_cast<int>(G.player->produced.size());
-            st[UP] = topRow > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-            st[PAGE_UP] = st[UP];
-            st[DOWN] = topRow + ROWS < count ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-            st[PAGE_DOWN] = st[DOWN];
+            st[kUp] = top_row > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kPageUp] = st[kUp];
+            st[kDown] = top_row + kRows < count ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kPageDown] = st[kDown];
         } else {
-            for (int id : {UP, DOWN, PAGE_UP, PAGE_DOWN}) hidden.insert(id);
+            for (int id : {kUp, kDown, kPageUp, kPageDown}) hidden.insert(id);
         }
     }
-    void scroll(int by) {
+    void Scroll(int by) {
         int count = static_cast<int>(G.player->produced.size());
-        topRow = std::max(0, std::min(std::max(0, count - ROWS), topRow + by));
-        refresh();
+        top_row = std::max(0, std::min(std::max(0, count - kRows), top_row + by));
+        Refresh();
     }
-    void drawProduction() {
+    void DrawProduction() {
         const auto& list = G.player->produced;
         const Font& font = kit::font(2);
-        for (int i = 0; i < ROWS; i++) {
-            if (topRow + i >= static_cast<int>(list.size())) break;
-            const w2::Produced& e = list[topRow + i];
+        for (int i = 0; i < kRows; i++) {
+            if (top_row + i >= static_cast<int>(list.size())) break;
+            const w2::Produced& e = list[top_row + i];
             int y = 176 + 30 * i;
             gfx::setColor(1, 1, 1);
-            font.draw(w2::fmt("%d", topRow + i + 1), 312, y);
+            font.draw(w2::fmt("%d", top_row + i + 1), 312, y);
             kit::army(e.type, G.player->index, 328, 170 + 30 * i, 1);
             w2::City* city = e.city != w2::NONE ? G.g->map->city(e.city) : nullptr;
             std::string name = e.standard ? "Standard" : (city ? city->name : "");
@@ -141,41 +141,41 @@ struct Reports : kit::Modal {
     }
     void draw() override {
         auto f = report::figures(*G.g, *G.player, n);
-        kit::popup(R);
+        kit::popup(kR);
         if (n == report::PRODUCTION) {
-            front::drawVectorMap(MAP_X, MAP_Y, nullptr, w2::NONE, true);
+            front::drawVectorMap(kMapX, kMapY, nullptr, w2::NONE, true);
         } else {
-            front::drawStrategicMap(MAP_X, MAP_Y);
-            if (n == report::ARMY) drawArmyBanners();
+            front::drawStrategicMap(kMapX, kMapY);
+            if (n == report::ARMY) DrawArmyBanners();
         }
         gfx::setColor(1, 1, 1);
-        kit::centred(kit::font(1), kit::text(S_TITLE, n), 432, 62);
-        kit::centred(kit::font(2), kit::text(S_WHAT, n), 432, 149);
+        kit::centred(kit::font(1), kit::text(kSTitle, n), 432, 62);
+        kit::centred(kit::font(2), kit::text(kSWhat, n), 432, 149);
         if (n == report::PRODUCTION)
-            drawProduction();
+            DrawProduction();
         else
-            drawBars(f);
-        kit::centred(kit::font(2).colours(G.player->colour, G.player->edge), summary(n, f), 432,
+            DrawBars(f);
+        kit::centred(kit::font(2).colours(G.player->colour, G.player->edge), Summary(n, f), 432,
                      322);
         kit::drawControls(v, hidden);
     }
     void mousepressed(int x, int y, int) override {
         auto c = kit::controlAt(v, x, y, hidden);
         if (!c) return;
-        if (c->id == DONE)
+        if (c->id == kDone)
             kit::pop(this);
-        else if (c->id >= TAB_FIRST && c->id < TAB_FIRST + 5) {
-            n = c->id - TAB_FIRST;
-            topRow = 0;
-            refresh();
-        } else if (c->id == UP)
-            scroll(-1);
-        else if (c->id == DOWN)
-            scroll(1);
-        else if (c->id == PAGE_UP)
-            scroll(-ROWS);
-        else if (c->id == PAGE_DOWN)
-            scroll(ROWS);
+        else if (c->id >= kTabFirst && c->id < kTabFirst + 5) {
+            n = c->id - kTabFirst;
+            top_row = 0;
+            Refresh();
+        } else if (c->id == kUp)
+            Scroll(-1);
+        else if (c->id == kDown)
+            Scroll(1);
+        else if (c->id == kPageUp)
+            Scroll(-kRows);
+        else if (c->id == kPageDown)
+            Scroll(kRows);
     }
     void keypressed(const std::string& key) override {
         if (key == "escape" || key == "return" || key == "kpenter") kit::pop(this);
@@ -185,10 +185,10 @@ struct Reports : kit::Modal {
 
 void open(int which) {
     auto d = std::make_shared<Reports>();
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
     d->n = which;
-    d->refresh();
+    d->Refresh();
     kit::push(d);
 }
 

@@ -58,10 +58,10 @@ using w2::format;
 
 namespace {
 // the ten options, in the order of group 4 and the table at 4125:23b4
-const char* const OPTION_KEYS[10] = {
+const char* const kOptionKeys[10] = {
     "neutralCities",  "diplomacy",     "quests",     "hiddenMap",       "viewEnemies",
     "viewProduction", "intenseCombat", "quickStart", "militaryAdvisor", "randomTurns"};
-const int PRESETS[3][10] = {
+const int kPresets[3][10] = {
     // 4125:2378
     {0, 0, 0, 0, 1, 0, 0, 0, 1, 0},
     {1, 1, 1, 0, 0, 0, 0, 0, 1, 0},
@@ -73,7 +73,7 @@ const int PRESETS[3][10] = {
 // place and whether it is set (else "?", left to chance).
 struct World {
     bool on = false;
-    int terrainSet = 0;
+    int terrain_set = 0;
     bool allies = false;
     std::array<int, 4> sliders{{3, 3, 2, 3}};
     std::array<bool, 4> set{{true, true, true, true}};
@@ -82,23 +82,24 @@ World world;
 
 // The options being set up (4125:23b4): one table for the session, the
 // Beginner preset to begin with.
-int OPTIONS[10] = {0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
+int remembered_options[10] = {0, 0, 0, 0, 1, 0, 0, 0, 1, 0};
 
 // 7bab:223b: put back the options the last game began with, ten u16s in
 // DATA\OPTIONS.DAT -- the setup screen as it opens, and Recall Options.
 // With no file the table is left as it is.
-void recallOptions() {
+void RecallOptions() {
     auto s = w2::readFile(G.dataDir + "/DATA/OPTIONS.DAT");
     if (!s) return;
-    for (size_t i = 0; i <= 9 && 2 * i + 2 <= s->size(); i++) OPTIONS[i] = w2::u16(*s, 2 * i);
+    for (size_t i = 0; i <= 9 && 2 * i + 2 <= s->size(); i++)
+        remembered_options[i] = w2::u16(*s, 2 * i);
 }
 
 // 7bab:2289: keep them for next time, as Begin starts the game.
-void keepOptions() {
+void KeepOptions() {
     std::string b;
     for (int i = 0; i <= 9; i++) {
-        b += static_cast<char>(OPTIONS[i] & 255);
-        b += static_cast<char>((OPTIONS[i] >> 8) & 255);
+        b += static_cast<char>(remembered_options[i] & 255);
+        b += static_cast<char>((remembered_options[i] >> 8) & 255);
     }
     w2::writeFile(G.dataDir + "/DATA/OPTIONS.DAT", b);
 }
@@ -110,7 +111,7 @@ struct Scenario {
 
 // SCENARIO.DAT's records, and after them the worlds the scenario generator
 // made (not the original's; warlords/scenarios, docs/scengen.md).
-std::vector<Scenario> scenarios() {
+std::vector<Scenario> Scenarios() {
     std::vector<Scenario> out;
     for (auto& e : w2::scenarios::list(G.dataDir))
         out.push_back(Scenario{e.name, e.dir, e.text, e.cities, e.ruins, e.players});
@@ -118,7 +119,7 @@ std::vector<Scenario> scenarios() {
 }
 
 std::map<std::string, gfx::ImageP> art;
-gfx::ImageP image(const std::string& path, int key = pckimage::NOKEY) {
+gfx::ImageP Image(const std::string& path, int key = pckimage::NOKEY) {
     auto it = art.find(path);
     if (it != art.end()) return it->second;
     gfx::ImageP img;
@@ -130,7 +131,7 @@ gfx::ImageP image(const std::string& path, int key = pckimage::NOKEY) {
 }
 
 struct SideSetup {
-    bool inUse = false;
+    bool in_use = false;
     std::string name;
     int colour = 15, edge = 0;
     bool computer = false;
@@ -139,12 +140,12 @@ struct SideSetup {
 
 struct Setup {
     Scenario sc;
-    int* options = OPTIONS;
+    int* options = remembered_options;
     SideSetup sides[8];
     bool greatest = false;
 };
 
-std::shared_ptr<Setup> newSetup(const Scenario& sc) {
+std::shared_ptr<Setup> NewSetup(const Scenario& sc) {
     std::string dir = w2::upper(sc.dir);
     auto map = w2::scn::load(G.dataDir + "/" + dir, dir);
     auto st = std::make_shared<Setup>();
@@ -152,12 +153,12 @@ std::shared_ptr<Setup> newSetup(const Scenario& sc) {
     // 7bab:0000: the tutorial plays with the Beginner options, any other
     // scenario with the last game's
     if (map->options.tutorial != 0)
-        for (int i = 0; i <= 9; i++) OPTIONS[i] = PRESETS[0][i];
+        for (int i = 0; i <= 9; i++) remembered_options[i] = kPresets[0][i];
     else
-        recallOptions();
+        RecallOptions();
     for (auto& s : map->sides) {
         SideSetup& e = st->sides[s.index];
-        e.inUse = s.inUse;
+        e.in_use = s.inUse;
         e.name = s.name;
         e.colour = s.colour;
         e.edge = s.edge;
@@ -168,19 +169,19 @@ std::shared_ptr<Setup> newSetup(const Scenario& sc) {
     return st;
 }
 
-bool presetMatches(const Setup& st, int p) {
+bool PresetMatches(const Setup& st, int p) {
     for (int i = 0; i <= 5; i++)
-        if (st.options[i] != PRESETS[p][i]) return false;
+        if (st.options[i] != kPresets[p][i]) return false;
     return true;
 }
 
 // 7bab:0bab: the options' weight and the computers' strength, a percent.
-int rating(const Setup& st) {
+int Rating(const Setup& st) {
     const int* o = st.options;
     int cx = std::min(20, o[0] * 4 + o[1] * 4 + o[2] * 3 + o[3] * 4 - o[4] + o[5]);
     int sum = 0, n = 0;
     for (auto& s : st.sides) {
-        if (s.inUse && s.computer && s.level != 3) {
+        if (s.in_use && s.computer && s.level != 3) {
             sum += s.level + 1;
             n++;
         }
@@ -194,16 +195,16 @@ struct Options : kit::Modal {
     std::shared_ptr<Setup> st;
     screen::View v;
     kit::Done after;
-    void refresh() {
+    void Refresh() {
         auto& s = v.state;
         for (int i = 0; i <= 9; i++) s[159 + i] = w2::uidata::NORMAL;
         for (int p = 0; p <= 2; p++)
-            s[169 + p] = presetMatches(*st, p) ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
+            s[169 + p] = PresetMatches(*st, p) ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
         s[172] = w2::uidata::NORMAL;
     }
     void draw() override {
-        const kit::Rect R{120, 50, 400, 360};  // popup 4
-        kit::popup(R);
+        const kit::Rect popup_rect{120, 50, 400, 360};  // popup 4
+        kit::popup(popup_rect);
         gfx::setColor(1, 1, 1);
         kit::centred(kit::font(1), kit::text(8, 0), 320, 55);
         const Font& f = kit::font(2);
@@ -235,7 +236,7 @@ struct Options : kit::Modal {
         }
         kit::drawControls(v);
     }
-    void finish() {
+    void Finish() {
         auto a = after;
         kit::pop(this);
         if (a) a();
@@ -244,7 +245,7 @@ struct Options : kit::Modal {
         auto c = kit::controlAt(v, x, y);
         if (!c) return;
         int id = c->id;
-        if (id == 172) return finish();
+        if (id == 172) return Finish();
         if (id >= 159 && id <= 168) {
             int i = id - 159;
             if (i == 0)
@@ -252,38 +253,38 @@ struct Options : kit::Modal {
             else
                 st->options[i] = st->options[i] != 0 ? 0 : 1;
         } else if (id >= 169 && id <= 171) {
-            for (int k = 0; k <= 5; k++) st->options[k] = PRESETS[id - 169][k];
+            for (int k = 0; k <= 5; k++) st->options[k] = kPresets[id - 169][k];
         }
-        refresh();
+        Refresh();
     }
     void keypressed(const std::string& key) override {
-        if (key == "return" || key == "kpenter" || key == "escape") finish();
+        if (key == "return" || key == "kpenter" || key == "escape") Finish();
     }
 };
 
-void openOptions(std::shared_ptr<Setup> st, kit::Done after) {
+void OpenOptions(std::shared_ptr<Setup> st, kit::Done after) {
     auto d = std::make_shared<Options>();
     d->st = st;
     d->after = after;
     d->v = kit::view(4);
     d->view = &d->v;
-    d->refresh();
+    d->Refresh();
     kit::push(d);
 }
 
 // SETUPBU.PCK's faces (4125:2408): Knight, Lord, Warlord, Off, the two
 // humans, a side not in the scenario, then a Knight, Lord and Warlord
 // playing a character other than the Standard one
-const int FACES[10][2] = {{0, 0},   {0, 40},   {0, 80},    {0, 120},   {0, 160},
-                          {0, 200}, {440, 40}, {424, 100}, {424, 140}, {424, 180}};
-const int LEVEL_BUTTON[5] = {120, 200, 280, 360, 40};  // 4125:24b8: Knight .. Off, Human
+const int kFaces[10][2] = {{0, 0},   {0, 40},   {0, 80},    {0, 120},   {0, 160},
+                           {0, 200}, {440, 40}, {424, 100}, {424, 140}, {424, 180}};
+const int kLevelButton[5] = {120, 200, 280, 360, 40};  // 4125:24b8: Knight .. Off, Human
 // the Character box (4125:24ec): ticked with a character chosen, else empty,
 // 24 x 20 at (x + 64, y + 39), its label at (x + 88, y + 41) (4125:24fc, 251c)
-const int CHECK[2][2] = {{440, 0}, {440, 20}};
+const int kCheck[2][2] = {{440, 0}, {440, 20}};
 
 // A side's face (7bab:0634), an index into FACES.
-int faceOf(const SideSetup& s, int i) {
-    if (!s.inUse) return 6;
+int FaceOf(const SideSetup& s, int i) {
+    if (!s.in_use) return 6;
     if (!s.computer) return i % 2 == 1 ? 5 : 4;
     int level = std::clamp(s.level, 0, 3);
     if (s.card != 0 && level < 3) return level + 7;
@@ -291,19 +292,19 @@ int faceOf(const SideSetup& s, int i) {
 }
 
 // How many computers are in play: Random Characters needs one (7bab:0416).
-int computers(const Setup& st) {
+int Computers(const Setup& st) {
     int n = 0;
     for (auto& s : st.sides)
-        if (s.inUse && s.computer && s.level != 3) n++;
+        if (s.in_use && s.computer && s.level != 3) n++;
     return n;
 }
 
 // Setup Side's controls (dialog 27)
-const int SIDE_OK = 457, SIDE_CANCEL = 458, SIDE_NAME = 459;
-const int SIDE_UP = 460, SIDE_DOWN = 461, SIDE_PAGE_UP = 462, SIDE_PAGE_DOWN = 463, SIDE_ROW = 464;
-const kit::Rect NAME_BOX{229, 138, 188, 22};
+const int kSideOk = 457, kSideCancel = 458, kSideName = 459;
+const int kSideUp = 460, kSideDown = 461, kSidePageUp = 462, kSidePageDown = 463, kSideRow = 464;
+const kit::Rect kNameBox{229, 138, 188, 22};
 // a Knight's characters are listed in colour 5, a Lord's 7, a Warlord's 9
-const int LEVEL_INK[3] = {5, 7, 9};
+const int kLevelInk[3] = {5, 7, 9};
 
 // Setup Side (7bab:16ea, drawn by 7bab:180b): popup 4, dialog 27. A side's
 // name, retyped in the field (15 characters, 128 pixels, 7bab:1f8a); for a
@@ -315,52 +316,52 @@ struct SideDialog : kit::Modal {
     int index = 0;
     screen::View v;
     kit::Done after;
-    std::string savedName;
-    int savedCard = 0;
+    std::string saved_name;
+    int saved_card = 0;
     std::vector<std::string> deck;
     int rows[5] = {-1, -1, -1, -1, -1};  // the five rows' cards, -1 for none
     std::optional<input::Editor> editing;
     std::vector<std::string> desc;
-    int descCard = -1;
+    int desc_card = -1;
 
-    SideSetup& side() { return st->sides[index]; }
-    int n() const { return static_cast<int>(deck.size()); }
+    SideSetup& Setup() { return st->sides[index]; }
+    int N() const { return static_cast<int>(deck.size()); }
 
-    void start() {
-        SideSetup& s = side();
-        savedName = s.name;
-        savedCard = s.card;
+    void Start() {
+        SideSetup& s = Setup();
+        saved_name = s.name;
+        saved_card = s.card;
         // Off has no deck: its letter is past the end of "KLW"
         if (s.computer && s.level >= 0 && s.level < 3) deck = w2::aicard::deck(G.dataDir, s.level);
         // the chosen one on the last row when it is past the first five
-        for (int r = 0; r < 5; r++) rows[r] = r < n() ? r : -1;
+        for (int r = 0; r < 5; r++) rows[r] = r < N() ? r : -1;
         if (s.card > 4)
             for (int r = 0; r < 5; r++) rows[r] += s.card - 4;
-        refresh();
+        Refresh();
     }
 
     // 7bab:1ae4
-    void refresh() {
+    void Refresh() {
         auto& vs = v.state;
         for (int r = 0; r < 5; r++)
-            vs[SIDE_ROW + r] = rows[r] < 0 ? w2::uidata::DISABLED : w2::uidata::NORMAL;
-        vs[SIDE_OK] = vs[SIDE_CANCEL] = vs[SIDE_NAME] = w2::uidata::NORMAL;
-        bool up = side().computer && rows[0] >= 1;
-        bool down = side().computer && rows[4] > 0 && rows[4] < n() - 1;
-        vs[SIDE_UP] = vs[SIDE_PAGE_UP] = up ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        vs[SIDE_DOWN] = vs[SIDE_PAGE_DOWN] = down ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            vs[kSideRow + r] = rows[r] < 0 ? w2::uidata::DISABLED : w2::uidata::NORMAL;
+        vs[kSideOk] = vs[kSideCancel] = vs[kSideName] = w2::uidata::NORMAL;
+        bool up = Setup().computer && rows[0] >= 1;
+        bool down = Setup().computer && rows[4] > 0 && rows[4] < N() - 1;
+        vs[kSideUp] = vs[kSidePageUp] = up ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        vs[kSideDown] = vs[kSidePageDown] = down ? w2::uidata::NORMAL : w2::uidata::DISABLED;
     }
 
     // an empty name is not taken: the setup screen knows a side by its name
-    void keepName() {
-        if (!editing->text.empty()) side().name = editing->text;
+    void KeepName() {
+        if (!editing->text.empty()) Setup().name = editing->text;
         editing.reset();
     }
 
-    void close(bool ok) {
+    void Close(bool ok) {
         if (!ok) {
-            side().name = savedName;
-            side().card = savedCard;
+            Setup().name = saved_name;
+            Setup().card = saved_card;
         }  // 7bab:1fd7
         auto a = after;
         kit::pop(this);
@@ -368,9 +369,9 @@ struct SideDialog : kit::Modal {
     }
 
     void draw() override {
-        const kit::Rect R{120, 50, 400, 360};  // popup 4
-        const SideSetup& s = side();
-        kit::popup(R);
+        const kit::Rect popup_rect{120, 50, 400, 360};  // popup 4
+        const SideSetup& s = Setup();
+        kit::popup(popup_rect);
         gfx::setColor(1, 1, 1);
         kit::centred(kit::font(1), "Setup Side", 320, 55);
         int c = s.colour, e = s.edge;
@@ -397,9 +398,9 @@ struct SideDialog : kit::Modal {
         kit::shield(index, 144, 202);
         gfx::setColor(1, 1, 1);
         kit::centred(f, "Retype the name of this side", 320, 116);
-        kit::field(NAME_BOX.x, NAME_BOX.y, NAME_BOX.w, NAME_BOX.h, editing ? editing->text : s.name,
+        kit::field(kNameBox.x, kNameBox.y, kNameBox.w, kNameBox.h, editing ? editing->text : s.name,
                    &f);
-        if (editing) editing->drawCursor(NAME_BOX.x, NAME_BOX.y);
+        if (editing) editing->drawCursor(kNameBox.x, kNameBox.y);
         kit::setPal(0);
         gfx::rectangle(gfx::FILL, 196, 218, 72, 1);
         gfx::rectangle(gfx::FILL, 384, 218, 96, 1);
@@ -415,15 +416,15 @@ struct SideDialog : kit::Modal {
             f.draw("N/A", 196, 224);  // 7bab:1d0f
             f.draw("N/A", 384, 224);
         } else {
-            const Font& ink = f.colours(s.level >= 0 && s.level < 3 ? LEVEL_INK[s.level] : 15, 0);
+            const Font& ink = f.colours(s.level >= 0 && s.level < 3 ? kLevelInk[s.level] : 15, 0);
             for (int r = 0; r < 5 && rows[r] >= 0; r++) {
-                const std::string& name = rows[r] < n() ? deck[rows[r]] : std::string();
+                const std::string& name = rows[r] < N() ? deck[rows[r]] : std::string();
                 (rows[r] == s.card ? f : ink).draw(name, 196, 252 + 19 * r);
             }
             // the name, and the .DSC's next six lines (7bab:20dc)
-            if (s.card >= 0 && s.card < n()) ink.draw(deck[s.card], 192, 224);
-            if (descCard != s.card) {
-                descCard = s.card;
+            if (s.card >= 0 && s.card < N()) ink.draw(deck[s.card], 192, 224);
+            if (desc_card != s.card) {
+                desc_card = s.card;
                 desc.clear();
                 if (s.level >= 0 && s.level < 3)
                     if (auto dd = w2::aicard::describe(G.dataDir, s.level, s.card))
@@ -436,48 +437,48 @@ struct SideDialog : kit::Modal {
     }
 
     void mousepressed(int x, int y, int) override {
-        if (editing) keepName();
+        if (editing) KeepName();
         auto ctl = kit::controlAt(v, x, y);
         if (!ctl) return;
         int id = ctl->id;
-        if (id == SIDE_OK) return close(true);  // 7bab:2024
-        if (id == SIDE_CANCEL) return close(false);
-        if (id == SIDE_NAME) {
+        if (id == kSideOk) return Close(true);  // 7bab:2024
+        if (id == kSideCancel) return Close(false);
+        if (id == kSideName) {
             editing = input::Editor{};
             editing->maxChars = 15;
             editing->maxWidth = 128;
-        } else if (id == SIDE_UP || id == SIDE_DOWN) {
+        } else if (id == kSideUp || id == kSideDown) {
             // 7bab:1ed1: a row up or down, a row run off the deck left empty
-            int step = id == SIDE_UP ? -1 : 1;
+            int step = id == kSideUp ? -1 : 1;
             for (int r = 0; r < 5; r++) {
                 rows[r] += step;
-                if (rows[r] < 0 || rows[r] >= n()) rows[r] = -1;
+                if (rows[r] < 0 || rows[r] >= N()) rows[r] = -1;
             }
-        } else if (id == SIDE_PAGE_UP || id == SIDE_PAGE_DOWN) {
+        } else if (id == kSidePageUp || id == kSidePageDown) {
             // 7bab:1f23: five rows, or as many as there are
-            int step = id == SIDE_PAGE_UP ? -std::min(rows[0], 5) : std::min(n() - rows[4] - 1, 5);
+            int step = id == kSidePageUp ? -std::min(rows[0], 5) : std::min(N() - rows[4] - 1, 5);
             rows[0] += step;
             for (int r = 1; r < 5; r++) rows[r] = rows[r - 1] + 1;
-        } else if (id >= SIDE_ROW && id < SIDE_ROW + 5) {
-            int card = rows[id - SIDE_ROW];  // 7bab:1e8a
-            if (card >= 0) side().card = card;
+        } else if (id >= kSideRow && id < kSideRow + 5) {
+            int card = rows[id - kSideRow];  // 7bab:1e8a
+            if (card >= 0) Setup().card = card;
         }
-        refresh();
+        Refresh();
     }
 
     void keypressed(const std::string& key) override {
         if (editing) {
             std::string r = editing->key(key);
             if (r == "keep")
-                keepName();
+                KeepName();
             else if (r == "undo")
                 editing.reset();
             return;
         }
         if (key == "return" || key == "kpenter")
-            close(true);
+            Close(true);
         else if (key == "escape")
-            close(false);
+            Close(false);
     }
 
     void textinput(const std::string& t) override {
@@ -486,28 +487,28 @@ struct SideDialog : kit::Modal {
     bool typing() const override { return editing.has_value(); }
 };
 
-void openSide(std::shared_ptr<Setup> st, int index, kit::Done after) {
+void OpenSide(std::shared_ptr<Setup> st, int index, kit::Done after) {
     auto d = std::make_shared<SideDialog>();
     d->st = st;
     d->index = index;
     d->after = after;
     d->v = kit::view(27);
     d->view = &d->v;
-    d->start();
+    d->Start();
     kit::push(d);
 }
 
-kit::Rect rectFor(int i) {
+kit::Rect RectFor(int i) {
     return kit::Rect{i < 4 ? 24 : 208, 40 + 90 * (i % 4), 160, 70};
 }  // 4125:23c8
 
 // where the quote's lines go, centred (4125:253c)
-const int QUOTE_Y[5] = {366, 384, 402, 420, 440};
+const int kQuoteY[5] = {366, 384, 402, 420, 440};
 
 // A quote from QUOTES.DAT, as 7bab:0f88 picks it: a two-digit count, then
 // records of a three-digit length and that many bytes less one, lines split
 // by "|" and each closed by one. `roll(count)`, dice(1, count), says which.
-std::vector<std::string> quote(const std::function<int(int)>& roll) {
+std::vector<std::string> Quote(const std::function<int(int)>& roll) {
     std::vector<std::string> lines;
     auto s = w2::readFile(G.dataDir + "/DATA/QUOTES.DAT");
     if (!s || s->size() < 2) return lines;
@@ -537,17 +538,17 @@ struct SetupScreen : kit::Modal {
     std::function<void(std::shared_ptr<Setup>)> begin;
     kit::Done back;
 
-    void refresh() {
+    void Refresh() {
         auto& s = v.state;
         for (int i = 0; i < 8; i++) s[125 + i] = w2::uidata::NORMAL;
         for (int p = 0; p <= 2; p++)
-            s[145 + p] = presetMatches(*st, p) ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
+            s[145 + p] = PresetMatches(*st, p) ? w2::uidata::ACTIVE : w2::uidata::NORMAL;
         s[141] = s[142] = s[148] = s[143] = s[144] = w2::uidata::NORMAL;
         s[157] = w2::uidata::NORMAL;
-        s[158] = computers(*st) > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        s[158] = Computers(*st) > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
         hidden = {st->greatest ? 143 : 144};
     }
-    void blit(int sx, int sy, int w, int h, int x, int y) {
+    void Blit(int sx, int sy, int w, int h, int x, int y) {
         auto a = G.screen->artFor(31);  // SETUPBU.PCK
         if (!a) return;
         gfx::setColor(1, 1, 1);
@@ -563,21 +564,25 @@ struct SetupScreen : kit::Modal {
         const Font& f = kit::font(2);
         for (int i = 0; i < 8; i++) {
             const SideSetup& s = st->sides[i];
-            kit::Rect R = rectFor(i);
+            kit::Rect slot_rect = RectFor(i);
             if (s.name.empty()) continue;
             int c = s.colour, e = s.edge;
             kit::setPal(c);
-            kit::outline(R.x, R.y, R.w, R.h);
-            gfx::rectangle(gfx::FILL, R.x - 1, R.y - 1, R.w + 2, 1);
-            gfx::rectangle(gfx::FILL, R.x - 1, R.y - 1, 1, R.h + 2);
-            gfx::rectangle(gfx::FILL, R.x + 1, R.y + R.h - 2, R.w - 2, 1);
-            gfx::rectangle(gfx::FILL, R.x + R.w - 2, R.y + 1, 1, R.h - 2);
+            kit::outline(slot_rect.x, slot_rect.y, slot_rect.w, slot_rect.h);
+            gfx::rectangle(gfx::FILL, slot_rect.x - 1, slot_rect.y - 1, slot_rect.w + 2, 1);
+            gfx::rectangle(gfx::FILL, slot_rect.x - 1, slot_rect.y - 1, 1, slot_rect.h + 2);
+            gfx::rectangle(gfx::FILL, slot_rect.x + 1, slot_rect.y + slot_rect.h - 2,
+                           slot_rect.w - 2, 1);
+            gfx::rectangle(gfx::FILL, slot_rect.x + slot_rect.w - 2, slot_rect.y + 1, 1,
+                           slot_rect.h - 2);
             kit::setPal(e);
-            gfx::rectangle(gfx::FILL, R.x + 1, R.y + 1, R.w - 2, 1);
-            gfx::rectangle(gfx::FILL, R.x + 1, R.y + 1, 1, R.h - 2);
-            gfx::rectangle(gfx::FILL, R.x - 1, R.y + R.h, R.w + 2, 1);
-            gfx::rectangle(gfx::FILL, R.x + R.w, R.y - 1, 1, R.h + 2);
-            int nx = R.x + 24, ny = R.y - 8;
+            gfx::rectangle(gfx::FILL, slot_rect.x + 1, slot_rect.y + 1, slot_rect.w - 2, 1);
+            gfx::rectangle(gfx::FILL, slot_rect.x + 1, slot_rect.y + 1, 1, slot_rect.h - 2);
+            gfx::rectangle(gfx::FILL, slot_rect.x - 1, slot_rect.y + slot_rect.h, slot_rect.w + 2,
+                           1);
+            gfx::rectangle(gfx::FILL, slot_rect.x + slot_rect.w, slot_rect.y - 1, 1,
+                           slot_rect.h + 2);
+            int nx = slot_rect.x + 24, ny = slot_rect.y - 8;
             int w = f.width(s.name);
             kit::setPal(3);
             gfx::rectangle(gfx::FILL, nx - 4, ny, w + 8, 20);
@@ -586,15 +591,15 @@ struct SetupScreen : kit::Modal {
             // the face (7bab:0634): Off, a human (two faces, turn about), or the
             // computer's level, another face for a character; the button the
             // same, Off and Human mapped in
-            int face = faceOf(s, i);
-            blit(FACES[face][0], FACES[face][1], 40, 40, R.x + 16, R.y + 16);
+            int face = FaceOf(s, i);
+            Blit(kFaces[face][0], kFaces[face][1], 40, 40, slot_rect.x + 16, slot_rect.y + 16);
             int lv = face >= 7 ? face - 7 : face;
             int btn = (lv == 6 || lv == 3) ? 3 : (lv >= 4 ? 4 : lv);
-            blit(LEVEL_BUTTON[btn], 0, 80, 25, R.x + 72, R.y + 12);
-            const int* ck = CHECK[s.card != 0 ? 0 : 1];
-            blit(ck[0], ck[1], 24, 20, R.x + 64, R.y + 39);
+            Blit(kLevelButton[btn], 0, 80, 25, slot_rect.x + 72, slot_rect.y + 12);
+            const int* ck = kCheck[s.card != 0 ? 0 : 1];
+            Blit(ck[0], ck[1], 24, 20, slot_rect.x + 64, slot_rect.y + 39);
             gfx::setColor(1, 1, 1);
-            f.colours(c, e).draw("Character", R.x + 88, R.y + 41);  // 4125:258b
+            f.colours(c, e).draw("Character", slot_rect.x + 88, slot_rect.y + 41);  // 4125:258b
         }
         // 7bab:10c7: the logo's (0, 0, 144, 64) to (440, 277) (4125:2550)
         gfx::setColor(1, 1, 1);
@@ -602,8 +607,8 @@ struct SetupScreen : kit::Modal {
             gfx::draw(logo->image, gfx::newQuad(0, 0, 144, 64), 440, 277);  // SSG.PCK
         kit::centred(f, kit::text(7, 0), 512, 48);
         kit::centred(f, kit::text(7, 1), 512, 206);
-        kit::centred(f, format(kit::text(6, 0), rating(*st)), 196, 426);
-        for (size_t i = 0; i < lines.size(); i++) kit::centred(f, lines[i], 512, QUOTE_Y[i]);
+        kit::centred(f, format(kit::text(6, 0), Rating(*st)), 196, 426);
+        for (size_t i = 0; i < lines.size(); i++) kit::centred(f, lines[i], 512, kQuoteY[i]);
         kit::drawControls(v, hidden);
     }
     void mousepressed(int x, int y, int) override {
@@ -613,7 +618,7 @@ struct SetupScreen : kit::Modal {
         if (id >= 125 && id <= 132) {
             // 7bab:0a4e: Human, Knight, Lord, Warlord, Off, and round again
             SideSetup& s = st->sides[id - 125];
-            if (s.inUse) {
+            if (s.in_use) {
                 if (!s.computer) {
                     s.computer = true;
                     s.level = 0;
@@ -627,9 +632,9 @@ struct SetupScreen : kit::Modal {
         } else if (id == 141) {
             int playing = 0;
             for (auto& s : st->sides)
-                if (s.inUse && !(s.computer && s.level == 3)) playing++;
+                if (s.in_use && !(s.computer && s.level == 3)) playing++;
             if (playing < 1) return;
-            keepOptions();  // 7bab:0cfe
+            KeepOptions();  // 7bab:0cfe
             auto b = begin;
             auto s = st;
             kit::pop(this);
@@ -643,7 +648,7 @@ struct SetupScreen : kit::Modal {
         } else if (id == 143) {
             st->greatest = true;
             for (auto& s : st->sides) {
-                if (s.inUse) {
+                if (s.in_use) {
                     if (!(s.computer && s.level == 2)) s.card = 0;
                     s.computer = true;
                     s.level = 2;
@@ -652,45 +657,45 @@ struct SetupScreen : kit::Modal {
         } else if (id == 144) {
             st->greatest = false;
         } else if (id >= 145 && id <= 147) {
-            for (int k = 0; k <= 5; k++) st->options[k] = PRESETS[id - 145][k];
+            for (int k = 0; k <= 5; k++) st->options[k] = kPresets[id - 145][k];
         } else if (id == 148) {
             std::weak_ptr<Modal> self = weak_from_this();
             SetupScreen* me = this;
-            openOptions(st, [self, me]() {
-                if (!self.expired()) me->refresh();
+            OpenOptions(st, [self, me]() {
+                if (!self.expired()) me->Refresh();
             });
             return;
         } else if ((id >= 133 && id <= 140) || (id >= 149 && id <= 156)) {
             // 7bab:16ea: the Character box or the face; a side not in the
             // scenario has neither
             int i = id >= 149 ? id - 149 : id - 133;
-            if (st->sides[i].inUse) {
+            if (st->sides[i].in_use) {
                 std::weak_ptr<Modal> self = weak_from_this();
                 SetupScreen* me = this;
-                openSide(st, i, [self, me]() {
-                    if (!self.expired()) me->refresh();
+                OpenSide(st, i, [self, me]() {
+                    if (!self.expired()) me->Refresh();
                 });
                 return;
             }
         } else if (id == 157) {
-            recallOptions();  // 7bab:2229
+            RecallOptions();  // 7bab:2229
         } else if (id == 158) {
             // 7bab:2051: each computer in play gets 1d(n - 1) of its level's n
             // characters -- any but the Standard one
             static std::mt19937 dice{std::random_device{}()};
             for (auto& s : st->sides) {
-                if (s.inUse && s.computer && s.level >= 0 && s.level < 3) {
+                if (s.in_use && s.computer && s.level >= 0 && s.level < 3) {
                     int n = static_cast<int>(w2::aicard::deck(G.dataDir, s.level).size());
                     s.card =
                             n > 1 ? 1 + static_cast<int>(dice() % static_cast<unsigned>(n - 1)) : 0;
                 }
             }
         }
-        refresh();
+        Refresh();
     }
 };
 
-void openSetup(std::shared_ptr<Setup> st, std::function<void(std::shared_ptr<Setup>)> begin,
+void OpenSetup(std::shared_ptr<Setup> st, std::function<void(std::shared_ptr<Setup>)> begin,
                kit::Done back) {
     auto d = std::make_shared<SetupScreen>();
     d->st = st;
@@ -702,43 +707,43 @@ void openSetup(std::shared_ptr<Setup> st, std::function<void(std::shared_ptr<Set
     d->menuBar = true;  // the menu bar stays live over it (7bab:0034)
     // picked once as the screen is drawn whole; Edit Options draws over it
     static std::mt19937 dice{std::random_device{}()};
-    d->lines = quote([](int n) { return 1 + static_cast<int>(dice() % static_cast<unsigned>(n)); });
-    d->refresh();
+    d->lines = Quote([](int n) { return 1 + static_cast<int>(dice() % static_cast<unsigned>(n)); });
+    d->Refresh();
     kit::push(d);
 }
 
 struct Chooser : kit::Modal {
     std::vector<Scenario> list;
     screen::View v;
-    int topRow = 0, cur = 0;
+    int top_row = 0, cur = 0;
     std::function<void(int)> after;
-    void refresh() {
+    void Refresh() {
         auto& s = v.state;
         for (auto& c : v.dialog.controls) s[c.id] = w2::uidata::NORMAL;
-        int up = topRow > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        int down = topRow + 7 < static_cast<int>(list.size()) ? w2::uidata::NORMAL
-                                                              : w2::uidata::DISABLED;
+        int up = top_row > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        int down = top_row + 7 < static_cast<int>(list.size()) ? w2::uidata::NORMAL
+                                                               : w2::uidata::DISABLED;
         s[470] = up;
         s[472] = up;
         s[471] = down;
         s[473] = down;
     }
     void draw() override {
-        const kit::Rect R{80, 45, 480, 360};  // popup 19
-        kit::popupFrame(R);
-        auto pic = image(G.dataDir + "/PICS/NEWSCEN.PCK");
+        const kit::Rect popup_rect{80, 45, 480, 360};  // popup 19
+        kit::popupFrame(popup_rect);
+        auto pic = Image(G.dataDir + "/PICS/NEWSCEN.PCK");
         gfx::setColor(1, 1, 1);
-        if (pic) gfx::draw(pic, R.x, R.y);
+        if (pic) gfx::draw(pic, popup_rect.x, popup_rect.y);
         kit::setPal(0);
         gfx::rectangle(gfx::FILL, 112, 153, 136, 140);
         gfx::setColor(1, 1, 1);
         const Font& f = kit::font(2);
         for (int i = 0; i <= 6; i++) {
-            if (topRow + i < static_cast<int>(list.size()))
-                f.colours(i == cur ? 15 : 5, 0).draw(list[topRow + i].name, 112, 153 + 20 * i);
+            if (top_row + i < static_cast<int>(list.size()))
+                f.colours(i == cur ? 15 : 5, 0).draw(list[top_row + i].name, 112, 153 + 20 * i);
         }
-        if (topRow + cur < static_cast<int>(list.size())) {
-            const Scenario& e = list[topRow + cur];
+        if (top_row + cur < static_cast<int>(list.size())) {
+            const Scenario& e = list[top_row + cur];
             const Font& g5 = f.colours(5, 0);
             kit::centred(g5, e.name, 416, 101);
             kit::centred(g5, e.text, 416, 174);
@@ -749,8 +754,8 @@ struct Chooser : kit::Modal {
         std::set<int> h = {476, 477, 478, 479, 480, 481, 482};
         kit::drawControls(v, h);
     }
-    void take(bool ok) {
-        int pick = ok ? topRow + cur : w2::NONE;
+    void Take(bool ok) {
+        int pick = ok ? top_row + cur : w2::NONE;
         auto a = after;
         kit::pop(this);
         a(pick);
@@ -759,27 +764,27 @@ struct Chooser : kit::Modal {
         auto c = kit::controlAt(v, x, y);
         if (!c || v.stateOf(c->id) == w2::uidata::DISABLED) return;
         int id = c->id;
-        if (id == 474) return take(true);
-        if (id == 475) return take(false);
+        if (id == 474) return Take(true);
+        if (id == 475) return Take(false);
         if (id >= 476 && id <= 482) {
-            if (topRow + id - 476 < static_cast<int>(list.size())) cur = id - 476;
+            if (top_row + id - 476 < static_cast<int>(list.size())) cur = id - 476;
         } else if (id == 470 || id == 472) {
-            topRow = std::max(0, topRow - (id == 472 ? 7 : 1));
+            top_row = std::max(0, top_row - (id == 472 ? 7 : 1));
         } else if (id == 471 || id == 473) {
-            topRow = std::min(std::max(0, static_cast<int>(list.size()) - 7),
-                              topRow + (id == 473 ? 7 : 1));
+            top_row = std::min(std::max(0, static_cast<int>(list.size()) - 7),
+                               top_row + (id == 473 ? 7 : 1));
         }
-        refresh();
+        Refresh();
     }
     void keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
-            take(true);
+            Take(true);
         else if (key == "escape")
-            take(false);
+            Take(false);
     }
 };
 
-void openChooser(const std::vector<Scenario>& list, int current, std::function<void(int)> after) {
+void OpenChooser(const std::vector<Scenario>& list, int current, std::function<void(int)> after) {
     auto d = std::make_shared<Chooser>();
     d->list = list;
     d->cur = current;
@@ -788,16 +793,16 @@ void openChooser(const std::vector<Scenario>& list, int current, std::function<v
     d->view = &d->v;
     while (d->cur >= 7) {
         d->cur--;
-        d->topRow++;
+        d->top_row++;
     }
-    d->refresh();
+    d->Refresh();
     kit::push(d);
 }
 
-const int SLIDER_X = 384, SLIDER_W = 120;  // 4125:29ac
+const int kSliderX = 384, kSliderW = 120;  // 4125:29ac
 
 // 7f77:0332: the random world's settings, in place of the picture.
-void drawWorld() {
+void DrawWorld() {
     kit::setPal(3);
     gfx::rectangle(gfx::FILL, 328, 200, 264, 225);  // 4125:2930
     const Font& f = kit::font(2);
@@ -808,13 +813,13 @@ void drawWorld() {
         kit::right(f, kit::text(2, i), 376, y);
         // the slider at its place (4125:29cc), or bare for "?" (4125:2a04)
         int sy = world.set[i] ? 80 + 20 * world.sliders[i] : 220;
-        if (art) gfx::draw(art->image, gfx::newQuad(496, sy, SLIDER_W, 20), SLIDER_X, y + 1);
+        if (art) gfx::draw(art->image, gfx::newQuad(496, sy, kSliderW, 20), kSliderX, y + 1);
         std::string shows = world.set[i] ? format(w2::randommap::SLIDER_FORMATS[i],
                                                   w2::randommap::SLIDER_SHOWS[i][world.sliders[i]])
                                          : "(?)";
         f.draw(shows, 504, y);
     }
-    f.draw(w2::randommap::terrainSetName(G.dataDir, world.terrainSet), 336, 340);
+    f.draw(w2::randommap::terrainSetName(G.dataDir, world.terrain_set), 336, 340);
     f.draw(kit::text(3, world.allies ? 1 : 0), 336, 365);
 }
 
@@ -822,7 +827,7 @@ void drawWorld() {
 // 4bed:01ff does on popup 23 -- the scroll with group 136's lines, the bar
 // RMAPBAR.PCK at (232, 257) growing a tenth at a time, the percentage over
 // it -- then hand it on. A "?" slider is rolled, 1d7-1.
-struct MakeWorld : kit::Modal {
+struct MakeWorldDialog : kit::Modal {
     w2::Rng rng;
     std::unique_ptr<w2::randommap::Run> run;
     kit::Done after;
@@ -836,9 +841,11 @@ struct MakeWorld : kit::Modal {
         if (a) a();
     }
     void draw() override {
-        const kit::Rect R{160, 55, 336, 347};  // popup 23
+        const kit::Rect popup_rect{160, 55, 336, 347};  // popup 23
         gfx::setColor(1, 1, 1);
-        if (scroll) gfx::draw(scroll, gfx::newQuad(0, 0, R.w, R.h), R.x, R.y);
+        if (scroll)
+            gfx::draw(scroll, gfx::newQuad(0, 0, popup_rect.w, popup_rect.h), popup_rect.x,
+                      popup_rect.y);
         const Font& f = kit::font(2).colours(0, 7);
         const int lines[2] = {2, 3};
         for (int i = 0; i < 2; i++) kit::centred(f, kit::text(0x88, lines[i]), 328, 181 + 20 * i);
@@ -853,8 +860,8 @@ struct MakeWorld : kit::Modal {
     }
 };
 
-void makeWorld(kit::Done after) {
-    auto d = std::make_shared<MakeWorld>();
+void MakeWorld(kit::Done after) {
+    auto d = std::make_shared<MakeWorldDialog>();
     d->rng = w2::Rng(static_cast<double>(time(nullptr) % 1000000007));
     w2::randommap::Options o;
     o.dataDir = G.dataDir;
@@ -862,11 +869,11 @@ void makeWorld(kit::Done after) {
     for (int i = 0; i < 4; i++)
         o.sliders[i] = world.set[i] ? world.sliders[i] : w2::randommap::RANDOM_SLIDER;
     o.allies = world.allies;
-    o.terrainSet = world.terrainSet;
+    o.terrainSet = world.terrain_set;
     d->run = std::make_unique<w2::randommap::Run>(o);
     d->after = after;
-    d->scroll = image(G.dataDir + "/PICS/BSCROLL.PCK", 10);
-    d->bar = image(G.dataDir + "/PICS/RMAPBAR.PCK", 10);
+    d->scroll = Image(G.dataDir + "/PICS/BSCROLL.PCK", 10);
+    d->bar = Image(G.dataDir + "/PICS/RMAPBAR.PCK", 10);
     kit::push(d);
 }
 
@@ -874,10 +881,10 @@ struct Menu : kit::Modal {
     std::vector<Scenario> list;
     screen::View v;
     int cur = 0;
-    std::function<void(const std::string&, const w2::game::NewGameOptions&)> beginGame;
+    std::function<void(const std::string&, const w2::game::NewGameOptions&)> begin_game;
     std::function<void(std::unique_ptr<w2::Game>)> loaded;
     // 7f77:011e
-    void refresh() {
+    void Refresh() {
         auto& s = v.state;
         s[100] = s[101] = s[103] = w2::uidata::NORMAL;
         s[102] = world.on ? w2::uidata::DISABLED : w2::uidata::NORMAL;
@@ -895,15 +902,15 @@ struct Menu : kit::Modal {
     void draw() override {
         gfx::setColor(1, 1, 1);
         for (int q = 0; q < 4; q++) {
-            auto img = image(G.dataDir + "/PICS/STARTUP" + std::to_string(q) + ".PCK");
+            auto img = Image(G.dataDir + "/PICS/STARTUP" + std::to_string(q) + ".PCK");
             if (img) gfx::draw(img, (q % 2) * 320, (q / 2) * 240);
         }
         bool have = cur < static_cast<int>(list.size());
         if (world.on) {
-            drawWorld();
+            DrawWorld();
         } else if (have) {
             std::string dir = w2::upper(list[cur].dir);
-            if (auto pic = image(G.dataDir + "/" + dir + "/PICS/SCENARIO.PCK")) {
+            if (auto pic = Image(G.dataDir + "/" + dir + "/PICS/SCENARIO.PCK")) {
                 gfx::setColor(1, 1, 1);
                 gfx::draw(pic, gfx::newQuad(0, 0, 264, 225), 328, 200);
             }
@@ -917,16 +924,16 @@ struct Menu : kit::Modal {
         }
         kit::drawControls(v, hidden);
     }
-    void setUp(const Scenario& sc) {
+    void SetUp(const Scenario& sc) {
         auto keep = shared_from_this();
-        auto st = newSetup(sc);
-        auto bg = beginGame;
-        openSetup(
+        auto st = NewSetup(sc);
+        auto bg = begin_game;
+        OpenSetup(
                 st,
                 [bg](std::shared_ptr<Setup> s) {
                     w2::game::NewGameOptions o;
                     for (int i = 0; i <= 9; i++)
-                        o.options.emplace_back(OPTION_KEYS[i], s->options[i]);
+                        o.options.emplace_back(kOptionKeys[i], s->options[i]);
                     for (int i = 0; i < 8; i++) {
                         const SideSetup& e = s->sides[i];
                         w2::game::SideSetup ss;
@@ -942,7 +949,7 @@ struct Menu : kit::Modal {
                 },
                 [keep]() {
                     auto m = std::static_pointer_cast<Menu>(keep);
-                    m->refresh();
+                    m->Refresh();
                     kit::push(keep);
                 });
     }
@@ -954,13 +961,13 @@ struct Menu : kit::Modal {
         Menu* me = this;
         if (id == 100) {
             // 7f77:067c: a scenario chosen ends the random world
-            openChooser(list, cur, [self, me](int i) {
+            OpenChooser(list, cur, [self, me](int i) {
                 if (self.expired()) return;
                 if (i != w2::NONE) {
                     me->cur = i;
                     world.on = false;
                 }
-                me->refresh();
+                me->Refresh();
             });
         } else if (id == 101) {
             auto l = loaded;
@@ -971,8 +978,8 @@ struct Menu : kit::Modal {
         } else if (id == 102) {
             world.on = true;  // 7f77:05f5
         } else if (id == 104) {
-            world.terrainSet =
-                    (world.terrainSet + 1) % w2::randommap::terrainSets(G.dataDir);  // 7f77:063a
+            world.terrain_set =
+                    (world.terrain_set + 1) % w2::randommap::terrainSets(G.dataDir);  // 7f77:063a
         } else if (id == 105) {
             world.allies = !world.allies;  // 7f77:0661
         } else if (id >= 106 && id <= 109) {
@@ -982,29 +989,29 @@ struct Menu : kit::Modal {
             if (!world.set[i])
                 world.set[i] = true;
             else
-                world.sliders[i] = std::clamp((x - SLIDER_X) * 7 / SLIDER_W, 0, 6);
+                world.sliders[i] = std::clamp((x - kSliderX) * 7 / kSliderW, 0, 6);
         } else if (id >= 110 && id <= 113) {
             world.set[id - 110] = false;  // 7f77:0571
         } else if (id == 103 && world.on) {
             // 7f77:060f: "One moment...", the world, then the sides as for any scenario
             advisor::say(w2::cues::MOMENT, [self, me]() {
-                makeWorld([self, me]() {
+                MakeWorld([self, me]() {
                     auto keep = self.lock();
                     if (!keep) return;
                     kit::pop(me);
                     Scenario sc;
                     sc.name = kit::text(0, 0);
                     sc.dir = w2::randommap::DIR;
-                    me->setUp(sc);
+                    me->SetUp(sc);
                 });
             });
         } else if (id == 103 && cur < static_cast<int>(list.size())) {
             auto keep = shared_from_this();
             kit::pop(this);
-            setUp(list[cur]);
+            SetUp(list[cur]);
             return;
         }
-        refresh();
+        Refresh();
     }
 };
 }  // namespace
@@ -1012,10 +1019,10 @@ struct Menu : kit::Modal {
 void open(std::function<void(const std::string& dir, const w2::game::NewGameOptions& opts)> begin,
           std::function<void(std::unique_ptr<w2::Game>)> loaded) {
     auto d = std::make_shared<Menu>();
-    d->list = scenarios();
+    d->list = Scenarios();
     for (size_t i = 0; i < d->list.size(); i++)
         if (d->list[i].dir == "Erythea") d->cur = static_cast<int>(i);  // 4125:2a6e
-    d->beginGame = begin;
+    d->begin_game = begin;
     d->loaded = loaded;
     // back from a random world, the menu is still on one (7f77:0000)
     if (G.scenario == w2::randommap::DIR) world.on = true;
@@ -1023,7 +1030,7 @@ void open(std::function<void(const std::string& dir, const w2::game::NewGameOpti
     d->v.screen = true;  // a screen, not a dialog: Begin has no ring
     d->view = &d->v;
     d->menuBar = true;
-    d->refresh();
+    d->Refresh();
     kit::push(d);
 }
 

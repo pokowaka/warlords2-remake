@@ -41,22 +41,22 @@ void outline(double x, double y, double w, double h) {
     gfx::rectangle(gfx::FILL, x + w - 1, y, 1, h);
 }
 
-void popupFrame(const Rect& R) {
+void popupFrame(const Rect& r) {
     gfx::setColor(0, 0, 0);
-    outline(R.x - 1, R.y - 1, R.w + 2, R.h + 2);
-    gfx::rectangle(gfx::FILL, R.x + 1, R.y + R.h + 1, R.w + 2, 2);
-    gfx::rectangle(gfx::FILL, R.x + R.w + 1, R.y + 1, 2, R.h + 2);
+    outline(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
+    gfx::rectangle(gfx::FILL, r.x + 1, r.y + r.h + 1, r.w + 2, 2);
+    gfx::rectangle(gfx::FILL, r.x + r.w + 1, r.y + 1, 2, r.h + 2);
 }
 
-void popup(const Rect& R) {
-    popupFrame(R);
+void popup(const Rect& r) {
+    popupFrame(r);
     gfx::setColor(1, 1, 1);
-    gfx::setScissor(R.x, R.y, R.w, R.h);
-    gfx::draw(G.marble, R.x, R.y);
+    gfx::setScissor(r.x, r.y, r.w, r.h);
+    gfx::draw(G.marble, r.x, r.y);
     // past the marble's 480 columns the blit reads on into the next row
     int mw = G.marble->w, mh = G.marble->h;
-    if (R.w > mw)
-        gfx::draw(G.marble, gfx::newQuad(0, 1, R.w - mw, std::min(R.h, mh - 1)), R.x + mw, R.y);
+    if (r.w > mw)
+        gfx::draw(G.marble, gfx::newQuad(0, 1, r.w - mw, std::min(r.h, mh - 1)), r.x + mw, r.y);
     gfx::setScissor();
 }
 
@@ -75,22 +75,22 @@ void right(const Font& f, const std::string& text, double x, double y) {
 }
 
 void bevel(double x, double y, double w, double h, int a, int b) {
-    auto topLeft = [&]() {
+    auto top_left = [&]() {
         setPal(a);
         gfx::rectangle(gfx::FILL, x, y, w, 1);
         gfx::rectangle(gfx::FILL, x, y, 1, h);
     };
-    auto bottomRight = [&]() {
+    auto bottom_right = [&]() {
         setPal(b);
         gfx::rectangle(gfx::FILL, x + w - 1, y, 1, h);
         gfx::rectangle(gfx::FILL, x, y + h - 1, w, 1);
     };
     if (b < a) {
-        bottomRight();
-        topLeft();
+        bottom_right();
+        top_left();
     } else {
-        topLeft();
-        bottomRight();
+        top_left();
+        bottom_right();
     }
 }
 
@@ -102,19 +102,19 @@ void field(double x, double y, double w, double h, const std::string* text, cons
     if (text) (f ? *f : *G.bigFont).draw(*text, x + 3, y + 2);
 }
 
-gfx::Quad armyQuad(int typeId) {
-    int i = ((typeId % 32) + 32) % 32;
+gfx::Quad armyQuad(int type_id) {
+    int i = ((type_id % 32) + 32) % 32;
     // An army sheet is 16 cells across on a 32-pixel stride; its rows are 30
     // apart and 29 tall, which is what 8611:08be reads out of it.
     return gfx::newQuad((i % 16) * 32, (i / 16) * 30, 32, 29);
 }
 
-void army(int typeId, int side, double x, double y, int ring, bool shadow) {
+void army(int type_id, int side, double x, double y, int ring, bool shadow) {
     if (side < 0 || side == 15 || side > 8) side = 8;
     gfx::setColor(1, 1, 1);
     if (ring > 0) gfx::draw(G.abits, gfx::newQuad((ring - 1) * 32, 0, 32, 30), x, y);
-    if (typeId != w2::NONE)
-        gfx::draw(shadow ? G.shadowImg : G.armyImg[side], armyQuad(typeId), x, y);
+    if (type_id != w2::NONE)
+        gfx::draw(shadow ? G.shadowImg : G.armyImg[side], armyQuad(type_id), x, y);
 }
 
 void shield(int side, double x, double y) {
@@ -167,8 +167,8 @@ void mapTarget(int mx, int my, int hx, int hy, int tx, int ty) {
     gfx::setScissor();
 }
 
-screen::View view(int dialogId) {
-    return screen::dialog(*G.screen, dialogId);
+screen::View view(int dialog_id) {
+    return screen::dialog(*G.screen, dialog_id);
 }
 
 void drawControls(const screen::View& v, const std::set<int>* hidden) {

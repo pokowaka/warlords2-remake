@@ -17,18 +17,18 @@ struct Pad {
 std::map<SDL_JoystickID, Pad> pads;
 std::optional<Sticks> scripted;
 
-const double DEAD = 0.15;               // of the stick's travel, all round
-const double PULL = 0.5, LET_GO = 0.3;  // a trigger's press, and its release
+const double kDead = 0.15;               // of the stick's travel, all round
+const double kPull = 0.5, kLetGo = 0.3;  // a trigger's press, and its release
 
 // One stick, its dead zone taken out and the rest stretched over 0..1, so
 // the slowest it goes is the slowest there is.
-void stick(SDL_GameController* c, SDL_GameControllerAxis ax, SDL_GameControllerAxis ay, double& x,
+void Stick(SDL_GameController* c, SDL_GameControllerAxis ax, SDL_GameControllerAxis ay, double& x,
            double& y) {
     double sx = SDL_GameControllerGetAxis(c, ax) / 32767.0,
            sy = SDL_GameControllerGetAxis(c, ay) / 32767.0;
     double m = std::hypot(sx, sy);
-    if (m <= DEAD) return;
-    double k = std::min(1.0, (m - DEAD) / (1 - DEAD)) / m;
+    if (m <= kDead) return;
+    double k = std::min(1.0, (m - kDead) / (1 - kDead)) / m;
     x += sx * k;
     y += sy * k;
 }
@@ -77,7 +77,7 @@ bool trigger(int& button, bool& down) {
             double v = SDL_GameControllerGetAxis(p.c, t == 0 ? SDL_CONTROLLER_AXIS_TRIGGERLEFT
                                                              : SDL_CONTROLLER_AXIS_TRIGGERRIGHT) /
                        32767.0;
-            if (was ? v < LET_GO : v > PULL) {
+            if (was ? v < kLetGo : v > kPull) {
                 was = !was;
                 button = t == 0 ? LEFT_TRIGGER : RIGHT_TRIGGER;
                 down = was;
@@ -92,8 +92,8 @@ Sticks sticks() {
     if (scripted) return *scripted;
     Sticks s;
     for (auto& [id, p] : pads) {
-        stick(p.c, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, s.lx, s.ly);
-        stick(p.c, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, s.rx, s.ry);
+        Stick(p.c, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, s.lx, s.ly);
+        Stick(p.c, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, s.rx, s.ry);
     }
     s.lx = std::clamp(s.lx, -1.0, 1.0);
     s.ly = std::clamp(s.ly, -1.0, 1.0);

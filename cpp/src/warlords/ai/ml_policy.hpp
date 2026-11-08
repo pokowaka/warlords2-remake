@@ -118,18 +118,18 @@ struct ResidualMLP {
     std::array<float, OutDim * H2Dim> w3{};
     std::array<float, OutDim> b3{};
 
-    std::array<float, OutDim> forward(const std::array<float, InDim>& x) const;
+    std::array<float, OutDim> Forward(const std::array<float, InDim>& x) const;
 
     /**
      * Accumulates exact parameter gradients dL/dW and dL/db into `gradAccum`
      * given input `x` and output gradient `dOut` = dL/dy.
      */
-    void backward(const std::array<float, InDim>& x, const std::array<float, OutDim>& dOut,
+    void Backward(const std::array<float, InDim>& x, const std::array<float, OutDim>& dOut,
                   ResidualMLP& gradAccum) const;
 
-    void zero();
-    void toFlat(std::vector<float>& out) const;
-    size_t fromFlat(const std::vector<float>& in, size_t offset);
+    void Zero();
+    void ToFlat(std::vector<float>& out) const;
+    size_t FromFlat(const std::vector<float>& in, size_t offset);
 
     /**
      * Loads weights saved with a narrower input of `oldInDim` columns: old column
@@ -137,7 +137,7 @@ struct ResidualMLP {
      * column starts at zero, so the function computed is unchanged until
      * training uses the new inputs.
      */
-    size_t fromFlatWidenInput(const std::vector<float>& in, size_t offset, int oldInDim,
+    size_t FromFlatWidenInput(const std::vector<float>& in, size_t offset, int oldInDim,
                               int insertAt, int insertCount);
 };
 

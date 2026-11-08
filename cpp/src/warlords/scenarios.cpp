@@ -8,13 +8,13 @@
 namespace w2::scenarios {
 
 namespace {
-constexpr size_t RECORD = 84;  // SCENARIO.DAT
-constexpr size_t LIST_NAME_MAX = 20, LIST_TEXT_MAX = 30;
+constexpr size_t kRecord = 84;  // SCENARIO.DAT
+constexpr size_t kListNameMax = 20, kListTextMax = 30;
 }  // namespace
 
 std::string info(const Entry& e) {
-    return "name=" + e.name.substr(0, LIST_NAME_MAX) + "\n" +
-           "text=" + e.text.substr(0, LIST_TEXT_MAX) + "\n" + "cities=" + std::to_string(e.cities) +
+    return "name=" + e.name.substr(0, kListNameMax) + "\n" +
+           "text=" + e.text.substr(0, kListTextMax) + "\n" + "cities=" + std::to_string(e.cities) +
            "\n" + "ruins=" + std::to_string(e.ruins) + "\n" +
            "players=" + std::to_string(e.players) + "\n";
 }
@@ -29,9 +29,9 @@ std::optional<Entry> parseInfo(const std::string& text, const std::string& dir) 
         if (line.empty() || line[0] == '#' || eq == std::string::npos) continue;
         std::string key = trim(line.substr(0, eq)), value = trim(line.substr(eq + 1));
         if (key == "name")
-            e.name = value.substr(0, LIST_NAME_MAX);
+            e.name = value.substr(0, kListNameMax);
         else if (key == "text")
-            e.text = value.substr(0, LIST_TEXT_MAX);
+            e.text = value.substr(0, kListTextMax);
         else if (key == "cities")
             e.cities = static_cast<int>(toInt(value).value_or(0));
         else if (key == "ruins")
@@ -43,12 +43,12 @@ std::optional<Entry> parseInfo(const std::string& text, const std::string& dir) 
     return e;
 }
 
-std::vector<Entry> list(const std::string& dataDir) {
+std::vector<Entry> list(const std::string& data_dir) {
     std::vector<Entry> out;
     std::vector<std::string> listed;
-    if (auto s = readFile(dataDir + "/DATA/SCENARIO.DAT")) {
-        for (size_t i = 0; i < s->size() / RECORD; i++) {
-            size_t o = RECORD * i;
+    if (auto s = readFile(data_dir + "/DATA/SCENARIO.DAT")) {
+        for (size_t i = 0; i < s->size() / kRecord; i++) {
+            size_t o = kRecord * i;
             Entry e{cstr(*s, o, 20),
                     cstr(*s, o + 20, 8),
                     cstr(*s, o + 28, 30),
@@ -60,12 +60,12 @@ std::vector<Entry> list(const std::string& dataDir) {
             out.push_back(e);
         }
     }
-    if (auto lst = readFile(dataDir + "/DATA/SCENGEN.LST")) {
+    if (auto lst = readFile(data_dir + "/DATA/SCENGEN.LST")) {
         for (const std::string& raw : splitLines(*lst)) {
             std::string dir = trim(raw);
             if (dir.empty() || std::find(listed.begin(), listed.end(), upper(dir)) != listed.end())
                 continue;
-            std::string base = dataDir + "/" + dir + "/" + dir;
+            std::string base = data_dir + "/" + dir + "/" + dir;
             auto text = readFile(base + ".INF");
             if (!text || !fileExists(base + ".SCN")) continue;
             if (auto e = parseInfo(*text, dir)) {
@@ -77,8 +77,8 @@ std::vector<Entry> list(const std::string& dataDir) {
     return out;
 }
 
-bool remember(const std::string& dataDir, const std::string& dir) {
-    std::string path = dataDir + "/DATA/SCENGEN.LST";
+bool remember(const std::string& data_dir, const std::string& dir) {
+    std::string path = data_dir + "/DATA/SCENGEN.LST";
     std::vector<std::string> dirs;
     if (auto lst = readFile(path))
         for (const std::string& raw : splitLines(*lst))

@@ -13,19 +13,19 @@ namespace w2::ai::heroes {
 using namespace core;
 
 namespace {
-bool blessed(const Army* h, const Site& s) {
+bool Blessed(const Army* h, const Site& s) {
     return s.templeIndex != NONE && h->blessings.count(s.templeIndex);
 }
 
 // Is a site still worth the hero's while (6087:1637)?
-bool worth(const Game& g, const Side& side, const Site& s, const Army* h) {
+bool Worth(const Game& g, const Side& side, const Site& s, const Army* h) {
     int dd = dist(s.x, s.y, h->x, h->y);
     int reach = g.turn * 2 + (s.rich ? 15 : 3);
     return dd < reach && explored(g, side.index, s.x, s.y) && siteOpen(s);
 }
 
 // Is an item lying where a hero may take it (6087:1736)?
-bool lying(const Game& g, const Side& side, const Item& it) {
+bool Lying(const Game& g, const Side& side, const Item& it) {
     if (it.status != 1 || it.x == NONE || it.planted) return false;
     if (!explored(g, side.index, it.x, it.y)) return false;
     City* c = cityAt(g, it.x, it.y);
@@ -37,18 +37,18 @@ struct Info {
     std::vector<City*> city;
     std::vector<Site*> site;
     Site* quest = nullptr;
-    int questD = 100;
+    int quest_d = 100;
     Site* target = nullptr;
-    int siteD = 100;
+    int site_d = 100;
     Item* item = nullptr;
-    int itemD = 100;
+    int item_d = 100;
     City* enemy = nullptr;
-    int enemyD = 20;
+    int enemy_d = 20;
 };
 
 // The side's heroes, six at most, with the city or site each stands on
 // (6087:065d).
-Info survey(Game& g, Side& side) {
+Info Survey(Game& g, Side& side) {
     AIData& d = data(g, side);
     Info info;
     d.heroes = 0;
@@ -65,22 +65,22 @@ Info survey(Game& g, Side& side) {
 }
 
 // Temples and ruins in reach (6087:0fda).
-void sites(Game& g, Side& side, size_t k, Info& info) {
+void Sites(Game& g, Side& side, size_t k, Info& info) {
     Army* h = info.heroes[k];
     int range = h->aiOrder == ORDER_CITY ? 5 : 25;
-    int questD = 100, siteD = 100;
-    Site* questS = nullptr;
+    int quest_d = 100, site_d = 100;
+    Site* quest_s = nullptr;
     Site* best = nullptr;
     for (auto& s : g.map->sites) {
-        if (worth(g, side, s, h)) {
+        if (Worth(g, side, s, h)) {
             int dd = dist(s.x, s.y, h->x, h->y);
             bool ok = true;
             if (s.content == site::TEMPLE) {
-                bool free = g.map->options.quests != 0 && !side.quest && dd < range && dd < questD;
+                bool free = g.map->options.quests != 0 && !side.quest && dd < range && dd < quest_d;
                 if (free) {
-                    questD = dd;
-                    questS = &s;
-                } else if (blessed(h, s))
+                    quest_d = dd;
+                    quest_s = &s;
+                } else if (Blessed(h, s))
                     ok = false;
             } else {
                 for (size_t j = 0; j < info.heroes.size(); j++) {
@@ -88,27 +88,27 @@ void sites(Game& g, Side& side, size_t k, Info& info) {
                     if (j != k && o->aiOrder == ORDER_SITE && o->aiDest == s.index) ok = false;
                 }
             }
-            if (ok && dd <= range && dd < siteD) {
-                siteD = dd;
+            if (ok && dd <= range && dd < site_d) {
+                site_d = dd;
                 best = &s;
             }
         }
     }
-    info.quest = questS;
-    info.questD = questD;
+    info.quest = quest_s;
+    info.quest_d = quest_d;
     info.target = best;
-    info.siteD = siteD;
+    info.site_d = site_d;
 }
 
 // Items lying about within 5 (sent at a city) or 15 (6087:11f8).
-void items(Game& g, Side& side, size_t k, Info& info) {
+void Items(Game& g, Side& side, size_t k, Info& info) {
     Army* h = info.heroes[k];
     int range = h->aiOrder == ORDER_CITY ? 5 : 15;
     Item* best = nullptr;
-    int bestD = 100;
+    int best_d = 100;
     for (int i = static_cast<int>(g.map->items.size()) - 1; i >= 0; i--) {
         Item& it = g.map->items[i];
-        if (lying(g, side, it)) {
+        if (Lying(g, side, it)) {
             bool taken = false;
             for (size_t j = 0; j < info.heroes.size(); j++) {
                 Army* o = info.heroes[j];
@@ -116,40 +116,40 @@ void items(Game& g, Side& side, size_t k, Info& info) {
             }
             if (!taken) {
                 int dd = dist(it.x, it.y, h->x, h->y);
-                if (dd <= range && dd < bestD) {
+                if (dd <= range && dd < best_d) {
                     best = &it;
-                    bestD = dd;
+                    best_d = dd;
                 }
             }
         }
     }
     info.item = best;
-    info.itemD = bestD;
+    info.item_d = best_d;
 }
 
 // An enemy city the hero's stack beats (6087:1348).
-void enemy(Game& g, Side& side, size_t k, Info& info) {
+void Enemy(Game& g, Side& side, size_t k, Info& info) {
     AIData& d = data(g, side);
     Army* h = info.heroes[k];
     info.enemy = nullptr;
-    info.enemyD = 20;
+    info.enemy_d = 20;
     int dest = h->aiOrder == ORDER_CITY ? h->aiDest : NONE;
     auto list = collectOrdered(g, side.index, h->x, h->y, h->aiGroup, h->aiOrder, 12);
     if (list.empty()) return;
     Sel sel = select(g, list);
     int need = list.size() < 3 ? 95 : 75;
-    int bestOdds = 0;
+    int best_odds = 0;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (standing(c) && !cflag(d, c, CF_UNSEEN) && c.ownerIndex != NONE &&
             state(g, side.index, c.ownerIndex) == 2) {
             int dd = dist(c.x, c.y, h->x, h->y);
-            if (dd <= info.enemyD || (dest != NONE && dest == c.index)) {
+            if (dd <= info.enemy_d || (dest != NONE && dest == c.index)) {
                 int o = odds(g, sel, c.x, c.y) + (dest != NONE && dest == c.index ? 20 : 0);
-                if (o >= need && (bestOdds < o || (o == bestOdds && dd < info.enemyD))) {
+                if (o >= need && (best_odds < o || (o == best_odds && dd < info.enemy_d))) {
                     info.enemy = &c;
-                    info.enemyD = dd;
-                    bestOdds = o;
+                    info.enemy_d = dd;
+                    best_odds = o;
                 }
             }
         }
@@ -158,14 +158,14 @@ void enemy(Game& g, Side& side, size_t k, Info& info) {
 
 // Pick (ai_choose_target, 6087:0efc): 1 the quest temple, 3 the site, 4 the
 // enemy city, 2 the item, 0 nothing.
-int choose(Game& g, Side& side, size_t k, Info& info) {
+int Choose(Game& g, Side& side, size_t k, Info& info) {
     AIData& d = data(g, side);
     int r = g.rng.dice(1, 20, 0);
     int pick = info.quest ? 1 : 0;
     int best = 0;
-    if (info.quest) best = 100 - info.questD + r;
+    if (info.quest) best = 100 - info.quest_d + r;
     r = g.rng.dice(1, 20, 0);
-    int s = 100 - info.siteD + r;
+    int s = 100 - info.site_d + r;
     if (info.target && best < s) {
         pick = 3;
         best = s;
@@ -173,19 +173,19 @@ int choose(Game& g, Side& side, size_t k, Info& info) {
     City* c = info.city[k];
     if (!c || get(d.garrison, c->index) > 4) {
         r = g.rng.dice(1, 20, 0);
-        s = 100 - info.enemyD + r;
+        s = 100 - info.enemy_d + r;
         if (info.enemy && best < s) {
             pick = 4;
             best = s;
         }
         r = g.rng.dice(1, 20, 0);
-        if (info.item && best < 100 - info.itemD + r) pick = 2;
+        if (info.item && best < 100 - info.item_d + r) pick = 2;
     }
     return pick;
 }
 
 // Go for the site (3) or the item (2) (6087:07ea). 1 when it got there.
-int go(Game& g, Side& side, size_t k, int kind, Info& info) {
+int Go(Game& g, Side& side, size_t k, int kind, Info& info) {
     AIData& d = data(g, side);
     Army* h = info.heroes[k];
     int tx, ty, index;
@@ -235,7 +235,7 @@ int go(Game& g, Side& side, size_t k, int kind, Info& info) {
 }
 
 // Go for the enemy city (6087:0b75).
-int attack(Game& g, Side& side, size_t k, Info& info) {
+int Attack(Game& g, Side& side, size_t k, Info& info) {
     AIData& d = data(g, side);
     Army* h = info.heroes[k];
     City* target = info.enemy;
@@ -253,7 +253,7 @@ int attack(Game& g, Side& side, size_t k, Info& info) {
 }
 
 // The quest hero goes for the city it is to take or raze (6087:0cf3).
-bool questGo(Game& g, Side& side, size_t k, Info& info) {
+bool QuestGo(Game& g, Side& side, size_t k, Info& info) {
     AIData& d = data(g, side);
     Army* h = info.heroes[k];
     auto q = side.quest;
@@ -281,19 +281,19 @@ void phase(Game& g, Side& side) {
         q->city) {
         d.questCity = q->city->index;
     }
-    Info info = survey(g, side);
+    Info info = Survey(g, side);
     for (int k = static_cast<int>(info.heroes.size()) - 1; k >= 0; k--) {
         Army* h = info.heroes[k];
         if (h && alive(g, h) && h->owner == side.index && isHero(h)) {
             if (info.city[k]) cities::garrison(g, side, *info.city[k], true);
             bool skip = g.map->options.quests != 0 && side.quest && side.quest->hero == h &&
-                        questGo(g, side, k, info);
+                        QuestGo(g, side, k, info);
             if (!skip && alive(g, h)) {
                 if (h->aiOrder == ORDER_SITE) {
                     Site* s = h->aiDest >= 0 && h->aiDest < static_cast<int>(g.map->sites.size())
                                       ? &g.map->sites[h->aiDest]
                                       : nullptr;
-                    if (!s || !worth(g, side, *s, h)) {
+                    if (!s || !Worth(g, side, *s, h)) {
                         for (Army* a : onTile(g, side.index, h->x, h->y)) {
                             if (a->aiOrder == h->aiOrder) {
                                 clearOrder(a);
@@ -302,25 +302,25 @@ void phase(Game& g, Side& side) {
                         }
                     } else {
                         info.target = s;
-                        go(g, side, k, 3, info);
+                        Go(g, side, k, 3, info);
                     }
                 }
                 int step = 1, tries = 0;
                 bool moved = false;
                 while (step != 0 && tries < 2 && alive(g, h) && h->moves > 3) {
                     tries++;
-                    sites(g, side, k, info);
-                    items(g, side, k, info);
-                    enemy(g, side, k, info);
-                    int pick = choose(g, side, k, info);
+                    Sites(g, side, k, info);
+                    Items(g, side, k, info);
+                    Enemy(g, side, k, info);
+                    int pick = Choose(g, side, k, info);
                     if (pick == 1) {
                         step = 0;
                     } else if (pick == 2 || pick == 3) {
                         moved = true;
-                        step = go(g, side, k, pick, info);
+                        step = Go(g, side, k, pick, info);
                     } else if (pick == 4) {
                         moved = true;
-                        step = attack(g, side, k, info);
+                        step = Attack(g, side, k, info);
                     } else {
                         if (moved && g.map->options.hiddenMap != 0 && g.turn < 10 &&
                             collect(g, side.index, h->x, h->y, 8).size() == 1) {

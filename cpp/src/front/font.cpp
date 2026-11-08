@@ -6,10 +6,10 @@
 #include "front/pckimage.hpp"
 #include "util/util.hpp"
 
-std::shared_ptr<Font> Font::load(const std::string& dataDir, const std::string& name,
-                                 const w2::pal::Palette& palette, int keyIndex) {
+std::shared_ptr<Font> Font::load(const std::string& data_dir, const std::string& name,
+                                 const w2::pal::Palette& palette, int key_index) {
     auto f = std::make_shared<Font>();
-    auto s = w2::readFile(dataDir + "/" + name + ".FIN");
+    auto s = w2::readFile(data_dir + "/" + name + ".FIN");
     if (!s) throw std::runtime_error("cannot open font metrics: " + name);
     auto m = std::make_shared<Metrics>();
     auto b = [&](size_t i) {
@@ -27,11 +27,11 @@ std::shared_ptr<Font> Font::load(const std::string& dataDir, const std::string& 
         m->width[c] = b(11 + m->count + i);
     }
     f->m_ = m;
-    f->px_ = w2::pck::decode(dataDir + "/" + name + ".FNT");
+    f->px_ = w2::pck::decode(data_dir + "/" + name + ".FNT");
     f->palette_ = palette;
-    f->key_ = keyIndex;
+    f->key_ = key_index;
     f->image_ = pckimage::fromPixels(*f->px_, palette, {},
-                                     keyIndex >= 0 ? std::set<int>{keyIndex} : std::set<int>{});
+                                     key_index >= 0 ? std::set<int>{key_index} : std::set<int>{});
     f->quad_ = std::make_shared<std::map<int, gfx::Quad>>();
     int x = 0, row = 0;
     for (int i = 0; i <= m->count - 2; i++) {  // the last entry has no glyph

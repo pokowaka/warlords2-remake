@@ -39,19 +39,19 @@ bool spared(Game& g, Side& side, int other) {
 }
 
 // Claim one more city as the side's own ground (558d:0917).
-static void claim(Game& g, Side& side) {
+static void Claim(Game& g, Side& side) {
     City* cap = side.capital;
     if (!cap) return;
     City* best = nullptr;
-    int bestD = NONE;
+    int best_d = NONE;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         int cl = c.claim != NONE ? c.claim : NEUTRAL;
         if (standing(c) && cl != side.index && (cl == NEUTRAL || !inPlay(g, cl))) {
             int dd = dist(c.x, c.y, cap->x, cap->y);
-            if (dd < 40 && (bestD == NONE || dd < bestD)) {
+            if (dd < 40 && (best_d == NONE || dd < best_d)) {
                 best = &c;
-                bestD = dd;
+                best_d = dd;
             }
         }
     }
@@ -62,18 +62,18 @@ void phase(Game& g, Side& side) {
     AIData& d = data(g, side);
     int me = side.index;
     bool human = !side.computer;
-    claim(g, side);
+    Claim(g, side);
     if (g.map->options.diplomacy == 0) return;
     int enemy = groups::pickEnemy(g, side);
 
-    int swapped[16] = {0}, total[16] = {0}, seen[16] = {0}, theyWar[8] = {0}, theyPeace[8] = {0};
+    int swapped[16] = {0}, total[16] = {0}, seen[16] = {0}, they_war[8] = {0}, they_peace[8] = {0};
     for (int b = 7; b >= 0; b--) {
         propose(g, me, b, 0);
         int p = proposal(g, b, me);
         if (p == 2)
-            theyWar[b] = 1;
+            they_war[b] = 1;
         else if (p == 0)
-            theyPeace[b] = 1;
+            they_peace[b] = 1;
     }
     int tiles = 0;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
@@ -94,13 +94,13 @@ void phase(Game& g, Side& side) {
     // the grudge tests; each has a war branch that can never run (docs/re/ai.md)
     for (int b = 7; b >= 0; b--) {
         if (b != me && inPlay(g, b)) {
-            int grudge = (theyPeace[b] - theyWar[b]) * 2;
+            int grudge = (they_peace[b] - they_war[b]) * 2;
             if (swapped[b] >= grudge + 4) propose(g, me, b, 1);
         }
     }
     for (int b = 7; b >= 0; b--) {
         if (b != me && inPlay(g, b)) {
-            int grudge = (theyPeace[b] - theyWar[b]) * 2;
+            int grudge = (they_peace[b] - they_war[b]) * 2;
             int threat = d.lost[b] + d.citiesLost[b] * 4 + d.heroesKilled[b] * 2;
             if (threat >= grudge + 5) propose(g, me, b, std::max(1, proposal(g, me, b)));
         }
@@ -134,11 +134,11 @@ void phase(Game& g, Side& side) {
                 propose(g, me, s, 0);
             }
         }
-        bool atWarWithHuman = false;
+        bool at_war_with_human = false;
         for (int s = 7; s >= 0; s--) {
-            if (inPlay(g, s) && !isComputer(g, s) && state(g, me, s) == 2) atWarWithHuman = true;
+            if (inPlay(g, s) && !isComputer(g, s) && state(g, me, s) == 2) at_war_with_human = true;
         }
-        if (atWarWithHuman) {
+        if (at_war_with_human) {
             for (int s = 7; s >= 0; s--) {
                 if (inPlay(g, s) && isComputer(g, s) && g.map->sides[s].aiSolidarity != 0)
                     propose(g, me, s, 0);

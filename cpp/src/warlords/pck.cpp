@@ -14,16 +14,16 @@ namespace {
 std::mutex lock;
 std::map<std::string, std::shared_ptr<const Pixels>> cache;
 
-size_t decodePlane(const std::string& s, size_t pos, size_t planeSize, std::vector<uint8_t>& out) {
-    out.assign(planeSize, 0);
+size_t DecodePlane(const std::string& s, size_t pos, size_t plane_size, std::vector<uint8_t>& out) {
+    out.assign(plane_size, 0);
     size_t n = 0;
-    while (n < planeSize) {
+    while (n < plane_size) {
         if (pos >= s.size()) throw std::runtime_error("plane ran out");
         int cmd = static_cast<uint8_t>(s[pos]);
         if (cmd < 0x80) {
             size_t count = cmd + 1;
             for (size_t i = 0; i < count; i++) {
-                if (n + i < planeSize) out[n + i] = static_cast<uint8_t>(u8(s, pos + 1 + i));
+                if (n + i < plane_size) out[n + i] = static_cast<uint8_t>(u8(s, pos + 1 + i));
             }
             n += count;
             pos += 1 + count;
@@ -34,12 +34,12 @@ size_t decodePlane(const std::string& s, size_t pos, size_t planeSize, std::vect
             for (int i = 0; i < count; i++) {
                 long src = static_cast<long>(n) - dist;
                 uint8_t v = src >= 0 ? out[src] : 0;
-                if (n < planeSize) out[n] = v;
+                if (n < plane_size) out[n] = v;
                 n++;
             }
         }
     }
-    if (n != planeSize) throw std::runtime_error("plane overran");
+    if (n != plane_size) throw std::runtime_error("plane overran");
     return pos;
 }
 }  // namespace
@@ -58,12 +58,12 @@ std::shared_ptr<const Pixels> decode(const std::string& path) {
     p->w = u16(s, 2);
     p->h = u16(s, 4);
     size_t rowbytes = p->w / 8;
-    size_t planeSize = rowbytes * p->h;
+    size_t plane_size = rowbytes * p->h;
     p->px.assign(static_cast<size_t>(p->w) * p->h, 0);
     size_t pos = 6;
     std::vector<uint8_t> plane;
     for (int b = 0; b < 4; b++) {
-        pos = decodePlane(s, pos, planeSize, plane);
+        pos = DecodePlane(s, pos, plane_size, plane);
         uint8_t bit = static_cast<uint8_t>(1 << b);
         for (int y = 0; y < p->h; y++) {
             for (size_t xb = 0; xb < rowbytes; xb++) {
@@ -81,7 +81,7 @@ std::shared_ptr<const Pixels> decode(const std::string& path) {
 }
 
 namespace {
-void encodePlane(const std::vector<uint8_t>& plane, std::string& out) {
+void EncodePlane(const std::vector<uint8_t>& plane, std::string& out) {
     size_t n = 0, size = plane.size();
     std::string lit;
     auto flush = [&]() {
@@ -128,7 +128,7 @@ std::string encode(const Pixels& p) {
             for (int x = 0; x < p.w; x++)
                 if (p.at(x, y) & (1 << b))
                     plane[y * rowbytes + x / 8] |= static_cast<uint8_t>(0x80 >> (x % 8));
-        encodePlane(plane, out);
+        EncodePlane(plane, out);
     }
     return out;
 }

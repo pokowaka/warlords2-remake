@@ -12,59 +12,60 @@
 namespace choose {
 
 namespace {
-const kit::Rect R{96, 50, 200, 200};     // popup 3
-const kit::Rect BOX{106, 70, 180, 110};  // 4125:15a6
-const int DIALOG = 2;
-const int ROW = 114, PAGE_UP = 119, PAGE_DOWN = 120, UP = 121, DOWN = 122, OK = 123, CANCEL = 124;
-const int ROWS = 5;
+const kit::Rect kR{96, 50, 200, 200};     // popup 3
+const kit::Rect kBox{106, 70, 180, 110};  // 4125:15a6
+const int kDialog = 2;
+const int kRow = 114, kPageUp = 119, kPageDown = 120, kUp = 121, kDown = 122, kOk = 123,
+          kCancel = 124;
+const int kRows = 5;
 
 struct Dialog : kit::Modal {
     std::string title;
     std::vector<std::string> names;
     std::function<void(int)> after;
     screen::View v;
-    int topRow = 0, cur = 0;
+    int top_row = 0, cur = 0;
 
-    int n() const { return static_cast<int>(names.size()); }
+    int N() const { return static_cast<int>(names.size()); }
 
-    void refresh() {
+    void Refresh() {
         auto& st = v.state;
-        for (int i = 0; i < ROWS; i++) st[ROW + i] = w2::uidata::NORMAL;
-        st[OK] = w2::uidata::NORMAL;
-        st[CANCEL] = w2::uidata::NORMAL;
+        for (int i = 0; i < kRows; i++) st[kRow + i] = w2::uidata::NORMAL;
+        st[kOk] = w2::uidata::NORMAL;
+        st[kCancel] = w2::uidata::NORMAL;
         hidden.clear();
-        if (n() > ROWS) {
-            int up = topRow > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-            int down = topRow + ROWS - 1 < n() - 1 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-            st[PAGE_UP] = up;
-            st[UP] = up;
-            st[PAGE_DOWN] = down;
-            st[DOWN] = down;
+        if (N() > kRows) {
+            int up = top_row > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            int down = top_row + kRows - 1 < N() - 1 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+            st[kPageUp] = up;
+            st[kUp] = up;
+            st[kPageDown] = down;
+            st[kDown] = down;
         } else {
-            for (int id : {PAGE_UP, PAGE_DOWN, UP, DOWN}) hidden.insert(id);
+            for (int id : {kPageUp, kPageDown, kUp, kDown}) hidden.insert(id);
         }
     }
 
-    int chosen() const { return topRow + cur < n() ? topRow + cur : w2::NONE; }
+    int Chosen() const { return top_row + cur < N() ? top_row + cur : w2::NONE; }
 
-    void close(int entry) {
+    void Close(int entry) {
         auto a = after;
         kit::pop(this);
         if (a) a(entry);
     }
 
     void draw() override {
-        kit::popup(R);
+        kit::popup(kR);
         const Font& f = kit::font(2);
         gfx::setColor(1, 1, 1);
         kit::centred(f, title, 196, 52);
         kit::setPal(3);
-        gfx::rectangle(gfx::FILL, BOX.x, BOX.y, BOX.w, BOX.h);
-        kit::bevel(BOX.x, BOX.y, BOX.w, BOX.h, 4, 2);
+        gfx::rectangle(gfx::FILL, kBox.x, kBox.y, kBox.w, kBox.h);
+        kit::bevel(kBox.x, kBox.y, kBox.w, kBox.h, 4, 2);
         gfx::setColor(1, 1, 1);
-        for (int i = 0; i < ROWS; i++) {
-            if (topRow + i < n())
-                f.colours(i == cur ? 15 : 2, 0).draw(names[topRow + i], 112, 74 + 20 * i);
+        for (int i = 0; i < kRows; i++) {
+            if (top_row + i < N())
+                f.colours(i == cur ? 15 : 2, 0).draw(names[top_row + i], 112, 74 + 20 * i);
         }
         kit::drawControls(v, hidden);
     }
@@ -73,31 +74,31 @@ struct Dialog : kit::Modal {
         auto c = kit::controlAt(v, x, y, hidden);
         if (!c) return;
         int id = c->id;
-        if (id >= ROW && id < ROW + ROWS) {
-            if (topRow + id - ROW < n()) cur = id - ROW;
-        } else if (id == UP) {
-            topRow--;
-            cur = std::min(cur + 1, ROWS - 1);
-        } else if (id == DOWN) {
-            topRow++;
+        if (id >= kRow && id < kRow + kRows) {
+            if (top_row + id - kRow < N()) cur = id - kRow;
+        } else if (id == kUp) {
+            top_row--;
+            cur = std::min(cur + 1, kRows - 1);
+        } else if (id == kDown) {
+            top_row++;
             cur = std::max(cur - 1, 0);
-        } else if (id == PAGE_UP) {
-            topRow -= std::min(ROWS, topRow);
-        } else if (id == PAGE_DOWN) {
-            topRow += std::min(ROWS, n() - (topRow + ROWS - 1) - 1);
-        } else if (id == OK) {
-            return close(chosen());
-        } else if (id == CANCEL) {
-            return close(w2::NONE);
+        } else if (id == kPageUp) {
+            top_row -= std::min(kRows, top_row);
+        } else if (id == kPageDown) {
+            top_row += std::min(kRows, N() - (top_row + kRows - 1) - 1);
+        } else if (id == kOk) {
+            return Close(Chosen());
+        } else if (id == kCancel) {
+            return Close(w2::NONE);
         }
-        refresh();
+        Refresh();
     }
 
     void keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
-            close(chosen());
+            Close(Chosen());
         else if (key == "escape")
-            close(w2::NONE);
+            Close(w2::NONE);
     }
 };
 }  // namespace
@@ -108,14 +109,14 @@ void open(const std::string& title, const std::vector<std::string>& names, int s
     d->title = title;
     d->names = names;
     d->after = after;
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
     d->cur = std::max(0, start);
-    while (d->cur >= ROWS) {
+    while (d->cur >= kRows) {
         d->cur--;
-        d->topRow++;
+        d->top_row++;
     }
-    d->refresh();
+    d->Refresh();
     kit::push(d);
 }
 

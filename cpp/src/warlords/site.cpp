@@ -20,16 +20,16 @@ const char* const CONTENT_NAMES[6] = {"empty",  "temple", "a magic item",
                                       "a sage", "gold",   "allies"};
 
 // The content tables, by band. 3 = sage, 4 = gold, 5 = allies.
-static const std::vector<int>& content(const std::string& band) {
-    static const std::vector<int> rich = {5, 5, 4}, far = {3, 4, 5, 3, 4}, near = {3, 4, 5};
-    return band == "rich" ? rich : band == "near" ? near : far;
+static const std::vector<int>& Content(const std::string& band) {
+    static const std::vector<int> kRich = {5, 5, 4}, kFar = {3, 4, 5, 3, 4}, kNear = {3, 4, 5};
+    return band == "rich" ? kRich : band == "near" ? kNear : kFar;
 }
 // Ally army types, by band (army type ids).
-static const std::vector<int>& allyTypes(const std::string& band) {
-    static const std::vector<int> rich = {25, 23, 27, 19},  // Dragons, Wizards, Devils, Archons
-            far = {24, 20, 26},                             // Ghosts, Giant Worms, Demons
-            near = {22, 20};                                // Elementals, Giant Worms
-    return band == "rich" ? rich : band == "near" ? near : far;
+static const std::vector<int>& AllyTypes(const std::string& band) {
+    static const std::vector<int> kRich = {25, 23, 27, 19},  // Dragons, Wizards, Devils, Archons
+            kFar = {24, 20, 26},                             // Ghosts, Giant Worms, Demons
+            kNear = {22, 20};                                // Elementals, Giant Worms
+    return band == "rich" ? kRich : band == "near" ? kNear : kFar;
 }
 
 bool itemReserved(int type, int value) {
@@ -40,12 +40,12 @@ bool itemReserved(int type, int value) {
 void fillItemPool(Game& g, int reserved) {
     if (!g.map->itemPool) return;
     const auto& pool = *g.map->itemPool;
-    std::map<int, Item*> byIndex;
+    std::map<int, Item*> by_index;
     std::map<int, bool> used;
-    for (auto& it : g.map->items) byIndex[it.index] = &it;
+    for (auto& it : g.map->items) by_index[it.index] = &it;
     for (int idx = 8; idx <= 21; idx++) {
-        auto f = byIndex.find(idx);
-        if (f == byIndex.end()) continue;
+        auto f = by_index.find(idx);
+        if (f == by_index.end()) continue;
         Item* item = f->second;
         bool want = idx < 8 + reserved;
         std::vector<int> choices;
@@ -81,7 +81,7 @@ void markRich(Game& g) {
 
 // rich, near (an in-play side's capital less than 15 away by map_distance,
 // 1a8b:0acc) or far.
-static std::string band(const Site& s, const std::vector<std::pair<int, int>>& capitals) {
+static std::string Band(const Site& s, const std::vector<std::pair<int, int>>& capitals) {
     if (s.rich) return "rich";
     for (auto& c : capitals) {
         double dx = s.x - c.first, dy = s.y - c.second;
@@ -108,32 +108,32 @@ void setup(Game& g) {
         s.guardian = NONE;
         s.allyType = NONE;
         s.searched = false;
-        s.band = band(s, capitals);
+        s.band = Band(s, capitals);
     }
 
-    int nSites = static_cast<int>(g.map->sites.size());
-    int reserved = nSites * 2 / 10;
+    int n_sites = static_cast<int>(g.map->sites.size());
+    int reserved = n_sites * 2 / 10;
     fillItemPool(g, reserved);
 
-    int bandHi = reserved;
-    int bandLo = std::min(g.rng.dice(2, 3, 1), bandHi);
-    int last = std::min(22, nSites / 3 + g.rng.dice(1, 5, -3) + 8);
+    int band_hi = reserved;
+    int band_lo = std::min(g.rng.dice(2, 3, 1), band_hi);
+    int last = std::min(22, n_sites / 3 + g.rng.dice(1, 5, -3) + 8);
 
     std::vector<Site*> free;
     for (auto& s : g.map->sites)
         if (s.content == EMPTY) free.push_back(&s);
     g.rng.shuffle(free);
 
-    std::map<int, Item*> byIndex;
+    std::map<int, Item*> by_index;
     for (auto& it : g.map->items) {
-        byIndex[it.index] = &it;
+        by_index[it.index] = &it;
         it.status = 0;
     }
 
     for (int idx = 8; idx <= last - 1; idx++) {
-        auto f = byIndex.find(idx);
+        auto f = by_index.find(idx);
         // the band between bandLo and bandHi is held back, probably for quests
-        if (f != byIndex.end() && !(idx >= 8 + bandLo && idx < 8 + bandHi)) {
+        if (f != by_index.end() && !(idx >= 8 + band_lo && idx < 8 + band_hi)) {
             Item* item = f->second;
             bool want = itemReserved(*item);
             for (size_t i = 0; i < free.size(); i++) {
@@ -150,12 +150,12 @@ void setup(Game& g) {
     }
 
     for (auto& s : g.map->sites) {
-        if (s.content == EMPTY) s.content = g.rng.pick(content(s.band), 0);
+        if (s.content == EMPTY) s.content = g.rng.pick(Content(s.band), 0);
         if (s.content == TEMPLE) {
             s.guardian = NONE;
         } else if (s.content == ALLIES) {
             // the allies' type takes the guardian's place (66d4:0000)
-            s.allyType = g.rng.pick(allyTypes(s.band), 0);
+            s.allyType = g.rng.pick(AllyTypes(s.band), 0);
             s.guardian = NONE;
         } else {
             s.guardian = g.rng.dice(1, 9, 0);
@@ -165,14 +165,14 @@ void setup(Game& g) {
     for (auto& s : g.map->sites) g.map->siteAt[s.y * g.map->width + s.x] = &s;
 }
 
-static Army* heroIn(const std::vector<Army*>& stack) {
+static Army* HeroIn(const std::vector<Army*>& stack) {
     for (Army* a : stack)
         if (a->type == armytype::HERO) return a;
     return nullptr;
 }
 
-bool survivesGuardian(Game& g, const Army& h, int monsterStrength) {
-    int margin = 90 + 5 * (h.strength + combat::battleItems(h) - monsterStrength) +
+bool survivesGuardian(Game& g, const Army& h, int monster_strength) {
+    int margin = 90 + 5 * (h.strength + combat::battleItems(h) - monster_strength) +
                  3 * static_cast<int>(game::armiesAt(g, h.x, h.y).size());
     return g.rng.dice(1, 100, 0) <= margin;
 }
@@ -198,7 +198,7 @@ int bless(Game& g, const Site& s, const std::vector<Army*>& stack) {
     return blessed;
 }
 
-static const Monster* monsterOf(const Game& g, int i) {
+static const Monster* MonsterOf(const Game& g, int i) {
     if (i < 0 || i > 9 || !g.map->monsters[i]) return nullptr;
     return &*g.map->monsters[i];
 }
@@ -209,7 +209,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
     Site* s = g.map->siteAt[y * g.map->width + x];
     if (!s || s->searched) return nullptr;
     if (stack.empty() || stack[0]->moves < 1) return nullptr;
-    Army* h = heroIn(stack);
+    Army* h = HeroIn(stack);
     auto out = std::make_shared<SearchResult>();
     out->site = s;
 
@@ -244,7 +244,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
     const Monster* beaten = nullptr;
     if (s->content != ALLIES && s->guardian != NONE && s->guardian > 0) {
         int str = guardianStrength(g, *s);
-        const Monster* monster = monsterOf(g, s->guardian);
+        const Monster* monster = MonsterOf(g, s->guardian);
         if (!survivesGuardian(g, *h, str)) {
             history::deed(g, side, DeedType::HERO_KILLED, history::KILLED_SEARCHING, 0,
                           h->name);             // 6536:02ef
@@ -306,7 +306,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
     return out;
 }
 
-static int sageDistance(const Site& s, int hx, int hy) {
+static int SageDistance(const Site& s, int hx, int hy) {
     double dx = s.x - hx, dy = s.y - hy;
     return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));  // 2012:1199
 }
@@ -315,15 +315,15 @@ bool shownTo(const Site& s, const Side& side) {
     return ((s.revealed >> side.index) & 1) == 1;
 }
 
-static bool unshown(const Side& side, const Site& s, int hx, int hy) {
-    return s.rich && !s.searched && !shownTo(s, side) && sageDistance(s, hx, hy) < SAGE_RANGE;
+static bool Unshown(const Side& side, const Site& s, int hx, int hy) {
+    return s.rich && !s.searched && !shownTo(s, side) && SageDistance(s, hx, hy) < SAGE_RANGE;
 }
 
 std::vector<SageEntry> sageList(Game& g, const Side& side, int hx, int hy) {
     std::vector<SageEntry> list;
     bool gold = false, allies = false;
     for (auto& s : g.map->sites) {
-        if (unshown(side, s, hx, hy)) {
+        if (Unshown(side, s, hx, hy)) {
             if (s.content == GOLD && !gold) {
                 gold = true;
                 list.push_back(SageEntry{"gold", "Gold", nullptr});
@@ -349,9 +349,9 @@ Site* sageShow(Game& g, const Side& side, const SageEntry& entry, int hx, int hy
                 found = &s;
                 break;
             }
-        } else if (unshown(side, s, hx, hy) &&
+        } else if (Unshown(side, s, hx, hy) &&
                    s.content == (entry.kind == "gold" ? GOLD : ALLIES)) {
-            int d = sageDistance(s, hx, hy);
+            int d = SageDistance(s, hx, hy);
             if (best == NONE || d < best) {
                 found = &s;
                 best = d;

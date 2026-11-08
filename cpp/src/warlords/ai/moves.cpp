@@ -16,41 +16,41 @@ namespace w2::ai::moves {
 
 using namespace core;
 
-static City* city(Game& g, int i) {
+static City* CityOrNull(Game& g, int i) {
     return i != NONE ? g.map->city(i) : nullptr;
 }
 
-static bool onCityTile(const Game& g, const Army* a) {
+static bool OnCityTile(const Game& g, const Army* a) {
     City* c = cityAt(g, a->x, a->y);
     return c && standing(*c);
 }
 
 // The computer's visit to a sage (5e97:0080).
-static void sage(Game& g, Side& side) {
+static void Sage(Game& g, Side& side) {
     AIData& d = data(g, side);
     int gold = g.rng.dice(3, 500, 500);
     City* best = nullptr;
-    int bestCount = -1, bestD = 0;
+    int best_count = -1, best_d = 0;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == NONE && cflag(d, c, CF_UNSEEN)) {
-            bool nextToUs = false;
+            bool next_to_us = false;
             for (City* n : neighbours(g, c).first)
-                if (n->ownerIndex == side.index) nextToUs = true;
-            if (nextToUs) {
-                int count = 0, dOwn = 1000;
+                if (n->ownerIndex == side.index) next_to_us = true;
+            if (next_to_us) {
+                int count = 0, d_own = 1000;
                 for (auto& o : g.map->cities) {
                     if (o.ownerIndex == NONE) {
                         if (cflag(d, o, CF_UNSEEN) && dist(c.x, c.y, o.x, o.y) < 20) count++;
                     } else if (o.ownerIndex == side.index) {
                         int dd = dist(c.x, c.y, o.x, o.y);
-                        if (dd < dOwn) dOwn = dd;
+                        if (dd < d_own) d_own = dd;
                     }
                 }
-                if (count > 3 && (bestCount < count || (count == bestCount && bestD < dOwn))) {
+                if (count > 3 && (best_count < count || (count == best_count && best_d < d_own))) {
                     best = &c;
-                    bestCount = count;
-                    bestD = dOwn;
+                    best_count = count;
+                    best_d = d_own;
                 }
             }
         }
@@ -73,7 +73,7 @@ int searchSite(Game& g, Sel* sel, Army* h, Site& s) {
     if (siteOpen(s)) {
         std::vector<Army*> stack = sel ? sel->armies : std::vector<Army*>{h};
         auto r = site::search(g, stack, s.x, s.y, false);
-        if (r && r->kind == "sage") sage(g, side);
+        if (r && r->kind == "sage") Sage(g, side);
         // at a temple the computer takes a quest, by its own rules (quest_assign(1))
         if (s.content == site::TEMPLE && g.map->options.quests != 0 && !side.quest && isHero(h)) {
             quest::assign(g, side, h, true, move::modeOf(g, stack) == move::FLYING);
@@ -106,8 +106,8 @@ int party(Game& g, Side& side, std::vector<Army*> list) {
     clearOrder(hero);
     clearOrder(flier);
     int score = -1;
-    Site* bestSite = nullptr;
-    City* bestCity = nullptr;
+    Site* best_site = nullptr;
+    City* best_city = nullptr;
     for (int i = static_cast<int>(g.map->sites.size()) - 1; i >= 0; i--) {
         Site& s = g.map->sites[i];
         bool taken = false;
@@ -125,7 +125,7 @@ int party(Game& g, Side& side, std::vector<Army*> list) {
                 base = 90;
             if (base != NONE) {
                 score = base - dd;
-                bestSite = &s;
+                best_site = &s;
             }
         }
     }
@@ -141,24 +141,24 @@ int party(Game& g, Side& side, std::vector<Army*> list) {
                 base = 40;
             if (base != NONE) {
                 score = base - dd;
-                bestCity = &c;
+                best_city = &c;
             }
         }
     }
-    if (bestSite) {
-        auto sel = order(g, list, ORDER_SITE, bestSite->index, 0x100);
+    if (best_site) {
+        auto sel = order(g, list, ORDER_SITE, best_site->index, 0x100);
         if (sel) moveTo(g, *sel, sel->leader->target->first, sel->leader->target->second);
-        return searchSite(g, sel ? &*sel : nullptr, hero, *bestSite);
+        return searchSite(g, sel ? &*sel : nullptr, hero, *best_site);
     }
-    if (bestCity && dist(hero->x, hero->y, bestCity->x, bestCity->y) > 2) {
-        auto sel = order(g, list, ORDER_CITY, bestCity->index, 0);
+    if (best_city && dist(hero->x, hero->y, best_city->x, best_city->y) > 2) {
+        auto sel = order(g, list, ORDER_CITY, best_city->index, 0);
         if (sel) moveTo(g, *sel, sel->leader->target->first, sel->leader->target->second);
     }
     return 0;
 }
 
 namespace {
-struct Scan {
+struct ScanResult {
     bool found = false;
     int tx = NONE, ty = NONE;
     int kind = 0;
@@ -166,9 +166,9 @@ struct Scan {
 };
 
 // Look over the 10 x 10 tiles round an explorer (57ea:177f) for where to go.
-Scan scan(Game& g, Side& side, Army* a, const Sel& sel) {
+ScanResult Scan(Game& g, Side& side, Army* a, const Sel& sel) {
     int hx, hy;
-    if (City* hc = city(g, a->homeCity)) {
+    if (City* hc = CityOrNull(g, a->homeCity)) {
         hx = hc->x;
         hy = hc->y;
     } else if (side.capital) {
@@ -179,15 +179,15 @@ Scan scan(Game& g, Side& side, Army* a, const Sel& sel) {
         hy = a->y;
     }
     bool coast = a->atSea;
-    if (g.rng.dice(1, 4, -1) == 0 && onCityTile(g, a) && !isHero(a)) {
+    if (g.rng.dice(1, 4, -1) == 0 && OnCityTile(g, a) && !isHero(a)) {
         City* c = cityAt(g, a->x, a->y);
         if (c && move::isPort(g, *c)) coast = true;
     }
     bool flying = sel.mode == move::FLYING;
     bool hl = move::stackMode(g, sel.armies).hills;
-    Scan out;
+    ScanResult out;
     int best = 0;
-    auto exploredRound = [&](int x, int y) {
+    auto explored_round = [&](int x, int y) {
         for (int nx = x - 1; nx <= x + 1; nx++) {
             for (int ny = y - 1; ny <= y + 1; ny++) {
                 if (nx >= 0 && ny >= 0 && nx < g.map->width && ny < g.map->height &&
@@ -205,13 +205,13 @@ Scan scan(Game& g, Side& side, Army* a, const Sel& sel) {
                 if (t == move::CITY && (!c || c->ownerIndex != side.index)) {
                     int dd = flying ? 2 : dist(a->x, a->y, x, y);
                     if (dd < 4 && (!a->atSea || (c && move::isPort(g, *c))) &&
-                        exploredRound(x, y)) {
+                        explored_round(x, y)) {
                         out.kind = 1;
                         out.ex = x;
                         out.ey = y;
                     }
                 }
-                if (t == move::SITE && out.kind == 0 && !a->atSea && exploredRound(x, y)) {
+                if (t == move::SITE && out.kind == 0 && !a->atSea && explored_round(x, y)) {
                     out.kind = 2;
                     out.ex = x;
                     out.ey = y;
@@ -236,10 +236,10 @@ Scan scan(Game& g, Side& side, Army* a, const Sel& sel) {
                             if (t != move::HILLS) bonus = 100;
                             if (road) bonus += 200;
                         }
-                        int fromHome = dist(x, y, hx, hy);
-                        int s = g.rng.dice(1, 10, 0) + dist(x, y, a->x, a->y) * 2 + fromHome +
+                        int from_home = dist(x, y, hx, hy);
+                        int s = g.rng.dice(1, 10, 0) + dist(x, y, a->x, a->y) * 2 + from_home +
                                 unseen * 10 + bonus;
-                        if (coast && bonus != 0) s += std::min(fromHome, 50) * 10;
+                        if (coast && bonus != 0) s += std::min(from_home, 50) * 10;
                         if (best < s) {
                             out.tx = x;
                             out.ty = y;
@@ -256,17 +256,17 @@ Scan scan(Game& g, Side& side, Army* a, const Sel& sel) {
 
 // A flier's fallback: the nearest unseen city, give or take 1d10 (57ea:164e);
 // it aims one up and left of it.
-std::pair<int, int> unseenCity(Game& g, Side& side, Army* a) {
+std::pair<int, int> UnseenCity(Game& g, Side& side, Army* a) {
     AIData& d = data(g, side);
     City* best = nullptr;
-    int bestD = NONE;
+    int best_d = NONE;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (standing(c) && cflag(d, c, CF_UNSEEN)) {
             int dd = dist(c.x, c.y, a->x, a->y) + g.rng.dice(1, 10, 0);
-            if (bestD == NONE || dd < bestD) {
+            if (best_d == NONE || dd < best_d) {
                 best = &c;
-                bestD = dd;
+                best_d = dd;
             }
         }
     }
@@ -276,7 +276,7 @@ std::pair<int, int> unseenCity(Game& g, Side& side, Army* a) {
 
 // An explorer next to a city goes for it (57ea:10a8) if it may and the odds
 // are good. True if it went.
-bool tryCity(Game& g, Side& side, Army* a, int ex, int ey) {
+bool TryCity(Game& g, Side& side, Army* a, int ex, int ey) {
     AIData& d = data(g, side);
     City* pick = nullptr;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
@@ -309,7 +309,7 @@ bool tryCity(Game& g, Side& side, Army* a, int ex, int ey) {
 }
 
 // An explorer next to a site visits it (57ea:12eb). True if it went.
-bool trySite(Game& g, Side& side, Army* a, int sx, int sy) {
+bool TrySite(Game& g, Side& side, Army* a, int sx, int sy) {
     Site* s = siteAt(g, sx, sy);
     if (!s || !siteOpen(*s) || a->atSea) return false;
     bool temple = s->content == site::TEMPLE;
@@ -345,7 +345,7 @@ bool trySite(Game& g, Side& side, Army* a, int sx, int sy) {
 }
 
 // Walk an explorer's stack to (x, y) (57ea:1581).
-void walkTo(Game& g, Army* a, int x, int y) {
+void WalkTo(Game& g, Army* a, int x, int y) {
     a->target = std::make_pair(x, y);
     Sel sel = selectStackOf(g, a);
     int r = moveTo(g, sel, x, y);
@@ -361,12 +361,12 @@ void walkTo(Game& g, Army* a, int x, int y) {
 }
 
 // One step of an explorer (57ea:0f46).
-void exploreStep(Game& g, Side& side, Army* a, City* home) {
+void ExploreStep(Game& g, Side& side, Army* a, City* home) {
     Sel sel = select(g, {a});
-    Scan sc = scan(g, side, a, sel);
+    ScanResult sc = Scan(g, side, a, sel);
     int tx = sc.tx, ty = sc.ty;
     if (!sc.found) {
-        if (flies(g, a)) std::tie(tx, ty) = unseenCity(g, side, a);
+        if (flies(g, a)) std::tie(tx, ty) = UnseenCity(g, side, a);
         if (tx == NONE) {
             std::map<int, int> none;
             City* n = home ? cities::openNeutral(g, side, *home, none) : nullptr;
@@ -381,11 +381,11 @@ void exploreStep(Game& g, Side& side, Army* a, City* home) {
             ty = n->y;
         }
     } else if (sc.kind == 1) {
-        if (tryCity(g, side, a, sc.ex, sc.ey)) return;
+        if (TryCity(g, side, a, sc.ex, sc.ey)) return;
     } else if (sc.kind == 2) {
-        if (trySite(g, side, a, sc.ex, sc.ey)) return;
+        if (TrySite(g, side, a, sc.ex, sc.ey)) return;
     }
-    walkTo(g, a, tx, ty);
+    WalkTo(g, a, tx, ty);
 }
 }  // namespace
 
@@ -396,7 +396,7 @@ void explore(Game& g, Side& side, Army* a, City* home) {
     for (;;) {
         if (!alive(g, a) || a->moves < 2) return;
         int px = a->x, py = a->y;
-        exploreStep(g, side, a, home);
+        ExploreStep(g, side, a, home);
         if (!alive(g, a) || (a->x == px && a->y == py)) return;
         if (a->moves < 4) return;
         if (steps == 0) return;
@@ -457,25 +457,25 @@ void heroParties(Game& g, Side& side) {
 }
 
 // Is the stack's neutral target still the thing to do (5ad0:05ff)?
-static bool neutralStillOn(Game& g, Side& side, Sel& sel) {
+static bool NeutralStillOn(Game& g, Side& side, Sel& sel) {
     AIData& d = data(g, side);
     Army* lead = sel.leader;
-    City* dest = city(g, lead->aiDest);
+    City* dest = CityOrNull(g, lead->aiDest);
     if (!dest) return true;
     if (dest->ownerIndex == side.index) {
         City* here = cityAt(g, lead->x, lead->y);
         auto nb = here ? cities::neutralNeighbours(g, side, *here)
                        : std::vector<cities::NeutralNeighbour>{};
         if (nb.empty()) nb = cities::neutralNeighbours(g, side, *dest);
-        int oddsV = 100;
+        int odds_v = 100;
         City* best = nullptr;
         int bd = 1000;
         for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
             City* n = nb[j].city;
             if (!cflag(d, *n, CF_UNSEEN)) {
-                if (g.map->options.neutralCities != 0) oddsV = odds(g, sel, n->x, n->y);
+                if (g.map->options.neutralCities != 0) odds_v = odds(g, sel, n->x, n->y);
                 int dd = dist(lead->x, lead->y, n->x, n->y);
-                if (oddsV > 74 && dd < bd) {
+                if (odds_v > 74 && dd < bd) {
                     best = n;
                     bd = dd;
                 }
@@ -533,7 +533,7 @@ void moveAll(Game& g, Side& side) {
             Sel sel = selectStackOf(g, pick);
             Army* lead = sel.leader;
             int ord = lead->aiOrder;
-            City* dest = city(g, lead->aiDest);
+            City* dest = CityOrNull(g, lead->aiDest);
             if (ord == ORDER_NONE ||
                 (ord == ORDER_CITY && (!dest || lead->aiDest == d.questCity || !standing(*dest)))) {
                 for (Army* a : sel.armies) {
@@ -541,8 +541,8 @@ void moveAll(Game& g, Side& side) {
                     a->target.reset();
                     a->done = true;
                 }
-            } else if (!lead->aiNeutral || neutralStillOn(g, side, sel)) {
-                dest = city(g, lead->aiDest);
+            } else if (!lead->aiNeutral || NeutralStillOn(g, side, sel)) {
+                dest = CityOrNull(g, lead->aiDest);
                 if (lead->aiOrder == ORDER_CITY && dest && dest->ownerIndex == side.index) {
                     lead->target = std::make_pair(dest->x + 1, dest->y + 1);
                 }
@@ -555,10 +555,10 @@ void moveAll(Game& g, Side& side) {
 }
 
 // The best city for an idle stack by the flood (5ad0:0f3c).
-static City* idleTarget(Game& g, Side& side, const Sel& sel, const Flood& flood, int n) {
+static City* IdleTarget(Game& g, Side& side, const Sel& sel, const Flood& flood, int n) {
     AIData& d = data(g, side);
     City* best = nullptr;
-    int bestD = 1000;
+    int best_d = 1000;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         int ow = owner(c);
@@ -570,13 +570,13 @@ static City* idleTarget(Game& g, Side& side, const Sel& sel, const Flood& flood,
                 if (ow == side.index) {
                     dd += role(d, c) == RALLY ? 10 : 30;
                     if (n > 3) dd += 100;
-                    if (dd < bestD) {
+                    if (dd < best_d) {
                         best = &c;
-                        bestD = dd;
+                        best_d = dd;
                     }
-                } else if (odds(g, sel, c.x, c.y) > 74 && dd < bestD) {
+                } else if (odds(g, sel, c.x, c.y) > 74 && dd < best_d) {
                     best = &c;
-                    bestD = dd;
+                    best_d = dd;
                 }
             }
         }
@@ -622,7 +622,7 @@ void sendIdle(Game& g, Side& side, Army* a) {
     int range = sel.hero ? 50 : (a->strength / 2) * 10;
     range = std::min(range, home + 10);
     Flood flood = floodFrom(g, side.index, a->x, a->y, range, &sel);
-    City* c = idleTarget(g, side, sel, flood, static_cast<int>(list.size()));
+    City* c = IdleTarget(g, side, sel, flood, static_cast<int>(list.size()));
     if (!c) {
         game::disband(g, side, list);
         return;
@@ -634,8 +634,8 @@ void sendIdle(Game& g, Side& side, Army* a) {
 void rescue(Game& g, Side& side) {
     for (Army* a : armies(g, side.index)) {
         if (alive(g, a) && !a->transit && a->x != NONE && a->maxMoves <= a->moves) {
-            if (a->moves == a->maxMoves + 2 && !onCityTile(g, a) && a->aiOrder == ORDER_CITY) {
-                City* dest = city(g, a->aiDest);
+            if (a->moves == a->maxMoves + 2 && !OnCityTile(g, a) && a->aiOrder == ORDER_CITY) {
+                City* dest = CityOrNull(g, a->aiDest);
                 if (!dest || !standing(*dest)) {
                     int gone = a->aiDest;
                     for (Army* b : onTile(g, side.index, a->x, a->y)) {
@@ -646,7 +646,7 @@ void rescue(Game& g, Side& side) {
                     }
                 }
             }
-            if (alive(g, a) && !a->aiExplore && a->aiOrder == 0 && !onCityTile(g, a))
+            if (alive(g, a) && !a->aiExplore && a->aiOrder == 0 && !OnCityTile(g, a))
                 sendIdle(g, side, a);
         }
     }
@@ -655,7 +655,7 @@ void rescue(Game& g, Side& side) {
 void lastRescue(Game& g, Side& side) {
     for (Army* a : armies(g, side.index)) {
         if (alive(g, a) && !a->transit && a->x != NONE && a->moves == a->maxMoves + 2 &&
-            !onCityTile(g, a)) {
+            !OnCityTile(g, a)) {
             a->aiExplore = false;
             a->aiNeutral = false;
             clearOrder(a);

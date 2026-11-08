@@ -10,19 +10,19 @@ namespace w2::rules {
 Bugs bugs;
 
 const Purpose& purpose(int p) {
-    static const Purpose table[7] = {
+    static const Purpose kTable[7] = {
         {0, 0, 0},   {10, 4, 1},   // quick and cheap
         {10, 10, 1},               // balanced
         {5, 10, 1},                // strongest
         {5, 10, 1},                // flying types only
         {5, 10, 1},  {10, 1, 10},  // fastest
     };
-    return table[std::clamp(p, 0, 6)];
+    return kTable[std::clamp(p, 0, 6)];
 }
 
-std::vector<Slot> citySlots(const std::vector<int>& produceIds, const Types& types, Rng& rng) {
+std::vector<Slot> citySlots(const std::vector<int>& produce_ids, const Types& types, Rng& rng) {
     std::vector<Slot> slots;
-    for (int id : produceIds) {
+    for (int id : produce_ids) {
         const ArmyType* a = types.byId(id);
         int strength = a->strength, time = a->time, cost = a->cost, move = a->move;
         if (rng.chance(10)) {
@@ -50,30 +50,30 @@ std::vector<Slot> citySlots(const std::vector<int>& produceIds, const Types& typ
     return slots;
 }
 
-int bestSlot(const std::vector<Slot>& slots, int purpose, const Types& types, bool sideBonus) {
+int bestSlot(const std::vector<Slot>& slots, int purpose, const Types& types, bool side_bonus) {
     const Purpose& w = rules::purpose(purpose);
-    int best = NONE, bestScore = 0;
+    int best = NONE, best_score = 0;
     for (int i = static_cast<int>(slots.size()) - 1; i >= 0; i--) {
         const Slot& slot = slots[i];
         const ArmyType* a = types.byId(slot.type);
         if (purpose != 4 || a->flies) {
-            int str = std::min(9, slot.strength + (sideBonus ? 2 : 0));
+            int str = std::min(9, slot.strength + (side_bonus ? 2 : 0));
             if (a->siege) str += 2;
             int time = slot.time + ((str < 3 && purpose != 6) ? 1 : 0);
             int score = (10 - std::min(10, time)) * w.time + str * w.str + (slot.move * w.move) / 2;
-            if (score > bestScore) {
+            if (score > best_score) {
                 best = i;
-                bestScore = score;
+                best_score = score;
             }
         }
     }
     return best;
 }
 
-std::optional<int> garrisonLevel(bool owned, int neutralCities, Rng& rng) {
+std::optional<int> garrisonLevel(bool owned, int neutral_cities, Rng& rng) {
     if (owned) return 3;
-    if (neutralCities <= 0) return std::nullopt;
-    return std::min(3, rng.dice(1, 4, 0) + neutralCities - 2);
+    if (neutral_cities <= 0) return std::nullopt;
+    return std::min(3, rng.dice(1, 4, 0) + neutral_cities - 2);
 }
 
 Army armyFromSlot(const Slot& slot, bool enhanced) {

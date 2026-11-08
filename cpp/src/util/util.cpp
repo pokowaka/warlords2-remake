@@ -122,17 +122,17 @@ std::string sfmt(const std::string& f, const std::vector<FmtArg>& args) {
 // ------------------------------------------------------------------- files
 
 namespace {
-std::mutex dirLock;
-std::map<std::string, std::vector<std::string>> dirCache;
+std::mutex dir_lock;
+std::map<std::string, std::vector<std::string>> dir_cache;
 
-const std::vector<std::string>& listing(const std::string& dir) {
-    auto it = dirCache.find(dir);
-    if (it != dirCache.end()) return it->second;
+const std::vector<std::string>& Listing(const std::string& dir) {
+    auto it = dir_cache.find(dir);
+    if (it != dir_cache.end()) return it->second;
     std::vector<std::string> names;
     std::error_code ec;
     for (auto& e : fs::directory_iterator(dir.empty() ? "." : dir, ec))
         names.push_back(e.path().filename().string());
-    return dirCache[dir] = names;
+    return dir_cache[dir] = names;
 }
 }  // namespace
 
@@ -141,7 +141,7 @@ std::string resolvePath(const std::string& path) {
     if (fs::exists(path, ec)) return path;
     std::string p = path;
     std::replace(p.begin(), p.end(), '\\', '/');
-    std::lock_guard<std::mutex> lock(dirLock);
+    std::lock_guard<std::mutex> lock(dir_lock);
     std::string cur;
     size_t i = 0;
     if (!p.empty() && p[0] == '/') {
@@ -157,7 +157,7 @@ std::string resolvePath(const std::string& path) {
         std::string next = cur.empty() ? part : (cur.back() == '/' ? cur + part : cur + "/" + part);
         if (part != ".." && !fs::exists(next, ec)) {
             std::string found;
-            for (auto& n : listing(cur)) {
+            for (auto& n : Listing(cur)) {
                 if (n.size() == part.size() && upper(n) == upper(part)) {
                     found = n;
                     break;
@@ -172,11 +172,11 @@ std::string resolvePath(const std::string& path) {
 }
 
 namespace {
-std::map<std::string, std::string>& madeFiles() {
+std::map<std::string, std::string>& MadeFiles() {
     static std::map<std::string, std::string> made;
     return made;
 }
-std::string madeKey(const std::string& path) {
+std::string MadeKey(const std::string& path) {
     std::string k;
     for (char c : path) {
         char d = c == '\\' ? '/' : static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
@@ -188,12 +188,12 @@ std::string madeKey(const std::string& path) {
 }  // namespace
 
 void installFile(const std::string& path, const std::string& bytes) {
-    madeFiles()[madeKey(path)] = bytes;
+    MadeFiles()[MadeKey(path)] = bytes;
 }
 
 std::optional<std::string> readFile(const std::string& path) {
-    auto made = madeFiles().find(madeKey(path));
-    if (made != madeFiles().end()) return made->second;
+    auto made = MadeFiles().find(MadeKey(path));
+    if (made != MadeFiles().end()) return made->second;
     std::string real = resolvePath(path);
     if (real.empty()) return std::nullopt;
     std::ifstream f(real, std::ios::binary);
@@ -210,7 +210,7 @@ std::string mustRead(const std::string& path) {
 }
 
 bool fileExists(const std::string& path) {
-    return madeFiles().count(madeKey(path)) > 0 || !resolvePath(path).empty();
+    return MadeFiles().count(MadeKey(path)) > 0 || !resolvePath(path).empty();
 }
 
 bool writeFile(const std::string& path, const std::string& bytes) {
@@ -226,8 +226,8 @@ bool writeFile(const std::string& path, const std::string& bytes) {
     std::error_code ec;
     fs::rename(tmp, real, ec);
     if (ec) return false;
-    std::lock_guard<std::mutex> lock(dirLock);
-    dirCache.clear();
+    std::lock_guard<std::mutex> lock(dir_lock);
+    dir_cache.clear();
     return true;
 }
 
@@ -236,8 +236,8 @@ bool removeFile(const std::string& path) {
     if (real.empty()) return false;
     std::error_code ec;
     bool ok = fs::remove(real, ec);
-    std::lock_guard<std::mutex> lock(dirLock);
-    dirCache.clear();
+    std::lock_guard<std::mutex> lock(dir_lock);
+    dir_cache.clear();
     return ok;
 }
 
@@ -334,8 +334,8 @@ std::optional<long> toInt(const std::string& s) {
 
 double now() {
     using namespace std::chrono;
-    static const auto start = steady_clock::now();
-    return duration<double>(steady_clock::now() - start).count();
+    static const auto kStart = steady_clock::now();
+    return duration<double>(steady_clock::now() - kStart).count();
 }
 
 }  // namespace w2

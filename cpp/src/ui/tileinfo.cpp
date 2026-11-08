@@ -18,7 +18,7 @@
 namespace tileinfo {
 
 namespace {
-const int W = 256, H = 75;
+const int kW = 256, kH = 75;
 
 struct TileBox : kit::Modal {
     int bx = 0, by = 0;
@@ -27,7 +27,7 @@ struct TileBox : kit::Modal {
     void draw() override {
         auto b = infobox::board(sign ? infobox::POPUP2 : infobox::LINES);
         gfx::setColor(1, 1, 1);
-        if (b) gfx::draw(b, gfx::newQuad(0, 0, W, H), bx, by);
+        if (b) gfx::draw(b, gfx::newQuad(0, 0, kW, kH), bx, by);
         gfx::setColor(1, 1, 1);
         paint();
     }
@@ -44,13 +44,13 @@ void open(int tx, int ty) {
     w2::Game& g = *G.g;
     int viewer = w2::game::viewerSide(g, G.player);
     if (!w2::game::seen(g, viewer, tx, ty)) return;
-    const auto& L = G.layout;
+    const auto& l = G.layout;
     auto [fcx, fcy] = front::mapToUI(tx + 0.5, ty + 0.5);
     int cx = static_cast<int>(std::floor(fcx)), cy = static_cast<int>(std::floor(fcy));
     cx = (cx + 4) / 8 * 8;
-    cx = std::max(W / 2, std::min(L.w - W / 2, cx));
-    cy = std::max(H / 2, std::min(L.h - 2 - H / 2, cy));
-    int bx = cx - W / 2 - L.dialog.x, by = cy - H / 2 - L.dialog.y;
+    cx = std::max(kW / 2, std::min(l.w - kW / 2, cx));
+    cy = std::max(kH / 2, std::min(l.h - 2 - kH / 2, cy));
+    int bx = cx - kW / 2 - l.dialog.x, by = cy - kH / 2 - l.dialog.y;
     w2::Side* me = G.player;
     auto d = std::make_shared<TileBox>();
     d->bx = bx;
@@ -65,20 +65,20 @@ void open(int tx, int ty) {
     auto colours = [](const w2::Side* s) -> const Font& {
         return kit::font(2).colours(s->colour, s->edge);
     };
-    auto twoLines = [bx, by](const std::string& a, const std::string& b, bool plainFirst) {
+    auto two_lines = [bx, by](const std::string& a, const std::string& b, bool plain_first) {
         const Font& f = kit::font(2);
-        kit::centred(plainFirst ? f : f.colours(7, 0), a, bx + W / 2 - 8, by + 11);
-        kit::centred(f, b, bx + W / 2 - 8, by + 35);
+        kit::centred(plain_first ? f : f.colours(7, 0), a, bx + kW / 2 - 8, by + 11);
+        kit::centred(f, b, bx + kW / 2 - 8, by + 35);
     };
 
     if (!armies.empty() &&
         (viewer == w2::NONE || g.map->options.viewEnemies != 0 || owner == me->index || tower)) {
         if (viewer != w2::NONE && owner != me->index && tower && g.map->options.viewEnemies == 0) {
-            d->paint = [twoLines]() { twoLines(kit::text(0x82, 0), kit::text(0x82, 1), false); };
+            d->paint = [two_lines]() { two_lines(kit::text(0x82, 0), kit::text(0x82, 1), false); };
         } else {
             d->paint = [armies, bx, by]() {
                 int n = static_cast<int>(armies.size());
-                int x = (bx + W / 2 - n * 12 - 16 + 4) / 8 * 8;
+                int x = (bx + kW / 2 - n * 12 - 16 + 4) / 8 * 8;
                 for (int i = 0; i < n; i++)
                     kit::army(armies[i]->type, armies[i]->owner, x + 24 * i, by + 16, 0);
             };
@@ -88,13 +88,13 @@ void open(int tx, int ty) {
             const Font& f = kit::font(2);
             const w2::Side* own =
                     city->ownerIndex != w2::NONE ? &G.g->map->sides[city->ownerIndex] : me;
-            kit::centred(colours(own), city->name, bx + W / 2 - 8, by + 11);
+            kit::centred(colours(own), city->name, bx + kW / 2 - 8, by + 11);
             if (city->razed) {
-                kit::centred(f, "Razed!", bx + W / 2 - 8, by + 35);
+                kit::centred(f, "Razed!", bx + kW / 2 - 8, by + 35);
                 return;
             }
             if (city->ownerIndex != w2::NONE && city->ownerIndex < 8) {
-                for (int x : {bx + 24, bx + W - 48}) {
+                for (int x : {bx + 24, bx + kW - 48}) {
                     gfx::setColor(1, 1, 1);
                     gfx::draw(G.shieldsImg, gfx::newQuad(city->ownerIndex * 40 + 24, 46, 16, 16), x,
                               by + 10);
@@ -109,7 +109,7 @@ void open(int tx, int ty) {
             auto bs = G.screen->artFor(38);
             for (int i = 0; i < 8; i++) {
                 if (G.g->map->sides[i].capital == city && bs) {
-                    for (int x : {bx + 16, bx + W - 56}) {
+                    for (int x : {bx + 16, bx + kW - 56}) {
                         gfx::setColor(1, 1, 1);
                         gfx::draw(bs->image, gfx::newQuad(i * 32, 36, 32, 23), x, by + 10);
                     }
@@ -119,26 +119,30 @@ void open(int tx, int ty) {
     } else if (site) {
         d->paint = [site, me, bx, by, colours]() {
             const Font& f = kit::font(2);
-            kit::centred(colours(me), site->name, bx + W / 2 - 8, by + 11);
+            kit::centred(colours(me), site->name, bx + kW / 2 - 8, by + 11);
             if (site->content == w2::site::TEMPLE)
-                kit::centred(f, "Blessings & Quests!", bx + W / 2 - 8, by + 35);
+                kit::centred(f, "Blessings & Quests!", bx + kW / 2 - 8, by + 35);
             else if (site->searched)
-                kit::centred(f, "Explored!", bx + W / 2 - 8, by + 33);
+                kit::centred(f, "Explored!", bx + kW / 2 - 8, by + 33);
             else
-                kit::centred(f, "Unexplored!", bx + W / 2 - 8, by + 35);
+                kit::centred(f, "Unexplored!", bx + kW / 2 - 8, by + 35);
         };
     } else if (terrain == w2::move::TOWER && w2::game::signAt(g, tx, ty)) {
         w2::Sign* sign = w2::game::signAt(g, tx, ty);
         d->sign = true;
-        d->paint = [sign, twoLines]() { twoLines(sign->lines[0], sign->lines[1], true); };
+        d->paint = [sign, two_lines]() { two_lines(sign->lines[0], sign->lines[1], true); };
     } else {
         bool road = w2::scn::roadAt(*g.map, tx, ty) % 32 != 0;
         bool port = g.map->crossing[ty * g.map->width + tx];
         if (port) {
-            d->paint = [twoLines]() { twoLines("Port", "A way for armies to put to sea", false); };
+            d->paint = [two_lines]() {
+                two_lines("Port", "A way for armies to put to sea", false);
+            };
         } else {
             int t = road ? 0 : terrain;
-            d->paint = [t, twoLines]() { twoLines(kit::text(0x80, t), kit::text(0x81, t), false); };
+            d->paint = [t, two_lines]() {
+                two_lines(kit::text(0x80, t), kit::text(0x81, t), false);
+            };
         }
     }
     d->infobox = true;

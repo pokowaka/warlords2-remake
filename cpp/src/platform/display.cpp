@@ -16,26 +16,26 @@ State d;
 namespace {
 SDL_Window* win = nullptr;
 SDL_Texture* canvas =
-        nullptr;        // the frame, when it is bigger than the window or goes through the tube
-bool noCanvas = false;  // the renderer cannot draw to one
+        nullptr;         // the frame, when it is bigger than the window or goes through the tube
+bool no_canvas = false;  // the renderer cannot draw to one
 
 // Drawn on the canvas: always through the tube, else only to shrink it.
-bool tube() {
-    return d.crt && !noCanvas;
+bool Tube() {
+    return d.crt && !no_canvas;
 }
-bool onCanvas() {
-    return d.shrink < 1 || tube();
+bool OnCanvas() {
+    return d.shrink < 1 || Tube();
 }
 
 // The window as it is about to be shown, for a script's glass.
-void shoot() {
+void Shoot() {
     if (d.glassShot.empty()) return;
     gfx::saveShot(d.glassShot);
     d.glassShot.clear();
 }
 }  // namespace
 
-SDL_Window* open(const char* title, bool windowed, int sizeW, int sizeH) {
+SDL_Window* open(const char* title, bool windowed, int size_w, int size_h) {
     Uint32 flags = SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_RESIZABLE;
     SDL_DisplayMode dm;
     int w = 1280, h = 960;
@@ -43,11 +43,11 @@ SDL_Window* open(const char* title, bool windowed, int sizeW, int sizeH) {
         w = std::max(W, dm.w * 4 / 5);
         h = std::max(H, dm.h * 4 / 5);
     }
-    bool sized = sizeW > 0 && sizeH > 0;
+    bool sized = size_w > 0 && size_h > 0;
     if (sized) {
         windowed = true;
-        w = sizeW;
-        h = sizeH;
+        w = size_w;
+        h = size_h;
     }
     if (!windowed) flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     // a click on the window both activates it and counts as a click
@@ -62,8 +62,8 @@ SDL_Window* open(const char* title, bool windowed, int sizeW, int sizeH) {
         SDL_GetWindowSize(win, &ww, &wh);
         SDL_GetWindowSizeInPixels(win, &pw, &ph);
         double k = ww > 0 ? static_cast<double>(pw) / ww : 1;
-        w = static_cast<int>(std::lround(sizeW / k));
-        h = static_cast<int>(std::lround(sizeH / k));
+        w = static_cast<int>(std::lround(size_w / k));
+        h = static_cast<int>(std::lround(size_h / k));
         SDL_SetWindowMinimumSize(win, std::min(W, w), std::min(H, h));
         SDL_SetWindowSize(win, w, h);
         SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
@@ -89,7 +89,7 @@ void measure() {
     d.maxScale = std::max(1, static_cast<int>(fit));
     // the smooth view, the next scale up drawn whole and shrunk to fit, when
     // the biggest whole one leaves a quarter over
-    d.smoothScale = !noCanvas && fit > 1 && d.maxScale / fit < 0.75 ? fit : 0;
+    d.smoothScale = !no_canvas && fit > 1 && d.maxScale / fit < 0.75 ? fit : 0;
     // a scale too big for 480 rows: only the main screen, which gives up the
     // strategic map's foot for them, fits
     d.maxShort =
@@ -111,12 +111,12 @@ void beginFrame() {
     if (!r) return;
     int cw = 0, ch = 0;
     if (canvas) SDL_QueryTexture(canvas, nullptr, nullptr, &cw, &ch);
-    if (canvas && (!onCanvas() || cw != d.pw || ch != d.ph)) {
+    if (canvas && (!OnCanvas() || cw != d.pw || ch != d.ph)) {
         SDL_SetRenderTarget(r, nullptr);
         SDL_DestroyTexture(canvas);
         canvas = nullptr;
     }
-    if (!onCanvas()) return;
+    if (!OnCanvas()) return;
     if (!canvas) {
         canvas = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_TARGET, d.pw,
                                    d.ph);
@@ -125,7 +125,7 @@ void beginFrame() {
     if (!canvas || SDL_SetRenderTarget(r, canvas) != 0) {
         if (canvas) SDL_DestroyTexture(canvas);
         canvas = nullptr;
-        noCanvas = true;
+        no_canvas = true;
         measure();
     }
 }
@@ -134,11 +134,11 @@ void present() {
     SDL_Renderer* r = gfx::renderer();
     if (!r) return;
     if (!canvas || SDL_GetRenderTarget(r) != canvas) {
-        shoot();
+        Shoot();
         SDL_RenderPresent(r);
         return;
     }
-    if (tube()) {
+    if (Tube()) {
         crt::present(r, canvas);
     } else {
         SDL_SetRenderTarget(r, nullptr);
@@ -147,7 +147,7 @@ void present() {
         SDL_RenderClear(r);
         SDL_RenderCopy(r, canvas, nullptr, nullptr);
     }
-    shoot();
+    Shoot();
     SDL_RenderPresent(r);
     // left on the canvas, so a script's shot between frames reads it
     SDL_SetRenderTarget(r, canvas);
@@ -181,16 +181,16 @@ void pushUI() {
     gfx::scale(d.scale);
 }
 
-void pushMap(int x, int y, int camX, int camY, int zoom) {
+void pushMap(int x, int y, int cam_x, int cam_y, int zoom) {
     gfx::push();
     gfx::origin();
-    gfx::translate(d.ox + x * d.scale - camX, d.oy + y * d.scale - camY);
+    gfx::translate(d.ox + x * d.scale - cam_x, d.oy + y * d.scale - cam_y);
     gfx::scale(zoom);
 }
 
 std::pair<int, int> toUI(double x, double y) {
     double px = x * d.dpi, py = y * d.dpi;
-    if (tube()) std::tie(px, py) = crt::unwarp(px, py);
+    if (Tube()) std::tie(px, py) = crt::unwarp(px, py);
     int ux = static_cast<int>(std::floor((px - d.ox) / d.scale));
     int uy = static_cast<int>(std::floor((py - d.oy) / d.scale));
     return {std::clamp(ux, 0, d.w - 1), std::clamp(uy, 0, d.h - 1)};
@@ -198,7 +198,7 @@ std::pair<int, int> toUI(double x, double y) {
 
 std::pair<double, double> fromUI(double x, double y) {
     double px = d.ox + x * d.scale, py = d.oy + y * d.scale;
-    if (tube()) {
+    if (Tube()) {
         // the window point the bow carries onto this one, a few steps closer each time
         double wx = px, wy = py;
         for (int i = 0; i < 8; i++) {

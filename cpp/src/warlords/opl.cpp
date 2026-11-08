@@ -18,59 +18,59 @@ struct Roms {
         }
     }
 };
-const Roms R;
+const Roms kR;
 
 // frequency multiplier, doubled (the chip's 0.5 is 1)
-const int MT[16] = {1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 20, 24, 24, 30, 30};
-const int KSLROM[16] = {0, 32, 40, 45, 48, 51, 53, 55, 56, 58, 59, 60, 61, 62, 63, 64};
-const int KSLSHIFT[4] = {8, 1, 2, 0};
-const int INCSTEP[4][4] = {{0, 0, 0, 0}, {1, 0, 0, 0}, {1, 0, 1, 0}, {1, 1, 1, 0}};
+const int kMt[16] = {1, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 20, 24, 24, 30, 30};
+const int kKslrom[16] = {0, 32, 40, 45, 48, 51, 53, 55, 56, 58, 59, 60, 61, 62, 63, 64};
+const int kKslshift[4] = {8, 1, 2, 0};
+const int kIncstep[4][4] = {{0, 0, 0, 0}, {1, 0, 0, 0}, {1, 0, 1, 0}, {1, 1, 1, 0}};
 
 // operator register offsets -> operator number (-1 for none)
-const int SLOT_OF_REG[32] = {0,  1,  2,  3,  4,  5,  -1, -1, 6,  7,  8,  9,  10, 11, -1, -1,
-                             12, 13, 14, 15, 16, 17, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
-const int CH_MOD[9] = {0, 1, 2, 6, 7, 8, 12, 13, 14};
+const int kSlotOfReg[32] = {0,  1,  2,  3,  4,  5,  -1, -1, 6,  7,  8,  9,  10, 11, -1, -1,
+                            12, 13, 14, 15, 16, 17, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+const int kChMod[9] = {0, 1, 2, 6, 7, 8, 12, 13, 14};
 
-enum { ATTACK, DECAY, SUSTAIN, RELEASE };
+enum { kAttack, kDecay, kSustain, kRelease };
 
 // the exponent: level 0 is loudest, every 256 halves it
-inline int calcExp(int level) {
+inline int CalcExp(int level) {
     if (level > 0x1fff) level = 0x1fff;
-    return (R.exp[level & 0xff] * 2) >> (level >> 8);
+    return (kR.exp[level & 0xff] * 2) >> (level >> 8);
 }
 
-inline int logsinOf(int phase) {
-    return (phase & 0x100) ? R.logsin[(phase & 0xff) ^ 0xff] : R.logsin[phase & 0xff];
+inline int LogsinOf(int phase) {
+    return (phase & 0x100) ? kR.logsin[(phase & 0xff) ^ 0xff] : kR.logsin[phase & 0xff];
 }
 
 // the four OPL2 waveforms: sine, half sine, absolute sine, quarter pulses
-inline int wave(int wf, int phase, int env) {
+inline int Wave(int wf, int phase, int env) {
     phase &= 0x3ff;
     int lv;
     if (wf == 0) {
-        int v = calcExp(logsinOf(phase) + env * 8);
+        int v = CalcExp(LogsinOf(phase) + env * 8);
         return (phase & 0x200) ? -v - 1 : v;
     } else if (wf == 1) {
-        lv = (phase & 0x200) ? 0x1000 : logsinOf(phase);
+        lv = (phase & 0x200) ? 0x1000 : LogsinOf(phase);
     } else if (wf == 2) {
-        lv = logsinOf(phase);
+        lv = LogsinOf(phase);
     } else {
-        lv = (phase & 0x100) ? 0x1000 : R.logsin[phase & 0xff];
+        lv = (phase & 0x100) ? 0x1000 : kR.logsin[phase & 0xff];
     }
-    return calcExp(lv + env * 8);
+    return CalcExp(lv + env * 8);
 }
 
 }  // namespace
 
 Opl::Opl() {
     for (int c = 0; c < 9; c++) {
-        ch_[c].mod = &slots_[CH_MOD[c]];
-        ch_[c].car = &slots_[CH_MOD[c] + 3];
+        ch_[c].mod = &slots_[kChMod[c]];
+        ch_[c].car = &slots_[kChMod[c] + 3];
     }
 }
 
-static void updateKsl(int& ksl, int& ksv, int fnum, int block) {
-    int k = KSLROM[fnum >> 6] * 4 - (8 - block) * 32;
+static void UpdateKsl(int& ksl, int& ksv, int fnum, int block) {
+    int k = kKslrom[fnum >> 6] * 4 - (8 - block) * 32;
     ksl = k < 0 ? 0 : k;
     ksv = block * 2 + ((fnum >> 9) & 1);
 }
@@ -83,7 +83,7 @@ void Opl::write(int reg, int v) {
         dam_ = (v & 0x80) != 0;
         dvb_ = (v & 0x40) != 0;
     } else if ((hi >= 0x20 && hi <= 0x80) || hi == 0xe0) {
-        int n = SLOT_OF_REG[reg & 0x1f];
+        int n = kSlotOfReg[reg & 0x1f];
         if (n < 0) return;
         Slot& s = slots_[n];
         if (hi == 0x20) {
@@ -108,12 +108,12 @@ void Opl::write(int reg, int v) {
     } else if (reg >= 0xa0 && reg <= 0xa8) {
         Channel& c = ch_[reg - 0xa0];
         c.fnum = (c.fnum & 0x300) | v;
-        updateKsl(c.ksl, c.ksv, c.fnum, c.block);
+        UpdateKsl(c.ksl, c.ksv, c.fnum, c.block);
     } else if (reg >= 0xb0 && reg <= 0xb8) {
         Channel& c = ch_[reg - 0xb0];
         c.fnum = (c.fnum & 0xff) | ((v & 3) << 8);
         c.block = (v >> 2) & 7;
-        updateKsl(c.ksl, c.ksv, c.fnum, c.block);
+        UpdateKsl(c.ksl, c.ksv, c.fnum, c.block);
         bool on = (v & 0x20) != 0;
         c.mod->key = on;
         c.car->key = on;
@@ -126,69 +126,69 @@ void Opl::write(int reg, int v) {
 
 // One step of an operator's envelope generator (Nuked's OPL3_EnvelopeCalc).
 void Opl::envelope(Slot& s, const Channel& c) {
-    int eo = s.rout + s.tl * 4 + (c.ksl >> KSLSHIFT[s.ksl]);
+    int eo = s.rout + s.tl * 4 + (c.ksl >> kKslshift[s.ksl]);
     if (s.am) eo += trem_;
     s.egOut = eo > 0x1ff ? 0x1ff : eo;
 
     bool reset = false;
     int rate;
-    if (s.key && s.gen == RELEASE) {
+    if (s.key && s.gen == kRelease) {
         reset = true;
         rate = s.ar;
-    } else if (s.gen == ATTACK)
+    } else if (s.gen == kAttack)
         rate = s.ar;
-    else if (s.gen == DECAY)
+    else if (s.gen == kDecay)
         rate = s.dr;
-    else if (s.gen == SUSTAIN)
+    else if (s.gen == kSustain)
         rate = s.egt == 0 ? s.rr : 0;
     else
         rate = s.rr;
     s.reset = reset;
 
-    int shift = 0, rateHi = 0;
+    int shift = 0, rate_hi = 0;
     if (rate != 0) {
         int ks = c.ksv >> (s.ksr == 1 ? 0 : 2);
         int r = ks + rate * 4;
-        rateHi = r >> 2;
-        int rateLo = r & 3;
-        if (rateHi > 15) rateHi = 15;
-        if (rateHi < 12) {
+        rate_hi = r >> 2;
+        int rate_lo = r & 3;
+        if (rate_hi > 15) rate_hi = 15;
+        if (rate_hi < 12) {
             if (egState_ == 1) {
-                int es = rateHi + egAdd_;
+                int es = rate_hi + egAdd_;
                 if (es == 12)
                     shift = 1;
                 else if (es == 13)
-                    shift = (rateLo >> 1) & 1;
+                    shift = (rate_lo >> 1) & 1;
                 else if (es == 14)
-                    shift = rateLo & 1;
+                    shift = rate_lo & 1;
             }
         } else {
-            shift = (rateHi & 3) + INCSTEP[rateLo][egTimerLo_];
+            shift = (rate_hi & 3) + kIncstep[rate_lo][egTimerLo_];
             if (shift & 4) shift = 3;
             if (shift == 0) shift = egState_;
         }
     }
 
     int rout = s.rout, inc = 0;
-    if (reset && rateHi == 15) rout = 0;
+    if (reset && rate_hi == 15) rout = 0;
     bool off = (s.rout & 0x1f8) == 0x1f8;
-    if (s.gen != ATTACK && !reset && off) rout = 0x1ff;
-    if (s.gen == ATTACK) {
+    if (s.gen != kAttack && !reset && off) rout = 0x1ff;
+    if (s.gen == kAttack) {
         if (s.rout == 0)
-            s.gen = DECAY;
-        else if (s.key && shift > 0 && rateHi != 15)
+            s.gen = kDecay;
+        else if (s.key && shift > 0 && rate_hi != 15)
             inc = static_cast<int>(std::floor((-s.rout - 1) / std::pow(2.0, 4 - shift)));
-    } else if (s.gen == DECAY) {
+    } else if (s.gen == kDecay) {
         if ((s.rout >> 4) == s.sl)
-            s.gen = SUSTAIN;
+            s.gen = kSustain;
         else if (!off && !reset && shift > 0)
             inc = 1 << (shift - 1);
     } else {
         if (!off && !reset && shift > 0) inc = 1 << (shift - 1);
     }
     s.rout = (rout + inc) & 0x1ff;
-    if (reset) s.gen = ATTACK;
-    if (!s.key) s.gen = RELEASE;
+    if (reset) s.gen = kAttack;
+    if (!s.key) s.gen = kRelease;
 }
 
 // the phase generator, with the chip's vibrato
@@ -208,12 +208,12 @@ void Opl::phaseGen(Slot& s, const Channel& c) {
     uint32_t base = (static_cast<uint32_t>(f << c.block) & 0xffffffff) >> 1;
     s.phaseOut = static_cast<int>(s.phase >> 9);
     if (s.reset) s.phase = 0;
-    s.phase = (s.phase + ((base * MT[s.mult]) >> 1)) & 0x7ffff;
+    s.phase = (s.phase + ((base * kMt[s.mult]) >> 1)) & 0x7ffff;
 }
 
 bool Opl::silent() const {
     for (const Slot& s : slots_)
-        if (s.key || s.gen != RELEASE || s.rout < 0x1f8) return false;
+        if (s.key || s.gen != kRelease || s.rout < 0x1f8) return false;
     return true;
 }
 
@@ -224,8 +224,8 @@ void Opl::generate(int16_t* out, int n) {
             Slot& m = *c.mod;
             Slot& k = *c.car;
             // skip a channel both of whose envelopes are silent
-            if (!(m.key || k.key || m.rout < 0x1f8 || k.rout < 0x1f8 || m.gen != RELEASE ||
-                  k.gen != RELEASE))
+            if (!(m.key || k.key || m.rout < 0x1f8 || k.rout < 0x1f8 || m.gen != kRelease ||
+                  k.gen != kRelease))
                 continue;
             // modulator, with feedback from its last two outputs
             int fbmod = 0;
@@ -234,16 +234,16 @@ void Opl::generate(int16_t* out, int n) {
             m.prout = m.out;
             envelope(m, c);
             phaseGen(m, c);
-            m.out = wave(m.wf, m.phaseOut + fbmod, m.egOut);
+            m.out = Wave(m.wf, m.phaseOut + fbmod, m.egOut);
             // carrier, frequency-modulated by it (FM) or beside it (AM)
             k.prout = k.out;
             envelope(k, c);
             phaseGen(k, c);
             if (c.con == 0) {
-                k.out = wave(k.wf, k.phaseOut + m.out, k.egOut);
+                k.out = Wave(k.wf, k.phaseOut + m.out, k.egOut);
                 acc += k.out;
             } else {
-                k.out = wave(k.wf, k.phaseOut, k.egOut);
+                k.out = Wave(k.wf, k.phaseOut, k.egOut);
                 acc += m.out + k.out;
             }
         }

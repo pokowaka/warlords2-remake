@@ -43,16 +43,16 @@ namespace sound {
 
 namespace {
 
-constexpr int SAMPLE_RATE = 11000;
+constexpr int kSampleRate = 11000;
 // The chip's nine voices leave a lot of headroom: a song peaks around a
 // fifth of full scale, some 10 dB under the samples. Twice as loud brings
 // the two close (musicthread.lua).
-constexpr float FM_GAIN = 2.0F / 32768;
+constexpr float kFmGain = 2.0F / 32768;
 
-const std::map<std::string, char> PREFIX = {{"fm", 'S'}, {"mt32", 'M'}, {"sc55", 'R'}};
+const std::map<std::string, char> kPrefix = {{"fm", 'S'}, {"mt32", 'M'}, {"sc55", 'R'}};
 
 // FILE.DAT's sample names, by what the game calls them for
-const std::map<std::string, std::pair<int, int>> EFFECT = {
+const std::map<std::string, std::pair<int, int>> kEffect = {
     {"army", {64, 0}},  {"army2", {64, 5}},    {"ding", {64, 1}},
     {"chord", {64, 2}}, {"dramatic", {37, 0}}, {"orch", {37, 1}},
     {"war", {38, 0}},   {"splash", {39, 0}},   {"turn", {63, 0}}};
@@ -63,7 +63,7 @@ using Pcm = std::shared_ptr<std::vector<float>>;
 struct Queued {
     Pcm pcm;
     std::function<void()> done;
-    double endsAt = 0;  // by the wall clock, should the device stall
+    double ends_at = 0;  // by the wall clock, should the device stall
 };
 
 #ifdef W2_VORBIS
@@ -81,7 +81,7 @@ struct Stream {
         if (open) ov_clear(&vf);
     }
     // Decode more until at least `need` frames lie ahead of pos.
-    void fill(size_t need) {
+    void Fill(size_t need) {
         size_t at = static_cast<size_t>(pos);
         if (at > 0) {
             buf.erase(buf.begin(), buf.begin() + std::min(buf.size(), at * 2));
@@ -104,7 +104,7 @@ struct Stream {
             frames += n;
         }
     }
-    bool done() const { return eof && pos + 1 >= frames; }
+    bool Done() const { return eof && pos + 1 >= frames; }
 };
 #endif
 
@@ -114,14 +114,14 @@ struct Mixer {
     int rate = 44100;
     // the sample sounding
     Pcm sample;
-    double samplePos = 0;
-    bool sampleEnded = true;
+    double sample_pos = 0;
+    bool sample_ended = true;
     // the FM music
     std::unique_ptr<w2::AilFm> fm;
-    std::shared_ptr<w2::xmi::Sequence> fmSeq;
-    std::vector<int16_t> fmBuf;
-    double fmPos = 0;
-    bool fmWasPlaying = false, fmEnded = false;
+    std::shared_ptr<w2::xmi::Sequence> fm_seq;
+    std::vector<int16_t> fm_buf;
+    double fm_pos = 0;
+    bool fm_was_playing = false, fm_ended = false;
 #ifdef W2_VORBIS
     std::unique_ptr<Stream> rec;
     std::vector<std::unique_ptr<Stream>> tails;
@@ -129,7 +129,7 @@ struct Mixer {
 };
 
 struct State {
-    std::string dataDir, recDir;
+    std::string data_dir, rec_dir;
     w2::uidata::Strings files;
     Options on{false, false, false};
     SDL_AudioDeviceID dev = 0;
@@ -139,94 +139,94 @@ struct State {
     std::optional<Queued> playing;
     int cue = w2::NONE;
     std::optional<std::pair<std::string, bool>> song;
-    bool songPlaying = false;
+    bool song_playing = false;
     std::string synth = "fm";
     std::string adv, ad;
     // the recording's loop point, and whether it loops
-    double recAt = 0;
-    bool recLoop = false;
+    double rec_at = 0;
+    bool rec_loop = false;
 };
-State S;
+State sound_state;
 
 std::mt19937 dice{std::random_device{}()};
-int roll(int n) {
+int Roll(int n) {
     return static_cast<int>(dice() % static_cast<unsigned>(std::max(1, n))) + 1;
 }
 
 struct Lock {
     Lock() {
-        if (S.dev) SDL_LockAudioDevice(S.dev);
+        if (sound_state.dev) SDL_LockAudioDevice(sound_state.dev);
     }
     ~Lock() {
-        if (S.dev) SDL_UnlockAudioDevice(S.dev);
+        if (sound_state.dev) SDL_UnlockAudioDevice(sound_state.dev);
     }
 };
 
 // ------------------------------------------------------------- the callback
 
-void mixSample(float* out, int n) {
-    Mixer& m = S.mix;
-    if (!m.sample || m.sampleEnded) return;
+void MixSample(float* out, int n) {
+    Mixer& m = sound_state.mix;
+    if (!m.sample || m.sample_ended) return;
     const auto& p = *m.sample;
-    double step = static_cast<double>(SAMPLE_RATE) / m.rate;
+    double step = static_cast<double>(kSampleRate) / m.rate;
     for (int i = 0; i < n; i++) {
-        size_t k = static_cast<size_t>(m.samplePos);
+        size_t k = static_cast<size_t>(m.sample_pos);
         if (k >= p.size()) {
-            m.sampleEnded = true;
+            m.sample_ended = true;
             return;
         }
-        double f = m.samplePos - k;
+        double f = m.sample_pos - k;
         float v = static_cast<float>(p[k] * (1 - f) + (k + 1 < p.size() ? p[k + 1] : 0) * f);
         out[static_cast<std::ptrdiff_t>(i) * 2] += v;
         out[i * 2 + 1] += v;
-        m.samplePos += step;
+        m.sample_pos += step;
     }
 }
 
-void mixFm(float* out, int n) {
-    Mixer& m = S.mix;
+void MixFm(float* out, int n) {
+    Mixer& m = sound_state.mix;
     if (!m.fm || m.fm->idle()) {
-        if (m.fmWasPlaying) m.fmEnded = true;
-        m.fmWasPlaying = false;
+        if (m.fm_was_playing) m.fm_ended = true;
+        m.fm_was_playing = false;
         return;
     }
     double step = w2::Opl::RATE / m.rate;
-    size_t need = static_cast<size_t>(std::ceil(m.fmPos + n * step)) + 2;
+    size_t need = static_cast<size_t>(std::ceil(m.fm_pos + n * step)) + 2;
     // keep what is still ahead, render the rest
-    size_t keep = static_cast<size_t>(m.fmPos);
+    size_t keep = static_cast<size_t>(m.fm_pos);
     if (keep > 0) {
-        m.fmBuf.erase(m.fmBuf.begin(), m.fmBuf.begin() + std::min(keep, m.fmBuf.size()));
-        m.fmPos -= keep;
+        m.fm_buf.erase(m.fm_buf.begin(), m.fm_buf.begin() + std::min(keep, m.fm_buf.size()));
+        m.fm_pos -= keep;
         need -= keep;
     }
-    if (m.fmBuf.size() < need) {
-        size_t from = m.fmBuf.size();
-        m.fmBuf.resize(need);
-        m.fm->render(m.fmBuf.data() + from, static_cast<int>(need - from));
+    if (m.fm_buf.size() < need) {
+        size_t from = m.fm_buf.size();
+        m.fm_buf.resize(need);
+        m.fm->render(m.fm_buf.data() + from, static_cast<int>(need - from));
     }
     for (int i = 0; i < n; i++) {
-        size_t k = static_cast<size_t>(m.fmPos);
-        double f = m.fmPos - k;
-        float v = static_cast<float>((m.fmBuf[k] * (1 - f) + m.fmBuf[k + 1] * f) * FM_GAIN);
+        size_t k = static_cast<size_t>(m.fm_pos);
+        double f = m.fm_pos - k;
+        float v = static_cast<float>((m.fm_buf[k] * (1 - f) + m.fm_buf[k + 1] * f) * kFmGain);
         v = std::clamp(v, -1.0F, 1.0F);
         out[static_cast<std::ptrdiff_t>(i) * 2] += v;
         out[i * 2 + 1] += v;
-        m.fmPos += step;
+        m.fm_pos += step;
     }
     bool now = m.fm->playing();
-    if (m.fmWasPlaying && !now) m.fmEnded = true;
-    m.fmWasPlaying = now;
+    if (m.fm_was_playing && !now) m.fm_ended = true;
+    m.fm_was_playing = now;
 }
 
 #ifdef W2_VORBIS
-void mixStream(Stream& s, float* out, int n, int rate) {
-    if (s.done()) return;
-    s.fill(static_cast<size_t>(std::ceil(n * s.step)) + 2);
+void MixStream(Stream& s, float* out, int n, int rate) {
+    if (s.Done()) return;
+    s.Fill(static_cast<size_t>(std::ceil(n * s.step)) + 2);
     for (int i = 0; i < n; i++) {
         size_t k = static_cast<size_t>(s.pos);
         if (k + 1 >= s.frames) {
             if (s.eof) break;
-            s.fill(static_cast<size_t>(std::ceil((n - i) * s.step)) + 2);
+            s.Fill(static_cast<size_t>(std::ceil((n - i) * s.step)) + 2);
             k = static_cast<size_t>(s.pos);
             if (k + 1 >= s.frames) break;
         }
@@ -240,342 +240,346 @@ void mixStream(Stream& s, float* out, int n, int rate) {
 }
 #endif
 
-void callback(void*, Uint8* stream, int len) {
+void Callback(void*, Uint8* stream, int len) {
     float* out = reinterpret_cast<float*>(stream);
     int n = len / static_cast<int>(sizeof(float) * 2);
     std::fill(out, out + static_cast<std::ptrdiff_t>(n) * 2, 0.0F);
-    mixFm(out, n);
+    MixFm(out, n);
 #ifdef W2_VORBIS
-    Mixer& m = S.mix;
-    if (m.rec) mixStream(*m.rec, out, n, m.rate);
-    for (auto& t : m.tails) mixStream(*t, out, n, m.rate);
+    Mixer& m = sound_state.mix;
+    if (m.rec) MixStream(*m.rec, out, n, m.rate);
+    for (auto& t : m.tails) MixStream(*t, out, n, m.rate);
 #endif
-    mixSample(out, n);
+    MixSample(out, n);
     for (int i = 0; i < n * 2; i++) out[i] = std::clamp(out[i], -1.0F, 1.0F);
 }
 
 // ------------------------------------------------------------- helpers
 
 // "SOUND\\army.8SN" -> <data>/SOUND/army.8SN, found ignoring case
-std::string dataPath(const std::string& name) {
+std::string DataPath(const std::string& name) {
     std::string rel = name;
     std::replace(rel.begin(), rel.end(), '\\', '/');
-    return S.dataDir + "/" + rel;
+    return sound_state.data_dir + "/" + rel;
 }
 
-Pcm sampleData(const std::string& name) {
-    auto it = S.samples.find(name);
-    if (it != S.samples.end()) return it->second;
+Pcm SampleData(const std::string& name) {
+    auto it = sound_state.samples.find(name);
+    if (it != sound_state.samples.end()) return it->second;
     Pcm p;
-    if (auto bytes = w2::readFile(dataPath(name)); bytes && !bytes->empty()) {
+    if (auto bytes = w2::readFile(DataPath(name)); bytes && !bytes->empty()) {
         p = std::make_shared<std::vector<float>>(bytes->size());
         for (size_t i = 0; i < bytes->size(); i++)
             (*p)[i] = (static_cast<uint8_t>((*bytes)[i]) - 128) / 128.0F;
     }
-    S.samples[name] = p;
+    sound_state.samples[name] = p;
     return p;
 }
 
-void saveOptionsFile() {
+void SaveOptionsFile() {
     std::string s;
-    s += S.on.music ? '1' : '0';
-    s += S.on.effects ? '1' : '0';
-    s += S.on.speech ? '1' : '0';
-    w2::writeFile(S.dataDir + "/DATA/OPTIONS.SND", s);
+    s += sound_state.on.music ? '1' : '0';
+    s += sound_state.on.effects ? '1' : '0';
+    s += sound_state.on.speech ? '1' : '0';
+    w2::writeFile(sound_state.data_dir + "/DATA/OPTIONS.SND", s);
 }
 
 // "INT12.XMI" -> <recordings>/RINT12.ogg
-std::string recordingPath(const std::string& synth, const std::string& name) {
+std::string RecordingPath(const std::string& synth, const std::string& name) {
     std::string n = w2::upper(name);
     if (w2::endsWith(n, ".XMI")) n = n.substr(0, n.size() - 4);
-    return S.recDir + "/" + PREFIX.at(synth) + n + ".ogg";
+    return sound_state.rec_dir + "/" + kPrefix.at(synth) + n + ".ogg";
 }
 
 #ifdef W2_VORBIS
-std::unique_ptr<Stream> openStream(const std::string& path) {
+std::unique_ptr<Stream> OpenStream(const std::string& path) {
     auto s = std::make_unique<Stream>();
     std::string real = w2::resolvePath(path);
     if (real.empty() || ov_fopen(real.c_str(), &s->vf) != 0) return nullptr;
     s->open = true;
     vorbis_info* vi = ov_info(&s->vf, -1);
     s->channels = vi->channels;
-    s->step = static_cast<double>(vi->rate) / S.mix.rate;
+    s->step = static_cast<double>(vi->rate) / sound_state.mix.rate;
     return s;
 }
 
 // the main thread's half of a recording reaching its loop point
-void stepRecording() {
+void StepRecording() {
     Lock lock;
-    Mixer& m = S.mix;
+    Mixer& m = sound_state.mix;
     auto& r = m.rec;
-    if (r && (r->played >= S.recAt || r->done())) {
+    if (r && (r->played >= sound_state.rec_at || r->Done())) {
         m.tails.push_back(std::move(r));
-        if (S.recLoop && S.song)
-            r = openStream(recordingPath(S.synth, S.song->first));
+        if (sound_state.rec_loop && sound_state.song)
+            r = OpenStream(RecordingPath(sound_state.synth, sound_state.song->first));
         else
-            S.songPlaying = false;
+            sound_state.song_playing = false;
     }
-    m.tails.erase(std::remove_if(m.tails.begin(), m.tails.end(), [](auto& t) { return t->done(); }),
+    m.tails.erase(std::remove_if(m.tails.begin(), m.tails.end(), [](auto& t) { return t->Done(); }),
                   m.tails.end());
     if (m.tails.size() > 4) m.tails.erase(m.tails.begin(), m.tails.end() - 4);
 }
 #endif
 
-void stopRecordings() {
+void StopRecordings() {
 #ifdef W2_VORBIS
     std::unique_ptr<Stream> rec;
     std::vector<std::unique_ptr<Stream>> tails;
     {
         Lock lock;
-        rec = std::move(S.mix.rec);
-        tails = std::move(S.mix.tails);
-        S.mix.tails.clear();
+        rec = std::move(sound_state.mix.rec);
+        tails = std::move(sound_state.mix.tails);
+        sound_state.mix.tails.clear();
     }
 #endif
 }
 
-void stopFm() {
+void StopFm() {
     Lock lock;
-    if (S.mix.fm) S.mix.fm->stop();
-    S.mix.fmWasPlaying = false;
-    S.mix.fmEnded = false;
+    if (sound_state.mix.fm) sound_state.mix.fm->stop();
+    sound_state.mix.fm_was_playing = false;
+    sound_state.mix.fm_ended = false;
 }
 
 // Start a song, `loop`ing or not, on the synthesizer chosen. False when it
 // cannot play: the recording, or the FM driver, missing.
-bool startSong(const std::string& name, bool loop) {
-    if (!S.dev) return false;
+bool StartSong(const std::string& name, bool loop) {
+    if (!sound_state.dev) return false;
 #ifdef W2_VORBIS
-    if (S.synth != "fm") {
+    if (sound_state.synth != "fm") {
         // the recording, and the song's own length from the file it was made
         // of: the driver starts a loop again one tick after it
-        auto bytes = w2::readFile(S.dataDir + "/SOUND/" + PREFIX.at(S.synth) + w2::upper(name));
+        auto bytes = w2::readFile(sound_state.data_dir + "/SOUND/" + kPrefix.at(sound_state.synth) +
+                                  w2::upper(name));
         auto seq = bytes ? w2::xmi::parse(*bytes) : std::nullopt;
-        auto stream = seq ? openStream(recordingPath(S.synth, name)) : nullptr;
+        auto stream = seq ? OpenStream(RecordingPath(sound_state.synth, name)) : nullptr;
         if (stream) {
-            stopFm();
-            stopRecordings();
+            StopFm();
+            StopRecordings();
             Lock lock;
-            S.mix.rec = std::move(stream);
-            S.recAt = (seq->length + 1.0) / w2::xmi::TICK_RATE;
-            S.recLoop = loop;
-            S.song = std::make_pair(name, loop);
-            S.songPlaying = true;
+            sound_state.mix.rec = std::move(stream);
+            sound_state.rec_at = (seq->length + 1.0) / w2::xmi::TICK_RATE;
+            sound_state.rec_loop = loop;
+            sound_state.song = std::make_pair(name, loop);
+            sound_state.song_playing = true;
             return true;
         }
     }
 #endif
     // the FM version's files carry an S: SINT12.XMI (255e:032f)
-    if (S.adv.empty() || S.ad.empty()) return false;
-    auto bytes = w2::readFile(S.dataDir + "/SOUND/S" + w2::upper(name));
+    if (sound_state.adv.empty() || sound_state.ad.empty()) return false;
+    auto bytes = w2::readFile(sound_state.data_dir + "/SOUND/S" + w2::upper(name));
     auto seq = bytes ? w2::xmi::parse(*bytes) : std::nullopt;
     if (!seq) return false;
-    stopRecordings();
+    StopRecordings();
     auto shared = std::make_shared<w2::xmi::Sequence>(std::move(*seq));
     std::shared_ptr<w2::xmi::Sequence> old;
     {
         Lock lock;
-        if (!S.mix.fm) S.mix.fm = std::make_unique<w2::AilFm>(S.adv, S.ad);
-        old = S.mix.fmSeq;
-        S.mix.fmSeq = shared;
-        S.mix.fm->play(shared.get(), loop);
-        S.mix.fmWasPlaying = true;
-        S.mix.fmEnded = false;
+        if (!sound_state.mix.fm)
+            sound_state.mix.fm = std::make_unique<w2::AilFm>(sound_state.adv, sound_state.ad);
+        old = sound_state.mix.fm_seq;
+        sound_state.mix.fm_seq = shared;
+        sound_state.mix.fm->play(shared.get(), loop);
+        sound_state.mix.fm_was_playing = true;
+        sound_state.mix.fm_ended = false;
     }
-    S.song = std::make_pair(name, loop);
-    S.songPlaying = true;
+    sound_state.song = std::make_pair(name, loop);
+    sound_state.song_playing = true;
     return true;
 }
 
 // queue a sample behind whatever is sounding; `done` runs once it has ended
-double enqueue(const std::string& name, std::function<void()> done) {
-    Pcm p = S.dev ? sampleData(name) : nullptr;
+double Enqueue(const std::string& name, std::function<void()> done) {
+    Pcm p = sound_state.dev ? SampleData(name) : nullptr;
     if (!p) {
         if (done) done();
         return 0;
     }
-    S.queue.push_back(Queued{p, std::move(done)});
+    sound_state.queue.push_back(Queued{p, std::move(done)});
     update();
-    return static_cast<double>(p->size()) / SAMPLE_RATE;
+    return static_cast<double>(p->size()) / kSampleRate;
 }
 
 }  // namespace
 
 // ------------------------------------------------------------- the interface
 
-void init(const std::string& dataDir, const w2::uidata::Strings& files) {
-    S.dataDir = dataDir;
-    S.files = files;
-    S.recDir = w2::fileExists("pre-rendered-sound") ? "pre-rendered-sound"
-                                                    : dataDir + "/../pre-rendered-sound";
-    std::string opts = w2::readFile(dataDir + "/DATA/OPTIONS.SND").value_or("111");
+void init(const std::string& data_dir, const w2::uidata::Strings& files) {
+    sound_state.data_dir = data_dir;
+    sound_state.files = files;
+    sound_state.rec_dir = w2::fileExists("pre-rendered-sound")
+                                  ? "pre-rendered-sound"
+                                  : data_dir + "/../pre-rendered-sound";
+    std::string opts = w2::readFile(data_dir + "/DATA/OPTIONS.SND").value_or("111");
     while (opts.size() < 3) opts += '1';
-    S.on.music = opts[0] == '1';
-    S.on.effects = opts[1] == '1';
-    S.on.speech = opts[2] != '0';
+    sound_state.on.music = opts[0] == '1';
+    sound_state.on.effects = opts[1] == '1';
+    sound_state.on.speech = opts[2] != '0';
     // the MT-32 unless another was picked; AdLib when its recordings are missing
     std::string synth = prefs::get("music");
     if (synth.empty()) synth = "mt32";
-    if (PREFIX.count(synth) && synthAvailable(synth)) S.synth = synth;
-    S.adv = w2::readFile(dataDir + "/ADLIB.ADV").value_or("");
-    S.ad = w2::readFile(dataDir + "/MIDPAK.AD").value_or("");
+    if (kPrefix.count(synth) && synthAvailable(synth)) sound_state.synth = synth;
+    sound_state.adv = w2::readFile(data_dir + "/ADLIB.ADV").value_or("");
+    sound_state.ad = w2::readFile(data_dir + "/MIDPAK.AD").value_or("");
     SDL_AudioSpec want{}, have{};
     want.freq = 44100;
     want.format = AUDIO_F32SYS;
     want.channels = 2;
     want.samples = 1024;
-    want.callback = callback;
-    S.dev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
-    if (!S.dev) return;
-    S.mix.rate = have.freq;
-    SDL_PauseAudioDevice(S.dev, 0);
+    want.callback = Callback;
+    sound_state.dev =
+            SDL_OpenAudioDevice(nullptr, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+    if (!sound_state.dev) return;
+    sound_state.mix.rate = have.freq;
+    SDL_PauseAudioDevice(sound_state.dev, 0);
 }
 
 void shutdown() {
-    if (!S.dev) return;
-    SDL_CloseAudioDevice(S.dev);
-    S.dev = 0;
+    if (!sound_state.dev) return;
+    SDL_CloseAudioDevice(sound_state.dev);
+    sound_state.dev = 0;
 #ifdef W2_VORBIS
-    S.mix.rec.reset();
-    S.mix.tails.clear();
+    sound_state.mix.rec.reset();
+    sound_state.mix.tails.clear();
 #endif
-    S.mix.fm.reset();
+    sound_state.mix.fm.reset();
 }
 
 Options& options() {
-    return S.on;
+    return sound_state.on;
 }
 void saveOptions() {
-    saveOptionsFile();
+    SaveOptionsFile();
 }
 
 // Turn one switch over (64d2:0576). Music turned on starts the play music;
 // turned off it stops at once.
 void toggle(const std::string& which) {
     if (which == "music")
-        S.on.music = !S.on.music;
+        sound_state.on.music = !sound_state.on.music;
     else if (which == "effects")
-        S.on.effects = !S.on.effects;
+        sound_state.on.effects = !sound_state.on.effects;
     else if (which == "speech")
-        S.on.speech = !S.on.speech;
+        sound_state.on.speech = !sound_state.on.speech;
     if (which == "music") {
-        if (S.on.music) {
-            S.cue = w2::NONE;
+        if (sound_state.on.music) {
+            sound_state.cue = w2::NONE;
             music(w2::cues::PLAY);
         } else {
             stopMusic();
         }
     }
-    saveOptionsFile();
+    SaveOptionsFile();
 }
 
 // Play a cue -- unless it is the one already playing, which goes on
 // undisturbed (6dda:0000).
 void music(int cue, const std::vector<w2::Side*>& sides) {
-    if (!S.on.music) return;
-    if (cue == S.cue && S.songPlaying) return;
-    auto [name, loop] = w2::cues::song(S.files, cue, sides, roll);
-    if (!name.empty() && startSong(name, loop)) S.cue = cue;
+    if (!sound_state.on.music) return;
+    if (cue == sound_state.cue && sound_state.song_playing) return;
+    auto [name, loop] = w2::cues::song(sound_state.files, cue, sides, Roll);
+    if (!name.empty() && StartSong(name, loop)) sound_state.cue = cue;
 }
 
 void stopMusic() {
-    S.cue = w2::NONE;
-    S.song.reset();
-    S.songPlaying = false;
-    stopFm();
-    stopRecordings();
+    sound_state.cue = w2::NONE;
+    sound_state.song.reset();
+    sound_state.song_playing = false;
+    StopFm();
+    StopRecordings();
 }
 
 std::string synth() {
-    return S.synth;
+    return sound_state.synth;
 }
 
 // FM wants ADLIB.ADV; the others their recordings, and libvorbisfile.
 bool synthAvailable(const std::string& s) {
     if (s == "fm") return true;
 #ifdef W2_VORBIS
-    return PREFIX.count(s) && w2::fileExists(recordingPath(s, "STARTUP.XMI"));
+    return kPrefix.count(s) && w2::fileExists(RecordingPath(s, "STARTUP.XMI"));
 #else
     return false;
 #endif
 }
 
 void setSynth(const std::string& s) {
-    if (!PREFIX.count(s) || s == S.synth) return;
-    S.synth = s;
+    if (!kPrefix.count(s) || s == sound_state.synth) return;
+    sound_state.synth = s;
     prefs::set("music", s);
-    if (S.on.music && S.song && S.songPlaying) {
-        auto song = *S.song;
-        startSong(song.first, song.second);
+    if (sound_state.on.music && sound_state.song && sound_state.song_playing) {
+        auto song = *sound_state.song;
+        StartSong(song.first, song.second);
     }
 }
 
 double effect(const std::string& what) {
-    if (!S.on.effects || S.files.empty()) return 0;
-    auto e = EFFECT.find(what);
-    if (e == EFFECT.end()) return 0;
+    if (!sound_state.on.effects || sound_state.files.empty()) return 0;
+    auto e = kEffect.find(what);
+    if (e == kEffect.end()) return 0;
     auto [group, index] = e->second;
-    if (group >= static_cast<int>(S.files.size()) ||
-        index >= static_cast<int>(S.files[group].size()))
+    if (group >= static_cast<int>(sound_state.files.size()) ||
+        index >= static_cast<int>(sound_state.files[group].size()))
         return 0;
-    const std::string& name = S.files[group][index];
+    const std::string& name = sound_state.files[group][index];
     if (name.empty()) return 0;
-    return enqueue(name, nullptr);
+    return Enqueue(name, nullptr);
 }
 
 bool speak(int group, std::function<void()> after) {
-    if (!S.on.speech || S.files.empty()) return false;
-    auto [name, subtitle] = w2::cues::clip(S.files, group, roll);
-    if (name.empty() || !S.dev || !sampleData(name)) return false;
-    enqueue(name, std::move(after));
+    if (!sound_state.on.speech || sound_state.files.empty()) return false;
+    auto [name, subtitle] = w2::cues::clip(sound_state.files, group, Roll);
+    if (name.empty() || !sound_state.dev || !SampleData(name)) return false;
+    Enqueue(name, std::move(after));
     return true;
 }
 
 bool speechOn() {
-    return S.on.speech;
+    return sound_state.on.speech;
 }
 
 bool busy() {
-    return S.playing.has_value() || !S.queue.empty();
+    return sound_state.playing.has_value() || !sound_state.queue.empty();
 }
 
 // Call every frame: start the next sample when the last has ended, hear
 // whether a song ran out, and start a looping recording over.
 void update() {
-    if (S.playing) {
+    if (sound_state.playing) {
         bool ended;
         {
             Lock lock;
-            ended = S.mix.sampleEnded;
+            ended = sound_state.mix.sample_ended;
         }
         // or, should the device stall, once its length has passed
-        if (ended || w2::now() >= S.playing->endsAt) {
-            auto done = std::move(S.playing->done);
-            S.playing.reset();
+        if (ended || w2::now() >= sound_state.playing->ends_at) {
+            auto done = std::move(sound_state.playing->done);
+            sound_state.playing.reset();
             if (done) done();
         }
     }
-    if (!S.playing && !S.queue.empty()) {
-        Queued q = std::move(S.queue.front());
-        S.queue.pop_front();
-        q.endsAt = w2::now() + static_cast<double>(q.pcm->size()) / SAMPLE_RATE + 0.25;
+    if (!sound_state.playing && !sound_state.queue.empty()) {
+        Queued q = std::move(sound_state.queue.front());
+        sound_state.queue.pop_front();
+        q.ends_at = w2::now() + static_cast<double>(q.pcm->size()) / kSampleRate + 0.25;
         {
             Lock lock;
-            S.mix.sample = q.pcm;
-            S.mix.samplePos = 0;
-            S.mix.sampleEnded = false;
+            sound_state.mix.sample = q.pcm;
+            sound_state.mix.sample_pos = 0;
+            sound_state.mix.sample_ended = false;
         }
-        S.playing = std::move(q);
+        sound_state.playing = std::move(q);
     }
     {
         Lock lock;
-        if (S.mix.fmEnded) {
-            S.mix.fmEnded = false;
-            if (S.song && !S.song->second) S.songPlaying = false;
+        if (sound_state.mix.fm_ended) {
+            sound_state.mix.fm_ended = false;
+            if (sound_state.song && !sound_state.song->second) sound_state.song_playing = false;
         }
     }
 #ifdef W2_VORBIS
-    stepRecording();
+    StepRecording();
 #endif
 }
 

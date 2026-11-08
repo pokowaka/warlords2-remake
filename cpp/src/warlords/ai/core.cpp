@@ -97,20 +97,20 @@ bool hills(const Game& g, const Army* a) {
     return g.types.byId(a->type)->hillsMove;
 }
 
-std::vector<Army*> armies(const Game& g, int sideIndex) {
+std::vector<Army*> armies(const Game& g, int side_index) {
     std::vector<Army*> out;
     for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
-        if (a->owner == sideIndex) out.push_back(a);
+        if (a->owner == side_index) out.push_back(a);
     }
     return out;
 }
 
-std::vector<Army*> onTile(const Game& g, int sideIndex, int x, int y) {
+std::vector<Army*> onTile(const Game& g, int side_index, int x, int y) {
     std::vector<Army*> out;
     for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
-        if (a->owner == sideIndex && !a->transit && a->x == x && a->y == y) out.push_back(a);
+        if (a->owner == side_index && !a->transit && a->x == x && a->y == y) out.push_back(a);
     }
     return out;
 }
@@ -127,8 +127,8 @@ AIData& data(Game& g, Side& sd) {
     return *sd.ai;
 }
 
-AIData& data(Game& g, int sideIndex) {
-    return data(g, *g.map->side(sideIndex));
+AIData& data(Game& g, int side_index) {
+    return data(g, *g.map->side(side_index));
 }
 
 // The shared neighbour table (623c:0398): each city's six nearest cities by
@@ -153,12 +153,12 @@ namespace {
 // walking the cities from the last; then six are taken, nearest first and
 // 50 further off for a direction that has three already, the list read from
 // its end so a tie goes to the later place. Returns how many were found.
-int pickNeighbours(Game& g, const City& c, const Flood& flood, std::vector<int>& picked,
+int PickNeighbours(Game& g, const City& c, const Flood& flood, std::vector<int>& picked,
                    std::vector<int>& dists) {
-    int slotCity[50], slotDist[50];
+    int slot_city[50], slot_dist[50];
     for (int k = 0; k < 50; k++) {
-        slotCity[k] = -1;
-        slotDist[k] = 0;
+        slot_city[k] = -1;
+        slot_dist[k] = 0;
     }
     int found = 0;
     for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
@@ -169,46 +169,46 @@ int pickNeighbours(Game& g, const City& c, const Flood& flood, std::vector<int>&
         found++;
         int at = -1, worst = d;
         int k = 0;
-        for (; k < 50 && slotCity[k] != -1; k++) {
-            if (worst < slotDist[k]) {
-                worst = slotDist[k];
+        for (; k < 50 && slot_city[k] != -1; k++) {
+            if (worst < slot_dist[k]) {
+                worst = slot_dist[k];
                 at = k;
             }
         }
         if (k < 50) at = k;
-        if (at != -1 && (slotCity[at] == -1 || d < slotDist[at])) {
-            slotCity[at] = i;
-            slotDist[at] = d & 0xff;
+        if (at != -1 && (slot_city[at] == -1 || d < slot_dist[at])) {
+            slot_city[at] = i;
+            slot_dist[at] = d & 0xff;
         }
     }
     int left = 0, right = 0, up = 0, down = 0;
     picked.clear();
     dists.clear();
     while (picked.size() < 6) {
-        int best = -1, bestScore = 10000;
+        int best = -1, best_score = 10000;
         for (int k = 49; k >= 0; k--) {
-            if (slotCity[k] != -1) {
-                const City& o = g.map->cities[slotCity[k]];
-                int score = slotDist[k];
+            if (slot_city[k] != -1) {
+                const City& o = g.map->cities[slot_city[k]];
+                int score = slot_dist[k];
                 if ((o.x < c.x && left > 2) || (c.x < o.x && right > 2) || (o.y < c.y && up > 2) ||
                     (c.y < o.y && down > 2)) {
                     score += 50;
                 }
-                if (score < bestScore) {
-                    bestScore = score;
+                if (score < best_score) {
+                    best_score = score;
                     best = k;
                 }
             }
         }
         if (best == -1) break;
-        const City& o = g.map->cities[slotCity[best]];
+        const City& o = g.map->cities[slot_city[best]];
         picked.push_back(o.index);
-        dists.push_back(slotDist[best]);
+        dists.push_back(slot_dist[best]);
         if (o.x < c.x) left++;
         if (c.x < o.x) right++;
         if (o.y < c.y) up++;
         if (c.y < o.y) down++;
-        slotCity[best] = -1;
+        slot_city[best] = -1;
     }
     return found;
 }
@@ -219,10 +219,10 @@ std::shared_ptr<Neighbours> buildNeighbours(Game& g) {
     out->byCity.resize(g.map->cities.size());
     for (auto& c : g.map->cities) {
         std::vector<int> picked, dists;
-        int found = pickNeighbours(g, c, floodFrom(g, 0, c.x, c.y, 45, move::LAND, NONE), picked,
+        int found = PickNeighbours(g, c, floodFrom(g, 0, c.x, c.y, 45, move::LAND, NONE), picked,
                                    dists);
         if (found == 0)
-            pickNeighbours(g, c, floodFrom(g, 0, c.x, c.y, 60, move::LAND, NONE), picked, dists);
+            PickNeighbours(g, c, floodFrom(g, 0, c.x, c.y, 60, move::LAND, NONE), picked, dists);
         out->byCity[c.index] = Neighbours::Entry{picked, dists};
     }
     return out;
@@ -249,15 +249,15 @@ Sel select(Game& g, const std::vector<Army*>& list) {
     return sel;
 }
 
-static int fightRank(const Game& g, const Army* a) {
+static int FightRank(const Game& g, const Army* a) {
     const auto& row = g.map->fightOrder[a->owner == NONE ? 8 : a->owner];
     return a->type < static_cast<int>(row.size()) ? row[a->type] : 0;
 }
 
-int newGroup(const Game& g, int sideIndex) {
+int newGroup(const Game& g, int side_index) {
     std::set<int> used;
     for (Army* a : g.armies) {
-        if (a->owner == sideIndex && !a->transit && a->group) used.insert(a->group);
+        if (a->owner == side_index && !a->transit && a->group) used.insert(a->group);
     }
     for (int n = 2; n <= 254; n++)
         if (!used.count(n)) return n;
@@ -269,7 +269,7 @@ std::optional<Sel> order(Game& g, const std::vector<Army*>& list, int ord, int d
     if (sel.armies.empty()) return std::nullopt;
     Army* best = nullptr;
     for (Army* a : sel.armies)
-        if (!best || fightRank(g, a) > fightRank(g, best)) best = a;
+        if (!best || FightRank(g, a) > FightRank(g, best)) best = a;
     sel.leader = best;
     int grp = sel.armies.size() > 1 ? newGroup(g, best->owner) : 0;
     for (Army* a : sel.armies) {
@@ -334,32 +334,32 @@ Sel selectStackOf(Game& g, Army* a) {
     Sel sel = select(g, list);
     Army* best = nullptr;
     for (Army* b : sel.armies)
-        if (!best || fightRank(g, b) > fightRank(g, best)) best = b;
+        if (!best || FightRank(g, b) > FightRank(g, best)) best = b;
     sel.leader = best ? best : a;
     return sel;
 }
 
-std::vector<Army*> collect(const Game& g, int sideIndex, int x, int y, int minMoves) {
+std::vector<Army*> collect(const Game& g, int side_index, int x, int y, int min_moves) {
     std::vector<Army*> out;
-    for (Army* a : onTile(g, sideIndex, x, y)) {
+    for (Army* a : onTile(g, side_index, x, y)) {
         if (static_cast<int>(out.size()) >= rules::MAX_STACK) break;
-        if (!minMoves || a->moves >= minMoves) out.push_back(a);
+        if (!min_moves || a->moves >= min_moves) out.push_back(a);
     }
     return out;
 }
 
-std::vector<Army*> collectOrdered(const Game& g, int sideIndex, int x, int y, int grp, int ord,
-                                  int minMax) {
+std::vector<Army*> collectOrdered(const Game& g, int side_index, int x, int y, int grp, int ord,
+                                  int min_max) {
     std::vector<Army*> out;
-    for (Army* a : onTile(g, sideIndex, x, y)) {
+    for (Army* a : onTile(g, side_index, x, y)) {
         if (static_cast<int>(out.size()) >= rules::MAX_STACK) break;
-        if (a->aiGroup == grp && a->aiOrder == ord && (!minMax || a->maxMoves >= minMax))
+        if (a->aiGroup == grp && a->aiOrder == ord && (!min_max || a->maxMoves >= min_max))
             out.push_back(a);
     }
     return out;
 }
 
-Flood floodFrom(Game& g, int sideIndex, int x, int y, int range, const Sel* sel, int fogSide) {
+Flood floodFrom(Game& g, int side_index, int x, int y, int range, const Sel* sel, int fog_side) {
     int mode = sel ? sel->mode : move::LAND;
     bool wd = false, hl = false;
     if (sel) {
@@ -370,17 +370,17 @@ Flood floodFrom(Game& g, int sideIndex, int x, int y, int range, const Sel* sel,
     Flood f;
     f.W = g.map->width;
     f.H = g.map->height;
-    f.dist = move::flood(g, sideIndex, x, y, range, mode, wd, hl,
-                         fogSide == SAME_SIDE ? sideIndex : fogSide);
+    f.dist = move::flood(g, side_index, x, y, range, mode, wd, hl,
+                         fog_side == SAME_SIDE ? side_index : fog_side);
     return f;
 }
 
-Flood floodFrom(Game& g, int sideIndex, int x, int y, int range, int mode, int fogSide) {
+Flood floodFrom(Game& g, int side_index, int x, int y, int range, int mode, int fog_side) {
     Flood f;
     f.W = g.map->width;
     f.H = g.map->height;
-    f.dist = move::flood(g, sideIndex, x, y, range, mode, false, false,
-                         fogSide == SAME_SIDE ? sideIndex : fogSide);
+    f.dist = move::flood(g, side_index, x, y, range, mode, false, false,
+                         fog_side == SAME_SIDE ? side_index : fog_side);
     return f;
 }
 
@@ -392,16 +392,16 @@ int floodAt(const Flood& f, int x, int y) {
 }
 
 // the ring round a city's 2x2 footprint, as 59bf:0a85 walks it
-static const int RING[12] = {0, 2, 2, 4, 4, 4, 6, 6, 6, 0, 0, 0};
-static const int RDX[8] = {0, 1, 1, 1, 0, -1, -1, -1};
-static const int RDY[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
+static const int kRing[12] = {0, 2, 2, 4, 4, 4, 6, 6, 6, 0, 0, 0};
+static const int kRdx[8] = {0, 1, 1, 1, 0, -1, -1, -1};
+static const int kRdy[8] = {-1, -1, 0, 1, 1, 1, 0, -1};
 
 std::tuple<int, int, int> cityDistance(const Game& g, const Flood& flood, const City& c, bool far) {
     int best = far ? 1000 : 100;
     int bx = NONE, by = NONE;
     int x = c.x, y = c.y;
-    for (int dir : RING) {
-        int nx = x + RDX[dir], ny = y + RDY[dir];
+    for (int dir : kRing) {
+        int nx = x + kRdx[dir], ny = y + kRdy[dir];
         if (nx < 0 || ny < 0 || nx >= 112 || ny >= 156) return {best, bx, by};
         x = nx;
         y = ny;
@@ -458,7 +458,7 @@ struct StepResult {
 // Walk the selection towards (tx, ty) (1a8b:0c4f and 1a8b:07f9): 1 no path,
 // 2 stopped short, 3 an enemy army is next, 4 the path is walked, 5 an enemy
 // city is next; with the tile ahead.
-StepResult step(Game& g, Sel& sel, int tx, int ty) {
+StepResult Step(Game& g, Sel& sel, int tx, int ty) {
     Army* lead = sel.leader;
     lead->target = std::make_pair(tx, ty);
     auto path = move::findPath(g, sel.armies, lead->x, lead->y, tx, ty);
@@ -519,7 +519,7 @@ int moveTo(Game& g, Sel& sel, int tx, int ty, bool keep) {
     while (again) {
         again = false;
         if (sel.armies.empty()) break;
-        StepResult s = step(g, sel, tx, ty);
+        StepResult s = Step(g, sel, tx, ty);
         code = s.code;
         int ax = s.x, ay = s.y;
         Army* lead = sel.leader;
@@ -600,16 +600,16 @@ City* retarget(Game& g, Sel& sel, City* c, int x, int y) {
     return c;
 }
 
-City* bestCity(Game& g, const Sel& sel, const Flood& flood, bool skipOwn) {
+City* bestCity(Game& g, const Sel& sel, const Flood& flood, bool skip_own) {
     int me = sel.leader->owner;
     AIData& d = data(g, me);
     City* best = nullptr;
-    int bestScore = -1;
+    int best_score = -1;
     auto& cities = g.map->cities;
     for (int i = static_cast<int>(cities.size()) - 1; i >= 0; i--) {
         City& c = cities[i];
         int own = owner(c);
-        if (!(skipOwn && own == me) && standing(c) && d.questCity != c.index &&
+        if (!(skip_own && own == me) && standing(c) && d.questCity != c.index &&
             !cflag(d, c, CF_UNSEEN) && (own == NEUTRAL || own == me || state(g, own, me) == 2)) {
             auto [dst, px, py] = cityDistance(g, flood, c);
             (void)py;
@@ -627,9 +627,9 @@ City* bestCity(Game& g, const Sel& sel, const Flood& flood, bool skipOwn) {
                     score = 100 - dst + od * 5;
                 else
                     score = -2;
-                if (score > bestScore) {
+                if (score > best_score) {
                     best = &c;
-                    bestScore = score;
+                    best_score = score;
                 }
             }
         }

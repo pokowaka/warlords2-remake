@@ -9,8 +9,8 @@
 namespace w2 {
 
 const Json& Json::none() {
-    static const Json n;
-    return n;
+    static const Json kN;
+    return kN;
 }
 
 bool Json::has(const std::string& k) const {
@@ -38,7 +38,7 @@ Json& Json::set(const std::string& k, Json v) {
     return o_.back().second;
 }
 
-static void writeString(std::string& out, const std::string& s) {
+static void WriteString(std::string& out, const std::string& s) {
     out += '"';
     for (unsigned char c : s) {
         switch (c) {
@@ -90,7 +90,7 @@ void Json::write(std::string& out) const {
         break;
     }
     case String:
-        writeString(out, s_);
+        WriteString(out, s_);
         break;
     case Array:
         out += '[';
@@ -107,7 +107,7 @@ void Json::write(std::string& out) const {
             if (e.second.isNull()) continue;
             if (!first) out += ',';
             first = false;
-            writeString(out, e.first);
+            WriteString(out, e.first);
             out += ':';
             e.second.write(out);
         }
@@ -127,13 +127,13 @@ namespace {
 struct Parser {
     const std::string& s;
     size_t i = 0;
-    [[noreturn]] void fail(const char* what) {
+    [[noreturn]] void Fail(const char* what) {
         throw std::runtime_error(std::string("bad JSON: ") + what + " at " + std::to_string(i));
     }
-    void ws() {
+    void Ws() {
         while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) i++;
     }
-    bool lit(const char* w) {
+    bool Lit(const char* w) {
         size_t n = strlen(w);
         if (s.compare(i, n, w) == 0) {
             i += n;
@@ -141,14 +141,14 @@ struct Parser {
         }
         return false;
     }
-    std::string str() {
-        if (s[i] != '"') fail("string");
+    std::string Str() {
+        if (s[i] != '"') Fail("string");
         i++;
         std::string out;
         while (i < s.size() && s[i] != '"') {
             char c = s[i++];
             if (c == '\\') {
-                if (i >= s.size()) fail("escape");
+                if (i >= s.size()) Fail("escape");
                 char e = s[i++];
                 switch (e) {
                 case 'n':
@@ -180,31 +180,31 @@ struct Parser {
                 out += c;
             }
         }
-        if (i >= s.size()) fail("unterminated string");
+        if (i >= s.size()) Fail("unterminated string");
         i++;
         return out;
     }
-    Json value() {
-        ws();
-        if (i >= s.size()) fail("end");
+    Json Value() {
+        Ws();
+        if (i >= s.size()) Fail("end");
         char c = s[i];
         if (c == '{') {
             i++;
             Json o = Json::object();
-            ws();
+            Ws();
             if (s[i] == '}') {
                 i++;
                 return o;
             }
             for (;;) {
-                ws();
-                std::string k = str();
-                ws();
-                if (s[i] != ':') fail("colon");
+                Ws();
+                std::string k = Str();
+                Ws();
+                if (s[i] != ':') Fail("colon");
                 i++;
-                Json v = value();
+                Json v = Value();
                 o.set(k, std::move(v));
-                ws();
+                Ws();
                 if (s[i] == ',') {
                     i++;
                     continue;
@@ -213,20 +213,20 @@ struct Parser {
                     i++;
                     return o;
                 }
-                fail("object");
+                Fail("object");
             }
         }
         if (c == '[') {
             i++;
             Json a = Json::array();
-            ws();
+            Ws();
             if (s[i] == ']') {
                 i++;
                 return a;
             }
             for (;;) {
-                a.push(value());
-                ws();
+                a.push(Value());
+                Ws();
                 if (s[i] == ',') {
                     i++;
                     continue;
@@ -235,16 +235,16 @@ struct Parser {
                     i++;
                     return a;
                 }
-                fail("array");
+                Fail("array");
             }
         }
-        if (c == '"') return Json(str());
-        if (lit("true")) return Json(true);
-        if (lit("false")) return Json(false);
-        if (lit("null")) return Json();
+        if (c == '"') return Json(Str());
+        if (Lit("true")) return Json(true);
+        if (Lit("false")) return Json(false);
+        if (Lit("null")) return Json();
         char* end = nullptr;
         double d = strtod(s.c_str() + i, &end);
-        if (end == s.c_str() + i) fail("value");
+        if (end == s.c_str() + i) Fail("value");
         i = end - s.c_str();
         return Json(d);
     }
@@ -253,9 +253,9 @@ struct Parser {
 
 Json Json::parse(const std::string& text) {
     Parser p{text};
-    Json v = p.value();
-    p.ws();
-    if (p.i != text.size()) p.fail("trailing text");
+    Json v = p.Value();
+    p.Ws();
+    if (p.i != text.size()) p.Fail("trailing text");
     return v;
 }
 

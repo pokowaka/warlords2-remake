@@ -16,28 +16,28 @@
 namespace armybonus {
 
 namespace {
-const kit::Rect R{80, 60, 480, 320};  // popup 0
-const int DIALOG = 34, DONE = 490, UP = 491, DOWN = 492, PAGE_UP = 493, PAGE_DOWN = 494;
-const int ROWS = 6, PLACES = 27;
-const int S = 0xa3;
+const kit::Rect kR{80, 60, 480, 320};  // popup 0
+const int kDialog = 34, kDone = 490, kUp = 491, kDown = 492, kPageUp = 493, kPageDown = 494;
+const int kRows = 6, kPlaces = 27;
+const int kS = 0xa3;
 
 struct Bonus : kit::Modal {
     screen::View v;
-    std::map<int, int> byRank;
-    int topRow = 0;
-    void refresh() {
+    std::map<int, int> by_rank;
+    int top_row = 0;
+    void Refresh() {
         auto& st = v.state;
-        st[DONE] = w2::uidata::NORMAL;
-        int up = topRow > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        int down = topRow + ROWS < PLACES ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        st[UP] = up;
-        st[PAGE_UP] = up;
-        st[DOWN] = down;
-        st[PAGE_DOWN] = down;
+        st[kDone] = w2::uidata::NORMAL;
+        int up = top_row > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        int down = top_row + kRows < kPlaces ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        st[kUp] = up;
+        st[kPageUp] = up;
+        st[kDown] = down;
+        st[kPageDown] = down;
     }
     void draw() override {
         w2::Side* side = G.player;
-        kit::popup(R);
+        kit::popup(kR);
         gfx::setColor(1, 1, 1);
         kit::centred(kit::font(1), kit::text(0xa4, 0), 320, 62);
         kit::bevel(124, 146, 434, 186, 4, 2);
@@ -48,9 +48,9 @@ struct Bonus : kit::Modal {
             gfx::draw(stack->image, gfx::newQuad(188, 0, 216, 22), 256, 125);
         }
         const Font& f = kit::font(2);
-        for (int i = 0; i < ROWS; i++) {
-            auto it = byRank.find(topRow + i);
-            const w2::ArmyType* t = it != byRank.end() ? G.g->types.byId(it->second) : nullptr;
+        for (int i = 0; i < kRows; i++) {
+            auto it = by_rank.find(top_row + i);
+            const w2::ArmyType* t = it != by_rank.end() ? G.g->types.byId(it->second) : nullptr;
             if (t) {
                 int y = 148 + 30 * i;
                 kit::army(t->id, side->index, 128, y, side->index + 2);
@@ -80,19 +80,19 @@ struct Bonus : kit::Modal {
     void mousepressed(int x, int y, int) override {
         auto c = kit::controlAt(v, x, y);
         if (!c) return;
-        if (c->id == DONE) {
+        if (c->id == kDone) {
             kit::pop(this);
             return;
         }
-        if (c->id == UP)
-            topRow--;
-        else if (c->id == DOWN)
-            topRow++;
-        else if (c->id == PAGE_UP)
-            topRow = std::max(0, topRow - ROWS);
-        else if (c->id == PAGE_DOWN)
-            topRow = std::min(PLACES - ROWS, topRow + ROWS);
-        refresh();
+        if (c->id == kUp)
+            top_row--;
+        else if (c->id == kDown)
+            top_row++;
+        else if (c->id == kPageUp)
+            top_row = std::max(0, top_row - kRows);
+        else if (c->id == kPageDown)
+            top_row = std::min(kPlaces - kRows, top_row + kRows);
+        Refresh();
     }
     void keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter" || key == "escape") kit::pop(this);
@@ -102,7 +102,7 @@ struct Bonus : kit::Modal {
 
 std::string bonusText(const w2::ArmyType& t, const w2::Army* army) {
     const auto& b = t.bonus;
-    auto say = [](int i, int v = 0) { return w2::format(kit::text(S, i), v); };
+    auto say = [](int i, int v = 0) { return w2::format(kit::text(kS, i), v); };
     if (army && army->atSea) return say(1);
     if (army && army->hero()) {
         int s = std::min(9, army->strength + w2::combat::battleItems(*army));
@@ -124,10 +124,10 @@ std::string bonusText(const w2::ArmyType& t, const w2::Army* army) {
 void open() {
     auto d = std::make_shared<Bonus>();
     const auto& row = G.g->map->fightOrder[G.player->index];
-    for (int t = 0; t <= 28 && t < static_cast<int>(row.size()); t++) d->byRank[row[t]] = t;
-    d->v = kit::view(DIALOG);
+    for (int t = 0; t <= 28 && t < static_cast<int>(row.size()); t++) d->by_rank[row[t]] = t;
+    d->v = kit::view(kDialog);
     d->view = &d->v;
-    d->refresh();
+    d->Refresh();
     kit::push(d);
 }
 

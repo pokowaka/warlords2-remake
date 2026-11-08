@@ -15,9 +15,9 @@ namespace questnews {
 using w2::format;
 
 namespace {
-const kit::Rect R{80, 60, 480, 312};  // popup 2
-const int MAP_X = 80, MAP_Y = 60;
-const int DIALOG = 17, DONE = 331;
+const kit::Rect kR{80, 60, 480, 312};  // popup 2
+const int kMapX = 80, kMapY = 60;
+const int kDialog = 17, kDone = 331;
 
 struct Reward : kit::Modal {
     std::shared_ptr<w2::QuestResult> news;
@@ -25,7 +25,7 @@ struct Reward : kit::Modal {
     kit::Done after;
     int grp = 0x1f;
     std::string last;
-    void close() {
+    void Close() {
         auto a = after;
         kit::pop(this);
         if (a) a();
@@ -34,11 +34,11 @@ struct Reward : kit::Modal {
         const w2::Quest& q = *news->quest;
         const w2::Reward& r = *news->reward;
         w2::Army* h = q.hero;
-        kit::popup(R);
-        front::drawStrategicMap(MAP_X, MAP_Y, nullptr, true);
+        kit::popup(kR);
+        front::drawStrategicMap(kMapX, kMapY, nullptr, true);
         if (r.kind == "revealed" && r.site && h && h->x != w2::NONE)
-            kit::mapTarget(MAP_X, MAP_Y, h->x, h->y, r.site->x, r.site->y);
-        if (h && h->x != w2::NONE) front::drawHeroFigure(MAP_X, MAP_Y, h->x, h->y);
+            kit::mapTarget(kMapX, kMapY, h->x, h->y, r.site->x, r.site->y);
+        if (h && h->x != w2::NONE) front::drawHeroFigure(kMapX, kMapY, h->x, h->y);
         gfx::setColor(1, 1, 1);
         kit::centred(kit::font(1), "Quest", 432, 64);  // 4125:00c8
         gfx::draw(G.scrollPic, 304, 95);
@@ -55,10 +55,10 @@ struct Reward : kit::Modal {
     }
     void mousepressed(int x, int y, int) override {
         auto c = kit::controlAt(v, x, y);
-        if (c && c->id == DONE) close();
+        if (c && c->id == kDone) Close();
     }
     void keypressed(const std::string& key) override {
-        if (key == "escape" || key == "return" || key == "kpenter") close();
+        if (key == "escape" || key == "return" || key == "kpenter") Close();
     }
 };
 }  // namespace
@@ -74,9 +74,9 @@ void show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
     auto d = std::make_shared<Reward>();
     d->news = news;
     d->after = after;
-    d->v = kit::view(DIALOG);
+    d->v = kit::view(kDialog);
     d->view = &d->v;
-    d->v.state[DONE] = w2::uidata::NORMAL;
+    d->v.state[kDone] = w2::uidata::NORMAL;
     const w2::Reward& r = *news->reward;
     if (r.kind == "revealed") {
         d->grp = 0x1d;

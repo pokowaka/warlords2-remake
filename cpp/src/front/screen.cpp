@@ -16,34 +16,34 @@ using w2::uidata::Region;
 
 namespace {
 // Find a .pck by name, wherever it lives: PICS/, TERRAIN<n>/ or the root.
-std::string findArt(const std::string& dataDir, const std::string& name, int terrain) {
+std::string FindArt(const std::string& data_dir, const std::string& name, int terrain) {
     std::string up = w2::upper(name);
     for (const std::string& p :
-         {dataDir + "/PICS/" + up, dataDir + "/TERRAIN" + std::to_string(terrain) + "/" + up,
-          dataDir + "/" + up}) {
+         {data_dir + "/PICS/" + up, data_dir + "/TERRAIN" + std::to_string(terrain) + "/" + up,
+          data_dir + "/" + up}) {
         if (w2::fileExists(p)) return p;
     }
     return "";
 }
 
-void setPal(const Screen& s, int i) {
+void SetPal(const Screen& s, int i) {
     const auto& c = s.palette[i];
     gfx::setColor(static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]));
 }
 
-const int LIGHT = 2, DARK = 4;
+const int kLight = 2, kDark = 4;
 
 struct Panel {
     const char* group;
     int x, y, w, h;
 };
-const Panel PANELS[] = {
+const Panel kPanels[] = {
     {"strat", 399, 29, 226, 314},
     {"panel", 399, 354, 226, 116},
     {"bar", 15, 402, 362, 68},
 };
 
-void composedArt(Screen& s) {
+void ComposedArt(Screen& s) {
     if (s.bgImage) return;
     w2::pck::Pixels px;
     px.w = 640;
@@ -74,70 +74,70 @@ void composedArt(Screen& s) {
     s.stoneImg->wrap = true;
 }
 
-void bevel(const Screen& s, int x, int y, int w, int h) {
-    setPal(s, DARK);
+void Bevel(const Screen& s, int x, int y, int w, int h) {
+    SetPal(s, kDark);
     gfx::rectangle(gfx::FILL, x - 1, y - 1, w + 2, 1);
     gfx::rectangle(gfx::FILL, x - 1, y, 1, h + 1);
-    setPal(s, LIGHT);
+    SetPal(s, kLight);
     gfx::rectangle(gfx::FILL, x, y + h, w + 1, 1);
     gfx::rectangle(gfx::FILL, x + w, y, 1, h);
 }
 
-bool sameRect(const Control& a, const Control& b) {
+bool SameRect(const Control& a, const Control& b) {
     return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h;
 }
 
 // Some controls share a rect exactly -- 183/184/185, 240/241. The live one
 // is what shows and what a click reaches; with none live, the first.
-bool isCovered(const Screen& s, const Control& c, size_t index) {
+bool IsCovered(const Screen& s, const Control& c, size_t index) {
     bool live = s.stateOf(c.id) != w2::uidata::DISABLED;
     const auto& cs = s.dialog.controls;
     for (size_t i = 0; i < cs.size(); i++) {
         const Control& o = cs[i];
-        if (i != index && sameRect(o, c)) {
-            bool oLive = s.stateOf(o.id) != w2::uidata::DISABLED;
-            if (oLive && (!live || i < index)) return true;
-            if (!oLive && !live && i < index) return true;
+        if (i != index && SameRect(o, c)) {
+            bool o_live = s.stateOf(o.id) != w2::uidata::DISABLED;
+            if (o_live && (!live || i < index)) return true;
+            if (!o_live && !live && i < index) return true;
         }
     }
     return false;
 }
 
 // The ring round a default button (1a0a:0005).
-void defaultRing(const Screen& s, const Control& c) {
-    setPal(s, 0);
+void DefaultRing(const Screen& s, const Control& c) {
+    SetPal(s, 0);
     auto across = [](int x, int y, int n) { gfx::rectangle(gfx::FILL, x, y, n, 1); };
     auto down = [](int x, int y, int n) { gfx::rectangle(gfx::FILL, x, y, 1, n); };
-    int X = c.x - 2, Y = c.y - 2, W = c.w + 3, H = c.h + 3;
+    int ring_x = c.x - 2, ring_y = c.y - 2, ring_w = c.w + 3, ring_h = c.h + 3;
     for (int k = 0; k < 2; k++) {
-        across(X + 1, Y, W - 2);
-        down(X + W - 1, Y, 2);
-        across(X + W - 1, Y + 1, 2);
-        down(X + W, Y + 1, H - 2);
-        across(X + W - 1, Y + H - 1, 2);
-        down(X + W - 1, Y + H - 1, 2);
-        across(X + 1, Y + H, W - 2);
-        down(X + 1, Y + H - 1, 2);
-        across(X, Y + H - 1, 2);
-        down(X, Y + 1, H - 2);
-        across(X, Y + 1, 2);
-        down(X + 1, Y, 2);
-        X--;
-        Y--;
-        W += 2;
-        H += 2;
+        across(ring_x + 1, ring_y, ring_w - 2);
+        down(ring_x + ring_w - 1, ring_y, 2);
+        across(ring_x + ring_w - 1, ring_y + 1, 2);
+        down(ring_x + ring_w, ring_y + 1, ring_h - 2);
+        across(ring_x + ring_w - 1, ring_y + ring_h - 1, 2);
+        down(ring_x + ring_w - 1, ring_y + ring_h - 1, 2);
+        across(ring_x + 1, ring_y + ring_h, ring_w - 2);
+        down(ring_x + 1, ring_y + ring_h - 1, 2);
+        across(ring_x, ring_y + ring_h - 1, 2);
+        down(ring_x, ring_y + 1, ring_h - 2);
+        across(ring_x, ring_y + 1, 2);
+        down(ring_x + 1, ring_y, 2);
+        ring_x--;
+        ring_y--;
+        ring_w += 2;
+        ring_h += 2;
     }
     gfx::setColor(1, 1, 1);
 }
 }  // namespace
 
-const Art* Screen::artFor(int bitmapId) {
-    auto it = art.find(bitmapId);
+const Art* Screen::artFor(int bitmap_id) {
+    auto it = art.find(bitmap_id);
     if (it != art.end()) return it->second.image ? &it->second : nullptr;
     Art a;
-    auto nm = ui.bitmaps.find(bitmapId);
+    auto nm = ui.bitmaps.find(bitmap_id);
     if (nm != ui.bitmaps.end()) {
-        std::string path = findArt(dataDir, nm->second, terrain);
+        std::string path = FindArt(dataDir, nm->second, terrain);
         if (!path.empty()) {
             auto px = w2::pck::decode(path);
             a.image = pckimage::fromPixels(*px, palette);
@@ -145,22 +145,22 @@ const Art* Screen::artFor(int bitmapId) {
             a.h = px->h;
         }
     }
-    art[bitmapId] = a;
-    return a.image ? &art[bitmapId] : nullptr;
+    art[bitmap_id] = a;
+    return a.image ? &art[bitmap_id] : nullptr;
 }
 
-std::unique_ptr<Screen> load(const std::string& dataDir, const w2::pal::Palette& palette,
-                             int dialogId, int terrain) {
+std::unique_ptr<Screen> load(const std::string& data_dir, const w2::pal::Palette& palette,
+                             int dialog_id, int terrain) {
     auto s = std::make_unique<Screen>();
-    s->ui = w2::uidata::load(dataDir);
-    s->dialog = w2::uidata::dialog(s->ui, dialogId);
+    s->ui = w2::uidata::load(data_dir);
+    s->dialog = w2::uidata::dialog(s->ui, dialog_id);
     s->original = s->dialog;
-    s->dataDir = dataDir;
+    s->dataDir = data_dir;
     s->palette = palette;
     s->terrain = terrain;
     // The background is four 320x240 quadrants of one 640x480 image.
     for (int i = 0; i < 4; i++) {
-        std::string path = findArt(dataDir, "screen" + std::to_string(i) + ".pck", terrain);
+        std::string path = FindArt(data_dir, "screen" + std::to_string(i) + ".pck", terrain);
         if (!path.empty()) {
             s->backgroundPx[i] = w2::pck::decode(path);
             s->background[i] = pckimage::fromPixels(*s->backgroundPx[i], palette);
@@ -169,7 +169,7 @@ std::unique_ptr<Screen> load(const std::string& dataDir, const w2::pal::Palette&
     // TERRAIN<n>/MAPCOLOR.DAT, the strategic map's own colour table (834b:2a11):
     // a colour per tile id for each of a tile's four pixels, a remap, and the
     // same four pixels for a tile with a road on it.
-    if (auto d = w2::readFile(dataDir + "/TERRAIN" + std::to_string(terrain) + "/MAPCOLOR.DAT")) {
+    if (auto d = w2::readFile(data_dir + "/TERRAIN" + std::to_string(terrain) + "/MAPCOLOR.DAT")) {
         auto b = [&](size_t i) {
             return i < d->size() ? static_cast<int>(static_cast<uint8_t>((*d)[i])) : 0;
         };
@@ -186,16 +186,16 @@ std::unique_ptr<Screen> load(const std::string& dataDir, const w2::pal::Palette&
     return s;
 }
 
-void relayout(Screen& s, const layout::Layout& L) {
+void relayout(Screen& s, const layout::Layout& l) {
     s.dialog = s.original;
     for (auto& c : s.dialog.controls) {
         layout::Rect r =
-                layout::move(L, layout::group(c.x, c.y), layout::Rect{c.x, c.y, c.w, c.h, c.id});
+                layout::move(l, layout::group(c.x, c.y), layout::Rect{c.x, c.y, c.w, c.h, c.id});
         c.x = r.x;
         c.y = r.y;
     }
     for (auto& r : s.dialog.regions) {
-        layout::Rect o = layout::region(L, layout::Rect{r.x, r.y, r.w, r.h, r.id});
+        layout::Rect o = layout::region(l, layout::Rect{r.x, r.y, r.w, r.h, r.id});
         r.x = o.x;
         r.y = o.y;
         r.w = o.w;
@@ -203,33 +203,33 @@ void relayout(Screen& s, const layout::Layout& L) {
     }
 }
 
-void drawBackground(Screen& s, const layout::Layout& L) {
+void drawBackground(Screen& s, const layout::Layout& l) {
     gfx::setColor(1, 1, 1);
-    if (L.classic) {
+    if (l.classic) {
         for (int i = 0; i < 4; i++)
             if (s.background[i]) gfx::draw(s.background[i], (i % 2) * 320, (i / 2) * 240);
         return;
     }
-    composedArt(s);
-    gfx::draw(s.stoneImg, gfx::newQuad(0, 0, L.w, L.h), 0, 0);
-    setPal(s, LIGHT);
-    gfx::rectangle(gfx::FILL, 0, 0, L.w - 1, 1);
-    gfx::rectangle(gfx::FILL, 0, 1, 1, L.h - 2);
-    setPal(s, DARK);
-    gfx::rectangle(gfx::FILL, 0, L.h - 1, L.w, 1);
-    gfx::rectangle(gfx::FILL, L.w - 1, 0, 1, L.h - 1);
-    const layout::Rect& m = L.mapRect;
-    bevel(s, m.x - 1, m.y - 1, m.w + 2, m.h + 2);
+    ComposedArt(s);
+    gfx::draw(s.stoneImg, gfx::newQuad(0, 0, l.w, l.h), 0, 0);
+    SetPal(s, kLight);
+    gfx::rectangle(gfx::FILL, 0, 0, l.w - 1, 1);
+    gfx::rectangle(gfx::FILL, 0, 1, 1, l.h - 2);
+    SetPal(s, kDark);
+    gfx::rectangle(gfx::FILL, 0, l.h - 1, l.w, 1);
+    gfx::rectangle(gfx::FILL, l.w - 1, 0, 1, l.h - 1);
+    const layout::Rect& m = l.mapRect;
+    Bevel(s, m.x - 1, m.y - 1, m.w + 2, m.h + 2);
     gfx::setColor(0, 0, 0);
     gfx::rectangle(gfx::FILL, m.x - 1, m.y - 1, m.w + 2, 1);
     gfx::rectangle(gfx::FILL, m.x - 1, m.y + m.h, m.w + 2, 1);
     gfx::rectangle(gfx::FILL, m.x - 1, m.y - 1, 1, m.h + 2);
     gfx::rectangle(gfx::FILL, m.x + m.w, m.y - 1, 1, m.h + 2);
-    for (const Panel& p : PANELS) {
-        layout::Rect at = layout::move(L, p.group, layout::Rect{p.x, p.y, p.w, p.h});
+    for (const Panel& p : kPanels) {
+        layout::Rect at = layout::move(l, p.group, layout::Rect{p.x, p.y, p.w, p.h});
         // on a short screen the strategic map's frame stops above the panel
-        int h = std::string(p.group) == "strat" ? p.h - L.cut : p.h;
-        bevel(s, at.x, at.y, p.w, h);
+        int h = std::string(p.group) == "strat" ? p.h - l.cut : p.h;
+        Bevel(s, at.x, at.y, p.w, h);
         gfx::setColor(1, 1, 1);
         gfx::draw(s.bgImage, gfx::newQuad(p.x, p.y, p.w, h), at.x, at.y);
     }
@@ -240,7 +240,7 @@ void drawControls(Screen& s) {
     const auto& cs = s.dialog.controls;
     for (size_t i = 0; i < cs.size(); i++) {
         const Control& c = cs[i];
-        if (c.bitmap != 0 && c.w > 0 && c.h > 0 && !isCovered(s, c, i)) {
+        if (c.bitmap != 0 && c.w > 0 && c.h > 0 && !IsCovered(s, c, i)) {
             int st = s.stateOf(c.id);
             const Art* a = s.artFor(c.bitmap);
             auto src = c.src[st];
@@ -274,7 +274,7 @@ void drawDialogControls(Screen& s, const View& v, const std::set<int>* hidden) {
                 gfx::draw(a->image, gfx::newQuad(src.x, src.y, c.w, c.h), c.x, c.y);
             }
         }
-        if (DEFAULT_IDS.count(c.id) && !v.screen && c.w > 0 && c.h > 0) defaultRing(s, c);
+        if (DEFAULT_IDS.count(c.id) && !v.screen && c.w > 0 && c.h > 0) DefaultRing(s, c);
     }
 }
 
@@ -366,7 +366,7 @@ const Control* controlAt(const Screen& s, int x, int y) {
     const auto& cs = s.dialog.controls;
     for (size_t i = 0; i < cs.size(); i++) {
         const Control& c = cs[i];
-        if (c.w > 0 && c.h > 0 && !isCovered(s, c, i) && x >= c.x && x < c.x + c.w && y >= c.y &&
+        if (c.w > 0 && c.h > 0 && !IsCovered(s, c, i) && x >= c.x && x < c.x + c.w && y >= c.y &&
             y < c.y + c.h)
             return &c;
     }

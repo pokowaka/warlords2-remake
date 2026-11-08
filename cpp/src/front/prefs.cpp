@@ -9,7 +9,7 @@
 
 namespace prefs {
 
-static const char* FILE_NAME = "w2-prefs.json";
+static const char* file_name = "w2-prefs.json";
 
 std::string userFile(const std::string& name) {
     static std::string dir = []() {
@@ -22,12 +22,12 @@ std::string userFile(const std::string& name) {
 }
 
 namespace {
-std::map<std::string, std::string>& store() {
+std::map<std::string, std::string>& Store() {
     static std::map<std::string, std::string> s;
     static bool loaded = false;
     if (!loaded) {
         loaded = true;
-        if (auto text = w2::readFile(userFile(FILE_NAME))) {
+        if (auto text = w2::readFile(userFile(file_name))) {
             try {
                 auto j = w2::Json::parse(*text);
                 for (auto& [k, v] : j.entries()) s[k] = v.str();
@@ -40,20 +40,20 @@ std::map<std::string, std::string>& store() {
 }  // namespace
 
 std::string get(const std::string& key) {
-    auto& s = store();
+    auto& s = Store();
     auto it = s.find(key);
     return it == s.end() ? "" : it->second;
 }
 
 void set(const std::string& key, const std::string& value) {
-    auto& s = store();
+    auto& s = Store();
     if (value.empty())
         s.erase(key);
     else
         s[key] = value;
     w2::Json j = w2::Json::object();
     for (auto& [k, v] : s) j.set(k, v);
-    w2::writeFile(userFile(FILE_NAME), j.dump());
+    w2::writeFile(userFile(file_name), j.dump());
 }
 
 int getInt(const std::string& key, int dflt) {
