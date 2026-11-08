@@ -4,8 +4,9 @@
 // the bottom bar is where the player builds up the group that will move. The
 // original keeps three parallel arrays over the tile's armies -- the group
 // each belongs to, whether that group is the one moving, and the mark drawn
-// under it. 89e0:0d30 builds them, 89e0:17e7 sorts and marks them, 89e0:000a
-// writes the grouping back into the armies. docs/re/ui.md > The army slots.
+// under it. Build() builds them, the sorting and marking happens on every
+// change, and Commit() writes the grouping back into the armies.
+// docs/re/ui.md > The army slots.
 //
 // Slots are numbered from 0 here.
 #pragma once
@@ -19,51 +20,78 @@
 
 namespace w2::slots {
 
+/** @brief How many slots the bar has; armies past the eighth are not shown. */
 constexpr int kMax = 8;
 
-// The mark under a slot (89e0:17e7): the head of the group that moves takes
-// the tick, the head of every other group the cross.
+/**
+ * @brief The mark under a slot: the head of the group that moves takes the
+ * tick, the head of every other group the cross, every other slot nothing.
+ */
 constexpr int kNomark = -1, kCross = 0, kTick = 1;
 
-// Group 0 means "not grouped": each such army is a group of its own.
+/** @brief Group 0 means "not grouped": each such army is a group of its own. */
 constexpr int kUngrouped = 0;
 
+/**
+ * @brief The army slots for one tile: which army sits where, the group each
+ * belongs to, and which of them move.
+ *
+ * Slots of the same group are kept next to each other, ordered by fight order.
+ */
 struct Slots {
-    int n = 0;
-    int side = kNone;
-    std::array<Army*, kMax> army{};
-    std::array<int, kMax> group{};
-    std::array<bool, kMax> in_group{};
-    std::array<int, kMax> mark{};
-    std::optional<int> active;
+    int n = 0;                          ///< How many slots are filled (at most kMax).
+    int side = kNone;                   ///< The side owning the armies.
+    std::array<Army*, kMax> army{};     ///< The army in each slot.
+    std::array<int, kMax> group{};      ///< Each slot's group number, counted from 0.
+    std::array<bool, kMax> in_group{};  ///< Whether the slot's army is among those that move.
+    std::array<int, kMax> mark{};  ///< The mark drawn under each slot (kNomark, kCross, kTick).
+    std::optional<int> active;     ///< The group that moves, when exactly one whole group does.
 };
 
-/** Which armies a click on the tile picks up (8c07:06eb). */
-std::set<Army*> Clicked(const Game& g, const std::vector<Army*>& armies, int side,
+/**
+ * @brief Which armies a click on the tile picks up.
+ *
+ * The clicked army (`anchor`, or else the one highest in the fight order) and
+ * every army that shares its remembered group.
+ */
+std::set<Army*> Clicked(const Game& game, const std::vector<Army*>& armies, int side,
                         Army* anchor = nullptr);
-/** The slots for the armies standing on one tile, at most eight of them.
- *  `selected` is the set of armies that should be moving (none: a click's). */
-Slots Build(const Game& g, const std::vector<Army*>& armies, int side,
+/**
+ * @brief The slots for the armies standing on one tile, at most eight of them.
+ * @param selected The set of armies that should be moving (null: what a click picks up).
+ */
+Slots Build(const Game& game, const std::vector<Army*>& armies, int side,
             const std::set<Army*>* selected = nullptr);
-/** Click a slot (controls 224-231, 89e0:0963): add that army to the moving
- *  group, or drop it out into a group of its own. */
-void Toggle(Slots& s, const Game& g, int i);
-/** Click the mark under a slot (controls 232-239, 89e0:0910). */
-void PickGroup(Slots& s, const Game& g, int i);
-/** The Grp button while it is red, and the space bar (control 240). */
-void All(Slots& s, const Game& g);
-/** The Grp button while it is green (control 241). */
-void Single(Slots& s, const Game& g);
-/** The armies that move. */
-std::vector<Army*> Selected(const Slots& s);
-/** Group Move: the pace of the slowest army in the group (1c8c:0912). */
-int Moves(const Slots& s);
-/** Whether the Grp button shows green (89e0:0567). */
-bool Grouped(const Slots& s);
-/** Rebuild the slots over a fresh list of armies, keeping whichever of them
- *  were moving. None when none are left. */
-std::optional<Slots> Keep(const Slots& s, const Game& g, const std::vector<Army*>& armies);
-/** Write the grouping back into the armies (89e0:000a's tail). */
-void Commit(Slots& s, Game& g);
+/**
+ * @brief Click a slot (controls 224-231): add that army to the moving group,
+ * or drop it out into a group of its own.
+ */
+void Toggle(Slots& slots, const Game& game, int slot);
+/** @brief Click the mark under a slot (controls 232-239): that slot's group moves. */
+void PickGroup(Slots& slots, const Game& game, int slot);
+/** @brief The Grp button while it is red, and the space bar (control 240): everyone moves. */
+void All(Slots& slots, const Game& game);
+/** @brief The Grp button while it is green (control 241): only the first army moves. */
+void Single(Slots& slots, const Game& game);
+/** @brief The armies that move. */
+std::vector<Army*> Selected(const Slots& slots);
+/** @brief Group Move: the pace of the slowest army in the group. */
+int Moves(const Slots& slots);
+/** @brief Whether the Grp button shows green: every army moves (or there is only one). */
+bool Grouped(const Slots& slots);
+/**
+ * @brief Rebuild the slots over a fresh list of armies, keeping whichever of
+ * them were moving.
+ * @return std::nullopt when no armies are left.
+ */
+std::optional<Slots> Keep(const Slots& slots, const Game& game, const std::vector<Army*>& armies);
+/**
+ * @brief Write the grouping back into the armies, the way the original does
+ * when the selection is done.
+ *
+ * Lone armies become ungrouped, the moving group gets a group id of its own
+ * (reusing one of its old ids where it can), and every other group gets 1.
+ */
+void Commit(Slots& slots, Game& game);
 
 }  // namespace w2::slots

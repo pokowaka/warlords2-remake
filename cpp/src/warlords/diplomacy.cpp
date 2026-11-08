@@ -30,236 +30,261 @@ const std::vector<int>& RatingRanks(int n) {
     return kRanks[n];
 }
 
-static int Key(int a, int b) {
-    return a * 8 + b;
+/** @brief Index of the ordered pair (from_side, to_side) in the 8x8 diplomacy tables. */
+static int Key(int from_side, int to_side) {
+    return from_side * 8 + to_side;
 }
-static bool ValidPair(int a, int b) {
-    return a >= 0 && b >= 0 && a < 8 && b < 8 && a != b;
+/** @brief Whether both are real side indices (0-7) and different from each other. */
+static bool ValidPair(int from_side, int to_side) {
+    return from_side >= 0 && to_side >= 0 && from_side < 8 && to_side < 8 && from_side != to_side;
 }
 
-void Init(Game& g) {
-    int start = g.map->options.diplomacy != 0 ? kPeace : kWar;
-    g.diplomacy.allied.fill(false);
-    g.diplomacy.propose_allied.fill(false);
-    g.diplomacy.truce_turns.fill(0);
-    g.diplomacy.gold_offer.fill(0);
-    g.diplomacy.war_target.fill(kNone);
-    g.diplomacy.trust.fill(0);
-    g.diplomacy.allied_target_city.fill(kNone);
-    for (int a = 0; a < 8; a++) {
-        for (int b = 0; b < 8; b++) {
-            int v = start;
-            g.diplomacy.state[Key(a, b)] = v;
-            g.diplomacy.proposal[Key(a, b)] = v;
+void Init(Game& game) {
+    int start_state = game.map->options.diplomacy != 0 ? kPeace : kWar;
+    game.diplomacy.allied.fill(false);
+    game.diplomacy.propose_allied.fill(false);
+    game.diplomacy.truce_turns.fill(0);
+    game.diplomacy.gold_offer.fill(0);
+    game.diplomacy.war_target.fill(kNone);
+    game.diplomacy.trust.fill(0);
+    game.diplomacy.allied_target_city.fill(kNone);
+    for (int from_side = 0; from_side < 8; from_side++) {
+        for (int to_side = 0; to_side < 8; to_side++) {
+            int pair_state = start_state;
+            game.diplomacy.state[Key(from_side, to_side)] = pair_state;
+            game.diplomacy.proposal[Key(from_side, to_side)] = pair_state;
         }
     }
 }
 
-int State(const Game& g, int a, int b) {
-    if (a < 0 || b < 0 || a > 7 || b > 7) return kWar;
-    int v = g.diplomacy.state[Key(a, b)];
-    return v == kNone ? kWar : v;
+int State(const Game& game, int from_side, int to_side) {
+    if (from_side < 0 || to_side < 0 || from_side > 7 || to_side > 7) return kWar;
+    int stored = game.diplomacy.state[Key(from_side, to_side)];
+    return stored == kNone ? kWar : stored;
 }
 
-bool MayAttack(const Game& g, int a, int b) {
-    if (a == kNone || b == kNone) return true;  // neutrals are fair game
-    return State(g, a, b) != kPeace;
+bool MayAttack(const Game& game, int from_side, int to_side) {
+    if (from_side == kNone || to_side == kNone) return true;  // neutrals are fair game
+    return State(game, from_side, to_side) != kPeace;
 }
 
-void Propose(Game& g, int a, int b, int st) {
-    if (!ValidPair(a, b)) return;
-    g.diplomacy.proposal[Key(a, b)] = st;
-    if (st != kPeace) {
-        g.diplomacy.propose_allied[Key(a, b)] = false;
+void Propose(Game& game, int from_side, int to_side, int proposed_state) {
+    if (!ValidPair(from_side, to_side)) return;
+    game.diplomacy.proposal[Key(from_side, to_side)] = proposed_state;
+    if (proposed_state != kPeace) {
+        game.diplomacy.propose_allied[Key(from_side, to_side)] = false;
     }
 }
 
-int Proposal(const Game& g, int a, int b) {
-    if (a < 0 || b < 0 || a > 7 || b > 7) return State(g, a, b);
-    int p = g.diplomacy.proposal[Key(a, b)];
-    if (p == kNone) p = State(g, a, b);
-    return p;
+int Proposal(const Game& game, int from_side, int to_side) {
+    if (from_side < 0 || to_side < 0 || from_side > 7 || to_side > 7)
+        return State(game, from_side, to_side);
+    int proposed = game.diplomacy.proposal[Key(from_side, to_side)];
+    if (proposed == kNone) proposed = State(game, from_side, to_side);
+    return proposed;
 }
 
-bool IsAllied(const Game& g, int a, int b) {
-    if (!ValidPair(a, b)) return false;
-    return State(g, a, b) == kPeace && g.diplomacy.allied[Key(a, b)];
+bool IsAllied(const Game& game, int from_side, int to_side) {
+    if (!ValidPair(from_side, to_side)) return false;
+    return State(game, from_side, to_side) == kPeace &&
+           game.diplomacy.allied[Key(from_side, to_side)];
 }
 
-void SetAllied(Game& g, int a, int b, bool v) {
-    if (!ValidPair(a, b)) return;
-    if (v) {
-        g.diplomacy.state[Key(a, b)] = kPeace;
-        g.diplomacy.state[Key(b, a)] = kPeace;
-        g.diplomacy.proposal[Key(a, b)] = kPeace;
-        g.diplomacy.proposal[Key(b, a)] = kPeace;
+void SetAllied(Game& game, int from_side, int to_side, bool allied) {
+    if (!ValidPair(from_side, to_side)) return;
+    if (allied) {
+        game.diplomacy.state[Key(from_side, to_side)] = kPeace;
+        game.diplomacy.state[Key(to_side, from_side)] = kPeace;
+        game.diplomacy.proposal[Key(from_side, to_side)] = kPeace;
+        game.diplomacy.proposal[Key(to_side, from_side)] = kPeace;
     }
-    g.diplomacy.allied[Key(a, b)] = v;
-    g.diplomacy.allied[Key(b, a)] = v;
-    g.diplomacy.propose_allied[Key(a, b)] = v;
-    g.diplomacy.propose_allied[Key(b, a)] = v;
+    game.diplomacy.allied[Key(from_side, to_side)] = allied;
+    game.diplomacy.allied[Key(to_side, from_side)] = allied;
+    game.diplomacy.propose_allied[Key(from_side, to_side)] = allied;
+    game.diplomacy.propose_allied[Key(to_side, from_side)] = allied;
 }
 
-bool ProposalAllied(const Game& g, int a, int b) {
-    if (!ValidPair(a, b)) return false;
-    return g.diplomacy.propose_allied[Key(a, b)];
+bool ProposalAllied(const Game& game, int from_side, int to_side) {
+    if (!ValidPair(from_side, to_side)) return false;
+    return game.diplomacy.propose_allied[Key(from_side, to_side)];
 }
 
-void ProposeAlliance(Game& g, int a, int b, bool v) {
-    if (!ValidPair(a, b)) return;
-    g.diplomacy.propose_allied[Key(a, b)] = v;
-    if (v) g.diplomacy.proposal[Key(a, b)] = kPeace;
+void ProposeAlliance(Game& game, int from_side, int to_side, bool propose) {
+    if (!ValidPair(from_side, to_side)) return;
+    game.diplomacy.propose_allied[Key(from_side, to_side)] = propose;
+    if (propose) game.diplomacy.proposal[Key(from_side, to_side)] = kPeace;
 }
 
-int TruceTurns(const Game& g, int a, int b) {
-    if (!ValidPair(a, b)) return 0;
-    return g.diplomacy.truce_turns[Key(a, b)];
+int TruceTurns(const Game& game, int from_side, int to_side) {
+    if (!ValidPair(from_side, to_side)) return 0;
+    return game.diplomacy.truce_turns[Key(from_side, to_side)];
 }
 
-void SetTruce(Game& g, int a, int b, int turns) {
-    if (!ValidPair(a, b)) return;
-    int t = std::max(0, turns);
-    g.diplomacy.truce_turns[Key(a, b)] = t;
-    g.diplomacy.truce_turns[Key(b, a)] = t;
+void SetTruce(Game& game, int from_side, int to_side, int turns) {
+    if (!ValidPair(from_side, to_side)) return;
+    int clamped_turns = std::max(0, turns);
+    game.diplomacy.truce_turns[Key(from_side, to_side)] = clamped_turns;
+    game.diplomacy.truce_turns[Key(to_side, from_side)] = clamped_turns;
 }
 
-int GoldOffer(const Game& g, int a, int b) {
-    if (!ValidPair(a, b)) return 0;
-    return g.diplomacy.gold_offer[Key(a, b)];
+int GoldOffer(const Game& game, int from_side, int to_side) {
+    if (!ValidPair(from_side, to_side)) return 0;
+    return game.diplomacy.gold_offer[Key(from_side, to_side)];
 }
 
-void SetGoldOffer(Game& g, int a, int b, int gold) {
-    if (!ValidPair(a, b)) return;
-    g.diplomacy.gold_offer[Key(a, b)] = gold;
+void SetGoldOffer(Game& game, int from_side, int to_side, int gold) {
+    if (!ValidPair(from_side, to_side)) return;
+    game.diplomacy.gold_offer[Key(from_side, to_side)] = gold;
 }
 
-int WarTarget(const Game& g, int a, int b) {
-    if (!ValidPair(a, b)) return kNone;
-    return g.diplomacy.war_target[Key(a, b)];
+int WarTarget(const Game& game, int from_side, int to_side) {
+    if (!ValidPair(from_side, to_side)) return kNone;
+    return game.diplomacy.war_target[Key(from_side, to_side)];
 }
 
-void SetWarTarget(Game& g, int a, int b, int target_side) {
-    if (!ValidPair(a, b)) return;
-    g.diplomacy.war_target[Key(a, b)] = target_side;
+void SetWarTarget(Game& game, int from_side, int to_side, int target_side) {
+    if (!ValidPair(from_side, to_side)) return;
+    game.diplomacy.war_target[Key(from_side, to_side)] = target_side;
 }
 
-int Trust(const Game& g, int a, int b) {
-    if (!ValidPair(a, b)) return 0;
-    return g.diplomacy.trust[Key(a, b)];
+int Trust(const Game& game, int from_side, int to_side) {
+    if (!ValidPair(from_side, to_side)) return 0;
+    return game.diplomacy.trust[Key(from_side, to_side)];
 }
 
-void AddTrust(Game& g, int a, int b, int delta) {
-    if (!ValidPair(a, b)) return;
-    g.diplomacy.trust[Key(a, b)] = std::clamp(g.diplomacy.trust[Key(a, b)] + delta, -100, 100);
+void AddTrust(Game& game, int from_side, int to_side, int delta) {
+    if (!ValidPair(from_side, to_side)) return;
+    game.diplomacy.trust[Key(from_side, to_side)] =
+            std::clamp(game.diplomacy.trust[Key(from_side, to_side)] + delta, -100, 100);
 }
 
-int AlliedTargetCity(const Game& g, int side) {
+int AlliedTargetCity(const Game& game, int side) {
     if (side < 0 || side >= 8) return kNone;
-    return g.diplomacy.allied_target_city[side];
+    return game.diplomacy.allied_target_city[side];
 }
 
-void SetAlliedTargetCity(Game& g, int side, int city_index) {
+void SetAlliedTargetCity(Game& game, int side, int city_index) {
     if (side < 0 || side >= 8) return;
-    g.diplomacy.allied_target_city[side] = city_index;
+    game.diplomacy.allied_target_city[side] = city_index;
 }
 
 namespace {
-void SettleDealTransfers(Game& g, Side& side, Side& other, std::vector<std::string>& messages) {
-    int a = side.index, b = other.index;
-    int offer_a = GoldOffer(g, a, b);
-    int offer_b = GoldOffer(g, b, a);
-    if (offer_a > 0 && side.gold > 0) {
-        int paid = std::min(side.gold, offer_a);
+/**
+ * @brief Carries out the terms attached to a peace or alliance just agreed.
+ *
+ * Pays the gold tribute either side offered (the first side's offer wins, and
+ * the payer earns some trust), then drags both sides into the joint war one of
+ * them asked for. Clears the offers and war targets afterwards.
+ * @param messages Receives a message for each payment and each war joined.
+ */
+void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::string>& messages) {
+    int side_index = side.index, other_index = other.index;
+    int side_offer = GoldOffer(game, side_index, other_index);
+    int other_offer = GoldOffer(game, other_index, side_index);
+    if (side_offer > 0 && side.gold > 0) {
+        int paid = std::min(side.gold, side_offer);
         side.gold -= paid;
         other.gold += paid;
-        AddTrust(g, b, a, std::min(30, paid / 10 + 5));
+        AddTrust(game, other_index, side_index, std::min(30, paid / 10 + 5));
         messages.push_back(Fmt("%s paid %d gold in tribute to %s.", side.name.c_str(), paid,
                                other.name.c_str()));
-    } else if (offer_b > 0 && other.gold > 0) {
-        int paid = std::min(other.gold, offer_b);
+    } else if (other_offer > 0 && other.gold > 0) {
+        int paid = std::min(other.gold, other_offer);
         other.gold -= paid;
         side.gold += paid;
-        AddTrust(g, a, b, std::min(30, paid / 10 + 5));
+        AddTrust(game, side_index, other_index, std::min(30, paid / 10 + 5));
         messages.push_back(Fmt("%s paid %d gold in tribute to %s.", other.name.c_str(), paid,
                                side.name.c_str()));
     }
-    SetGoldOffer(g, a, b, 0);
-    SetGoldOffer(g, b, a, 0);
+    SetGoldOffer(game, side_index, other_index, 0);
+    SetGoldOffer(game, other_index, side_index, 0);
 
-    int wt = WarTarget(g, a, b);
-    if (wt == kNone) wt = WarTarget(g, b, a);
-    if (wt >= 0 && wt < 8 && wt != a && wt != b && g.map->sides[wt].alive) {
-        for (int participant : {a, b}) {
-            if (State(g, participant, wt) != kWar) {
-                g.diplomacy.state[Key(participant, wt)] = kWar;
-                g.diplomacy.state[Key(wt, participant)] = kWar;
-                g.diplomacy.proposal[Key(participant, wt)] = kWar;
-                g.diplomacy.proposal[Key(wt, participant)] = kWar;
-                SetAllied(g, participant, wt, false);
+    int war_target = WarTarget(game, side_index, other_index);
+    if (war_target == kNone) war_target = WarTarget(game, other_index, side_index);
+    if (war_target >= 0 && war_target < 8 && war_target != side_index &&
+        war_target != other_index && game.map->sides[war_target].alive) {
+        for (int participant : {side_index, other_index}) {
+            if (State(game, participant, war_target) != kWar) {
+                game.diplomacy.state[Key(participant, war_target)] = kWar;
+                game.diplomacy.state[Key(war_target, participant)] = kWar;
+                game.diplomacy.proposal[Key(participant, war_target)] = kWar;
+                game.diplomacy.proposal[Key(war_target, participant)] = kWar;
+                SetAllied(game, participant, war_target, false);
                 messages.push_back(Fmt("%s joined the war against %s!",
-                                       g.map->sides[participant].name.c_str(),
-                                       g.map->sides[wt].name.c_str()));
+                                       game.map->sides[participant].name.c_str(),
+                                       game.map->sides[war_target].name.c_str()));
             }
         }
     }
-    SetWarTarget(g, a, b, kNone);
-    SetWarTarget(g, b, a, kNone);
+    SetWarTarget(game, side_index, other_index, kNone);
+    SetWarTarget(game, other_index, side_index, kNone);
 }
 }  // namespace
 
-std::vector<std::string> Apply(Game& g, Side& side) {
+std::vector<std::string> Apply(Game& game, Side& side) {
     std::vector<std::string> messages;
-    int a = side.index;
-    for (int b = 0; b < 8; b++) {
-        Side* other = g.map->Side(b);
-        if (b != a && other) {
-            if (!side.classic_ai && TruceTurns(g, a, b) > 0 && State(g, a, b) == kPeace) {
-                SetTruce(g, a, b, TruceTurns(g, a, b) - 1);
+    int side_index = side.index;
+    for (int other_index = 0; other_index < 8; other_index++) {
+        Side* other = game.map->Side(other_index);
+        if (other_index != side_index && other) {
+            if (!side.classic_ai && TruceTurns(game, side_index, other_index) > 0 &&
+                State(game, side_index, other_index) == kPeace) {
+                SetTruce(game, side_index, other_index,
+                         TruceTurns(game, side_index, other_index) - 1);
             }
-            int now = State(g, a, b);
-            int want = Proposal(g, a, b);
-            if (want != now) {
-                if (want > now) {  // escalation: at once
-                    bool was_allied = IsAllied(g, a, b);
-                    int truce_left = TruceTurns(g, a, b);
-                    SetAllied(g, a, b, false);
-                    SetTruce(g, a, b, 0);
-                    g.diplomacy.state[Key(a, b)] = want;
-                    g.diplomacy.state[Key(b, a)] = want;
-                    if (Proposal(g, b, a) < want) g.diplomacy.proposal[Key(b, a)] = want;
-                    if (!side.classic_ai && (was_allied || (truce_left > 0 && want == kWar))) {
-                        AddTrust(g, b, a, -50);
-                        for (int c = 0; c < 8; c++) {
-                            if (c != a && c != b) AddTrust(g, c, a, -20);
+            int current = State(game, side_index, other_index);
+            int wanted = Proposal(game, side_index, other_index);
+            if (wanted != current) {
+                if (wanted > current) {  // escalation: at once
+                    bool was_allied = IsAllied(game, side_index, other_index);
+                    int truce_left = TruceTurns(game, side_index, other_index);
+                    SetAllied(game, side_index, other_index, false);
+                    SetTruce(game, side_index, other_index, 0);
+                    game.diplomacy.state[Key(side_index, other_index)] = wanted;
+                    game.diplomacy.state[Key(other_index, side_index)] = wanted;
+                    if (Proposal(game, other_index, side_index) < wanted)
+                        game.diplomacy.proposal[Key(other_index, side_index)] = wanted;
+                    if (!side.classic_ai && (was_allied || (truce_left > 0 && wanted == kWar))) {
+                        // Breaking an alliance or a truce: the victim and every
+                        // onlooker trust the breaker less.
+                        AddTrust(game, other_index, side_index, -50);
+                        for (int bystander = 0; bystander < 8; bystander++) {
+                            if (bystander != side_index && bystander != other_index)
+                                AddTrust(game, bystander, side_index, -20);
                         }
                     }
-                    if (want == kWar) {
-                        history::RecordDeed(g, &side, DeedType::kAtWar, a, b, "");  // 484e:0f15
+                    if (wanted == kWar) {
+                        history::RecordDeed(game, &side, DeedType::kAtWar, side_index, other_index,
+                                            "");
                         messages.push_back("War declared with " + other->name + "!");
                     }
-                } else if (Proposal(g, b, a) <= want) {  // de-escalation: mutual
-                    g.diplomacy.state[Key(a, b)] = want;
-                    g.diplomacy.state[Key(b, a)] = want;
-                    if (want == kPeace) {
-                        history::RecordDeed(g, &side, DeedType::kAtPeace, a, b, "");  // 484e:1027
+                } else if (Proposal(game, other_index, side_index) <= wanted) {
+                    // de-escalation: only when both sides want it
+                    game.diplomacy.state[Key(side_index, other_index)] = wanted;
+                    game.diplomacy.state[Key(other_index, side_index)] = wanted;
+                    if (wanted == kPeace) {
+                        history::RecordDeed(game, &side, DeedType::kAtPeace, side_index,
+                                            other_index, "");
                         messages.push_back("Peace negotiated with " + other->name + "!");
                         if (!side.classic_ai || !other->classic_ai) {
-                            SetTruce(g, a, b, 10);
-                            AddTrust(g, a, b, 15);
-                            AddTrust(g, b, a, 15);
-                            SettleDealTransfers(g, side, *other, messages);
+                            SetTruce(game, side_index, other_index, 10);
+                            AddTrust(game, side_index, other_index, 15);
+                            AddTrust(game, other_index, side_index, 15);
+                            SettleDealTransfers(game, side, *other, messages);
                         }
                     }
                 }
             }
             // Check mutual Alliance upgrade when at Peace
-            if (State(g, a, b) == kPeace && !IsAllied(g, a, b) && ProposalAllied(g, a, b) &&
-                ProposalAllied(g, b, a)) {
-                SetAllied(g, a, b, true);
-                SetTruce(g, a, b, 15);
-                AddTrust(g, a, b, 25);
-                AddTrust(g, b, a, 25);
-                SettleDealTransfers(g, side, *other, messages);
+            if (State(game, side_index, other_index) == kPeace &&
+                !IsAllied(game, side_index, other_index) &&
+                ProposalAllied(game, side_index, other_index) &&
+                ProposalAllied(game, other_index, side_index)) {
+                SetAllied(game, side_index, other_index, true);
+                SetTruce(game, side_index, other_index, 15);
+                AddTrust(game, side_index, other_index, 25);
+                AddTrust(game, other_index, side_index, 25);
+                SettleDealTransfers(game, side, *other, messages);
                 messages.push_back("Alliance forged with " + other->name + "!");
             }
         }
@@ -267,92 +292,99 @@ std::vector<std::string> Apply(Game& g, Side& side) {
     return messages;
 }
 
-bool MustDeclare(const Game& g, int a, int b, const City* city) {
-    if (g.map->options.diplomacy == 0 || a == kNone || b == kNone) return false;
-    int st = State(g, a, b);
-    return st == kPeace || (st == kIntermediate && city && city->index > 0);
+bool MustDeclare(const Game& game, int from_side, int to_side, const City* city) {
+    if (game.map->options.diplomacy == 0 || from_side == kNone || to_side == kNone) return false;
+    int current_state = State(game, from_side, to_side);
+    return current_state == kPeace || (current_state == kIntermediate && city && city->index > 0);
 }
 
-void AttackAnyway(Game& g, int a, int b) {
-    if (a == kNone || b == kNone) return;
-    Side* side = g.map->Side(a);
+void AttackAnyway(Game& game, int from_side, int to_side) {
+    if (from_side == kNone || to_side == kNone) return;
+    Side* side = game.map->Side(from_side);
     if (!side) return;
-    int st = State(g, a, b);
-    if (st == kPeace)
-        game::AddDiploScore(g, *side, g.rng.Dice(1, 100, 100));
-    else if (st == kIntermediate)
-        game::AddDiploScore(g, *side, g.rng.Dice(1, 15, 10));
-    SetAllied(g, a, b, false);
-    SetTruce(g, a, b, 0);
-    AddTrust(g, b, a, -60);
-    for (int c = 0; c < 8; c++) {
-        if (c != a && c != b) AddTrust(g, c, a, -25);
+    int current_state = State(game, from_side, to_side);
+    if (current_state == kPeace)
+        game::AddDiploScore(game, *side, game.rng.Dice(1, 100, 100));
+    else if (current_state == kIntermediate)
+        game::AddDiploScore(game, *side, game.rng.Dice(1, 15, 10));
+    SetAllied(game, from_side, to_side, false);
+    SetTruce(game, from_side, to_side, 0);
+    AddTrust(game, to_side, from_side, -60);
+    for (int bystander = 0; bystander < 8; bystander++) {
+        if (bystander != from_side && bystander != to_side)
+            AddTrust(game, bystander, from_side, -25);
     }
-    for (int k : {Key(a, b), Key(b, a)}) {
-        g.diplomacy.state[k] = kWar;
-        g.diplomacy.proposal[k] = kWar;
+    for (int pair_key : {Key(from_side, to_side), Key(to_side, from_side)}) {
+        game.diplomacy.state[pair_key] = kWar;
+        game.diplomacy.proposal[pair_key] = kWar;
     }
-    history::RecordDeed(g, side, DeedType::kTreachery, a, b, "");
+    history::RecordDeed(game, side, DeedType::kTreachery, from_side, to_side, "");
 }
 
-void ScoreUpdate(Game& g, Side& side) {
-    int a = side.index;
-    for (int b = 0; b < 8; b++) {
-        if (b != a) {
-            int p = Proposal(g, a, b), st = State(g, a, b);
-            if (p < st && p < Proposal(g, b, a)) AddScore(g, side, st, p);
+void ScoreUpdate(Game& game, Side& side) {
+    int side_index = side.index;
+    for (int other_index = 0; other_index < 8; other_index++) {
+        if (other_index != side_index) {
+            int proposed = Proposal(game, side_index, other_index),
+                current_state = State(game, side_index, other_index);
+            // Only an overture toward peace that the other side has not yet
+            // matched counts.
+            if (proposed < current_state && proposed < Proposal(game, other_index, side_index))
+                AddScore(game, side, current_state, proposed);
         }
     }
 }
 
-int AddScore(Game& g, Side& side, int from, int to) {
+int AddScore(Game& game, Side& side, int from_state, int to_state) {
     int gain = kNone;
-    if (from == kWar && to == kPeace)
-        gain = g.rng.Dice(1, 10, 10);
-    else if (to < from)
-        gain = g.rng.Dice(1, 2, 1);
-    if (gain != kNone) game::AddDiploScore(g, side, gain);
+    if (from_state == kWar && to_state == kPeace)
+        gain = game.rng.Dice(1, 10, 10);
+    else if (to_state < from_state)
+        gain = game.rng.Dice(1, 2, 1);
+    if (gain != kNone) game::AddDiploScore(game, side, gain);
     return gain;
 }
 
-std::map<int, std::string> Ratings(const Game& g) {
-    struct E {
-        Side* side;
-        int score;
-        int seq;
+std::map<int, std::string> Ratings(const Game& game) {
+    /** @brief A living side and what it is ranked by. */
+    struct RankedSide {
+        Side* side;  ///< The side being ranked.
+        int score;   ///< Its diplomatic score; lower ranks better.
+        int seq;     ///< Its place in the side list, to break ties.
     };
-    std::vector<E> order;
-    // only the sides still in the game are ranked (484e:0aed)
-    for (size_t i = 0; i < g.sides.size(); i++) {
-        if (g.sides[i]->alive)
-            order.push_back(E{g.sides[i], g.sides[i]->diplo_score, static_cast<int>(i)});
+    std::vector<RankedSide> order;
+    // only the sides still in the game are ranked
+    for (size_t i = 0; i < game.sides.size(); i++) {
+        if (game.sides[i]->alive)
+            order.push_back(
+                    RankedSide{game.sides[i], game.sides[i]->diplo_score, static_cast<int>(i)});
     }
-    LuaSort(order, [](const E& p, const E& q) {
-        return p.score != q.score ? p.score < q.score : p.seq < q.seq;
+    LuaSort(order, [](const RankedSide& lhs, const RankedSide& rhs) {
+        return lhs.score != rhs.score ? lhs.score < rhs.score : lhs.seq < rhs.seq;
     });
     const std::vector<int>& ranks = RatingRanks(static_cast<int>(order.size()));
-    std::map<int, std::string> out;
+    std::map<int, std::string> titles;
     for (size_t i = 0; i < order.size(); i++) {
-        int r = i < ranks.size() ? ranks[i] : 8;
-        out[order[i].side->index] = kTitles[r - 1];
+        int rank = i < ranks.size() ? ranks[i] : 8;
+        titles[order[i].side->index] = kTitles[rank - 1];
     }
-    return out;
+    return titles;
 }
 
-AttitudeBreakdown ComputeAttitude(const Game& g, int ai_side, int target_side) {
-    AttitudeBreakdown out;
-    out.from_side = ai_side;
-    out.to_side = target_side;
-    if (!ValidPair(ai_side, target_side)) return out;
+AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side) {
+    AttitudeBreakdown breakdown;
+    breakdown.from_side = ai_side;
+    breakdown.to_side = target_side;
+    if (!ValidPair(ai_side, target_side)) return breakdown;
 
-    const Side& me = g.map->sides[ai_side];
-    const Side& them = g.map->sides[target_side];
-    const auto& prof = ai::personality::ForSide(me);
-    out.personality_name = prof.name;
-    out.personality_archetype = prof.archetype;
-    out.motto = prof.motto;
-    out.trust_score = Trust(g, ai_side, target_side);
-    out.truce_remaining = TruceTurns(g, ai_side, target_side);
+    const Side& own_side = game.map->sides[ai_side];
+    const Side& their_side = game.map->sides[target_side];
+    const auto& profile = ai::personality::ForSide(own_side);
+    breakdown.personality_name = profile.name;
+    breakdown.personality_archetype = profile.archetype;
+    breakdown.motto = profile.motto;
+    breakdown.trust_score = Trust(game, ai_side, target_side);
+    breakdown.truce_remaining = TruceTurns(game, ai_side, target_side);
 
     // Only cities the AI side can actually see count, so the attitude score (which
     // feeds the diplomacy policy) never leaks the true map under Hidden Map.
@@ -360,55 +392,59 @@ AttitudeBreakdown ComputeAttitude(const Game& g, int ai_side, int target_side) {
     int their_cities = 0, leader_cities = 0, leader_side = kNone;
     int cities_taken_from_me = 0;
     std::array<int, 8> side_cities{};
-    for (const auto& c : g.map->cities) {
-        if (c.razed || !ai::belief::IsCityVisible(g, ai_side, c)) continue;
+    for (const auto& city : game.map->cities) {
+        if (city.razed || !ai::belief::IsCityVisible(game, ai_side, city)) continue;
         total_standing_cities++;
-        if (c.owner_index >= 0 && c.owner_index < 8) {
-            side_cities[c.owner_index]++;
-            if (side_cities[c.owner_index] > leader_cities) {
-                leader_cities = side_cities[c.owner_index];
-                leader_side = c.owner_index;
+        if (city.owner_index >= 0 && city.owner_index < 8) {
+            side_cities[city.owner_index]++;
+            if (side_cities[city.owner_index] > leader_cities) {
+                leader_cities = side_cities[city.owner_index];
+                leader_side = city.owner_index;
             }
         }
-        if (c.owner_index == target_side) {
+        if (city.owner_index == target_side) {
             their_cities++;
-            if (c.claim == ai_side) cities_taken_from_me++;
+            if (city.claim == ai_side) cities_taken_from_me++;
         }
     }
 
     auto push_factor = [&](const std::string& label, int delta) {
         if (delta == 0) return;
-        out.factors.push_back(AttitudeFactor{label, delta});
-        out.total_score += delta;
+        breakdown.factors.push_back(AttitudeFactor{label, delta});
+        breakdown.total_score += delta;
     };
 
     // Personality disposition baseline
-    int base_disp = static_cast<int>(std::round((prof.traits[ai::personality::kHonour] -
-                                                 prof.traits[ai::personality::kAggression] * 0.6F) *
-                                                20.0F));
-    push_factor("Personality (" + prof.archetype + ")", base_disp);
+    int base_disp =
+            static_cast<int>(std::round((profile.traits[ai::personality::kHonour] -
+                                         profile.traits[ai::personality::kAggression] * 0.6F) *
+                                        20.0F));
+    push_factor("Personality (" + profile.archetype + ")", base_disp);
 
     // Relational trust & treaty history
-    if (out.trust_score != 0) {
-        push_factor("Treaty and trust track record", out.trust_score / 2);
+    if (breakdown.trust_score != 0) {
+        push_factor("Treaty and trust track record", breakdown.trust_score / 2);
     }
-    if (IsAllied(g, ai_side, target_side)) {
+    if (IsAllied(game, ai_side, target_side)) {
         push_factor("Sworn military alliance", 35);
-    } else if (out.truce_remaining > 0) {
-        push_factor(Fmt("Active peace truce (%d turns left)", out.truce_remaining), 15);
+    } else if (breakdown.truce_remaining > 0) {
+        push_factor(Fmt("Active peace truce (%d turns left)", breakdown.truce_remaining), 15);
     }
 
     // Shared enemies vs opposing wars
     int shared_wars = 0;
-    for (int s = 0; s < 8; s++) {
-        if (s != ai_side && s != target_side && g.map->sides[s].alive) {
-            if (State(g, ai_side, s) == kWar && State(g, target_side, s) == kWar) shared_wars++;
+    for (int third_side = 0; third_side < 8; third_side++) {
+        if (third_side != ai_side && third_side != target_side &&
+            game.map->sides[third_side].alive) {
+            if (State(game, ai_side, third_side) == kWar &&
+                State(game, target_side, third_side) == kWar)
+                shared_wars++;
         }
     }
     if (shared_wars > 0) {
         int bonus = shared_wars *
                     static_cast<int>(std::round(
-                            18.0F + 10.0F * prof.traits[ai::personality::kCoalitionDrive]));
+                            18.0F + 10.0F * profile.traits[ai::personality::kCoalitionDrive]));
         push_factor(
                 Fmt("Fighting %d common %s", shared_wars, shared_wars == 1 ? "enemy" : "enemies"),
                 bonus);
@@ -416,22 +452,23 @@ AttitudeBreakdown ComputeAttitude(const Game& g, int ai_side, int target_side) {
 
     // Border military pressure (from fair-info belief if available)
     float their_border_str = 0.0F, my_border_str = 0.0F;
-    if (me.belief) {
-        their_border_str = me.belief->their_border_strength[target_side];
-        my_border_str = me.belief->my_border_strength[target_side];
+    if (own_side.belief) {
+        their_border_str = own_side.belief->their_border_strength[target_side];
+        my_border_str = own_side.belief->my_border_strength[target_side];
     }
     if (their_border_str > 4.0F) {
         int border_pen = -std::min(40, static_cast<int>(std::round(their_border_str * 1.2F)));
         push_factor("Your armies massed near our borders", border_pen);
     } else if (my_border_str > their_border_str + 12.0F &&
-               prof.traits[ai::personality::kAggression] > 0.2F) {
+               profile.traits[ai::personality::kAggression] > 0.2F) {
         push_factor("Our strike forces outmatch your border garrison", -18);
     }
 
     // Past battle casualties & lost cities
-    if (me.ai) {
-        int grudge = me.ai->cities_lost[target_side] * 10 + me.ai->heroes_killed[target_side] * 8 +
-                     me.ai->lost[target_side] * 3;
+    if (own_side.ai) {
+        int grudge = own_side.ai->cities_lost[target_side] * 10 +
+                     own_side.ai->heroes_killed[target_side] * 8 +
+                     own_side.ai->lost[target_side] * 3;
         if (grudge > 0) {
             push_factor("Blood feud (cities and heroes lost)", -std::min(50, grudge));
         }
@@ -440,7 +477,7 @@ AttitudeBreakdown ComputeAttitude(const Game& g, int ai_side, int target_side) {
         push_factor(Fmt("You hold %d of our claimed cities", cities_taken_from_me),
                     -cities_taken_from_me * 8);
     }
-    if (me.capital && me.capital->owner_index == target_side) {
+    if (own_side.capital && own_side.capital->owner_index == target_side) {
         push_factor("You occupy our ancestral Capital!", -60);
     }
 
@@ -450,7 +487,7 @@ AttitudeBreakdown ComputeAttitude(const Game& g, int ai_side, int target_side) {
     if (leader_side == target_side && their_share >= 0.30F) {
         int hegemony_pen = -static_cast<int>(
                 std::round((their_share - 0.25F) * 120.0F *
-                           (1.0F + 0.5F * prof.traits[ai::personality::kCoalitionDrive])));
+                           (1.0F + 0.5F * profile.traits[ai::personality::kCoalitionDrive])));
         push_factor(Fmt("Fear of your growing hegemony (%d%% of cities)",
                         static_cast<int>(std::round(their_share * 100.0F))),
                     hegemony_pen);
@@ -462,76 +499,82 @@ AttitudeBreakdown ComputeAttitude(const Game& g, int ai_side, int target_side) {
     }
 
     // Diplomatic reputation / atrocities
-    if (them.diplo_score > 60) {
-        int atrocity_pen = -std::min(35, (them.diplo_score - 40) / 4);
-        if (prof.traits[ai::personality::kHonour] > 0.0F) {
+    if (their_side.diplo_score > 60) {
+        int atrocity_pen = -std::min(35, (their_side.diplo_score - 40) / 4);
+        if (profile.traits[ai::personality::kHonour] > 0.0F) {
             push_factor("Your reputation for razing and treachery", atrocity_pen);
         }
     }
 
     // Active tribute offer on the table
-    int offered_to_ai = GoldOffer(g, target_side, ai_side);
+    int offered_to_ai = GoldOffer(game, target_side, ai_side);
     if (offered_to_ai > 0) {
         int gold_bonus = static_cast<int>(
                 std::round(static_cast<float>(offered_to_ai) / 8.0F *
-                           (1.0F + 0.6F * prof.traits[ai::personality::kAvarice])));
+                           (1.0F + 0.6F * profile.traits[ai::personality::kAvarice])));
         push_factor(Fmt("Gold tribute offered (%d gold)", offered_to_ai), gold_bonus);
     }
 
-    out.total_score = std::clamp(out.total_score, -100, 100);
+    breakdown.total_score = std::clamp(breakdown.total_score, -100, 100);
 
     // Compute clear stance summary and "What It Takes" forecast
-    int cur_state = State(g, ai_side, target_side);
-    if (IsAllied(g, ai_side, target_side)) {
-        out.stance_summary = "Allied Partner";
-        out.what_it_takes = "Alliance is strong. Coordinate strikes against shared foes!";
-        out.peace_gold_needed = 0;
-        out.ally_gold_needed = 0;
-    } else if (me.capital && me.capital->owner_index == target_side) {
-        out.stance_summary = "Mortal Enemy (Capital Held)";
-        out.what_it_takes = "Refuses Peace while you hold " + me.capital->name + "!";
-        out.peace_gold_needed = kNone;
-        out.ally_gold_needed = kNone;
+    int cur_state = State(game, ai_side, target_side);
+    if (IsAllied(game, ai_side, target_side)) {
+        breakdown.stance_summary = "Allied Partner";
+        breakdown.what_it_takes = "Alliance is strong. Coordinate strikes against shared foes!";
+        breakdown.peace_gold_needed = 0;
+        breakdown.ally_gold_needed = 0;
+    } else if (own_side.capital && own_side.capital->owner_index == target_side) {
+        breakdown.stance_summary = "Mortal Enemy (Capital Held)";
+        breakdown.what_it_takes = "Refuses Peace while you hold " + own_side.capital->name + "!";
+        breakdown.peace_gold_needed = kNone;
+        breakdown.ally_gold_needed = kNone;
     } else {
-        float greed_mult = std::max(0.5F, 1.2F - 0.5F * prof.traits[ai::personality::kAvarice]);
-        if (out.total_score >= 35) {
-            out.stance_summary = "Friendly, Cooperative";
-            out.peace_gold_needed = 0;
-            out.ally_gold_needed = 0;
-            out.what_it_takes = "Willing to accept Peace or forge a full Alliance!";
-        } else if (out.total_score >= 0) {
-            out.stance_summary = (cur_state == kWar) ? "Weary of War" : "Cautious, Pragmatic";
-            out.peace_gold_needed = 0;
-            out.ally_gold_needed = std::max(
-                    50, static_cast<int>(std::round((35 - out.total_score) * 8.0F / greed_mult)) /
-                                25 * 25);
-            out.what_it_takes = Fmt("Accepts Peace freely; Alliance for ~%d gold (or shared war).",
-                                    out.ally_gold_needed);
-        } else if (out.total_score >= -45) {
-            out.stance_summary = "Hostile, Distrustful";
-            out.peace_gold_needed = std::max(
-                    50, static_cast<int>(std::round((-out.total_score + 10) * 6.0F / greed_mult)) /
-                                25 * 25);
-            out.ally_gold_needed = kNone;
-            out.what_it_takes = Fmt("Demands %d gold tribute (or border withdrawal) for Peace.",
-                                    out.peace_gold_needed);
+        float greed_mult = std::max(0.5F, 1.2F - 0.5F * profile.traits[ai::personality::kAvarice]);
+        if (breakdown.total_score >= 35) {
+            breakdown.stance_summary = "Friendly, Cooperative";
+            breakdown.peace_gold_needed = 0;
+            breakdown.ally_gold_needed = 0;
+            breakdown.what_it_takes = "Willing to accept Peace or forge a full Alliance!";
+        } else if (breakdown.total_score >= 0) {
+            breakdown.stance_summary = (cur_state == kWar) ? "Weary of War" : "Cautious, Pragmatic";
+            breakdown.peace_gold_needed = 0;
+            breakdown.ally_gold_needed = std::max(
+                    50,
+                    static_cast<int>(std::round((35 - breakdown.total_score) * 8.0F / greed_mult)) /
+                            25 * 25);
+            breakdown.what_it_takes =
+                    Fmt("Accepts Peace freely; Alliance for ~%d gold (or shared war).",
+                        breakdown.ally_gold_needed);
+        } else if (breakdown.total_score >= -45) {
+            breakdown.stance_summary = "Hostile, Distrustful";
+            breakdown.peace_gold_needed =
+                    std::max(50, static_cast<int>(std::round((-breakdown.total_score + 10) * 6.0F /
+                                                             greed_mult)) /
+                                         25 * 25);
+            breakdown.ally_gold_needed = kNone;
+            breakdown.what_it_takes =
+                    Fmt("Demands %d gold tribute (or border withdrawal) for Peace.",
+                        breakdown.peace_gold_needed);
         } else {
-            out.stance_summary = "Implacable Warpath";
-            if (prof.traits[ai::personality::kAvarice] > 0.5F && out.total_score > -75) {
-                out.peace_gold_needed = std::max(
-                        150, static_cast<int>(std::round((-out.total_score) * 8.0F)) / 50 * 50);
-                out.what_it_takes = Fmt("Only a heavy tribute of %d gold will stay their hand!",
-                                        out.peace_gold_needed);
+            breakdown.stance_summary = "Implacable Warpath";
+            if (profile.traits[ai::personality::kAvarice] > 0.5F && breakdown.total_score > -75) {
+                breakdown.peace_gold_needed = std::max(
+                        150,
+                        static_cast<int>(std::round((-breakdown.total_score) * 8.0F)) / 50 * 50);
+                breakdown.what_it_takes =
+                        Fmt("Only a heavy tribute of %d gold will stay their hand!",
+                            breakdown.peace_gold_needed);
             } else {
-                out.peace_gold_needed = kNone;
-                out.what_it_takes =
+                breakdown.peace_gold_needed = kNone;
+                breakdown.what_it_takes =
                         "Refuses Peace: determined to settle grievances on the battlefield!";
             }
-            out.ally_gold_needed = kNone;
+            breakdown.ally_gold_needed = kNone;
         }
     }
 
-    return out;
+    return breakdown;
 }
 
 }  // namespace w2::diplomacy

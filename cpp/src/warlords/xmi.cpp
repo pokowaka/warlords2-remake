@@ -6,100 +6,118 @@ namespace w2::xmi {
 
 namespace {
 
-uint32_t U32be(const std::string& s, size_t i) {
-    return (static_cast<uint32_t>(static_cast<uint8_t>(s[i])) << 24) |
-           (static_cast<uint32_t>(static_cast<uint8_t>(s[i + 1])) << 16) |
-           (static_cast<uint32_t>(static_cast<uint8_t>(s[i + 2])) << 8) |
-           static_cast<uint8_t>(s[i + 3]);
+/** @brief The unsigned big-endian 32-bit word at `offset` (IFF chunk sizes). */
+uint32_t U32be(const std::string& bytes, size_t offset) {
+    return (static_cast<uint32_t>(static_cast<uint8_t>(bytes[offset])) << 24) |
+           (static_cast<uint32_t>(static_cast<uint8_t>(bytes[offset + 1])) << 16) |
+           (static_cast<uint32_t>(static_cast<uint8_t>(bytes[offset + 2])) << 8) |
+           static_cast<uint8_t>(bytes[offset + 3]);
 }
 
-// the EVNT chunk of the first sequence: {start, length}
-bool Walk(const std::string& s, size_t from, size_t to, size_t& at, size_t& len) {
-    size_t p = from;
-    while (p + 8 <= to) {
-        std::string id = s.substr(p, 4);
-        size_t n = U32be(s, p + 4);
-        if (id == "FORM" || id == "CAT ") {
-            if (Walk(s, p + 12, std::min(to, p + 8 + n), at, len)) return true;
-        } else if (id == "EVNT") {
-            at = p + 8;
-            len = n;
+/**
+ * @brief Finds the EVNT chunk of the first sequence.
+ *
+ * Walks the IFF chunks in bytes [from, end), descending into FORM and CAT
+ * containers.
+ *
+ * @param start Receives where the EVNT chunk's data starts.
+ * @param len Receives the EVNT chunk's length.
+ * @return Whether an EVNT chunk was found.
+ */
+bool Walk(const std::string& bytes, size_t from, size_t end, size_t& start, size_t& len) {
+    size_t pos = from;
+    while (pos + 8 <= end) {
+        std::string chunk_id = bytes.substr(pos, 4);
+        size_t size = U32be(bytes, pos + 4);
+        if (chunk_id == "FORM" || chunk_id == "CAT ") {
+            if (Walk(bytes, pos + 12, std::min(end, pos + 8 + size), start, len)) return true;
+        } else if (chunk_id == "EVNT") {
+            start = pos + 8;
+            len = size;
             return true;
         }
-        p += 8 + n + n % 2;
+        pos += 8 + size + size % 2;
     }
     return false;
 }
 
+/** @brief An event as read, before it is put in time order. */
 struct Raw {
-    int t, order;
-    uint8_t st, a, b;
-    size_t i;
+    int tick;           ///< When it happens.
+    int order;          ///< Its place in the file, from 1; -1 for a note-off.
+    uint8_t status;     ///< MIDI status byte.
+    uint8_t data1;      ///< First data byte.
+    uint8_t data2;      ///< Second data byte, 0 when there is none.
+    size_t file_index;  ///< Its index in the read list, the sort's tie-breaker.
 };
 
 }  // namespace
 
-std::optional<Sequence> Parse(const std::string& s) {
+std::optional<Sequence> Parse(const std::string& bytes) {
     size_t start, len;
-    if (!Walk(s, 0, s.size(), start, len)) return std::nullopt;
-    size_t stop = std::min(s.size(), start + len);
+    if (!Walk(bytes, 0, bytes.size(), start, len)) return std::nullopt;
+    size_t stop = std::min(bytes.size(), start + len);
     std::vector<Raw> raw;
-    size_t p = start;
-    int t = 0, order = 0, finish = 0;
-    auto byte = [&](size_t i) -> uint8_t { return i < s.size() ? static_cast<uint8_t>(s[i]) : 0; };
-    auto varlen = [&]() {
-        int v = 0;
-        uint8_t c;
-        do {
-            c = byte(p++);
-            v = v * 128 + (c & 0x7f);
-        } while (c >= 0x80 && p < stop);
-        return v;
+    size_t pos = start;
+    int tick = 0, order = 0, finish = 0;
+    auto byte = [&](size_t offset) -> uint8_t {
+        return offset < bytes.size() ? static_cast<uint8_t>(bytes[offset]) : 0;
     };
-    while (p < stop) {
-        uint8_t c = byte(p);
-        if (c < 0x80) {
-            t += c;
-            p++;
+    // a MIDI variable-length number: seven bits a byte, high bit set on all but the last
+    auto varlen = [&]() {
+        int value = 0;
+        uint8_t next;
+        do {
+            next = byte(pos++);
+            value = value * 128 + (next & 0x7f);
+        } while (next >= 0x80 && pos < stop);
+        return value;
+    };
+    while (pos < stop) {
+        uint8_t status = byte(pos);
+        if (status < 0x80) {
+            tick += status;
+            pos++;
             continue;
         }
-        p++;
-        uint8_t hi = c & 0xf0;
-        if (c == 0xff) {
-            uint8_t kind = byte(p++);
-            int n = varlen();
-            p += n;
+        pos++;
+        uint8_t high_nibble = status & 0xf0;
+        if (status == 0xff) {
+            uint8_t kind = byte(pos++);
+            int length = varlen();
+            pos += length;
             if (kind == 0x2f) break;
-        } else if (c == 0xf0 || c == 0xf7) {
-            p += varlen();
-        } else if (hi == 0x90) {
-            uint8_t key = byte(p), vel = byte(p + 1);
-            p += 2;
+        } else if (status == 0xf0 || status == 0xf7) {
+            pos += varlen();
+        } else if (high_nibble == 0x90) {
+            uint8_t key = byte(pos), vel = byte(pos + 1);
+            pos += 2;
             int dur = varlen();
-            raw.push_back({t, ++order, c, key, vel, 0});
+            raw.push_back({tick, ++order, status, key, vel, 0});
             // the note's end sorts before anything else at its tick
-            raw.push_back({t + dur, -1, static_cast<uint8_t>(0x80 | (c & 15)), key, 0, 0});
-            finish = std::max(finish, t + dur);
-        } else if (hi == 0xc0 || hi == 0xd0) {
-            raw.push_back({t, ++order, c, byte(p), 0, 0});
-            p++;
+            raw.push_back({tick + dur, -1, static_cast<uint8_t>(0x80 | (status & 15)), key, 0, 0});
+            finish = std::max(finish, tick + dur);
+        } else if (high_nibble == 0xc0 || high_nibble == 0xd0) {
+            raw.push_back({tick, ++order, status, byte(pos), 0, 0});
+            pos++;
         } else {
-            raw.push_back({t, ++order, c, byte(p), byte(p + 1), 0});
-            p += 2;
+            raw.push_back({tick, ++order, status, byte(pos), byte(pos + 1), 0});
+            pos += 2;
         }
     }
-    finish = std::max(finish, t);
+    finish = std::max(finish, tick);
     // a stable sort: by tick, note-offs first, then the file's own order
-    for (size_t i = 0; i < raw.size(); i++) raw[i].i = i;
-    std::sort(raw.begin(), raw.end(), [](const Raw& x, const Raw& y) {
-        if (x.t != y.t) return x.t < y.t;
-        if ((x.order < 0) != (y.order < 0)) return x.order < 0;
-        return x.i < y.i;
+    for (size_t i = 0; i < raw.size(); i++) raw[i].file_index = i;
+    std::sort(raw.begin(), raw.end(), [](const Raw& lhs, const Raw& rhs) {
+        if (lhs.tick != rhs.tick) return lhs.tick < rhs.tick;
+        if ((lhs.order < 0) != (rhs.order < 0)) return lhs.order < 0;
+        return lhs.file_index < rhs.file_index;
     });
     Sequence seq;
     seq.length = finish;
     seq.events.reserve(raw.size());
-    for (auto& e : raw) seq.events.push_back({e.t, e.st, e.a, e.b});
+    for (auto& event : raw)
+        seq.events.push_back({event.tick, event.status, event.data1, event.data2});
     return seq;
 }
 

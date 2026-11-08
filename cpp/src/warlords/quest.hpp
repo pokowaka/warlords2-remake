@@ -1,7 +1,10 @@
-// Quests: taking one at a temple, checking it off, and the reward.
-//
-// docs/rules.md > Quests. quest_assign is 4976:0d7a, quest_check 4976:1ded
-// and quest_choose_reward 4976:1909. One quest per side at a time.
+/**
+ * @file
+ * @brief Quests: taking one at a temple, checking it off, and the reward.
+ *
+ * See docs/rules.md > Quests. The original's routines are quest_assign,
+ * quest_check and quest_choose_reward. One quest per side at a time.
+ */
 #pragma once
 
 #include <memory>
@@ -12,65 +15,83 @@
 
 namespace w2 {
 
-/** What a finished quest paid (quest_choose_reward). */
+/** @brief What a finished quest paid (the original's quest_choose_reward). */
 struct Reward {
-    std::string kind;  // "allies", "gold", "item", "revealed"
-    std::vector<Army*> armies;
-    const ArmyType* type = nullptr;
-    int count = 0;  // allies given, room or not
-    int gold = 0;
-    Item* item = nullptr;
-    Site* site = nullptr;
+    std::string kind;                ///< "allies", "gold", "item", "revealed".
+    std::vector<Army*> armies;       ///< The allies given, as many as had room.
+    const ArmyType* type = nullptr;  ///< The allies' army type.
+    int count = 0;                   ///< Allies given, room or not.
+    int gold = 0;                    ///< The gold given.
+    Item* item = nullptr;            ///< The item given.
+    Site* site = nullptr;            ///< The rich site revealed.
 };
 
-/** A quest's end: done with a reward, or failed for a reason. */
+/** @brief A quest's end: done with a reward, or failed for a reason. */
 struct QuestResult {
-    std::shared_ptr<Quest> quest;
-    std::shared_ptr<Reward> reward;
-    std::string failed;  // "" when it was done
-    int why = 0;         // the STRING.DAT group quest_check tells a human it with
+    std::shared_ptr<Quest> quest;    ///< The quest that ended.
+    std::shared_ptr<Reward> reward;  ///< The reward, when it was done.
+    std::string failed;              ///< Why it failed; "" when it was done.
+    int why = 0;  ///< The STRING.DAT group quest_check tells a human the failure with.
 };
 
 namespace quest {
 
+/// The quest types (Quest::type).
 constexpr int kSlayHero = 0, kRetrieveItem = 1, kSlayType = 2;
 constexpr int kSlaughter = 3, kOccupy = 4, kRaze = 5, kPillageGold = 6;
 
-// DS:00a0, rolled with 1d10: types 4, 5 and 6 come up twice as often.
+/// The original's quest type table, rolled with 1d10: types 4, 5 and 6 come
+/// up twice as often.
 extern const std::vector<int> kTypeTable;
+/// A line of prose per quest type; some take the required count.
 extern const char* const kDescriptions[7];
-// how far a target may be from the hero: a human's, a computer's
+/// How far a target may be from the hero: a human's, a computer's.
 constexpr int kItemRange = 50, kCityRange = 60;
 constexpr int kAiItemRange = 30, kAiCityRange = 40, kRazeRange = 60;
-// what a quest's target *is*, so it can be saved and restored by reference
+/// What a quest's target *is*, by quest type, so it can be saved and restored
+/// by reference.
 extern const char* const kTargetKind[7];
-constexpr int kExperience = 10;
-// The allies a quest gives are always Archons (4976:1d5b pushes 19).
+constexpr int kExperience = 10;  ///< Experience a hero gains for finishing a quest.
+/// The allies a quest gives are always Archons (army type 19), as in the
+/// original.
 constexpr int kRewardAlly = 19;
 
-/** Take a quest at a temple, or none (quest_assign, 4976:0d7a): tries until
- *  a quest finds a target -- pillage gold always does. `computer` for a
- *  computer player's (5ad0:15c3). */
-std::shared_ptr<Quest> Assign(Game& g, Side& side, Army* h, bool computer = false,
+/**
+ * @brief Takes a quest at a temple, or none (the original's quest_assign).
+ *
+ * Tries until a quest finds a target; pillage gold always does.
+ * @param hero The hero taking the quest.
+ * @param computer For a computer player's quest: other types first and
+ *     shorter ranges.
+ * @param flying Whether the searching stack flies: a retrieve-item quest
+ *     uncovers more round the item's site.
+ * @return The quest, or nullptr when the side has one or quests are off.
+ */
+std::shared_ptr<Quest> Assign(Game& game, Side& side, Army* hero, bool computer = false,
                               bool flying = false);
-/** A line of prose for a quest. */
-std::string Describe(const Quest& q);
+/** @brief A line of prose for a quest. */
+std::string Describe(const Quest& quest);
 
-/** What just happened, for event(). */
+/** @brief What just happened, for Notify(). */
 struct Event {
-    std::vector<Army*> stack;
-    std::vector<Army*> killed;
-    City* city = nullptr;
-    int gold = 0;
-    Army* hero = nullptr;
+    std::vector<Army*> stack;   ///< The stack that acted (the quest hero must be in it).
+    std::vector<Army*> killed;  ///< The armies killed in a battle.
+    City* city = nullptr;       ///< The city pillaged, occupied or razed.
+    int gold = 0;               ///< The gold pillaged.
+    Army* hero = nullptr;       ///< The hero concerned.
 };
-/** Tell the quest what just happened: "battle", "item", "pillage", "occupy",
- *  "raze" or "turn" (quest_check, 4976:1ded). */
-std::shared_ptr<QuestResult> Notify(Game& g, Side& side, const std::string& ev,
+/**
+ * @brief Tells the quest what just happened (the original's quest_check).
+ * @param event "battle", "item", "pillage", "occupy", "raze" or "turn".
+ * @return How the quest ended, or nullptr while it goes on.
+ */
+std::shared_ptr<QuestResult> Notify(Game& game, Side& side, const std::string& event,
                                     const Event& data = Event());
-/** Choose and give the reward (quest_choose_reward, 4976:1909, and
- *  quest_give_reward, 4976:1c02). */
-std::shared_ptr<Reward> ChooseReward(Game& g, Side& side, const Quest* q);
+/**
+ * @brief Chooses and gives the reward (the original's quest_choose_reward
+ * and quest_give_reward).
+ */
+std::shared_ptr<Reward> ChooseReward(Game& game, Side& side, const Quest* quest);
 
 }  // namespace quest
 }  // namespace w2

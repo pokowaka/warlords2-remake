@@ -50,7 +50,11 @@ using namespace w2;
 
 namespace {
 
-/** Show a picture in the system's viewer. */
+/**
+ * @brief Shows a picture in the system's image viewer.
+ *
+ * Prints a note to stderr when the viewer cannot be started.
+ */
 void OpenPicture(const std::string& path) {
 #if defined(__APPLE__)
     std::string cmd = "open \"" + path + "\"";
@@ -63,7 +67,13 @@ void OpenPicture(const std::string& path) {
         fprintf(stderr, "could not open %s; open it yourself\n", path.c_str());
 }
 
-/** The preview picture beside a scenario's files; its path. */
+/**
+ * @brief Draws the preview picture beside a scenario's files.
+ * @param data The game's data folder.
+ * @param name The scenario's folder and file name.
+ * @return The path of the picture written, DATA/NAME/NAME.png.
+ * @throws std::runtime_error when the picture cannot be written.
+ */
 std::string WritePreview(const std::string& data, const std::string& name) {
     auto map = scn::Load(data + "/" + name, name);
     std::string path = data + "/" + name + "/" + name + ".png";
@@ -72,20 +82,30 @@ std::string WritePreview(const std::string& data, const std::string& name) {
     return path;
 }
 
-/** What puts a world in New Scenario's list: NAME.INF, and the start menu's
- *  picture, PICS/SCENARIO.PCK (warlords/scenarios). */
+/**
+ * @brief Writes what puts a world in New Scenario's list.
+ *
+ * That is NAME.INF, the start menu's picture PICS/SCENARIO.PCK, and the
+ * world's entry in the list of generated scenarios (warlords/scenarios).
+ *
+ * @param data The game's data folder.
+ * @param dir The scenario's folder and file name.
+ * @param title The name shown in the list.
+ * @param text The description shown with it.
+ * @throws std::runtime_error when any of it cannot be written.
+ */
 void WriteListing(const std::string& data, const std::string& dir, const std::string& title,
                   const std::string& text) {
     auto map = scn::Load(data + "/" + dir, dir);
-    scenarios::Entry e;
-    e.name = title;
-    e.text = text;
-    e.cities = static_cast<int>(map->cities.size());
-    e.ruins = static_cast<int>(map->sites.size());
-    for (auto& sd : map->sides) e.players += sd.capital != nullptr;
+    scenarios::Entry entry;
+    entry.name = title;
+    entry.text = text;
+    entry.cities = static_cast<int>(map->cities.size());
+    entry.ruins = static_cast<int>(map->sites.size());
+    for (auto& side : map->sides) entry.players += side.capital != nullptr;
     std::string base = data + "/" + dir + "/";
     std::filesystem::create_directories(base + "PICS");
-    if (!WriteFile(base + dir + ".INF", scenarios::Info(e)) ||
+    if (!WriteFile(base + dir + ".INF", scenarios::Info(entry)) ||
         !WriteFile(base + "PICS/SCENARIO.PCK", pck::Encode(preview::MenuPicture(*map, data))) ||
         !scenarios::Remember(data, dir))
         throw std::runtime_error("could not write the listing in " + base);
@@ -93,6 +113,13 @@ void WriteListing(const std::string& data, const std::string& dir, const std::st
 
 }  // namespace
 
+/**
+ * @brief Parses the command line (see the top of this file) and makes the
+ *        worlds asked for, or only draws a preview (`--preview`) or dumps the
+ *        raw generated files (`--dump`).
+ * @return 0 on success, 1 when files are missing, cannot be written or no seed
+ *         passes the hard rules, 2 on a bad command line.
+ */
 int main(int argc, char** argv) {
     std::string data = "original", name, preview_only, dump_dir;
     long seed = 1;
@@ -100,48 +127,49 @@ int main(int argc, char** argv) {
     bool keep_failures = false, quiet = false, open = false;
     scengen::Settings world;
     for (int i = 1; i < argc; i++) {
-        std::string a = argv[i];
+        std::string arg = argv[i];
+        // the option's value: the next argument, which it consumes
         auto next = [&]() -> std::string {
             if (i + 1 >= argc) {
-                fprintf(stderr, "%s needs a value\n", a.c_str());
+                fprintf(stderr, "%s needs a value\n", arg.c_str());
                 exit(2);
             }
             return argv[++i];
         };
-        if (a == "--seed")
+        if (arg == "--seed")
             seed = std::stol(next());
-        else if (a == "--count")
+        else if (arg == "--count")
             count = std::max(1, std::stoi(next()));
-        else if (a == "--shape") {
-            std::string s = next();
-            if (!scengen::ParseShape(s, world.shape)) {
+        else if (arg == "--shape") {
+            std::string shape_name = next();
+            if (!scengen::ParseShape(shape_name, world.shape)) {
                 fprintf(stderr, "unknown shape '%s': use continents, pangaea or islands\n",
-                        s.c_str());
+                        shape_name.c_str());
                 return 2;
             }
-        } else if (a == "--cities")
+        } else if (arg == "--cities")
             world.cities = std::stoi(next());
-        else if (a == "--land")
+        else if (arg == "--land")
             world.land = std::stod(next());
-        else if (a == "--name")
+        else if (arg == "--name")
             name = Upper(next());
-        else if (a == "--data")
+        else if (arg == "--data")
             data = next();
-        else if (a == "--tries")
+        else if (arg == "--tries")
             tries = std::max(1, std::stoi(next()));
-        else if (a == "--keep-failures")
+        else if (arg == "--keep-failures")
             keep_failures = true;
-        else if (a == "--open")
+        else if (arg == "--open")
             open = true;
-        else if (a == "--quiet")
+        else if (arg == "--quiet")
             quiet = true;
-        else if (a == "--preview")
+        else if (arg == "--preview")
             preview_only = Upper(next());
-        else if (a == "--dump")
+        else if (arg == "--dump")
             dump_dir = next();
         else {
             fprintf(stderr, "unknown argument: %s (see the top of cpp/test/scengen.cpp)\n",
-                    a.c_str());
+                    arg.c_str());
             return 2;
         }
     }
@@ -178,47 +206,48 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (!dump_dir.empty()) {
-        for (int k = 0; k < count; k++) {
-            long s0 = seed + k;
-            Rng r(static_cast<double>(s0));
-            randommap::Options o;
-            o.data_dir = data;
-            o.rng = &r;
-            o.scenario = true;
-            o.world = world;
-            auto files = randommap::GenerateNow(o);
-            std::string dir =
-                    dump_dir + "/" + scengen::ShapeName(world.shape) + "-" + std::to_string(s0);
+        for (int world_index = 0; world_index < count; world_index++) {
+            long world_seed = seed + world_index;
+            Rng rng(static_cast<double>(world_seed));
+            randommap::Options options;
+            options.data_dir = data;
+            options.rng = &rng;
+            options.scenario = true;
+            options.world = world;
+            auto files = randommap::GenerateNow(options);
+            std::string dir = dump_dir + "/" + scengen::ShapeName(world.shape) + "-" +
+                              std::to_string(world_seed);
             std::filesystem::create_directories(dir);
             for (auto& [ext, bytes] : files)
                 WriteFile(dir + "/" + randommap::kDir + "." + ext, bytes);
-            auto t = scengen::MakeTitle(world.shape, s0);
-            WriteFile(dir + "/TITLE.TXT", t.name + "\n" + t.text + "\n");
+            auto title = scengen::MakeTitle(world.shape, world_seed);
+            WriteFile(dir + "/TITLE.TXT", title.name + "\n" + title.text + "\n");
         }
         return 0;
     }
     std::vector<std::string> pictures;
-    for (int k = 0; k < count; k++) {
+    for (int world_index = 0; world_index < count; world_index++) {
         randommap::Files files;
         mapeval::Evaluation eval;
-        long first = seed + k, used = first;
+        long first = seed + world_index, used = first;
         // a failed seed steps on by the count, so the worlds' seeds never collide
-        for (int t = 0; t < tries; t++, used += count) {
-            Rng r(static_cast<double>(used));
-            randommap::Options o;
-            o.data_dir = data;
-            o.rng = &r;
-            o.scenario = true;
-            o.world = world;
-            files = randommap::GenerateNow(o);
+        for (int attempt = 0; attempt < tries; attempt++, used += count) {
+            Rng rng(static_cast<double>(used));
+            randommap::Options options;
+            options.data_dir = data;
+            options.rng = &rng;
+            options.scenario = true;
+            options.world = world;
+            files = randommap::GenerateNow(options);
             auto map = scn::LoadFromFiles(data + "/" + randommap::kDir, randommap::kDir, files);
             eval = mapeval::Evaluate(*map, "scenario#" + std::to_string(used));
             if (eval.Passed() || keep_failures) break;
             if (!quiet) {
-                for (auto& is : eval.issues)
-                    if (mapeval::IsHard(is.check)) {
+                // report the first hard-rule failure only
+                for (auto& issue : eval.issues)
+                    if (mapeval::IsHard(issue.check)) {
                         printf("seed %ld: %s at (%d,%d): %s; trying another seed\n", used,
-                               is.check.c_str(), is.x, is.y, is.detail.c_str());
+                               issue.check.c_str(), issue.x, issue.y, issue.detail.c_str());
                         break;
                     }
             }
@@ -230,46 +259,47 @@ int main(int argc, char** argv) {
                     first);
             return 1;
         }
-        std::string n = name.empty() ? "GEN" + std::to_string(used % 100000) : name;
-        if (n.size() > 8) {
+        std::string folder = name.empty() ? "GEN" + std::to_string(used % 100000) : name;
+        if (folder.size() > 8) {
             fprintf(stderr,
                     "--name: '%s' is longer than the 8 letters the game's file names allow\n",
-                    n.c_str());
+                    folder.c_str());
             return 2;
         }
-        std::string dir = data + "/" + n;
+        std::string dir = data + "/" + folder;
         std::filesystem::create_directories(dir);
         for (auto& [ext, bytes] : files)
-            if (!WriteFile(dir + "/" + n + "." + ext, bytes)) {
-                fprintf(stderr, "could not write %s/%s.%s\n", dir.c_str(), n.c_str(), ext.c_str());
+            if (!WriteFile(dir + "/" + folder + "." + ext, bytes)) {
+                fprintf(stderr, "could not write %s/%s.%s\n", dir.c_str(), folder.c_str(),
+                        ext.c_str());
                 return 1;
             }
         // the item pool the random worlds use
         if (auto itm = ReadFile(data + "/RANDOM/RANDOM.ITM"))
-            WriteFile(dir + "/" + n + ".ITM", *itm);
+            WriteFile(dir + "/" + folder + ".ITM", *itm);
         std::string picture;
         try {
-            picture = WritePreview(data, n);
+            picture = WritePreview(data, folder);
             pictures.push_back(picture);
-            auto fun = scengen::MakeTitle(world.shape, used);
-            WriteListing(data, n, name.empty() ? fun.name : n, fun.text);
+            auto title = scengen::MakeTitle(world.shape, used);
+            WriteListing(data, folder, name.empty() ? title.name : folder, title.text);
         } catch (const std::exception& ex) {
-            fprintf(stderr, "%s: no preview or listing: %s\n", n.c_str(), ex.what());
+            fprintf(stderr, "%s: no preview or listing: %s\n", folder.c_str(), ex.what());
         }
         if (!quiet) {
             printf("%s: \"%s\" (seed %ld, %s), %s the hard rules\n", dir.c_str(),
-                   (name.empty() ? scengen::MakeTitle(world.shape, used).name : n).c_str(), used,
-                   scengen::ShapeName(world.shape), eval.Passed() ? "passes" : "FAILS");
+                   (name.empty() ? scengen::MakeTitle(world.shape, used).name : folder).c_str(),
+                   used, scengen::ShapeName(world.shape), eval.Passed() ? "passes" : "FAILS");
             if (count == 1)
                 for (const char* key :
                      {"cities", "landFrac", "clarkEvansR", "cityRoadCoverage", "capitalGapMinTurns",
                       "expansionGini", "remoteCityFrac", "roadsToNowhere"})
                     printf("  %-20s %.2f\n", key, eval.Metric(key));
             if (!picture.empty()) printf("  preview: %s\n", picture.c_str());
-            printf("  play it: bazel-bin/cpp/warlords2 --window --scenario %s\n", n.c_str());
+            printf("  play it: bazel-bin/cpp/warlords2 --window --scenario %s\n", folder.c_str());
         }
     }
     if (open)
-        for (auto& p : pictures) OpenPicture(p);
+        for (auto& picture_path : pictures) OpenPicture(picture_path);
     return 0;
 }

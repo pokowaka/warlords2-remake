@@ -8,56 +8,58 @@
 namespace w2::scenarios {
 
 namespace {
-constexpr size_t kRecord = 84;  // SCENARIO.DAT
+constexpr size_t kRecord = 84;  ///< The size of one SCENARIO.DAT record.
+/// How long a name and a description line may be in New Scenario's list.
 constexpr size_t kListNameMax = 20, kListTextMax = 30;
 }  // namespace
 
-std::string Info(const Entry& e) {
-    return "name=" + e.name.substr(0, kListNameMax) + "\n" +
-           "text=" + e.text.substr(0, kListTextMax) + "\n" + "cities=" + std::to_string(e.cities) +
-           "\n" + "ruins=" + std::to_string(e.ruins) + "\n" +
-           "players=" + std::to_string(e.players) + "\n";
+std::string Info(const Entry& entry) {
+    return "name=" + entry.name.substr(0, kListNameMax) + "\n" +
+           "text=" + entry.text.substr(0, kListTextMax) + "\n" +
+           "cities=" + std::to_string(entry.cities) + "\n" +
+           "ruins=" + std::to_string(entry.ruins) + "\n" +
+           "players=" + std::to_string(entry.players) + "\n";
 }
 
 std::optional<Entry> ParseInfo(const std::string& text, const std::string& dir) {
-    Entry e;
-    e.dir = dir;
-    e.generated = true;
+    Entry entry;
+    entry.dir = dir;
+    entry.generated = true;
     for (const std::string& raw : SplitLines(text)) {
         std::string line = Trim(raw);
-        auto eq = line.find('=');
-        if (line.empty() || line[0] == '#' || eq == std::string::npos) continue;
-        std::string key = Trim(line.substr(0, eq)), value = Trim(line.substr(eq + 1));
+        auto equals_at = line.find('=');
+        if (line.empty() || line[0] == '#' || equals_at == std::string::npos) continue;
+        std::string key = Trim(line.substr(0, equals_at)), value = Trim(line.substr(equals_at + 1));
         if (key == "name")
-            e.name = value.substr(0, kListNameMax);
+            entry.name = value.substr(0, kListNameMax);
         else if (key == "text")
-            e.text = value.substr(0, kListTextMax);
+            entry.text = value.substr(0, kListTextMax);
         else if (key == "cities")
-            e.cities = static_cast<int>(ToInt(value).value_or(0));
+            entry.cities = static_cast<int>(ToInt(value).value_or(0));
         else if (key == "ruins")
-            e.ruins = static_cast<int>(ToInt(value).value_or(0));
+            entry.ruins = static_cast<int>(ToInt(value).value_or(0));
         else if (key == "players")
-            e.players = static_cast<int>(ToInt(value).value_or(0));
+            entry.players = static_cast<int>(ToInt(value).value_or(0));
     }
-    if (e.name.empty()) return std::nullopt;
-    return e;
+    if (entry.name.empty()) return std::nullopt;
+    return entry;
 }
 
 std::vector<Entry> List(const std::string& data_dir) {
     std::vector<Entry> out;
-    std::vector<std::string> listed;
-    if (auto s = ReadFile(data_dir + "/DATA/SCENARIO.DAT")) {
-        for (size_t i = 0; i < s->size() / kRecord; i++) {
-            size_t o = kRecord * i;
-            Entry e{Cstr(*s, o, 20),
-                    Cstr(*s, o + 20, 8),
-                    Cstr(*s, o + 28, 30),
-                    U16(*s, o + 76),
-                    U16(*s, o + 78),
-                    U16(*s, o + 80),
-                    false};
-            listed.push_back(Upper(e.dir));
-            out.push_back(e);
+    std::vector<std::string> listed;  // the folders already in the list, upper case
+    if (auto records = ReadFile(data_dir + "/DATA/SCENARIO.DAT")) {
+        for (size_t i = 0; i < records->size() / kRecord; i++) {
+            size_t offset = kRecord * i;
+            Entry entry{Cstr(*records, offset, 20),
+                        Cstr(*records, offset + 20, 8),
+                        Cstr(*records, offset + 28, 30),
+                        U16(*records, offset + 76),
+                        U16(*records, offset + 78),
+                        U16(*records, offset + 80),
+                        false};
+            listed.push_back(Upper(entry.dir));
+            out.push_back(entry);
         }
     }
     if (auto lst = ReadFile(data_dir + "/DATA/SCENGEN.LST")) {
@@ -68,9 +70,9 @@ std::vector<Entry> List(const std::string& data_dir) {
             std::string base = data_dir + "/" + dir + "/" + dir;
             auto text = ReadFile(base + ".INF");
             if (!text || !FileExists(base + ".SCN")) continue;
-            if (auto e = ParseInfo(*text, dir)) {
+            if (auto entry = ParseInfo(*text, dir)) {
                 listed.push_back(Upper(dir));
-                out.push_back(*e);
+                out.push_back(*entry);
             }
         }
     }
@@ -86,7 +88,7 @@ bool Remember(const std::string& data_dir, const std::string& dir) {
     if (std::find(dirs.begin(), dirs.end(), dir) == dirs.end()) dirs.push_back(dir);
     std::sort(dirs.begin(), dirs.end());
     std::string text;
-    for (auto& d : dirs) text += d + "\n";
+    for (auto& listed_dir : dirs) text += listed_dir + "\n";
     return WriteFile(path, text);
 }
 

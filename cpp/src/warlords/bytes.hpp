@@ -1,5 +1,10 @@
-// Reading the original's little-endian records. Offsets are 0-based, as in
-// docs/formats.
+/**
+ * @file
+ * @brief Reading the original's little-endian records.
+ *
+ * Offsets are 0-based, as in docs/formats. Reads past the end of the data
+ * yield 0, so a short file reads as one padded with zeros.
+ */
 #pragma once
 
 #include <cstdint>
@@ -7,25 +12,33 @@
 
 namespace w2 {
 
-inline int U8(const std::string& b, size_t off) {
-    return off < b.size() ? static_cast<uint8_t>(b[off]) : 0;
+/** @brief The unsigned byte at `offset`, or 0 past the end of `bytes`. */
+inline int U8(const std::string& bytes, size_t offset) {
+    return offset < bytes.size() ? static_cast<uint8_t>(bytes[offset]) : 0;
 }
-inline int U16(const std::string& b, size_t off) {
-    return U8(b, off) + U8(b, off + 1) * 256;
+/** @brief The unsigned little-endian 16-bit word at `offset`. */
+inline int U16(const std::string& bytes, size_t offset) {
+    return U8(bytes, offset) + U8(bytes, offset + 1) * 256;
 }
-inline int I16(const std::string& b, size_t off) {
-    int v = U16(b, off);
-    return v >= 0x8000 ? v - 0x10000 : v;
+/** @brief The signed (two's complement) little-endian 16-bit word at `offset`. */
+inline int I16(const std::string& bytes, size_t offset) {
+    int value = U16(bytes, offset);
+    return value >= 0x8000 ? value - 0x10000 : value;
 }
 
-/** A NUL-terminated string in a fixed field, one character a byte. */
-inline std::string Cstr(const std::string& b, size_t off, size_t len) {
-    std::string s;
-    for (size_t i = off; i < off + len && i < b.size(); i++) {
-        if (b[i] == 0) break;
-        s += b[i];
+/**
+ * @brief A NUL-terminated string in a fixed field, one character a byte.
+ * @param bytes The record data.
+ * @param offset Where the field starts.
+ * @param length The field's width; the string stops at the first NUL or here.
+ */
+inline std::string Cstr(const std::string& bytes, size_t offset, size_t length) {
+    std::string text;
+    for (size_t i = offset; i < offset + length && i < bytes.size(); i++) {
+        if (bytes[i] == 0) break;
+        text += bytes[i];
     }
-    return s;
+    return text;
 }
 
 }  // namespace w2

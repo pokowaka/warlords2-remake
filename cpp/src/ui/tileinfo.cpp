@@ -1,12 +1,14 @@
-// The right button on the map: what is on a tile (740d:0037, button 2).
-//
-// Only on a tile the side has seen, and gone when the button comes up
-// (740d:11cf). The box is 256x75, centred on the tile (740d:131a), with
-// POPUP.PCK behind it through its mask. What it shows, first that applies:
-// a stack the side may see, side by side (740d:0bad) -- an enemy in a tower
-// only "Tower / Very hard to conquer!"; a city (740d:0c73) with its shields,
-// income and defence; a site (740d:0fd7); a signpost over POPUP2.PCK
-// (740d:0a1c); else the terrain (740d:10e1).
+/**
+ * @file
+ * @brief The right button on the map: what is on a tile (button 2).
+ *
+ * Only on a tile the side has seen, and gone when the button comes up. The
+ * box is 256x75, centred on the tile, with POPUP.PCK behind it through its
+ * mask. What it shows, first that applies: a stack the side may see, side by
+ * side -- an enemy in a tower only "Tower / Very hard to conquer!"; a city
+ * with its shields, income and defence; a site; a signpost over POPUP2.PCK;
+ * else the terrain.
+ */
 #include <cmath>
 
 #include "ui/dialogs.hpp"
@@ -18,16 +20,20 @@
 namespace tileinfo {
 
 namespace {
-const int kW = 256, kH = 75;
+const int kBoxWidth = 256;  ///< Width of the box.
+const int kBoxHeight = 75;  ///< Height of the box.
 
+/** @brief The box over the tile; any click, release or key takes it away. */
 struct TileBox : kit::Modal {
-    int bx = 0, by = 0;
-    bool sign = false;
-    std::function<void()> paint;
+    int box_x = 0;                ///< Left edge, in the dialogs' frame.
+    int box_y = 0;                ///< Top edge, in the dialogs' frame.
+    bool signpost_board = false;  ///< POPUP2.PCK, the signpost's board, behind.
+    std::function<void()> paint;  ///< Draws what is on the tile over the board.
+    /** @brief Draws the board, then what is on the tile. */
     void Draw() override {
-        auto b = infobox::BoardImage(sign ? infobox::kPopuP2 : infobox::kLines);
+        auto board = infobox::BoardImage(signpost_board ? infobox::kPopuP2 : infobox::kLines);
         gfx::SetColor(1, 1, 1);
-        if (b) gfx::Draw(b, gfx::NewQuad(0, 0, kW, kH), bx, by);
+        if (board) gfx::Draw(board, gfx::NewQuad(0, 0, kBoxWidth, kBoxHeight), box_x, box_y);
         gfx::SetColor(1, 1, 1);
         paint();
     }
@@ -40,114 +46,132 @@ struct TileBox : kit::Modal {
 };
 }  // namespace
 
-void Open(int tx, int ty) {
-    w2::Game& g = *G.g;
-    int viewer = w2::game::ViewerSide(g, G.player);
-    if (!w2::game::Seen(g, viewer, tx, ty)) return;
-    const auto& l = G.layout;
-    auto [fcx, fcy] = front::MapToUi(tx + 0.5, ty + 0.5);
-    int cx = static_cast<int>(std::floor(fcx)), cy = static_cast<int>(std::floor(fcy));
-    cx = (cx + 4) / 8 * 8;
-    cx = std::max(kW / 2, std::min(l.w - kW / 2, cx));
-    cy = std::max(kH / 2, std::min(l.h - 2 - kH / 2, cy));
-    int bx = cx - kW / 2 - l.dialog.x, by = cy - kH / 2 - l.dialog.y;
-    w2::Side* me = G.player;
-    auto d = std::make_shared<TileBox>();
-    d->bx = bx;
-    d->by = by;
+/**
+ * @brief Shows what is on map tile (tile_x, tile_y) in a box over it.
+ *
+ * The box is kept on the screen and its centre snapped to 8 pixels across.
+ */
+void Open(int tile_x, int tile_y) {
+    w2::Game& game = *G.g;
+    int viewer = w2::game::ViewerSide(game, G.player);
+    if (!w2::game::Seen(game, viewer, tile_x, tile_y)) return;
+    const auto& screen_layout = G.layout;
+    auto [exact_centre_x, exact_centre_y] = front::MapToUi(tile_x + 0.5, tile_y + 0.5);
+    int centre_x = static_cast<int>(std::floor(exact_centre_x)),
+        centre_y = static_cast<int>(std::floor(exact_centre_y));
+    centre_x = (centre_x + 4) / 8 * 8;
+    centre_x = std::max(kBoxWidth / 2, std::min(screen_layout.w - kBoxWidth / 2, centre_x));
+    centre_y = std::max(kBoxHeight / 2, std::min(screen_layout.h - 2 - kBoxHeight / 2, centre_y));
+    int box_x = centre_x - kBoxWidth / 2 - screen_layout.dialog.x,
+        box_y = centre_y - kBoxHeight / 2 - screen_layout.dialog.y;
+    w2::Side* player = G.player;
+    auto box = std::make_shared<TileBox>();
+    box->box_x = box_x;
+    box->box_y = box_y;
 
-    auto armies = w2::game::ArmiesAt(g, tx, ty);
+    auto armies = w2::game::ArmiesAt(game, tile_x, tile_y);
     int owner = armies.empty() ? w2::kNone : armies[0]->owner;
-    bool tower = w2::game::TowerAt(g, tx, ty);
-    w2::City* city = w2::game::CityAt(g, tx, ty);
-    w2::Site* site = g.map->site_at.empty() ? nullptr : g.map->site_at[ty * g.map->width + tx];
-    int terrain = w2::scn::TerrainAt(*g.map, tx, ty);
-    auto colours = [](const w2::Side* s) -> const Font& {
-        return kit::GetFont(2).Colours(s->colour, s->edge);
+    bool tower = w2::game::TowerAt(game, tile_x, tile_y);
+    w2::City* city = w2::game::CityAt(game, tile_x, tile_y);
+    w2::Site* site = game.map->site_at.empty()
+                             ? nullptr
+                             : game.map->site_at[tile_y * game.map->width + tile_x];
+    int terrain = w2::scn::TerrainAt(*game.map, tile_x, tile_y);
+    // the text font in a side's colours
+    auto colours = [](const w2::Side* side) -> const Font& {
+        return kit::GetFont(2).Colours(side->colour, side->edge);
     };
-    auto two_lines = [bx, by](const std::string& a, const std::string& b, bool plain_first) {
-        const Font& f = kit::GetFont(2);
-        kit::Centred(plain_first ? f : f.Colours(7, 0), a, bx + kW / 2 - 8, by + 11);
-        kit::Centred(f, b, bx + kW / 2 - 8, by + 35);
+    // two centred lines; the first in colours 7 and 0 unless `plain_first`
+    auto two_lines = [box_x, box_y](const std::string& first, const std::string& second,
+                                    bool plain_first) {
+        const Font& font = kit::GetFont(2);
+        kit::Centred(plain_first ? font : font.Colours(7, 0), first, box_x + kBoxWidth / 2 - 8,
+                     box_y + 11);
+        kit::Centred(font, second, box_x + kBoxWidth / 2 - 8, box_y + 35);
     };
 
-    if (!armies.empty() &&
-        (viewer == w2::kNone || g.map->options.view_enemies != 0 || owner == me->index || tower)) {
-        if (viewer != w2::kNone && owner != me->index && tower &&
-            g.map->options.view_enemies == 0) {
-            d->paint = [two_lines]() { two_lines(kit::Text(0x82, 0), kit::Text(0x82, 1), false); };
+    if (!armies.empty() && (viewer == w2::kNone || game.map->options.view_enemies != 0 ||
+                            owner == player->index || tower)) {
+        if (viewer != w2::kNone && owner != player->index && tower &&
+            game.map->options.view_enemies == 0) {
+            box->paint = [two_lines]() {
+                two_lines(kit::Text(0x82, 0), kit::Text(0x82, 1), false);
+            };
         } else {
-            d->paint = [armies, bx, by]() {
-                int n = static_cast<int>(armies.size());
-                int x = (bx + kW / 2 - n * 12 - 16 + 4) / 8 * 8;
-                for (int i = 0; i < n; i++)
-                    kit::Army(armies[i]->type, armies[i]->owner, x + 24 * i, by + 16, 0);
+            box->paint = [armies, box_x, box_y]() {
+                int count = static_cast<int>(armies.size());
+                int x = (box_x + kBoxWidth / 2 - count * 12 - 16 + 4) / 8 * 8;
+                for (int i = 0; i < count; i++)
+                    kit::Army(armies[i]->type, armies[i]->owner, x + 24 * i, box_y + 16, 0);
             };
         }
     } else if (city) {
-        d->paint = [city, me, bx, by, colours]() {
-            const Font& f = kit::GetFont(2);
-            const w2::Side* own =
-                    city->owner_index != w2::kNone ? &G.g->map->sides[city->owner_index] : me;
-            kit::Centred(colours(own), city->name, bx + kW / 2 - 8, by + 11);
+        box->paint = [city, player, box_x, box_y, colours]() {
+            const Font& font = kit::GetFont(2);
+            const w2::Side* owner_side =
+                    city->owner_index != w2::kNone ? &G.g->map->sides[city->owner_index] : player;
+            kit::Centred(colours(owner_side), city->name, box_x + kBoxWidth / 2 - 8, box_y + 11);
             if (city->razed) {
-                kit::Centred(f, "Razed!", bx + kW / 2 - 8, by + 35);
+                kit::Centred(font, "Razed!", box_x + kBoxWidth / 2 - 8, box_y + 35);
                 return;
             }
             if (city->owner_index != w2::kNone && city->owner_index < 8) {
-                for (int x : {bx + 24, bx + kW - 48}) {
+                for (int x : {box_x + 24, box_x + kBoxWidth - 48}) {
                     gfx::SetColor(1, 1, 1);
                     gfx::Draw(G.shields_img, gfx::NewQuad(city->owner_index * 40 + 24, 46, 16, 16),
-                              x, by + 10);
+                              x, box_y + 10);
                 }
             }
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.abits, gfx::NewQuad(424, 0, 24, 11), bx + 48, by + 36);
-            f.Draw(w2::Fmt("%d", city->income), bx + 80, by + 33);
+            gfx::Draw(G.abits, gfx::NewQuad(424, 0, 24, 11), box_x + 48, box_y + 36);
+            font.Draw(w2::Fmt("%d", city->income), box_x + 80, box_y + 33);
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.abits, gfx::NewQuad(424, 11, 24, 11), bx + 144, by + 36);
-            f.Draw(w2::Fmt("%d", city->defence), bx + 176, by + 33);
-            auto bs = G.screen->ArtFor(38);
+            gfx::Draw(G.abits, gfx::NewQuad(424, 11, 24, 11), box_x + 144, box_y + 36);
+            font.Draw(w2::Fmt("%d", city->defence), box_x + 176, box_y + 33);
+            // a capital is marked on both sides with its side's cell of art 38
+            auto capital_marks = G.screen->ArtFor(38);
             for (int i = 0; i < 8; i++) {
-                if (G.g->map->sides[i].capital == city && bs) {
-                    for (int x : {bx + 16, bx + kW - 56}) {
+                if (G.g->map->sides[i].capital == city && capital_marks) {
+                    for (int x : {box_x + 16, box_x + kBoxWidth - 56}) {
                         gfx::SetColor(1, 1, 1);
-                        gfx::Draw(bs->image, gfx::NewQuad(i * 32, 36, 32, 23), x, by + 10);
+                        gfx::Draw(capital_marks->image, gfx::NewQuad(i * 32, 36, 32, 23), x,
+                                  box_y + 10);
                     }
                 }
             }
         };
     } else if (site) {
-        d->paint = [site, me, bx, by, colours]() {
-            const Font& f = kit::GetFont(2);
-            kit::Centred(colours(me), site->name, bx + kW / 2 - 8, by + 11);
+        box->paint = [site, player, box_x, box_y, colours]() {
+            const Font& font = kit::GetFont(2);
+            kit::Centred(colours(player), site->name, box_x + kBoxWidth / 2 - 8, box_y + 11);
             if (site->content == w2::site::kTemple)
-                kit::Centred(f, "Blessings & Quests!", bx + kW / 2 - 8, by + 35);
+                kit::Centred(font, "Blessings & Quests!", box_x + kBoxWidth / 2 - 8, box_y + 35);
             else if (site->searched)
-                kit::Centred(f, "Explored!", bx + kW / 2 - 8, by + 33);
+                kit::Centred(font, "Explored!", box_x + kBoxWidth / 2 - 8, box_y + 33);
             else
-                kit::Centred(f, "Unexplored!", bx + kW / 2 - 8, by + 35);
+                kit::Centred(font, "Unexplored!", box_x + kBoxWidth / 2 - 8, box_y + 35);
         };
-    } else if (terrain == w2::move::kTower && w2::game::SignAt(g, tx, ty)) {
-        w2::Sign* sign = w2::game::SignAt(g, tx, ty);
-        d->sign = true;
-        d->paint = [sign, two_lines]() { two_lines(sign->lines[0], sign->lines[1], true); };
+    } else if (terrain == w2::move::kTower && w2::game::SignAt(game, tile_x, tile_y)) {
+        w2::Sign* sign = w2::game::SignAt(game, tile_x, tile_y);
+        box->signpost_board = true;
+        box->paint = [sign, two_lines]() { two_lines(sign->lines[0], sign->lines[1], true); };
     } else {
-        bool road = w2::scn::RoadAt(*g.map, tx, ty) % 32 != 0;
-        bool port = g.map->crossing[ty * g.map->width + tx];
+        bool road = w2::scn::RoadAt(*game.map, tile_x, tile_y) % 32 != 0;
+        bool port = game.map->crossing[tile_y * game.map->width + tile_x];
         if (port) {
-            d->paint = [two_lines]() {
+            box->paint = [two_lines]() {
                 two_lines("Port", "A way for armies to put to sea", false);
             };
         } else {
-            int t = road ? 0 : terrain;
-            d->paint = [t, two_lines]() {
-                two_lines(kit::Text(0x80, t), kit::Text(0x81, t), false);
+            // a road is told as line 0, else the terrain's own lines
+            int terrain_line = road ? 0 : terrain;
+            box->paint = [terrain_line, two_lines]() {
+                two_lines(kit::Text(0x80, terrain_line), kit::Text(0x81, terrain_line), false);
             };
         }
     }
-    d->infobox = true;
-    kit::Push(d);
+    box->infobox = true;
+    kit::Push(box);
 }
 
 }  // namespace tileinfo

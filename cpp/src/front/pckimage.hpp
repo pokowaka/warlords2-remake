@@ -1,5 +1,10 @@
-// Decoded .PCK sheets as images in a palette, with colours keyed out or
-// remapped as the original blits them. See docs/formats/pck.md.
+/**
+ * @file
+ * @brief Decoded .PCK sheets as images in a palette.
+ *
+ * Colours are keyed out or remapped as the original blits them. See
+ * docs/formats/pck.md.
+ */
 #pragma once
 
 #include <map>
@@ -12,18 +17,23 @@
 
 namespace pckimage {
 
-/** An image from decoded indices, each passed through `map` (index -> index)
- *  if given; `keys` is the sheet's own indices to leave clear. This is how a
- *  font is drawn in colours other than its own (78a8:0839). */
-gfx::ImageP FromPixels(const w2::pck::Pixels& px, const w2::pal::Palette& palette,
+/**
+ * @brief An image from decoded palette indices.
+ *
+ * Each index is passed through `map` (index -> index) if it is there;
+ * `keys` is the sheet's own indices to leave clear. This is how a font is
+ * drawn in colours other than its own.
+ */
+gfx::ImageP FromPixels(const w2::pck::Pixels& pixels, const w2::pal::Palette& palette,
                        const std::map<int, int>& map = {}, const std::set<int>& keys = {});
 
-constexpr int kCorner = -2;  // key out whatever colour the sheet's top left is
-constexpr int kNokey = -1;
+constexpr int kCorner = -2;  ///< Key out whatever colour the sheet's top left is.
+constexpr int kNokey = -1;   ///< Key out nothing.
 
-/** Decode a .PCK into an image; `key` is the index to make transparent,
- *  NOKEY or CORNER. */
+/** @brief Decodes a .PCK into an image; `key` is the index to make transparent, kNokey or kCorner.
+ */
 gfx::ImageP Load(const std::string& path, const w2::pal::Palette& palette, int key = kNokey);
+/** @brief Decodes a .PCK into an image with every index in `keys` transparent. */
 gfx::ImageP Load(const std::string& path, const w2::pal::Palette& palette,
                  const std::set<int>& keys);
 

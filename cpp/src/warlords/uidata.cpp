@@ -7,18 +7,20 @@
 
 namespace w2::uidata {
 
+/// The word that opens every AREA.DAT and BUTTON.DAT record.
 static const int kMagic = 0x7d00;
 
 Strings LoadStrings(const std::string& path) {
-    std::string s = MustRead(path);
-    int n_groups = U16(s, 0) / 4;  // the first offset IS the index size
+    std::string bytes = MustRead(path);
+    int n_groups = U16(bytes, 0) / 4;  // the first offset IS the index size
     Strings groups;
-    for (int g = 0; g < n_groups; g++) {
-        int off = U16(s, static_cast<size_t>(g) * 4), count = U16(s, g * 4 + 2);
+    for (int group = 0; group < n_groups; group++) {
+        int offset = U16(bytes, static_cast<size_t>(group) * 4), count = U16(bytes, group * 4 + 2);
         std::vector<std::string> out;
         for (int i = 0; i < count; i++) {
-            int at = U16(s, off + i * 2);
-            out.push_back(Cstr(s, at, s.size() > static_cast<size_t>(at) ? s.size() - at : 0));
+            int pos = U16(bytes, offset + i * 2);
+            out.push_back(Cstr(bytes, pos,
+                               bytes.size() > static_cast<size_t>(pos) ? bytes.size() - pos : 0));
         }
         groups.push_back(out);
     }
@@ -26,136 +28,140 @@ Strings LoadStrings(const std::string& path) {
 }
 
 std::map<int, Join> Joins(const std::string& path) {
-    std::string s = MustRead(path);
+    std::string bytes = MustRead(path);
     std::map<int, Join> out;
-    for (size_t i = 0; i < s.size() / 6; i++) {
-        size_t at = i * 6;
-        out[U16(s, at)] = Join{U16(s, at + 2), U16(s, at + 4)};
+    for (size_t i = 0; i < bytes.size() / 6; i++) {
+        size_t pos = i * 6;
+        out[U16(bytes, pos)] = Join{U16(bytes, pos + 2), U16(bytes, pos + 4)};
     }
     return out;
 }
 
 std::map<int, Area> Areas(const std::string& path) {
-    std::string s = MustRead(path);
+    std::string bytes = MustRead(path);
     std::map<int, Area> out;
-    size_t at = 0;
-    while (at + 13 < s.size()) {
-        if (U16(s, at) != kMagic) throw std::runtime_error("AREA.DAT: lost the record boundary");
-        Area a;
-        a.id = U16(s, at + 2);
-        a.enabled = U16(s, at + 4);
-        int count = U16(s, at + 6);
+    size_t pos = 0;
+    while (pos + 13 < bytes.size()) {
+        if (U16(bytes, pos) != kMagic)
+            throw std::runtime_error("AREA.DAT: lost the record boundary");
+        Area area;
+        area.id = U16(bytes, pos + 2);
+        area.enabled = U16(bytes, pos + 4);
+        int count = U16(bytes, pos + 6);
         for (int i = 0; i < count; i++) {
-            size_t r = at + 14 + static_cast<size_t>(i) * 14;
-            a.regions.push_back(
-                    Region{U16(s, r), U16(s, r + 4), U16(s, r + 6), U16(s, r + 8), U16(s, r + 10)});
+            size_t region = pos + 14 + static_cast<size_t>(i) * 14;
+            area.regions.push_back(Region{U16(bytes, region), U16(bytes, region + 4),
+                                          U16(bytes, region + 6), U16(bytes, region + 8),
+                                          U16(bytes, region + 10)});
         }
-        out[a.id] = a;
-        at += 14 + count * 14;
+        out[area.id] = area;
+        pos += 14 + count * 14;
     }
     return out;
 }
 
 std::map<int, ButtonGroup> Buttons(const std::string& path) {
-    std::string s = MustRead(path);
+    std::string bytes = MustRead(path);
     std::map<int, ButtonGroup> out;
-    size_t at = 0;
-    while (at + 32 < s.size()) {
-        if (U16(s, at) != kMagic) throw std::runtime_error("BUTTON.DAT: lost the record boundary");
-        ButtonGroup b;
-        b.id = U16(s, at + 2);
-        int count = U16(s, at + 4);
+    size_t pos = 0;
+    while (pos + 32 < bytes.size()) {
+        if (U16(bytes, pos) != kMagic)
+            throw std::runtime_error("BUTTON.DAT: lost the record boundary");
+        ButtonGroup group;
+        group.id = U16(bytes, pos + 2);
+        int count = U16(bytes, pos + 4);
         for (int i = 0; i < count; i++) {
-            size_t c = at + 33 + static_cast<size_t>(i) * 33;
-            Control ctl;
-            for (int st = 0; st <= 2; st++)
-                ctl.src[st] = Point{U16(s, c + 19 + static_cast<size_t>(st) * 4),
-                                    U16(s, c + 21 + static_cast<size_t>(st) * 4)};
-            ctl.id = U16(s, c);
-            ctl.x = U16(s, c + 6);
-            ctl.y = U16(s, c + 8);
-            ctl.w = U8(s, c + 10);
-            ctl.h = U8(s, c + 11);
-            ctl.bitmap = U16(s, c + 31);
-            b.controls.push_back(ctl);
+            size_t record = pos + 33 + static_cast<size_t>(i) * 33;
+            Control control;
+            for (int state = 0; state <= 2; state++)
+                control.src[state] =
+                        Point{U16(bytes, record + 19 + static_cast<size_t>(state) * 4),
+                              U16(bytes, record + 21 + static_cast<size_t>(state) * 4)};
+            control.id = U16(bytes, record);
+            control.x = U16(bytes, record + 6);
+            control.y = U16(bytes, record + 8);
+            control.w = U8(bytes, record + 10);
+            control.h = U8(bytes, record + 11);
+            control.bitmap = U16(bytes, record + 31);
+            group.controls.push_back(control);
         }
-        out[b.id] = b;
-        at += 33 + count * 33;
+        out[group.id] = group;
+        pos += 33 + count * 33;
     }
     return out;
 }
 
 std::map<int, ShortcutItem> ShortcutItems(const std::string& path) {
-    std::string s = MustRead(path);
+    std::string bytes = MustRead(path);
     std::map<int, ShortcutItem> out;
-    for (size_t i = 0; (i + 1) * 68 <= s.size(); i++) {
-        size_t at = i * 68;
-        int id = U16(s, at + 2);
-        std::string name = Cstr(s, at + 4, 50);
-        int x = U16(s, at + 54), y = U16(s, at + 56);
+    for (size_t i = 0; (i + 1) * 68 <= bytes.size(); i++) {
+        size_t pos = i * 68;
+        int item_id = U16(bytes, pos + 2);
+        std::string name = Cstr(bytes, pos + 4, 50);
+        int x = U16(bytes, pos + 54), y = U16(bytes, pos + 56);
         if (!name.empty()) {
-            ShortcutItem it;
-            it.name = name;
-            it.w = U16(s, at + 66);
-            it.h = U16(s, at + 60);
-            it.src = {Point{x + U16(s, at + 66), y}, Point{x, y},
-                      Point{U16(s, at + 62), U16(s, at + 64)}};
-            out[id] = it;
+            ShortcutItem item;
+            item.name = name;
+            item.w = U16(bytes, pos + 66);
+            item.h = U16(bytes, pos + 60);
+            item.src = {Point{x + U16(bytes, pos + 66), y}, Point{x, y},
+                        Point{U16(bytes, pos + 62), U16(bytes, pos + 64)}};
+            out[item_id] = item;
         }
     }
     return out;
 }
 
 std::map<int, int> Shortcuts(const std::string& path) {
-    std::string s = MustRead(path);
+    std::string bytes = MustRead(path);
     std::map<int, int> out;
-    for (size_t i = 0; i < s.size() / 2; i++) out[static_cast<int>(i)] = U16(s, i * 2);
+    for (size_t i = 0; i < bytes.size() / 2; i++) out[static_cast<int>(i)] = U16(bytes, i * 2);
     return out;
 }
 
 UI Load(const std::string& data_dir) {
-    std::string d = data_dir + "/DATA/";
-    UI ui;
-    ui.files = LoadStrings(d + "FILE.DAT");
-    if (ui.files.size() > 3)
-        for (size_t i = 0; i < ui.files[3].size(); i++)
-            ui.bitmaps[static_cast<int>(i)] = Lower(ui.files[3][i]);
+    std::string dir = data_dir + "/DATA/";
+    UI layout;
+    layout.files = LoadStrings(dir + "FILE.DAT");
+    if (layout.files.size() > 3)
+        for (size_t i = 0; i < layout.files[3].size(); i++)
+            layout.bitmaps[static_cast<int>(i)] = Lower(layout.files[3][i]);
     try {
-        ui.shortcut_items = ShortcutItems(data_dir + "/UDB/UDB.DAT");
-        ui.shortcuts = Shortcuts(data_dir + "/UDB/UDB.CUR");
+        layout.shortcut_items = ShortcutItems(data_dir + "/UDB/UDB.DAT");
+        layout.shortcuts = Shortcuts(data_dir + "/UDB/UDB.CUR");
     } catch (const std::exception&) {
-        ui.shortcut_items.clear();
-        ui.shortcuts.clear();
+        layout.shortcut_items.clear();
+        layout.shortcuts.clear();
     }
-    for (auto& [id, it] : ui.shortcut_items) ui.shortcut_names[id] = it.name;
-    ui.joins = Joins(d + "JOIN.DAT");
-    ui.areas = Areas(d + "AREA.DAT");
-    ui.buttons = Buttons(d + "BUTTON.DAT");
-    ui.text = LoadStrings(d + "STRING.DAT");
-    return ui;
+    for (auto& [item_id, item] : layout.shortcut_items) layout.shortcut_names[item_id] = item.name;
+    layout.joins = Joins(dir + "JOIN.DAT");
+    layout.areas = Areas(dir + "AREA.DAT");
+    layout.buttons = Buttons(dir + "BUTTON.DAT");
+    layout.text = LoadStrings(dir + "STRING.DAT");
+    return layout;
 }
 
-std::string Text(const UI& ui, int group, int index) {
-    if (group < 0 || group >= static_cast<int>(ui.text.size())) return "";
-    const auto& g = ui.text[group];
-    if (index < 0 || index >= static_cast<int>(g.size())) return "";
-    return g[index];
+std::string Text(const UI& layout, int group, int index) {
+    if (group < 0 || group >= static_cast<int>(layout.text.size())) return "";
+    const auto& strings = layout.text[group];
+    if (index < 0 || index >= static_cast<int>(strings.size())) return "";
+    return strings[index];
 }
 
-Dialog FindDialog(const UI& ui, int id) {
-    Dialog d;
-    d.id = id;
-    auto j = ui.joins.find(id);
-    if (j == ui.joins.end()) return d;
-    d.found = true;
-    auto b = ui.buttons.find(j->second.button);
-    auto a = ui.areas.find(j->second.area);
-    if (b != ui.buttons.end()) d.controls = b->second.controls;
-    if (a != ui.areas.end()) {
-        d.regions = a->second.regions;
-        d.enabled = a->second.enabled;
+Dialog FindDialog(const UI& layout, int dialog_id) {
+    Dialog dialog;
+    dialog.id = dialog_id;
+    auto join = layout.joins.find(dialog_id);
+    if (join == layout.joins.end()) return dialog;
+    dialog.found = true;
+    auto buttons = layout.buttons.find(join->second.button);
+    auto area = layout.areas.find(join->second.area);
+    if (buttons != layout.buttons.end()) dialog.controls = buttons->second.controls;
+    if (area != layout.areas.end()) {
+        dialog.regions = area->second.regions;
+        dialog.enabled = area->second.enabled;
     }
-    return d;
+    return dialog;
 }
 
 }  // namespace w2::uidata
