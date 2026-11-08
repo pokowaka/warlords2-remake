@@ -11,6 +11,9 @@ evaluator or of a generator.
     cpp/build/w2mapeval --seeds 1-200 --json /tmp/mv/eval.json --export /tmp/mv/maps
     # 2. make a ballot: pair-NN.png (clean), pair-NN-issues.png, ballot-B.json
     python3 tools/mapvote.py ballot --eval /tmp/mv/eval.json --maps /tmp/mv/maps --out DIR --batch 1
+    #    or the same seeds from two generators (one --eval file per generator)
+    python3 tools/mapvote.py ballot --eval c.json f.json --maps /tmp/mv/maps --out DIR --batch 2 \
+        --matched classic,fair
     # 3. record the votes, e.g. pair 1 went to A, 2 to B, 3 no preference
     python3 tools/mapvote.py record --ballot DIR/ballot-1.json 1A 2B 3= --note 2 "roads make sense"
     # 4. how often the evaluator agrees, overall and metric by metric
@@ -180,9 +183,12 @@ def folder_of(name):
     return name.replace('#', '-')
 
 
-def load_eval(path):
-    data = json.load(open(path))
-    return {m['name']: m for m in data['maps']}
+def load_eval(paths):
+    """Every map in one or more evaluator JSON files, by name."""
+    out = {}
+    for path in paths if isinstance(paths, list) else [paths]:
+        out.update({m['name']: m for m in json.load(open(path))['maps']})
+    return out
 
 
 def voted():
@@ -250,14 +256,37 @@ def choose_pairs(maps, count, rng):
     return pairs
 
 
+def matched_pairs(maps, gens, count, rng):
+    """The same seed from two generators, side by side in a random order:
+    the same world, made two ways, so only what differs is judged."""
+    a, b = gens
+    seen = {v['a'] for v in voted()} | {v['b'] for v in voted()}
+    seeds = sorted({n.split('#')[1] for n in maps if n.startswith(a + '#')} &
+                   {n.split('#')[1] for n in maps if n.startswith(b + '#')}, key=int)
+    seeds = [s for s in seeds if '%s#%s' % (a, s) not in seen and '%s#%s' % (b, s) not in seen
+             and 'classic#%s' % s not in seen]
+    pairs = []
+    picked = rng.sample(seeds, min(count, len(seeds)))
+    for k, s in enumerate(picked):
+        x, y = maps['%s#%s' % (a, s)], maps['%s#%s' % (b, s)]
+        # each generator on the left exactly half the time
+        pairs.append((x, y, 'matched') if k % 2 == 0 else (y, x, 'matched'))
+    rng.shuffle(pairs)
+    return pairs
+
+
 def cmd_ballot(args):
     maps = load_eval(args.eval)
     rng = random.Random(args.batch)
-    pairs = choose_pairs(maps, args.pairs, rng)
+    if args.matched:
+        pairs = matched_pairs(maps, args.matched.split(','), args.pairs, rng)
+    else:
+        pairs = choose_pairs(maps, args.pairs, rng)
     os.makedirs(args.out, exist_ok=True)
     pal = load_pal(os.path.join(TERRAIN, 'WAR2.PAL')) + EXTRA
     issues_of = {m['name']: m['issues'] for m in maps.values()}
-    ballot = {'batch': args.batch, 'eval': os.path.abspath(args.eval), 'maps': os.path.abspath(args.maps),
+    ballot = {'batch': args.batch, 'eval': [os.path.abspath(e) for e in args.eval],
+              'maps': os.path.abspath(args.maps),
               'pairs': []}
     for n, (a, b, kind) in enumerate(pairs, 1):
         cv = draw_pair(n, a['name'], b['name'], args.maps)
@@ -298,7 +327,7 @@ def cmd_agree(args):
     maps = load_eval(args.eval)
     votes = [v for v in voted() if v['winner'] != 'tie' and v['a'] in maps and v['b'] in maps]
     if not votes:
-        sys.exit('no decided votes on maps in %s' % args.eval)
+        sys.exit('no decided votes on maps in %s' % ' '.join(args.eval))
 
     def pen(n):
         return maps[n]['score']['penalty']
@@ -331,8 +360,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest='cmd', required=True)
     b = sub.add_parser('ballot')
-    b.add_argument('--eval', required=True)
+    b.add_argument('--eval', required=True, nargs='+')
     b.add_argument('--maps', required=True)
+    b.add_argument('--matched', metavar='GEN_A,GEN_B',
+                   help='pair the same seeds from two generators instead')
     b.add_argument('--out', required=True)
     b.add_argument('--batch', type=int, required=True)
     b.add_argument('--pairs', type=int, default=12)
@@ -341,7 +372,7 @@ def main():
     r.add_argument('--note', nargs=2, action='append', metavar=('PAIR', 'TEXT'))
     r.add_argument('votes', nargs='+')
     a = sub.add_parser('agree')
-    a.add_argument('--eval', required=True)
+    a.add_argument('--eval', required=True, nargs='+')
     args = p.parse_args()
     {'ballot': cmd_ballot, 'record': cmd_record, 'agree': cmd_agree}[args.cmd](args)
 

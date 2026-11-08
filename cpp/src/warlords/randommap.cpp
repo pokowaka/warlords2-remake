@@ -24,6 +24,7 @@
 #include "warlords/armytype.hpp"
 #include "warlords/bytes.hpp"
 #include "warlords/move.hpp"
+#include "warlords/travel.hpp"
 #include "warlords/types.hpp"
 
 namespace w2::randommap {
@@ -161,6 +162,7 @@ class Generator {
   Types types;
   Rng* rng;
   bool allies;
+  bool fair = false;               // Options::fairCapitals
   std::vector<uint16_t> tiles;
   std::vector<uint8_t> rd;
   std::string cty, spc, sgn;
@@ -1463,6 +1465,12 @@ class Generator {
       }
       if (!again) break;
     }
+    crown();
+  }
+
+  /** The capitals in the side records take their sides: the city's owner
+   *  byte, and the castle in the side's colours (513d:09b3). */
+  void crown() {
     for (int s = 0; s < 8; s++) {
       int x = s16(sideRec(s) + 6), y = s16(sideRec(s) + 8);
       for (int c = 0; c < cityCount(); c++) {
@@ -1473,6 +1481,121 @@ class Generator {
       setTile(x, y, t); setTile(x + 1, y, t + 1);
       setTile(x, y + 1, t + 16); setTile(x + 1, y + 1, t + 17);
     }
+  }
+
+  /** Not the original's (Options::fairCapitals): the eight capitals chosen
+   *  among the cities for a fair start, by travel cost between them
+   *  (warlords/travel). What a fair start is was learned from the hand-made
+   *  scenarios and from votes on generated maps (docs/mapeval.md):
+   *   - no city far from every capital (a swathe nobody is near becomes one
+   *     side's free hinterland),
+   *   - each side about as many cities it reaches first as the next,
+   *   - capitals at least FAIR_GAP turns apart (none of the designers' maps
+   *     comes nearer than 2.5).
+   *  A local search from a few random starts, swapping one capital at a
+   *  time while the start gets fairer. */
+  void fairCapitals() {
+    constexpr int SIDES = 8;
+    constexpr double FAIR_GAP = 3.0;      // turns
+    constexpr double REMOTE = 5.0;        // turns from the nearest capital
+    constexpr int STARTS = 12, PASSES = 40;
+    const int n = cityCount();
+    if (n < SIDES) { capitals(); return; }
+    travel::Ground g;
+    g.w = W;
+    g.h = H;
+    g.terrain.resize(W * H);
+    g.road.resize(W * H);
+    g.crossing.resize(W * H);
+    for (int y = 0; y < H; y++)
+      for (int x = 0; x < W; x++) {
+        int i = y * W + x, t = terrainOf(tile(x, y));
+        g.terrain[i] = t;
+        g.road[i] = road(x, y) != 0;
+        g.crossing[i] = (tiles[i] & 0x8000) != 0 || t == BRIDGE;
+      }
+    auto footprint = [&](int c) {
+      std::vector<int> f;
+      for (auto& d : FOOTPRINT)
+        if (cx(c) + d[0] < W && cy(c) + d[1] < H) f.push_back((cy(c) + d[1]) * W + cx(c) + d[0]);
+      return f;
+    };
+    // a port city is a crossing (1555:109d): its footprint touches the sea
+    for (int c = 0; c < n; c++) {
+      bool port = false;
+      for (auto& r : ROUND_CITY) {
+        int t = terrainOf(tile(cx(c) + r[0], cy(c) + r[1]));
+        if (t == BRIDGE || t == WATER || t == SHORE) port = true;
+      }
+      if (port)
+        for (int i : footprint(c)) g.crossing[i] = 1;
+    }
+    std::vector<std::vector<int>> d(n, std::vector<int>(n, travel::UNREACHED));
+    for (int c = 0; c < n; c++) {
+      auto field = travel::costs(g, footprint(c));
+      for (int o = 0; o < n; o++)
+        for (int i : footprint(o)) d[c][o] = std::min(d[c][o], field[i]);
+    }
+    // how unfair a choice is; lower is better
+    std::vector<int> owner(n);
+    auto unfairness = [&](const std::array<int, SIDES>& caps) {
+      double gap = 1e9;
+      for (int a = 0; a < SIDES; a++)
+        for (int b = a + 1; b < SIDES; b++) gap = std::min(gap, (double)d[caps[a]][caps[b]]);
+      if (gap >= travel::UNREACHED) return 1e12;   // a capital cut off from another
+      gap /= travel::TURN;
+      std::array<int, SIDES> share{};
+      int remote = 0;
+      double reach = 0;
+      for (int c = 0; c < n; c++) {
+        if (std::find(caps.begin(), caps.end(), c) != caps.end()) continue;
+        int best = travel::UNREACHED, who = 0;
+        for (int s = 0; s < SIDES; s++)
+          if (d[caps[s]][c] < best) { best = d[caps[s]][c]; who = s; }
+        if (best == travel::UNREACHED) { remote++; continue; }
+        share[who]++;
+        reach += (double)best / travel::TURN;
+        if (best > REMOTE * travel::TURN) remote++;
+      }
+      auto [lo, hi] = std::minmax_element(share.begin(), share.end());
+      return 3.0 * remote + 1.0 * (*hi - *lo) + reach / n + (gap < FAIR_GAP ? 10.0 * (FAIR_GAP - gap) : 0.0);
+    };
+    std::array<int, SIDES> best{};
+    double bestScore = 1e18;
+    for (int start = 0; start < STARTS; start++) {
+      std::array<int, SIDES> caps{};
+      for (int s = 0; s < SIDES; s++) {
+        int c;
+        do c = dice(1, n, -1); while (std::find(caps.begin(), caps.begin() + s, c) != caps.begin() + s);
+        caps[s] = c;
+      }
+      double score = unfairness(caps);
+      for (int pass = 0; pass < PASSES; pass++) {
+        bool better = false;
+        for (int s = 0; s < SIDES; s++)
+          for (int c = 0; c < n; c++) {
+            if (std::find(caps.begin(), caps.end(), c) != caps.end()) continue;
+            int was = caps[s];
+            caps[s] = c;
+            double now = unfairness(caps);
+            if (now < score - 1e-9) { score = now; better = true; }
+            else caps[s] = was;
+          }
+        if (!better) break;
+      }
+      if (score < bestScore) { bestScore = score; best = caps; }
+    }
+    // the sides take the capitals in a random order; a side's armies favour
+    // the region its capital stands in, as 513d:0689 has it
+    for (int s = SIDES - 1; s > 0; s--) std::swap(best[s], best[dice(1, s + 1, -1)]);
+    for (int s = 0; s < SIDES; s++) {
+      int x = cx(best[s]), y = cy(best[s]);
+      int region = std::min(3, x / 28) + 4 * std::min(1, y / 78);
+      w16(REGION_CLASS + 2 * region, r16(SIDE_CLASS + 2 * s));
+      ws16(sideRec(s) + 6, x);
+      ws16(sideRec(s) + 8, y);
+    }
+    crown();
   }
 
   /** 5132:0014 / 006b: each side a name from five, and 3d50+20 gold. */
@@ -1779,7 +1902,12 @@ class Generator {
         // 4fef:0014
         roadShapes();
         return 92;
-      case 15: cityList(); capitals(); sides(); return 94;
+      case 15:
+        cityList();
+        if (fair) fairCapitals();
+        else capitals();
+        sides();
+        return 94;
       case 16: cityDetails(); return 96;
       case 17: sgn = signs(); return 98;
       case 18: {
@@ -1844,6 +1972,7 @@ Run::Run(const Options& opts) {
   armytype::load(opts.dataDir + "/TERRAIN0/ARMYTYPE.DAT", g.types);
   g.rng = opts.rng;
   g.allies = opts.allies;
+  g.fair = opts.fairCapitals;
   g.tiles.assign(W * H, 0);
   g.rd.assign(W * H, 0);
   g.scn[S_TERRAIN_SET] = (uint8_t)opts.terrainSet;

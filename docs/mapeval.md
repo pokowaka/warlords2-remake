@@ -51,6 +51,7 @@ rate), because the designers broke them now and then.
 | `road-to-nowhere` | hard | a road network (roads and bridges, 4-connected) touches no city, site, signpost or crossing |
 | `spur-road` | soft | a road network touches exactly one place. Erythea and Hadesha each have one |
 | `unreachable` | hard | a city or site cannot be reached from some capital, using the real movement rules: mountains are shut unless a road crosses them (a pass), and a stack can only change between land and sea at a crossing, i.e. a bridge, a bit-15 tile or a port city (`docs/rules.md` > Movement) |
+| `capital-gap` | hard | two capitals are less than 1.5 turns of travel apart. The designers never go under 2.5 (Erythea), and the threshold is about 60% of that |
 | `signpost` | hard | a signpost is not on a signpost tile, or a "*N leagues dir*" sign names no city, points the wrong way, or gets the distance wrong (any footprint tile counts, within 4 leagues or 25%) |
 | `port` | hard | a bit-15 crossing does not touch both land and sea |
 
@@ -75,6 +76,12 @@ for context.
 | `biggestLandmassCityShare`* | share of cities on the largest landmass |
 | `forestPatchMedian`*, `hillsPatchMedian`*, `mountainPatchMedian`* | median connected patch size per terrain type |
 | `speckleFrac`* | share of forest/hills/mountain/marsh tiles that stand alone |
+| `capitalGapMinTurns`*, `capitalGapMedianTurns`* | turns of travel to the nearest rival capital (12 movement points per turn, a Light Infantry's; going to sea or coming ashore costs a whole turn) |
+| `expansionMinShare`*, `expansionMaxShare`* | the neutral cities a side reaches before anyone else (a Voronoi split by travel cost), as a share of a fair split, for the worst-off and best-off side |
+| `expansionGini`*, `incomeGini`* | the inequality of that split across sides, by city count and by income (0 is perfectly even) |
+| `near4MinShare`* | neutral cities within 4 turns of the worst-off capital, as a share of a fair split |
+| `remoteCityFrac`* | share of neutral cities more than 5 turns from every capital: wild land that one side will pick up unchallenged |
+| `hinterlandMaxShare`* | the most uncontested cities any side gets (the next capital is twice as far away and at least 2 turns further), as a share of a fair split |
 | `cities`, `roadTiles`, `roadNetworks`, `roadsToNowhere`, `spurRoads`, `deadEnds`, `capitals`, `inhabitedLandmasses`, `marshPatchMedian`, `signs`, `pointingSigns`, `crossings` | counts |
 
 ## Baseline: the classic (1993) generator
@@ -96,6 +103,46 @@ cities, consistent road autotiling, correct signposts and legal ports.
 The classic generator stays byte-identical to the original, so its failures
 are reported, not asserted in `w2test`. These numbers are the baseline a new
 generator has to beat.
+
+## Travel cost
+
+The fairness checks measure distance by travel, not straight lines
+(`cpp/src/warlords/travel.{hpp,cpp}`). It is a Dijkstra search over the
+movement rules: each tile costs its terrain's cost, a road tile costs 1, and
+mountains are shut unless a road crosses them. Changing between land and sea
+is only possible at a crossing (a bridge, a bit-15 tile or a port city) and
+costs a whole turn. The generator's fair capital placement uses the same model.
+
+## Fair capitals (`randommap::Options::fairCapitals`, generator `fair`)
+
+This is not part of the original game. The world is generated exactly as by the
+classic generator; only the choice of the eight capitals differs. The search
+picks capitals from the cities using travel cost between every pair of cities.
+It starts from 12 random sets and swaps one capital at a time, keeping any swap
+that lowers this penalty:
+
+```
+3 × (cities more than 5 turns from every capital)
++ (the gap between the largest and smallest first-reach share)
++ (the mean turns from a city to its nearest capital)
++ 10 × (how far the closest two capitals fall short of 3 turns)
+```
+
+With the option off (the default), the world is the original's, byte for byte.
+Over 200 seeds:
+
+| | classic | fair | hand-made |
+|---|---|---|---|
+| `capital-gap` failures | 19% of maps | **0%** | 0% |
+| closest capitals (turns, median) | 2.4 | **3.6** | 2.5–5.5 |
+| `expansionGini` (median) | 0.28 | **0.11** | 0.06–0.24 |
+| `incomeGini` (median) | 0.29 | **0.12** | 0.06–0.24 |
+| `remoteCityFrac` (median) | 0.12 | **0.00** | 0.00–0.10 |
+| `hinterlandMaxShare` (median) | 0.78 | 0.89 | 0.43–0.78 |
+| penalty (median) | 17.8 | **11.4** | 0 |
+
+The one trade-off: spreading the capitals out leaves each side more
+uncontested hinterland. It costs about 0.1 s per map.
 
 ## Human votes
 
@@ -122,12 +169,17 @@ after the vote, so it does not sway it. `agree` reports how often the lower
 penalty won, and for each metric how often the map closer to the reference
 won. That shows which metrics deserve more weight.
 
+### What the votes have shown
+
+Batch 1 (12 pairs from the classic generator): the evaluator agreed on all 5
+clear-cut pairs. The voter's notes pointed at fairness: capitals right next to
+each other, and a swathe of cities that would become one side's hinterland.
+Of the measures added after that batch, `remoteCityFrac` agrees with 10 of the
+12 votes, and `capitalGapMinTurns` and `expansionGini` with about 7.
+
 ## Next
 
 - A problem overlay image (stray roads, crowded cities, unreachable places)
   for checking by eye.
-- Tier 3 fairness: territory by travel cost from each capital, the cities and
-  income each side can reach first, early expansion room, and the Gini spread
-  across sides.
 - Tier 4: AI self-play seat bias, on the many-core machine, through the
   `w2arena` evaluation harness.

@@ -10,7 +10,8 @@
 //                       [--allies] [--scenarios ERYTHEA,...] [--reference A,B,...]
 //                       [--json PATH] [--issues N] [--threads N] [--data DIR]
 //
-//   --generator NAME   which generator makes the maps (classic: the 1993 port);
+//   --generator NAME   which generator makes the maps (classic: the 1993 port;
+//                      fair: the same with capitals placed for a fair start);
 //                      "none" evaluates only --scenarios
 //   --seeds A-B|A,B,C  the seeds to make maps from
 //   --scenarios LIST   scenarios to evaluate as well, by folder name
@@ -50,6 +51,11 @@ using Generator = std::function<randommap::Files(const randommap::Options&)>;
 const std::map<std::string, Generator>& generators() {
   static const std::map<std::string, Generator> g = {
       {"classic", [](const randommap::Options& o) { return randommap::generateNow(o); }},
+      {"fair", [](const randommap::Options& o) {
+         auto f = o;
+         f.fairCapitals = true;
+         return randommap::generateNow(f);
+       }},
   };
   return g;
 }

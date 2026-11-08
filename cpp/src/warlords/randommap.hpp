@@ -34,6 +34,11 @@ struct Options {
   std::array<int, 4> sliders{{3, 3, 2, 3}};   // Water, Hills, Cities, Forest, 0-7
   bool allies = false;
   int terrainSet = 0;
+  /** Not the original's: choose the eight capitals for a fair start (far
+   *  apart, every city near some capital, each side as much room to grow as
+   *  the next) instead of 513d:0689's random picks. Off, the world is the
+   *  original's, byte for byte. See docs/mapeval.md. */
+  bool fairCapitals = false;
 };
 
 /** The sliders as random_map_setup (7bab:10e8) takes them: 7 rolled as 1d7-1. */

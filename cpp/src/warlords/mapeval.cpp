@@ -10,6 +10,7 @@
 #include "util/util.hpp"
 #include "warlords/move.hpp"
 #include "warlords/scn.hpp"
+#include "warlords/travel.hpp"
 
 namespace w2::mapeval {
 
@@ -31,6 +32,11 @@ const char* const COMPASS[8] = {"north", "northeast", "east", "southeast", "sout
 constexpr int MIN_CITY_GAP = 1;
 // A city this close (tiles between footprints) to another counts as crowded.
 constexpr int CROWDED_GAP = 2;
+// Two capitals may not be closer than this, in turns of travel. The hand-made
+// scenarios never come under 2.5 (Erythea); this is about 60% of that.
+constexpr double CAPITAL_GAP_TURNS = 1.5;
+// A neutral city further than this from every capital is out in the wilds.
+constexpr int REMOTE_TURNS = 5;
 
 double quantile(std::vector<double> v, double q) {
   if (v.empty()) return 0;
@@ -364,6 +370,111 @@ void reachability(Context& cx) {
   cx.metric("landReachShare", capitals.empty() ? 0 : landShare / capitals.size());
 }
 
+// ---------------------------------------------------------------- fairness
+
+double gini(std::vector<double> v) {
+  if (v.size() < 2) return 0;
+  std::sort(v.begin(), v.end());
+  double sum = 0, weighted = 0;
+  for (size_t i = 0; i < v.size(); i++) {
+    sum += v[i];
+    weighted += (double)(i + 1) * v[i];
+  }
+  if (sum <= 0) return 0;
+  double n = (double)v.size();
+  return (2 * weighted) / (n * sum) - (n + 1) / n;
+}
+
+/** Each side's start, by travel cost from its capital: how near its rivals
+ *  are, and what it can expand into -- the neutral cities it reaches before
+ *  anyone else does (a Voronoi diagram by travel cost), their income, and
+ *  how many lie within a few turns. */
+void fairness(Context& cx) {
+  const View& v = cx.v;
+  const Map& m = v.m;
+  int w = v.w, n = w * v.h;
+  travel::Ground ground;
+  ground.w = w;
+  ground.h = v.h;
+  ground.terrain = v.terrain;
+  ground.road.resize(n);
+  ground.crossing.resize(n);
+  for (int i = 0; i < n; i++) {
+    ground.road[i] = v.road[i] != 0;
+    ground.crossing[i] = v.crossing[i] || v.port[i] || v.terrain[i] == BRIDGE;
+  }
+  auto footprint = [&](const City& c) {
+    std::vector<int> t;
+    for (int dy = 0; dy <= 1; dy++)
+      for (int dx = 0; dx <= 1; dx++)
+        if (v.in(c.x + dx, c.y + dy)) t.push_back((c.y + dy) * w + c.x + dx);
+    return t;
+  };
+  auto costTo = [&](const std::vector<int>& field, const City& c) {
+    int best = travel::UNREACHED;
+    for (int t : footprint(c)) best = std::min(best, field[t]);
+    return best;
+  };
+  std::vector<const City*> caps;
+  for (const Side& s : m.sides)
+    if (s.capital) caps.push_back(s.capital);
+  int k = (int)caps.size();
+  if (k < 2) return;
+  std::vector<std::vector<int>> field(k);
+  for (int i = 0; i < k; i++) field[i] = travel::costs(ground, footprint(*caps[i]));
+
+  // the nearest rival capital, in turns
+  std::vector<double> gaps;
+  for (int i = 0; i < k; i++) {
+    int best = travel::UNREACHED;
+    for (int j = 0; j < k; j++)
+      if (j != i) best = std::min(best, costTo(field[i], *caps[j]));
+    if (best == travel::UNREACHED) continue;
+    double turns = (double)best / travel::TURN;
+    gaps.push_back(turns);
+    for (int j = i + 1; j < k; j++) {
+      int c = costTo(field[i], *caps[j]);
+      if (c != travel::UNREACHED && (double)c / travel::TURN < CAPITAL_GAP_TURNS)
+        cx.issue("capital-gap", caps[i]->x, caps[i]->y,
+                 caps[i]->name + " and " + caps[j]->name + " are " +
+                     fmt("%.1f", (double)c / travel::TURN) + " turns apart");
+    }
+  }
+  // the neutral cities each side reaches first, and those within reach
+  std::vector<double> cities(k, 0), income(k, 0), near2(k, 0), near4(k, 0), hinterland(k, 0);
+  int neutral = 0, remote = 0;
+  for (const City& c : m.cities) {
+    if (std::find(caps.begin(), caps.end(), &c) != caps.end()) continue;
+    neutral++;
+    int best = travel::UNREACHED, second = travel::UNREACHED, who = -1;
+    for (int i = 0; i < k; i++) {
+      int d = costTo(field[i], c);
+      if (d < best) { second = best; best = d; who = i; }
+      else if (d < second) second = d;
+      if (d <= 2 * travel::TURN) near2[i]++;
+      if (d <= 4 * travel::TURN) near4[i]++;
+    }
+    if (who < 0) continue;
+    cities[who]++;
+    income[who] += c.income;
+    if (best > REMOTE_TURNS * travel::TURN) remote++;
+    // a city nobody else can contest: the next side is twice as far, and
+    // at least two turns further
+    if (second == travel::UNREACHED || (second >= 2 * best && second - best >= 2 * travel::TURN)) hinterland[who]++;
+  }
+  double fair = neutral > 0 ? (double)neutral / k : 1;
+  cx.metric("capitalGapMinTurns", gaps.empty() ? 0 : quantile(gaps, 0));
+  cx.metric("capitalGapMedianTurns", quantile(gaps, 0.5));
+  cx.metric("expansionMinShare", *std::min_element(cities.begin(), cities.end()) / fair);
+  cx.metric("expansionMaxShare", *std::max_element(cities.begin(), cities.end()) / fair);
+  cx.metric("expansionGini", gini(cities));
+  cx.metric("incomeGini", gini(income));
+  cx.metric("near2MinShare", *std::min_element(near2.begin(), near2.end()) / fair);
+  cx.metric("near4MinShare", *std::min_element(near4.begin(), near4.end()) / fair);
+  cx.metric("hinterlandMaxShare", *std::max_element(hinterland.begin(), hinterland.end()) / fair);
+  cx.metric("remoteCityFrac", neutral ? (double)remote / neutral : 0);
+}
+
 // ---------------------------------------------------------------- terrain
 
 void terrain(Context& cx) {
@@ -531,7 +642,7 @@ int Evaluation::count(const std::string& check) const {
 
 const std::vector<std::string>& checks() {
   static const std::vector<std::string> c = {"city-terrain", "city-gap", "city-name", "dead-end", "road-to-nowhere",
-                                             "spur-road",    "unreachable", "signpost", "port"};
+                                             "spur-road",    "unreachable", "capital-gap", "signpost", "port"};
   return c;
 }
 
@@ -547,7 +658,10 @@ const std::vector<std::string>& scoredMetrics() {
       "clarkEvansR",       "spurRoadsPerCity",   "roadShapeMismatchFrac", "cityRoadCoverage",
       "mainNetworkCityShare", "roadTilesPerCity", "roadDetourMedian",    "roadDetourP95",
       "landReachShare",    "landFrac",           "coastComplexity",     "biggestLandmassCityShare",
-      "forestPatchMedian", "hillsPatchMedian",   "mountainPatchMedian", "speckleFrac"};
+      "forestPatchMedian", "hillsPatchMedian",   "mountainPatchMedian", "speckleFrac",
+      "capitalGapMinTurns", "capitalGapMedianTurns", "expansionMinShare", "expansionMaxShare",
+      "expansionGini",     "incomeGini",         "near4MinShare",       "hinterlandMaxShare",
+      "remoteCityFrac"};
   return s;
 }
 
@@ -559,6 +673,7 @@ Evaluation evaluate(const Map& map, const std::string& name) {
   cities(cx);
   roads(cx);
   reachability(cx);
+  fairness(cx);
   terrain(cx);
   signsAndPorts(cx);
   return e;

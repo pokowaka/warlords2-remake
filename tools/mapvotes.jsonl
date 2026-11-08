@@ -8,5 +8,5 @@
 {"batch": 1, "pair": 8, "a": "classic#70", "b": "classic#175", "kind": "close", "winner": "b", "note": "", "penalty": [24.304924745989872, 23.499307039806816], "passed": [false, false]}
 {"batch": 1, "pair": 9, "a": "classic#50", "b": "classic#57", "kind": "clear", "winner": "a", "note": "9B two capitals very close", "penalty": [4.350030599456053, 24.731136680229696], "passed": [false, false]}
 {"batch": 1, "pair": 10, "a": "classic#41", "b": "classic#153", "kind": "rules", "winner": "b", "note": "", "penalty": [4.947160075496183, 24.09940329198471], "passed": [false, true]}
-{"batch": 1, "pair": 11, "a": "classic#75", "b": "classic#18", "kind": "clear", "winner": "b", "note": "capitals very close in center", "penalty": [29.692652395227725, 3.71828985240236], "passed": [false, false]}
+{"batch": 1, "pair": 11, "a": "classic#75", "b": "classic#18", "kind": "clear", "winner": "b", "note": "B has black, green and red capitals close together, but A has a large swath of isolated cities that will be black's hinterland", "penalty": [29.692652395227725, 3.71828985240236], "passed": [false, false]}
 {"batch": 1, "pair": 12, "a": "classic#77", "b": "classic#65", "kind": "close", "winner": "b", "note": "", "penalty": [18.34302004602447, 16.09622714264609], "passed": [false, false]}

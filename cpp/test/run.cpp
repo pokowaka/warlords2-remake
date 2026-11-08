@@ -2473,6 +2473,37 @@ static void testMapEval() {
   ok(!e.passed(), "a broken map fails");
   for (const char* c : {"road-to-nowhere", "dead-end", "city-gap", "city-terrain", "city-name", "signpost", "unreachable"})
     ok(e.count(c) > 0, std::string("the broken map trips ") + c);
+  // a second side's capital next door to the first's
+  {
+    auto near = scn::load(DATA + "/ERYTHEA", "ERYTHEA");
+    City* home = near->sides[0].capital;
+    City* next = nullptr;
+    for (auto& c : near->cities)
+      if (&c != home && (!next || std::hypot(c.x - home->x, c.y - home->y) < std::hypot(next->x - home->x, next->y - home->y)))
+        next = &c;
+    near->sides[1].capital = next;
+    ok(mapeval::evaluate(*near, "near").count("capital-gap") > 0, "two capitals side by side trip capital-gap");
+  }
+  // the fair capitals: the same world, its capitals chosen for a fair start
+  {
+    Rng r1(11), r2(11);
+    randommap::Options o;
+    o.dataDir = DATA;
+    o.rng = &r1;
+    auto classicFiles = randommap::generateNow(o);
+    o.rng = &r2;
+    o.fairCapitals = true;
+    auto fairFiles = randommap::generateNow(o);
+    ok(classicFiles["SCN"] != fairFiles["SCN"], "fair capitals make a different start");
+    auto fair = scn::loadFromFiles(DATA + "/RANDOM", "RANDOM", fairFiles);
+    std::set<City*> capitals;
+    for (auto& sd : fair->sides) capitals.insert(sd.capital);
+    eq((int)capitals.size(), 8, "fair capitals: eight, one a side");
+    auto fe = mapeval::evaluate(*fair, "fair#11");
+    eq(fe.count("capital-gap"), 0, "fair capitals are never side by side");
+    ok(fe.metric("remoteCityFrac") <= 0.05, "fair capitals leave hardly a city far from every capital");
+    ok(fe.metric("capitalGapMinTurns") >= 2.5, "fair capitals are as far apart as the designers' (2.5 turns)");
+  }
   // the reference and the score: the designers' own maps score nothing
   std::vector<mapeval::Evaluation> refs;
   for (const char* s : {"ERYTHEA", "HADESHA"}) refs.push_back(mapeval::evaluate(*scn::load(DATA + "/" + s, s), s));
