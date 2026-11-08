@@ -121,18 +121,11 @@ static gfx::Quad tileQuad(int t) {
 }
 static gfx::Quad roadQuad(int i) { return gfx::newQuad((i % 13) * 48, (i / 13) * TILE, TILE, TILE); }
 static void palColour(int i) { kit::setPal(i); }
-static bool held(std::initializer_list<const char*> k) {
-  if (keys::isDown(k)) return true;
-  SDL_Keymod mod = SDL_GetModState();
-  for (auto name : k) {
-    std::string s(name);
-    if ((s == "lshift" || s == "rshift") && (mod & KMOD_SHIFT)) return true;
-    if ((s == "lctrl" || s == "rctrl") && (mod & KMOD_CTRL)) return true;
-    if ((s == "lalt" || s == "ralt") && (mod & KMOD_ALT)) return true;
-    if ((s == "lgui" || s == "rgui") && (mod & KMOD_GUI)) return true;
-  }
-  return false;
-}
+// Only the keys the game saw go down, and has not seen come up or lost with
+// the window's focus (keys::clear). Not SDL_GetModState: a modifier held as
+// the window loses focus (Ctrl+arrow to another Space, Cmd+Tab) stays "down"
+// there, and a phantom Ctrl or Alt turns every click into another command.
+static bool held(std::initializer_list<const char*> k) { return keys::isDown(k); }
 static int ownerOr8(int o) { return o == NONE ? 8 : o; }
 static int optMilitaryAdvisor = -1;
 
@@ -3484,6 +3477,9 @@ void front::openStart() {
 //   select TX TY    pick up the stack on a tile
 //   attack TX TY    send the selection at a tile, fighting if it must
 //   near            list the cities nearest the selection not the player's
+//   greet           the advisor's greeting, as the start screens open
+//   sdlclick X Y    a left click on UI point (X, Y) sent through SDL's event
+//                   queue, as a real one arrives
 //   quit
 static void stepScript() {
   if (!script) return;
@@ -3622,6 +3618,24 @@ static void stepScript() {
         printf("  %s at %d,%d owner %d, %d away\n", found[i].second->name.c_str(), found[i].second->x, found[i].second->y,
                found[i].second->ownerIndex, found[i].first);
       fflush(stdout);
+    } else if (cmd == "greet") {
+      advisor::say(w2::cues::GREET);
+    } else if (cmd == "sdlclick") {
+      // a click on UI point (x, y) as SDL delivers one, in window points,
+      // through the event loop
+      int ux, uy;
+      in >> ux >> uy;
+      auto [wx, wy] = display::fromUI(ux, uy);
+      int x = (int)wx, y = (int)wy;
+      for (Uint32 type : {SDL_MOUSEBUTTONDOWN, SDL_MOUSEBUTTONUP}) {
+        SDL_Event ev{};
+        ev.type = type;
+        ev.button.button = SDL_BUTTON_LEFT;
+        ev.button.state = type == SDL_MOUSEBUTTONDOWN ? SDL_PRESSED : SDL_RELEASED;
+        ev.button.x = x;
+        ev.button.y = y;
+        SDL_PushEvent(&ev);
+      }
     } else if (cmd == "quit") {
       G.quitRequested = true;
       return;
