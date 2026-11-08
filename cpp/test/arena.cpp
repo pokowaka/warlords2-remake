@@ -27,7 +27,7 @@
 // cities held by the two camps when the game is cut off, with a 95% interval.
 //
 // Usage (from the repository root):
-//   cpp/build/w2arena [--iterations N] [--games-per-iter G] [--turns T]
+//   bazel-bin/cpp/w2arena [--iterations N] [--games-per-iter G] [--turns T]
 //                     [--eval-every E] [--eval-turns T] [--select-seeds S]
 //                     [--report-seeds R] [--classic-frac F] [--from-scratch]
 //                     [--out PATH] [--log CSV] [--benchmark-only]

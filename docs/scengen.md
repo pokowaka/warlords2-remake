@@ -6,14 +6,14 @@ which stays byte-identical to the original). It writes each world as a
 scenario folder the game can play like any other.
 
 ```bash
-cmake --build cpp/build --target w2scengen
-cpp/build/w2scengen --seed 7                       # writes original/GEN7/GEN7.* and GEN7.png
-cpp/build/w2scengen --seed 20 --count 6 --open     # six worlds, previews opened to look at
-cpp/build/w2scengen --seed 7 --shape pangaea --cities 100 --name BIGLAND
-cpp/build/warlords2 --window --scenario GEN7       # play the one you like
-cpp/build/w2scengen --preview ERYTHEA --open       # the same picture of any scenario
+bazel build //cpp:w2scengen
+bazel-bin/cpp/w2scengen --seed 7                       # writes original/GEN7/GEN7.* and GEN7.png
+bazel-bin/cpp/w2scengen --seed 20 --count 6 --open     # six worlds, previews opened to look at
+bazel-bin/cpp/w2scengen --seed 7 --shape pangaea --cities 100 --name BIGLAND
+bazel-bin/cpp/warlords2 --window --scenario GEN7       # play the one you like
+bazel-bin/cpp/w2scengen --preview ERYTHEA --open       # the same picture of any scenario
 python3 tools/mapvote.py render cmp.png original/GEN7 original/ERYTHEA   # side by side
-cpp/build/w2mapeval --generator scenario --shape islands --seeds 1-100    # score it
+bazel-bin/cpp/w2mapeval --generator scenario --shape islands --seeds 1-100    # score it
 ```
 
 | option | meaning |

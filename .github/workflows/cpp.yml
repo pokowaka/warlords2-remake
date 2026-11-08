@@ -1,0 +1,31 @@
+# Builds the C++ port with Bazel and runs the rules suite and the golden
+# files (cpp/test/golden/) on Linux. The headless trainer's targets need no
+# SDL, so this builds none.
+
+name: C++
+
+on:
+  push:
+    paths: ["cpp/**", "MODULE.bazel", ".bazelrc", ".bazelversion", "BUILD.bazel", ".github/workflows/cpp.yml"]
+  pull_request:
+    paths: ["cpp/**", "MODULE.bazel", ".bazelrc", ".bazelversion", "BUILD.bazel"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # bazelisk is preinstalled as bazel; it picks .bazelversion
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel
+          key: bazel-${{ hashFiles('MODULE.bazel.lock') }}
+      - run: bazel test //cpp:w2test //cpp:golden_test

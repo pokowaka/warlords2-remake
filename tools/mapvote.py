@@ -1,6 +1,6 @@
 """Human votes on generated maps, to check and weight the map evaluator.
 
-The evaluator (cpp/build/w2mapeval, docs/mapeval.md) scores maps against the
+The evaluator (bazel-bin/cpp/w2mapeval, docs/mapeval.md) scores maps against the
 hand-made scenarios. Votes test whether those scores match what a player
 prefers. A ballot is a batch of map pairs, each drawn side by side as A | B.
 The voter picks A, B or = (no preference), and the votes are appended to
@@ -8,7 +8,7 @@ tools/mapvotes.jsonl so they can be checked against any later version of the
 evaluator or of a generator.
 
     # 1. evaluate and export some maps
-    cpp/build/w2mapeval --seeds 1-200 --json /tmp/mv/eval.json --export /tmp/mv/maps
+    bazel-bin/cpp/w2mapeval --seeds 1-200 --json /tmp/mv/eval.json --export /tmp/mv/maps
     # 2. make a ballot: pair-NN.png (clean), pair-NN-issues.png, ballot-B.json
     python3 tools/mapvote.py ballot --eval /tmp/mv/eval.json --maps /tmp/mv/maps --out DIR --batch 1
     #    or the same seeds from two generators (one --eval file per generator)
@@ -20,7 +20,7 @@ evaluator or of a generator.
     python3 tools/mapvote.py agree --eval /tmp/mv/eval.json
 
 A map is named as the evaluator names it, "<generator>#<seed>". With the
-default sliders, `cpp/build/warlords2 --window --scenario RANDOM --seed N`
+default sliders, `bazel-bin/cpp/warlords2 --window --scenario RANDOM --seed N`
 opens classic#N in the game.
 """
 import argparse

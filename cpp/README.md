@@ -12,21 +12,23 @@ Canvas recordings from `pre-rendered-sound/` where they already lie.
 
 ## Building
 
-You need CMake, a C++20 compiler and SDL2. libvorbisfile is optional: without
-it the game still builds, and plays the AdLib music only.
+You need Bazel (best through bazelisk, which picks the version in
+`.bazelversion`) and a C++23 compiler: Xcode's on macOS, gcc or clang on
+Linux. Bazel fetches SDL2, Vorbis and GoogleTest itself, from the Bazel
+Central Registry (`MODULE.bazel`).
 
 ```sh
-brew install cmake sdl2 libvorbis                       # macOS
-sudo apt install cmake libsdl2-dev libvorbis-dev        # Debian, Ubuntu
-
-cmake -S cpp -B cpp/build
-cmake --build cpp/build -j
+brew install bazelisk                     # macOS
+bazel build //cpp/...                     # the game, the tools and the tests
+bazel test //cpp/...                      # the rules suite and the golden files
+sh tools/check.sh                         # every gate, the Lua and JS ports too
+sh tools/package.sh                       # a zip to share: the game and its files
 ```
 
-A self-contained x86_64 Linux build, for any distribution and the Steam
-Deck, is made in a container by `cpp/linux/build.sh` (`cpp/linux/README.md`).
-A Windows build, with its DLLs beside it, is made in MSYS2 by
-`cpp/windows/build.sh` (`cpp/windows/README.md`).
+Bazel puts the programs in `bazel-bin/cpp/`. `bazel run //cpp:play` starts
+the game in the repository root. For clangd and clang-tidy,
+`python3 tools/compile_commands.py` writes `compile_commands.json`, and
+`sh tools/tidy.sh` runs clang-tidy with `cpp/.clang-tidy`.
 
 ## Running
 
@@ -34,11 +36,11 @@ Run from the repository root, so that `original/` and `pre-rendered-sound/`
 are found:
 
 ```sh
-cpp/build/warlords2                          # the start screens
-cpp/build/warlords2 --scenario ISLADIA       # straight into a scenario
-cpp/build/warlords2 --scenario ERYTHEA --seed 7 --window
-cpp/build/warlords2 --scenario RANDOM --seed 7   # a random world, made from that seed
-cpp/build/warlords2 --data /path/to/WARLORD2 # the game's files elsewhere
+bazel-bin/cpp/warlords2                          # the start screens
+bazel-bin/cpp/warlords2 --scenario ISLADIA       # straight into a scenario
+bazel-bin/cpp/warlords2 --scenario ERYTHEA --seed 7 --window
+bazel-bin/cpp/warlords2 --scenario RANDOM --seed 7   # a random world, made from that seed
+bazel-bin/cpp/warlords2 --data /path/to/WARLORD2 # the game's files elsewhere
 ```
 
 Random Map works as the original's does: the start menu's settings, then
@@ -60,7 +62,7 @@ The controls are the Lua remake's (`love2d/README.md`). The differences:
   libvorbisfile and the recordings.
 - A game controller plays as well: the right stick is the pointer, R2 or A
   and L2 or X are the left and right buttons, the left stick slides the map
-  (`cpp/linux/README.md` has the whole table, made for the Steam Deck). Text
+  (the whole table is under Controller below, made for the Steam Deck). Text
   input is on only while a name field is typed into, so that on the Deck it
   brings up Steam's on-screen keyboard.
 
@@ -96,9 +98,9 @@ Notes for anyone porting more of the Lua:
 From the repository root, after building:
 
 ```sh
-cpp/build/w2test                    # the rules suite (love2d/test/run.lua, ported)
+bazel-bin/cpp/w2test                    # the rules suite (love2d/test/run.lua, ported)
 sh cpp/test/compare.sh              # all-computer games, Lua vs C++, turn by turn (needs luajit)
-cpp/build/w2fm original/SOUND/SINT12.XMI 10 > c.txt
+bazel-bin/cpp/w2fm original/SOUND/SINT12.XMI 10 > c.txt
 luajit cpp/test/fmrender.lua original/SOUND/SINT12.XMI 10 | tr '\t' ' ' > l.txt
 diff c.txt l.txt                    # the FM music, checksummed second by second
 ```
@@ -108,7 +110,7 @@ screens:
 
 ```sh
 SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software SDL_AUDIODRIVER=dummy \
-  cpp/build/warlords2 --window --scenario ERYTHEA --seed 1 --script steps.txt
+  bazel-bin/cpp/warlords2 --window --scenario ERYTHEA --seed 1 --script steps.txt
 ```
 
 A script has one command per line: `wait N` (frames), `key NAME`,
@@ -122,3 +124,27 @@ Keys go by LÖVE's names for them, a controller's buttons by SDL's (`a`,
 held where `stick` puts them, -1 to 1, until it sets them all to 0. Points
 are in the 640x480 interface's pixels, and tiles in map coordinates. With `SDL_AUDIODRIVER=disk` the mix is
 written to a file.
+
+## Controller
+
+The touchscreen is the mouse (a tap is a left click), and the game reads the
+controller itself, through Steam Input's gamepad: leave the controller layout
+on Steam's **Gamepad** default.
+
+| Deck | does |
+|---|---|
+| right trackpad or right stick | move the pointer: the further over, the faster |
+| left stick | slide the map |
+| R2 or A | left click: pick up, move, press buttons; hold to drag the map |
+| L2 or X | right click, held: what is on a tile, an army's numbers, a button's help |
+| B / Y | Esc / Enter: quit army / next army, Cancel / OK |
+| L1 / R1 | zoom the map out / in, about the pointer |
+| D-pad | step the stack one tile, as 8 2 4 6 do |
+| hold View (⧉) | Shift, for a Shift-click (the Military Advisor's verdict) |
+| hold Menu (☰) | Alt, for an Alt-click (plan a route) with R2 |
+| L3 / R3 | group the whole stack / centre on it |
+
+The menus, End Turn and everything else are on the screen, under the
+pointer. Steam's Gamepad layout hands the game the right trackpad as the
+right stick, so the thumb on the trackpad steers the pointer as the stick
+does, and R2 clicks. For the trackpad as a true mouse instead, pick the

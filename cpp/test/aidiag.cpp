@@ -6,7 +6,7 @@
 // Used to see *why* a checkpoint wins or loses, which the city-share
 // benchmark in w2arena does not show.
 //
-//   cpp/build/w2aidiag WEIGHTS [SCENARIO] [SEED] [TURNS] [HIDDEN_MAP 0|1]
+//   bazel-bin/cpp/w2aidiag WEIGHTS [SCENARIO] [SEED] [TURNS] [HIDDEN_MAP 0|1]
 //
 // Run from the repository root, so that original/ is found.
 #include <algorithm>

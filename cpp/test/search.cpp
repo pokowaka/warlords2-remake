@@ -13,7 +13,7 @@
 //   play:  every Modern turn is searched; reports the benchmark city share, to
 //          be compared with the same seeds played without search.
 //
-//   cpp/build-train/w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair]
+//   bazel-bin/cpp/w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair]
 //
 // Copies are made with save::encode/decode, so only shipped scenarios are used
 // (random maps live in memory only).

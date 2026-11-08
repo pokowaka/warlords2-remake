@@ -1,7 +1,7 @@
 // Headless tests for the rules core: the Lua remake's love2d/test/run.lua,
 // ported (by way of web/test/run.js). No SDL, no graphics.
 //
-//     cpp/build/w2test            -- from the repository root
+//     bazel-bin/cpp/w2test            -- from the repository root
 //
 // Every assertion cites the rule it checks; docs/rules.md is the spec. Where
 // the Lua counts from 1 these count from 0, so a city's first production

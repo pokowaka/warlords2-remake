@@ -4,7 +4,7 @@
 #   cpp/test/train.sh [extra w2arena flags...]
 #
 # Run from the repository root (original/ must hold the game files). Builds
-# into cpp/build-train without SDL2 (W2_BUILD_GAME=OFF, -march=native), runs
+# the trainer with Bazel, tuned for this CPU (--config=native; no SDL2), runs
 # the rules suite, then trains into runs/<timestamp>/:
 #   weights.json  best checkpoint by the selection set (copy to cpp/ai_weights.json)
 #   log.csv       one line per iteration
@@ -19,18 +19,15 @@ if [[ ! -f original/TERRAIN0/ARMYTYPE.DAT ]]; then
   exit 1
 fi
 
-GEN=()
-command -v ninja >/dev/null && GEN=(-G Ninja)
-cmake "${GEN[@]}" -S cpp -B cpp/build-train -DCMAKE_BUILD_TYPE=Release -DW2_BUILD_GAME=OFF -DW2_NATIVE=ON
-cmake --build cpp/build-train -j
-cpp/build-train/w2test | tail -1
+bazel build --config=native //cpp:w2test //cpp:w2arena
+bazel-bin/cpp/w2test | tail -1
 
 RUN="runs/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN"
 git rev-parse HEAD > "$RUN/commit.txt" 2>/dev/null || true
 echo "train.sh: writing to $RUN"
 
-cpp/build-train/w2arena \
+bazel-bin/cpp/w2arena \
   --from-scratch \
   --iterations 400 \
   --games-per-iter 192 \

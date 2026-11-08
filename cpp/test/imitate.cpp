@@ -15,7 +15,7 @@
 // then trained by behaviour cloning (cross-entropy on those labels), starting
 // from the given weights; the other heads are untouched.
 //
-//   cpp/build-train/w2imitate IN.json OUT.json [GAMES] [TURNS] [EPOCHS] [LR]
+//   bazel-bin/cpp/w2imitate IN.json OUT.json [GAMES] [TURNS] [EPOCHS] [LR]
 #include <algorithm>
 #include <array>
 #include <atomic>

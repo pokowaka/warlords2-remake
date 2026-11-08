@@ -6,7 +6,7 @@
 // maps span. See docs/mapeval.md.
 //
 // Usage (from the repository root):
-//   cpp/build/w2mapeval [--generator classic] [--seeds 1-50] [--sliders 3,3,2,3]
+//   bazel-bin/cpp/w2mapeval [--generator classic] [--seeds 1-50] [--sliders 3,3,2,3]
 //                       [--allies] [--scenarios ERYTHEA,...] [--reference A,B,...]
 //                       [--json PATH] [--issues N] [--threads N] [--data DIR]
 //

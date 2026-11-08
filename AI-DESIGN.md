@@ -452,7 +452,7 @@ Adv-Hidden 35.1 → 45.2 %, Interm-Diplo 58.3 → 63.5 %, Fog-TotalWar 32.8 →
 35.4 %, Beginner-Open 37.3 → 33.2 %. The polish stage (T 0.65 → 0.5) did not
 improve on the 1v7 stage.
 
-**Throughput.** On 72 Xeon threads (`cpp/build-train`, `-DW2_NATIVE=ON`), a
+**Throughput.** On 72 Xeon threads (`bazel build --config=native`), a
 `432`-game full-map iteration (`~12,200` learner turns) takes **20–24 s**; a
 `288`-game cropped `1v1` iteration takes **2–8 s**.
 
@@ -460,8 +460,10 @@ improve on the 1v7 stage.
 
 ### Setup
 ```bash
-# Ubuntu/Debian: compiler, CMake, Ninja (SDL2 is NOT needed for training)
-sudo apt install build-essential cmake ninja-build git
+# Ubuntu/Debian: a compiler, git and Bazel (bazelisk); SDL2 is NOT needed for
+# training, Bazel builds only what the trainer links
+sudo apt install build-essential git
+# bazelisk: https://github.com/bazelbuild/bazelisk/releases (as bazel on PATH)
 git clone <repo> warlords2-remake && cd warlords2-remake && git checkout ai
 # The original game files must be in original/ (same layout as on the dev machine):
 ls original/TERRAIN0/ARMYTYPE.DAT
@@ -470,12 +472,11 @@ ls original/TERRAIN0/ARMYTYPE.DAT
 ### Train (curriculum or `train.sh`)
 ```bash
 # Build headless trainer & run unit tests
-cmake -G Ninja -S cpp -B cpp/build-train -DCMAKE_BUILD_TYPE=Release -DW2_BUILD_GAME=OFF -DW2_NATIVE=ON
-cmake --build cpp/build-train -j && cpp/build-train/w2test
+bazel build --config=native //cpp:w2test //cpp:w2arena //cpp:w2aidiag && bazel-bin/cpp/w2test
 
 # Stage 1: 1v1 cropped maps from scratch (--report-seeds 0 throughout tuning!)
 mkdir -p runs/s1_1v1
-cpp/build-train/w2arena --solo-learner --from-scratch \
+bazel-bin/cpp/w2arena --solo-learner --from-scratch \
   --iterations 60 --games-per-iter 288 --turns 28 \
   --eval-every 10 --eval-turns 28 --select-seeds 32 --report-seeds 0 \
   --active-sides 2 --crop-margin 14 --random-map-frac 0.40 \
@@ -492,7 +493,7 @@ the candidates against `cpp/ai_weights.json`; ~3 h on 72 threads).
 
 ### Evaluate, inspect, install
 ```bash
-B=cpp/build-train
+B=bazel-bin/cpp
 $B/w2arena --benchmark-only --select-seeds 96 --report-seeds 0 --eval-turns 40 --out runs/X/weights.json  # 192g selection
 $B/w2arena --benchmark-only --report-seeds 64 --eval-turns 40 --out runs/X/weights.json                   # 128g held-out report
 $B/w2arena --out cpp/ai_weights.json --compare runs/X/weights.json --dev-seeds 256 --breakdown  # paired A/B on dev seeds
@@ -615,10 +616,10 @@ games, low training temperature, 60-turn training games, weight averaging.
 
 ## 11. Playing against it
 ```bash
-cpp/build/warlords2 --window --scenario ERYTHEA --diplomacy --hidden-map               # Modern AI, classic UI
-cpp/build/warlords2 --window --modern-ui --scenario ERYTHEA --diplomacy --hidden-map   # with Parley / F10 inspector
-cpp/build/warlords2 --window --classic-ai --scenario ERYTHEA                           # the 1993 AI
-cpp/build/warlords2 --window --modern-ui --scenario ERYTHEA --spectate                 # watch 8 AIs, full map
-cpp/build/warlords2 --weights runs/X/weights.json ...                                  # try a checkpoint
+bazel-bin/cpp/warlords2 --window --scenario ERYTHEA --diplomacy --hidden-map               # Modern AI, classic UI
+bazel-bin/cpp/warlords2 --window --modern-ui --scenario ERYTHEA --diplomacy --hidden-map   # with Parley / F10 inspector
+bazel-bin/cpp/warlords2 --window --classic-ai --scenario ERYTHEA                           # the 1993 AI
+bazel-bin/cpp/warlords2 --window --modern-ui --scenario ERYTHEA --spectate                 # watch 8 AIs, full map
+bazel-bin/cpp/warlords2 --weights runs/X/weights.json ...                                  # try a checkpoint
 ```
 The Military Advisor (`--military-advisor`, active by default; `--no-military-advisor` to disable) speculates on combat odds via Shift-hover/click over adjacent enemy armies and cities.

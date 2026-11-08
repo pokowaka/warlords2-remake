@@ -12,12 +12,12 @@ every generator, and every hand-made `.SCN`, is judged the same way.
 ## Running it
 
 ```bash
-cmake --build cpp/build --target w2mapeval
-cpp/build/w2mapeval                                  # reference + classic generator, seeds 1-50
-cpp/build/w2mapeval --seeds 1-200 --json out.json    # baseline, with every issue and metric
-cpp/build/w2mapeval --seeds 7 --issues 50            # one map, its issues listed with tiles
-cpp/build/w2mapeval --sliders 6,0,6,0 --seeds 1-100  # Water, Hills, Cities, Forest (7 = chance)
-cpp/build/w2mapeval --generator none --scenarios TUTORIA --issues 20
+bazel build //cpp:w2mapeval
+bazel-bin/cpp/w2mapeval                                  # reference + classic generator, seeds 1-50
+bazel-bin/cpp/w2mapeval --seeds 1-200 --json out.json    # baseline, with every issue and metric
+bazel-bin/cpp/w2mapeval --seeds 7 --issues 50            # one map, its issues listed with tiles
+bazel-bin/cpp/w2mapeval --sliders 6,0,6,0 --seeds 1-100  # Water, Hills, Cities, Forest (7 = chance)
+bazel-bin/cpp/w2mapeval --generator none --scenarios TUTORIA --issues 20
 ```
 
 Maps are generated in memory, one per seed, in parallel across all cores.
@@ -86,7 +86,7 @@ for context.
 
 ## Baseline: the classic (1993) generator
 
-`cpp/build/w2mapeval --seeds 1-200`, default sliders (3,3,2,3):
+`bazel-bin/cpp/w2mapeval --seeds 1-200`, default sliders (3,3,2,3):
 
 - **8% of maps pass every hard rule.** The median penalty is 9.6 (p95 24.3); every hand-made map scores 0.
 - **Roads to nowhere: 81% of maps, about 2 per map.** These are mostly a bridge over a river with a one-tile stub on each side and no road leading to it.
@@ -152,7 +152,7 @@ cities, capitals and sites drawn bold). The voter picks A, B or `=`, and the
 votes go to `tools/mapvotes.jsonl`.
 
 ```bash
-cpp/build/w2mapeval --seeds 1-200 --json /tmp/mv/eval.json --export /tmp/mv/maps
+bazel-bin/cpp/w2mapeval --seeds 1-200 --json /tmp/mv/eval.json --export /tmp/mv/maps
 python3 tools/mapvote.py ballot --eval /tmp/mv/eval.json --maps /tmp/mv/maps --out /tmp/mv/b1 --batch 1
 python3 tools/mapvote.py record --ballot /tmp/mv/b1/ballot-1.json 1A 2B 3= --note 2 "roads make sense"
 python3 tools/mapvote.py agree --eval /tmp/mv/eval.json

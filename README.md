@@ -27,7 +27,7 @@ identically in each.
 
 ```sh
 love love2d                                    # Lua, needs LÖVE 11+
-cmake -S cpp -B cpp/build && cmake --build cpp/build -j && cpp/build/warlords2
+bazel run //cpp:play                           # C++, needs Bazel (bazelisk)
 cd web && python3 -m http.server 8765          # then open http://localhost:8765/
 ```
 

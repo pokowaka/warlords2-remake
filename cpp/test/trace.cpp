@@ -1,7 +1,7 @@
 // An all-computer game, one line per side's turn: the C++ half of the
 // Lua-vs-C++ comparison (web/test/trace.lua prints the same lines).
 //
-//     cpp/build/w2trace ERYTHEA 1 10 [hidden] [diplo] [save]
+//     bazel-bin/cpp/w2trace ERYTHEA 1 10 [hidden] [diplo] [save]
 //
 // Run from the repository root, so that original/ is found.
 #include <cstdio>

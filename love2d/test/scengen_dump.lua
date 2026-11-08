@@ -5,7 +5,7 @@
 --
 -- writes, for seeds FIRST .. FIRST+COUNT-1, DIR/<shape>-<seed>/RANDOM.<ext>
 -- for every file the generator makes, and TITLE.TXT with the world's name
--- and line -- what `cpp/build/w2scengen --dump DIR --shape SHAPE --seed
+-- and line -- what `bazel-bin/cpp/w2scengen --dump DIR --shape SHAPE --seed
 -- FIRST --count COUNT` writes, byte for byte.
 
 package.path = "love2d/?.lua;" .. package.path

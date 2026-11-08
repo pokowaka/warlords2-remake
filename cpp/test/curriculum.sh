@@ -4,8 +4,8 @@
 #
 #   cpp/test/curriculum.sh [OUT_DIR]
 #
-# Run from the repository root with the headless trainer built in
-# cpp/build-train (see AI-DESIGN.md §7). About 3 hours on 72 threads. Each
+# Run from the repository root with the trainer built by
+# `bazel build --config=native //cpp:w2arena` (see AI-DESIGN.md §7). About 3 hours on 72 threads. Each
 # stage starts from the previous stage's final weights; the last step compares
 # the candidates against cpp/ai_weights.json on the development seeds.
 set -uo pipefail
@@ -13,7 +13,7 @@ if [[ ! -f original/TERRAIN0/ARMYTYPE.DAT ]]; then
   echo "curriculum.sh: run from the repository root with the game files in original/." >&2
   exit 1
 fi
-A=cpp/build-train/w2arena
+A=bazel-bin/cpp/w2arena
 D=${1:-runs/curriculum-$(date +%Y%m%d-%H%M%S)}
 mkdir -p "$D"
 git rev-parse HEAD > "$D/commit.txt" 2>/dev/null || true

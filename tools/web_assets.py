@@ -33,7 +33,7 @@ from pck import load as load_pck  # noqa: E402
 from PIL import Image  # noqa: E402
 
 # what the browser never needs: programs, drivers, the installer's leftovers,
-# and the PNG previews cpp/build/w2scengen leaves beside a generated world
+# and the PNG previews bazel-bin/cpp/w2scengen leaves beside a generated world
 # (NAME/NAME.png; the start menu's picture is its PICS/SCENARIO.PCK)
 SKIP_EXT = {'.EXE', '.COM', '.ADV', '.AD', '.BAT', '.INI', '.HTML', '.XMI', '.ME', '.PNG'}
 SKIP_FILES = {'SWAP.DAT', 'SOUND.DAT', 'VER102.DAT', 'CURRENT.HST', 'CURRENT.SGN'}

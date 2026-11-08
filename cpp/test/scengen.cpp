@@ -6,10 +6,10 @@
 // made; one that breaks a hard rule is made again from another seed.
 //
 // Usage (from the repository root):
-//   cpp/build/w2scengen [--seed N] [--count N] [--shape continents|pangaea|islands]
+//   bazel-bin/cpp/w2scengen [--seed N] [--count N] [--shape continents|pangaea|islands]
 //                       [--cities N] [--land 0.55] [--name NAME] [--data DIR]
 //                       [--tries N] [--keep-failures] [--open] [--quiet]
-//   cpp/build/w2scengen --preview NAME [--open]
+//   bazel-bin/cpp/w2scengen --preview NAME [--open]
 //
 //   --count N       make N worlds, from seeds N, N+1, ... (each its own folder)
 //   --name NAME     the folder and file names, at most 8 letters (default
@@ -29,7 +29,7 @@
 // DATA/DATA/SCENGEN.LST, which put it in the game's New Scenario list (all
 // three games), after the shipped scenarios, with its picture on the start
 // menu (warlords/scenarios). Or play it straight away:
-//   cpp/build/warlords2 --window --scenario NAME
+//   bazel-bin/cpp/warlords2 --window --scenario NAME
 
 #include <cctype>
 #include <cstdio>
@@ -266,7 +266,7 @@ int main(int argc, char** argv) {
                       "expansionGini", "remoteCityFrac", "roadsToNowhere"})
                     printf("  %-20s %.2f\n", key, eval.Metric(key));
             if (!picture.empty()) printf("  preview: %s\n", picture.c_str());
-            printf("  play it: cpp/build/warlords2 --window --scenario %s\n", n.c_str());
+            printf("  play it: bazel-bin/cpp/warlords2 --window --scenario %s\n", n.c_str());
         }
     }
     if (open)
