@@ -9,39 +9,40 @@
 namespace w2 {
 
 const Json& Json::None() {
-    static const Json kN;
-    return kN;
+    static const Json kNullJson;
+    return kNullJson;
 }
 
-bool Json::Has(const std::string& k) const {
-    for (auto& e : o_)
-        if (e.first == k) return true;
+bool Json::Has(const std::string& key) const {
+    for (const auto& entry : obj_val_)
+        if (entry.first == key) return true;
     return false;
 }
 
-const Json& Json::operator[](const std::string& k) const {
-    for (auto& e : o_)
-        if (e.first == k) return e.second;
+const Json& Json::operator[](const std::string& key) const {
+    for (const auto& entry : obj_val_)
+        if (entry.first == key) return entry.second;
     return None();
 }
 
-Json& Json::Set(const std::string& k, Json v) {
+Json& Json::Set(const std::string& key, Json val) {
     type_ = kObject;
-    for (auto& e : o_) {
-        if (e.first == k) {
-            e.second = std::move(v);
-            return e.second;
+    for (auto& entry : obj_val_) {
+        if (entry.first == key) {
+            entry.second = std::move(val);
+            return entry.second;
         }
     }
-    if (v.IsNull()) return const_cast<Json&>(None());
-    o_.emplace_back(k, std::move(v));
-    return o_.back().second;
+    if (val.IsNull()) return const_cast<Json&>(None());
+    obj_val_.emplace_back(key, std::move(val));
+    return obj_val_.back().second;
 }
 
-static void WriteString(std::string& out, const std::string& s) {
+/** @brief Appends `str` to `out` as a quoted, escaped ASCII JSON string. */
+static void WriteString(std::string& out, const std::string& str) {
     out += '"';
-    for (unsigned char c : s) {
-        switch (c) {
+    for (unsigned char byte : str) {
+        switch (byte) {
         case '"':
             out += "\\\"";
             break;
@@ -58,14 +59,14 @@ static void WriteString(std::string& out, const std::string& s) {
             out += "\\t";
             break;
         default:
-            // the game's strings are Latin-1 bytes: anything past ASCII is
-            // written as its code point, so the file stays plain ASCII
-            if (c < 0x20 || c >= 0x7f) {
+            // The game's strings are Latin-1 bytes: anything outside printable
+            // ASCII is escaped as a code point so the file stays plain ASCII.
+            if (byte < 0x20 || byte >= 0x7f) {
                 char buf[8];
-                snprintf(buf, sizeof buf, "\\u%04x", c);
+                snprintf(buf, sizeof buf, "\\u%04x", byte);
                 out += buf;
             } else {
-                out += static_cast<char>(c);
+                out += static_cast<char>(byte);
             }
         }
     }
@@ -78,38 +79,38 @@ void Json::Write(std::string& out) const {
         out += "null";
         break;
     case kBool:
-        out += b_ ? "true" : "false";
+        out += bool_val_ ? "true" : "false";
         break;
     case kNumber: {
         char buf[32];
-        if (std::floor(n_) == n_ && std::fabs(n_) < 1e15)
-            snprintf(buf, sizeof buf, "%.0f", n_);
+        if (std::floor(num_val_) == num_val_ && std::fabs(num_val_) < 1e15)
+            snprintf(buf, sizeof buf, "%.0f", num_val_);
         else
-            snprintf(buf, sizeof buf, "%.17g", n_);
+            snprintf(buf, sizeof buf, "%.17g", num_val_);
         out += buf;
         break;
     }
     case kString:
-        WriteString(out, s_);
+        WriteString(out, str_val_);
         break;
     case kArray:
         out += '[';
-        for (size_t i = 0; i < a_.size(); i++) {
+        for (size_t i = 0; i < arr_val_.size(); i++) {
             if (i) out += ',';
-            a_[i].Write(out);
+            arr_val_[i].Write(out);
         }
         out += ']';
         break;
     case kObject: {
         out += '{';
         bool first = true;
-        for (auto& e : o_) {
-            if (e.second.IsNull()) continue;
+        for (const auto& entry : obj_val_) {
+            if (entry.second.IsNull()) continue;
             if (!first) out += ',';
             first = false;
-            WriteString(out, e.first);
+            WriteString(out, entry.first);
             out += ':';
-            e.second.Write(out);
+            entry.second.Write(out);
         }
         out += '}';
         break;
@@ -124,33 +125,47 @@ std::string Json::Dump() const {
 }
 
 namespace {
+/**
+ * @brief Recursive-descent JSON parser over a source string.
+ */
 struct Parser {
-    const std::string& s;
-    size_t i = 0;
-    [[noreturn]] void Fail(const char* what) {
-        throw std::runtime_error(std::string("bad JSON: ") + what + " at " + std::to_string(i));
+    const std::string& src;  ///< Input JSON text.
+    size_t pos = 0;          ///< Current byte cursor into `src`.
+
+    /** @brief Throws a syntax error naming `what` and the current byte offset. */
+    [[noreturn]] void Fail(const char* what) const {
+        throw std::runtime_error(std::string("bad JSON: ") + what + " at " + std::to_string(pos));
     }
-    void Ws() {
-        while (i < s.size() && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) i++;
+
+    /** @brief Advances `pos` past any ASCII whitespace. */
+    void SkipWhitespace() {
+        while (pos < src.size() &&
+               (src[pos] == ' ' || src[pos] == '\n' || src[pos] == '\r' || src[pos] == '\t')) {
+            pos++;
+        }
     }
-    bool Lit(const char* w) {
-        size_t n = strlen(w);
-        if (s.compare(i, n, w) == 0) {
-            i += n;
+
+    /** @brief Consumes `word` if it matches at `pos` and returns true. */
+    bool ConsumeLiteral(const char* word) {
+        size_t len = strlen(word);
+        if (src.compare(pos, len, word) == 0) {
+            pos += len;
             return true;
         }
         return false;
     }
-    std::string Str() {
-        if (s[i] != '"') Fail("string");
-        i++;
+
+    /** @brief Parses a double-quoted JSON string. */
+    std::string ParseString() {
+        if (src[pos] != '"') Fail("string");
+        pos++;
         std::string out;
-        while (i < s.size() && s[i] != '"') {
-            char c = s[i++];
-            if (c == '\\') {
-                if (i >= s.size()) Fail("escape");
-                char e = s[i++];
-                switch (e) {
+        while (pos < src.size() && src[pos] != '"') {
+            char chr = src[pos++];
+            if (chr == '\\') {
+                if (pos >= src.size()) Fail("escape");
+                char esc = src[pos++];
+                switch (esc) {
                 case 'n':
                     out += '\n';
                     break;
@@ -167,96 +182,98 @@ struct Parser {
                     out += '\f';
                     break;
                 case 'u': {
-                    unsigned cp =
-                            static_cast<unsigned>(strtoul(s.substr(i, 4).c_str(), nullptr, 16));
-                    i += 4;
-                    out += cp < 256 ? static_cast<char>(cp) : '?';
+                    unsigned code_point =
+                            static_cast<unsigned>(strtoul(src.substr(pos, 4).c_str(), nullptr, 16));
+                    pos += 4;
+                    out += code_point < 256 ? static_cast<char>(code_point) : '?';
                     break;
                 }
                 default:
-                    out += e;
+                    out += esc;
                 }
             } else {
-                out += c;
+                out += chr;
             }
         }
-        if (i >= s.size()) Fail("unterminated string");
-        i++;
+        if (pos >= src.size()) Fail("unterminated string");
+        pos++;
         return out;
     }
-    Json Value() {
-        Ws();
-        if (i >= s.size()) Fail("end");
-        char c = s[i];
-        if (c == '{') {
-            i++;
-            Json o = Json::Object();
-            Ws();
-            if (s[i] == '}') {
-                i++;
-                return o;
+
+    /** @brief Parses a single JSON value (object, array, string, boolean, null, or number). */
+    Json ParseValue() {
+        SkipWhitespace();
+        if (pos >= src.size()) Fail("end");
+        char chr = src[pos];
+        if (chr == '{') {
+            pos++;
+            Json obj = Json::Object();
+            SkipWhitespace();
+            if (src[pos] == '}') {
+                pos++;
+                return obj;
             }
             for (;;) {
-                Ws();
-                std::string k = Str();
-                Ws();
-                if (s[i] != ':') Fail("colon");
-                i++;
-                Json v = Value();
-                o.Set(k, std::move(v));
-                Ws();
-                if (s[i] == ',') {
-                    i++;
+                SkipWhitespace();
+                std::string key = ParseString();
+                SkipWhitespace();
+                if (src[pos] != ':') Fail("colon");
+                pos++;
+                Json val = ParseValue();
+                obj.Set(key, std::move(val));
+                SkipWhitespace();
+                if (src[pos] == ',') {
+                    pos++;
                     continue;
                 }
-                if (s[i] == '}') {
-                    i++;
-                    return o;
+                if (src[pos] == '}') {
+                    pos++;
+                    return obj;
                 }
                 Fail("object");
             }
         }
-        if (c == '[') {
-            i++;
-            Json a = Json::Array();
-            Ws();
-            if (s[i] == ']') {
-                i++;
-                return a;
+        if (chr == '[') {
+            pos++;
+            Json arr = Json::Array();
+            SkipWhitespace();
+            if (src[pos] == ']') {
+                pos++;
+                return arr;
             }
             for (;;) {
-                a.Push(Value());
-                Ws();
-                if (s[i] == ',') {
-                    i++;
+                arr.Push(ParseValue());
+                SkipWhitespace();
+                if (src[pos] == ',') {
+                    pos++;
                     continue;
                 }
-                if (s[i] == ']') {
-                    i++;
-                    return a;
+                if (src[pos] == ']') {
+                    pos++;
+                    return arr;
                 }
                 Fail("array");
             }
         }
-        if (c == '"') return Json(Str());
-        if (Lit("true")) return Json(true);
-        if (Lit("false")) return Json(false);
-        if (Lit("null")) return Json();
+        if (chr == '"') return Json(ParseString());
+        if (ConsumeLiteral("true")) return Json(true);
+        if (ConsumeLiteral("false")) return Json(false);
+        if (ConsumeLiteral("null")) return Json();
         char* end = nullptr;
-        double d = strtod(s.c_str() + i, &end);
-        if (end == s.c_str() + i) Fail("value");
-        i = end - s.c_str();
-        return Json(d);
+        double num = strtod(src.c_str() + pos, &end);
+        if (end == src.c_str() + pos) Fail("value");
+        pos = end - src.c_str();
+        return Json(num);
     }
 };
 }  // namespace
 
 Json Json::Parse(const std::string& text) {
-    Parser p{text};
-    Json v = p.Value();
-    p.Ws();
-    if (p.i != text.size()) p.Fail("trailing text");
-    return v;
+    Parser parser{text};
+    Json val = parser.ParseValue();
+    parser.SkipWhitespace();
+    if (parser.pos != text.size()) parser.Fail("trailing text");
+    return val;
 }
 
 }  // namespace w2

@@ -16,105 +16,109 @@ namespace fs = std::filesystem;
 
 namespace w2 {
 
-std::string Fmt(const char* f, ...) {
-    va_list ap;
-    va_start(ap, f);
+std::string Fmt(const char* fmt_str, ...) {
+    va_list args_primary;
+    va_start(args_primary, fmt_str);
     char buf[512];
-    va_list ap2;
-    va_copy(ap2, ap);
-    int n = vsnprintf(buf, sizeof buf, f, ap);
-    va_end(ap);
+    va_list args_copy;
+    va_copy(args_copy, args_primary);
+    int len = vsnprintf(buf, sizeof buf, fmt_str, args_primary);
+    va_end(args_primary);
     std::string out;
-    if (n < static_cast<int>(sizeof buf)) {
-        out.assign(buf, n < 0 ? 0 : n);
+    if (len < static_cast<int>(sizeof buf)) {
+        out.assign(buf, len < 0 ? 0 : len);
     } else {
-        out.resize(n + 1);
-        vsnprintf(out.data(), n + 1, f, ap2);
-        out.resize(n);
+        out.resize(len + 1);
+        vsnprintf(out.data(), len + 1, fmt_str, args_copy);
+        out.resize(len);
     }
-    va_end(ap2);
+    va_end(args_copy);
     return out;
 }
 
-std::string Sfmt(const std::string& f, const std::vector<FmtArg>& args) {
+std::string Sfmt(const std::string& fmt_str, const std::vector<FmtArg>& args) {
     std::string out;
-    size_t n = 0;
-    for (size_t i = 0; i < f.size(); i++) {
-        char c = f[i];
-        if (c != '%' || i + 1 >= f.size()) {
-            out += c;
+    size_t arg_index = 0;
+    for (size_t i = 0; i < fmt_str.size(); i++) {
+        char chr = fmt_str[i];
+        if (chr != '%' || i + 1 >= fmt_str.size()) {
+            out += chr;
             continue;
         }
-        size_t j = i + 1;
+        size_t pos = i + 1;
         std::string flags;
-        while (j < f.size() && strchr("-+ 0#", f[j])) flags += f[j++];
+        while (pos < fmt_str.size() && strchr("-+ 0#", fmt_str[pos])) flags += fmt_str[pos++];
         int width = 0;
-        while (j < f.size() && isdigit(static_cast<unsigned char>(f[j])))
-            width = width * 10 + (f[j++] - '0');
+        while (pos < fmt_str.size() && isdigit(static_cast<unsigned char>(fmt_str[pos])))
+            width = width * 10 + (fmt_str[pos++] - '0');
         int prec = -1;
-        if (j < f.size() && f[j] == '.') {
+        if (pos < fmt_str.size() && fmt_str[pos] == '.') {
             prec = 0;
-            j++;
-            while (j < f.size() && isdigit(static_cast<unsigned char>(f[j])))
-                prec = prec * 10 + (f[j++] - '0');
+            pos++;
+            while (pos < fmt_str.size() && isdigit(static_cast<unsigned char>(fmt_str[pos])))
+                prec = prec * 10 + (fmt_str[pos++] - '0');
         }
-        while (j < f.size() && (f[j] == 'l' || f[j] == 'h')) j++;
-        if (j >= f.size()) {
-            out += f.substr(i);
+        while (pos < fmt_str.size() && (fmt_str[pos] == 'l' || fmt_str[pos] == 'h')) pos++;
+        if (pos >= fmt_str.size()) {
+            out += fmt_str.substr(i);
             break;
         }
-        char conv = f[j];
-        i = j;
+        char conv = fmt_str[pos];
+        i = pos;
         if (conv == '%') {
             out += '%';
             continue;
         }
-        FmtArg a = n < args.size() ? args[n] : FmtArg("nil");
-        n++;
-        std::string s;
+        FmtArg arg = arg_index < args.size() ? args[arg_index] : FmtArg("nil");
+        arg_index++;
+        std::string formatted;
         switch (conv) {
         case 'd':
         case 'i':
         case 'u': {
-            long v = a.str ? (ToInt(a.s) ? *ToInt(a.s) : 0) : a.n;
-            s = std::to_string(v < 0 ? -v : v);
+            long val = arg.is_str ? (ToInt(arg.str_val) ? *ToInt(arg.str_val) : 0) : arg.num_val;
+            formatted = std::to_string(val < 0 ? -val : val);
             if (prec >= 0)
-                while (static_cast<int>(s.size()) < prec) s = "0" + s;
-            if (v < 0)
-                s = "-" + s;
+                while (static_cast<int>(formatted.size()) < prec) formatted = "0" + formatted;
+            if (val < 0)
+                formatted = "-" + formatted;
             else if (flags.find('+') != std::string::npos)
-                s = "+" + s;
+                formatted = "+" + formatted;
             break;
         }
         case 'x':
         case 'X': {
             char buf[32];
             snprintf(buf, sizeof buf, conv == 'x' ? "%lx" : "%lX",
-                     static_cast<unsigned long>(a.str ? 0 : a.n));
-            s = buf;
+                     static_cast<unsigned long>(arg.is_str ? 0 : arg.num_val));
+            formatted = buf;
             break;
         }
         case 'c':
-            s = std::string(1, static_cast<char>(a.str ? (a.s.empty() ? ' ' : a.s[0]) : a.n));
+            formatted = std::string(
+                    1, static_cast<char>(arg.is_str ? (arg.str_val.empty() ? ' ' : arg.str_val[0])
+                                                    : arg.num_val));
             break;
         case 's':
         default:
-            s = a.str ? a.s : std::to_string(a.n);
-            if (prec >= 0 && static_cast<int>(s.size()) > prec) s = s.substr(0, prec);
+            formatted = arg.is_str ? arg.str_val : std::to_string(arg.num_val);
+            if (prec >= 0 && static_cast<int>(formatted.size()) > prec)
+                formatted = formatted.substr(0, prec);
             break;
         }
-        if (static_cast<int>(s.size()) < width) {
-            if (flags.find('-') != std::string::npos)
-                s += std::string(width - s.size(), ' ');
-            else if (flags.find('0') != std::string::npos && conv != 's') {
-                bool sign = !s.empty() && (s[0] == '-' || s[0] == '+');
-                std::string body = sign ? s.substr(1) : s;
-                s = (sign ? s.substr(0, 1) : "") + std::string(width - s.size(), '0') + body;
+        if (static_cast<int>(formatted.size()) < width) {
+            if (flags.find('-') != std::string::npos) {
+                formatted += std::string(width - formatted.size(), ' ');
+            } else if (flags.find('0') != std::string::npos && conv != 's') {
+                bool sign = !formatted.empty() && (formatted[0] == '-' || formatted[0] == '+');
+                std::string body = sign ? formatted.substr(1) : formatted;
+                formatted = (sign ? formatted.substr(0, 1) : "") +
+                            std::string(width - formatted.size(), '0') + body;
             } else {
-                s = std::string(width - s.size(), ' ') + s;
+                formatted = std::string(width - formatted.size(), ' ') + formatted;
             }
         }
-        out += s;
+        out += formatted;
     }
     return out;
 }
@@ -125,41 +129,42 @@ namespace {
 std::mutex dir_lock;
 std::map<std::string, std::vector<std::string>> dir_cache;
 
+/** @brief Returns the cached filename listing for `dir`. */
 const std::vector<std::string>& Listing(const std::string& dir) {
-    auto it = dir_cache.find(dir);
-    if (it != dir_cache.end()) return it->second;
+    auto found_it = dir_cache.find(dir);
+    if (found_it != dir_cache.end()) return found_it->second;
     std::vector<std::string> names;
-    std::error_code ec;
-    for (auto& e : fs::directory_iterator(dir.empty() ? "." : dir, ec))
-        names.push_back(e.path().filename().string());
+    std::error_code err_code;
+    for (const auto& entry : fs::directory_iterator(dir.empty() ? "." : dir, err_code))
+        names.push_back(entry.path().filename().string());
     return dir_cache[dir] = names;
 }
 }  // namespace
 
 std::string ResolvePath(const std::string& path) {
-    std::error_code ec;
-    if (fs::exists(path, ec)) return path;
-    std::string p = path;
-    std::replace(p.begin(), p.end(), '\\', '/');
+    std::error_code err_code;
+    if (fs::exists(path, err_code)) return path;
+    std::string norm_path = path;
+    std::replace(norm_path.begin(), norm_path.end(), '\\', '/');
     std::lock_guard<std::mutex> lock(dir_lock);
     std::string cur;
-    size_t i = 0;
-    if (!p.empty() && p[0] == '/') {
+    size_t pos = 0;
+    if (!norm_path.empty() && norm_path[0] == '/') {
         cur = "/";
-        i = 1;
+        pos = 1;
     }
-    while (i <= p.size()) {
-        size_t j = p.find('/', i);
-        if (j == std::string::npos) j = p.size();
-        std::string part = p.substr(i, j - i);
-        i = j + 1;
+    while (pos <= norm_path.size()) {
+        size_t slash = norm_path.find('/', pos);
+        if (slash == std::string::npos) slash = norm_path.size();
+        std::string part = norm_path.substr(pos, slash - pos);
+        pos = slash + 1;
         if (part.empty() || part == ".") continue;
         std::string next = cur.empty() ? part : (cur.back() == '/' ? cur + part : cur + "/" + part);
-        if (part != ".." && !fs::exists(next, ec)) {
+        if (part != ".." && !fs::exists(next, err_code)) {
             std::string found;
-            for (auto& n : Listing(cur)) {
-                if (n.size() == part.size() && Upper(n) == Upper(part)) {
-                    found = n;
+            for (const auto& name : Listing(cur)) {
+                if (name.size() == part.size() && Upper(name) == Upper(part)) {
+                    found = name;
                     break;
                 }
             }
@@ -172,18 +177,21 @@ std::string ResolvePath(const std::string& path) {
 }
 
 namespace {
+/** @brief Returns the process-wide in-memory file overlay map. */
 std::map<std::string, std::string>& MadeFiles() {
     static std::map<std::string, std::string> made;
     return made;
 }
+/** @brief Normalizes `path` into an upper-case forward-slash key for `MadeFiles()`. */
 std::string MadeKey(const std::string& path) {
-    std::string k;
-    for (char c : path) {
-        char d = c == '\\' ? '/' : static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        if (d == '/' && !k.empty() && k.back() == '/') continue;
-        k += d;
+    std::string key;
+    for (char chr : path) {
+        char norm = chr == '\\' ? '/'
+                                : static_cast<char>(std::toupper(static_cast<unsigned char>(chr)));
+        if (norm == '/' && !key.empty() && key.back() == '/') continue;
+        key += norm;
     }
-    return k;
+    return key;
 }
 }  // namespace
 
@@ -196,17 +204,17 @@ std::optional<std::string> ReadFile(const std::string& path) {
     if (made != MadeFiles().end()) return made->second;
     std::string real = ResolvePath(path);
     if (real.empty()) return std::nullopt;
-    std::ifstream f(real, std::ios::binary);
-    if (!f) return std::nullopt;
-    std::ostringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
+    std::ifstream file(real, std::ios::binary);
+    if (!file) return std::nullopt;
+    std::ostringstream stream;
+    stream << file.rdbuf();
+    return stream.str();
 }
 
 std::string MustRead(const std::string& path) {
-    auto s = ReadFile(path);
-    if (!s) throw std::runtime_error("cannot open: " + path);
-    return *s;
+    auto content = ReadFile(path);
+    if (!content) throw std::runtime_error("cannot open: " + path);
+    return *content;
 }
 
 bool FileExists(const std::string& path) {
@@ -218,14 +226,14 @@ bool WriteFile(const std::string& path, const std::string& bytes) {
     if (real.empty()) real = path;
     std::string tmp = real + ".tmp";
     {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        if (!f) return false;
-        f.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        if (!f) return false;
+        std::ofstream file(tmp, std::ios::binary | std::ios::trunc);
+        if (!file) return false;
+        file.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        if (!file) return false;
     }
-    std::error_code ec;
-    fs::rename(tmp, real, ec);
-    if (ec) return false;
+    std::error_code err_code;
+    fs::rename(tmp, real, err_code);
+    if (err_code) return false;
     std::lock_guard<std::mutex> lock(dir_lock);
     dir_cache.clear();
     return true;
@@ -234,102 +242,105 @@ bool WriteFile(const std::string& path, const std::string& bytes) {
 bool RemoveFile(const std::string& path) {
     std::string real = ResolvePath(path);
     if (real.empty()) return false;
-    std::error_code ec;
-    bool ok = fs::remove(real, ec);
+    std::error_code err_code;
+    bool removed = fs::remove(real, err_code);
     std::lock_guard<std::mutex> lock(dir_lock);
     dir_cache.clear();
-    return ok;
+    return removed;
 }
 
 // ----------------------------------------------------------------- strings
 
-std::string Upper(std::string s) {
-    for (auto& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return s;
+std::string Upper(std::string str) {
+    for (auto& chr : str) chr = static_cast<char>(std::toupper(static_cast<unsigned char>(chr)));
+    return str;
 }
-std::string Lower(std::string s) {
-    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    return s;
+std::string Lower(std::string str) {
+    for (auto& chr : str) chr = static_cast<char>(std::tolower(static_cast<unsigned char>(chr)));
+    return str;
 }
-std::string TrimRight(const std::string& s) {
-    size_t e = s.size();
-    while (e > 0 && std::isspace(static_cast<unsigned char>(s[e - 1]))) e--;
-    return s.substr(0, e);
+std::string TrimRight(const std::string& str) {
+    size_t end_pos = str.size();
+    while (end_pos > 0 && std::isspace(static_cast<unsigned char>(str[end_pos - 1]))) end_pos--;
+    return str.substr(0, end_pos);
 }
-std::string Trim(const std::string& s) {
-    size_t b = 0;
-    while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) b++;
-    return TrimRight(s.substr(b));
+std::string Trim(const std::string& str) {
+    size_t start_pos = 0;
+    while (start_pos < str.size() && std::isspace(static_cast<unsigned char>(str[start_pos])))
+        start_pos++;
+    return TrimRight(str.substr(start_pos));
 }
-std::vector<std::string> SplitLines(const std::string& s) {
+std::vector<std::string> SplitLines(const std::string& str) {
     std::vector<std::string> out;
     std::string cur;
-    for (char c : s) {
-        if (c == '\r' || c == '\n') {
+    for (char chr : str) {
+        if (chr == '\r' || chr == '\n') {
             if (!cur.empty()) out.push_back(cur);
             cur.clear();
         } else {
-            cur += c;
+            cur += chr;
         }
     }
     if (!cur.empty()) out.push_back(cur);
     return out;
 }
-bool StartsWith(const std::string& s, const std::string& p) {
-    return s.compare(0, p.size(), p) == 0;
+bool StartsWith(const std::string& str, const std::string& prefix) {
+    return str.compare(0, prefix.size(), prefix) == 0;
 }
-bool EndsWith(const std::string& s, const std::string& p) {
-    return s.size() >= p.size() && s.compare(s.size() - p.size(), p.size(), p) == 0;
+bool EndsWith(const std::string& str, const std::string& suffix) {
+    return str.size() >= suffix.size() &&
+           str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
-bool Contains(const std::string& s, const std::string& p) {
-    return s.find(p) != std::string::npos;
+bool Contains(const std::string& str, const std::string& needle) {
+    return str.find(needle) != std::string::npos;
 }
 
-std::string Latin1ToUtf8(const std::string& s) {
+std::string Latin1ToUtf8(const std::string& str) {
     std::string out;
-    for (unsigned char c : s) {
-        if (c < 0x80)
-            out += static_cast<char>(c);
-        else {
-            out += static_cast<char>(0xc0 | (c >> 6));
-            out += static_cast<char>(0x80 | (c & 0x3f));
+    for (unsigned char byte : str) {
+        if (byte < 0x80) {
+            out += static_cast<char>(byte);
+        } else {
+            out += static_cast<char>(0xc0 | (byte >> 6));
+            out += static_cast<char>(0x80 | (byte & 0x3f));
         }
     }
     return out;
 }
-std::string Utf8ToLatin1(const std::string& s) {
+std::string Utf8ToLatin1(const std::string& str) {
     std::string out;
-    for (size_t i = 0; i < s.size();) {
-        unsigned char c = s[i];
-        if (c < 0x80) {
-            out += static_cast<char>(c);
+    for (size_t i = 0; i < str.size();) {
+        unsigned char lead = str[i];
+        if (lead < 0x80) {
+            out += static_cast<char>(lead);
             i++;
             continue;
         }
-        int n = c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : 2;
-        unsigned cp = c & (0x3f >> (n - 1));
-        for (int k = 1; k < n && i + k < s.size(); k++) cp = (cp << 6) | (s[i + k] & 0x3f);
-        out += cp < 256 ? static_cast<char>(cp) : '?';
-        i += n;
+        int seq_len = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : 2;
+        unsigned code_point = lead & (0x3f >> (seq_len - 1));
+        for (int offset = 1; offset < seq_len && i + offset < str.size(); offset++)
+            code_point = (code_point << 6) | (str[i + offset] & 0x3f);
+        out += code_point < 256 ? static_cast<char>(code_point) : '?';
+        i += seq_len;
     }
     return out;
 }
-std::optional<long> ToInt(const std::string& s) {
-    std::string t = Trim(s);
-    if (t.empty()) return std::nullopt;
-    size_t i = 0;
+std::optional<long> ToInt(const std::string& str) {
+    std::string trimmed = Trim(str);
+    if (trimmed.empty()) return std::nullopt;
+    size_t pos = 0;
     bool neg = false;
-    if (t[0] == '-' || t[0] == '+') {
-        neg = t[0] == '-';
-        i = 1;
+    if (trimmed[0] == '-' || trimmed[0] == '+') {
+        neg = trimmed[0] == '-';
+        pos = 1;
     }
-    if (i >= t.size()) return std::nullopt;
-    long v = 0;
-    for (; i < t.size(); i++) {
-        if (!std::isdigit(static_cast<unsigned char>(t[i]))) return std::nullopt;
-        v = v * 10 + (t[i] - '0');
+    if (pos >= trimmed.size()) return std::nullopt;
+    long val = 0;
+    for (; pos < trimmed.size(); pos++) {
+        if (!std::isdigit(static_cast<unsigned char>(trimmed[pos]))) return std::nullopt;
+        val = val * 10 + (trimmed[pos] - '0');
     }
-    return neg ? -v : v;
+    return neg ? -val : val;
 }
 
 double Now() {

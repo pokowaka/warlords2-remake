@@ -10,77 +10,85 @@
 namespace pad {
 
 namespace {
+/**
+ * @brief State for an open `SDL_GameController` and its trigger hysteresis.
+ */
 struct Pad {
-    SDL_GameController* c = nullptr;
-    bool lt = false, rt = false;  // the triggers, as buttons
+    SDL_GameController* controller = nullptr;  ///< Underlying SDL game controller handle.
+    bool left_trig = false;                    ///< True while left trigger is held past threshold.
+    bool right_trig = false;                   ///< True while right trigger is held past threshold.
 };
 std::map<SDL_JoystickID, Pad> pads;
 std::optional<Sticks> scripted;
 
-const double kDead = 0.15;               // of the stick's travel, all round
-const double kPull = 0.5, kLetGo = 0.3;  // a trigger's press, and its release
+const double kDead = 0.15;               // Radial thumbstick dead zone.
+const double kPull = 0.5, kLetGo = 0.3;  // Trigger press and release thresholds.
 
-// One stick, its dead zone taken out and the rest stretched over 0..1, so
-// the slowest it goes is the slowest there is.
-void Stick(SDL_GameController* c, SDL_GameControllerAxis ax, SDL_GameControllerAxis ay, double& x,
-           double& y) {
-    double sx = SDL_GameControllerGetAxis(c, ax) / 32767.0,
-           sy = SDL_GameControllerGetAxis(c, ay) / 32767.0;
-    double m = std::hypot(sx, sy);
-    if (m <= kDead) return;
-    double k = std::min(1.0, (m - kDead) / (1 - kDead)) / m;
-    x += sx * k;
-    y += sy * k;
+/**
+ * @brief Reads one thumbstick, removes its radial dead zone, and rescales the
+ * remaining range smoothly over `0..1`.
+ */
+void Stick(SDL_GameController* controller, SDL_GameControllerAxis axis_x,
+           SDL_GameControllerAxis axis_y, double& x, double& y) {
+    double stick_x = SDL_GameControllerGetAxis(controller, axis_x) / 32767.0;
+    double stick_y = SDL_GameControllerGetAxis(controller, axis_y) / 32767.0;
+    double mag = std::hypot(stick_x, stick_y);
+    if (mag <= kDead) return;
+    double scale = std::min(1.0, (mag - kDead) / (1 - kDead)) / mag;
+    x += stick_x * scale;
+    y += stick_y * scale;
 }
 }  // namespace
 
 void Hints() {
-    // SDL's own Steam Deck driver turns the trackpads' mouse ("lizard mode")
-    // off, and reports no trackpads: with Steam running, Steam has the Deck's
-    // controls anyway and hands the game a virtual pad, and without it the
-    // trackpad stays the mouse
+    // Disable SDL's direct Steam Deck HID driver so Steam Input's virtual pad
+    // and desktop trackpad mouse mode both work as expected.
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "0");
-    // A is the bottom face button on every pad, whatever its label says
+    // Use physical button positions (bottom face button is always A).
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
-    // the Deck's on-screen keyboard, one line, Enter closes it
+    // Pressing Enter on the Steam Deck on-screen keyboard dismisses it.
     SDL_SetHint(SDL_HINT_RETURN_KEY_HIDES_IME, "1");
 }
 
-bool TranslateEvent(const SDL_Event& e, int& button, bool& down) {
-    switch (e.type) {
+bool TranslateEvent(const SDL_Event& event, int& button, bool& down) {
+    switch (event.type) {
     case SDL_CONTROLLERDEVICEADDED: {
-        SDL_GameController* c = SDL_GameControllerOpen(e.cdevice.which);
-        if (c) pads[SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(c))] = Pad{c};
+        SDL_GameController* controller = SDL_GameControllerOpen(event.cdevice.which);
+        if (controller)
+            pads[SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller))] =
+                    Pad{controller};
         return false;
     }
     case SDL_CONTROLLERDEVICEREMOVED: {
-        auto p = pads.find(e.cdevice.which);
-        if (p != pads.end()) {
-            SDL_GameControllerClose(p->second.c);
-            pads.erase(p);
+        auto pad_it = pads.find(event.cdevice.which);
+        if (pad_it != pads.end()) {
+            SDL_GameControllerClose(pad_it->second.controller);
+            pads.erase(pad_it);
         }
         return false;
     }
     case SDL_CONTROLLERBUTTONDOWN:
     case SDL_CONTROLLERBUTTONUP:
-        button = e.cbutton.button;
-        down = e.type == SDL_CONTROLLERBUTTONDOWN;
+        button = event.cbutton.button;
+        down = event.type == SDL_CONTROLLERBUTTONDOWN;
         return true;
     }
     return false;
 }
 
 bool Trigger(int& button, bool& down) {
-    for (auto& [id, p] : pads) {
-        for (int t = 0; t < 2; t++) {
-            bool& was = t == 0 ? p.lt : p.rt;
-            double v = SDL_GameControllerGetAxis(p.c, t == 0 ? SDL_CONTROLLER_AXIS_TRIGGERLEFT
+    for (auto& [joy_id, pad_entry] : pads) {
+        (void)joy_id;
+        for (int trig = 0; trig < 2; trig++) {
+            bool& was_down = trig == 0 ? pad_entry.left_trig : pad_entry.right_trig;
+            double val = SDL_GameControllerGetAxis(pad_entry.controller,
+                                                   trig == 0 ? SDL_CONTROLLER_AXIS_TRIGGERLEFT
                                                              : SDL_CONTROLLER_AXIS_TRIGGERRIGHT) /
-                       32767.0;
-            if (was ? v < kLetGo : v > kPull) {
-                was = !was;
-                button = t == 0 ? kLeftTrigger : kRightTrigger;
-                down = was;
+                         32767.0;
+            if (was_down ? val < kLetGo : val > kPull) {
+                was_down = !was_down;
+                button = trig == 0 ? kLeftTrigger : kRightTrigger;
+                down = was_down;
                 return true;
             }
         }
@@ -90,23 +98,26 @@ bool Trigger(int& button, bool& down) {
 
 Sticks ReadSticks() {
     if (scripted) return *scripted;
-    Sticks s;
-    for (auto& [id, p] : pads) {
-        Stick(p.c, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, s.lx, s.ly);
-        Stick(p.c, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY, s.rx, s.ry);
+    Sticks sticks;
+    for (const auto& [joy_id, pad_entry] : pads) {
+        (void)joy_id;
+        Stick(pad_entry.controller, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, sticks.lx,
+              sticks.ly);
+        Stick(pad_entry.controller, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY,
+              sticks.rx, sticks.ry);
     }
-    s.lx = std::clamp(s.lx, -1.0, 1.0);
-    s.ly = std::clamp(s.ly, -1.0, 1.0);
-    s.rx = std::clamp(s.rx, -1.0, 1.0);
-    s.ry = std::clamp(s.ry, -1.0, 1.0);
-    return s;
+    sticks.lx = std::clamp(sticks.lx, -1.0, 1.0);
+    sticks.ly = std::clamp(sticks.ly, -1.0, 1.0);
+    sticks.rx = std::clamp(sticks.rx, -1.0, 1.0);
+    sticks.ry = std::clamp(sticks.ry, -1.0, 1.0);
+    return sticks;
 }
 
-void Script(const Sticks& s) {
-    if (s.lx == 0 && s.ly == 0 && s.rx == 0 && s.ry == 0)
+void Script(const Sticks& sticks) {
+    if (sticks.lx == 0 && sticks.ly == 0 && sticks.rx == 0 && sticks.ry == 0)
         scripted.reset();
     else
-        scripted = s;
+        scripted = sticks;
 }
 
 int FromName(const std::string& name) {

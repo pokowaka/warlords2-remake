@@ -1,7 +1,7 @@
-// The game's sound: the samples (.8SN) queued one after another as DIGPAK
-// plays them, the advisor's voice, and the music -- the AdLib songs
-// synthesized live through the remake's own OPL2, or the MT-32 and Sound
-// Canvas recordings streamed from pre-rendered-sound/. docs/re/sound.md.
+// Game audio subsystem: `.8SN` sound effects queued sequentially (as DIGPAK
+// played them), the advisor's speech clips, and background music — either live
+// AdLib OPL2 synthesis (`warlords/ailfm`) or pre-rendered MT-32 / Sound Canvas
+// Ogg Vorbis streams from `pre-rendered-sound/` (see `docs/re/sound.md`).
 #pragma once
 
 #include <functional>
@@ -13,37 +13,53 @@
 
 namespace sound {
 
-/** Open the audio device and read what the game plays: FILE.DAT's names,
- *  OPTIONS.SND's switches. Quiet if there is no device. */
+/**
+ * @brief Opens the SDL audio device and loads sound metadata (`FILE.DAT` sample
+ * names and `OPTIONS.SND` toggles). Silent when no audio device is available.
+ */
 void Init(const std::string& data_dir, const w2::uidata::Strings& files);
+/** @brief Closes the audio device and releases active streams and synthesizer state. */
 void Shutdown();
 
+/**
+ * @brief User-toggled audio switches persisted in `DATA/OPTIONS.SND`.
+ */
 struct Options {
-    bool music = true, effects = true, speech = true;
+    bool music = true;    ///< True when background music is enabled.
+    bool effects = true;  ///< True when sound effects are enabled.
+    bool speech = true;   ///< True when advisor voice clips are enabled.
 };
+/** @brief Returns a mutable reference to the active audio options. */
 Options& MutableOptions();
-/** Write OPTIONS.SND after a switch has changed. */
+/** @brief Persists the current audio options to `DATA/OPTIONS.SND`. */
 void SaveOptions();
-void Toggle(const std::string& which);  // "music", "effects", "speech"
+/** @brief Toggles `"music"`, `"effects"`, or `"speech"` and saves `OPTIONS.SND`. */
+void Toggle(const std::string& which);
 
-/** Play a cue's song (warlords/cues). */
+/** @brief Starts playing the song for `cue` (unless that cue is already playing). */
 void Music(int cue, const std::vector<w2::Side*>& sides = {});
+/** @brief Stops any playing background music. */
 void StopMusic();
-/** The synthesizer the songs play on: "fm", "mt32" or "sc55". */
+/** @brief Returns the active music synthesizer (`"fm"`, `"mt32"`, or `"sc55"`). */
 std::string Synth();
-bool SynthAvailable(const std::string& s);
-void SetSynth(const std::string& s);
+/** @brief Returns true if synthesizer `synth_name` has its required assets available. */
+bool SynthAvailable(const std::string& synth_name);
+/** @brief Switches the active music synthesizer to `synth_name` and restarts the current song. */
+void SetSynth(const std::string& synth_name);
 
-/** Queue a named sample ("turn", "war", "ding", ...); how long it plays, in
- *  seconds, 0 if it does not. */
+/** @brief Queues sound effect `name` and returns its duration in seconds (0 if silent). */
 double Effect(const std::string& name);
-/** The advisor says a FILE.DAT group; `after` runs when he has finished.
- *  False when there is nothing to say (no clip, speech off, no device). */
+/**
+ * @brief Queues a random advisor clip from `FILE.DAT` group `group` and runs
+ * `after` when playback finishes. Returns false if speech is disabled or unavailable.
+ */
 bool Speak(int group, std::function<void()> after);
+/** @brief Returns true when advisor speech is enabled. */
 bool SpeechOn();
-/** Is a sample still sounding, or waiting to? */
+/** @brief Returns true while a sample or speech clip is playing or queued. */
 bool Busy();
-/** Called every frame: runs what finished playing. */
+/** @brief Per-frame audio pump: advances the sample queue, fires completion callbacks, and loops
+ * streams. */
 void Update();
 
 }  // namespace sound

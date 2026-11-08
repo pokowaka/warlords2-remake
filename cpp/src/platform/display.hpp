@@ -1,23 +1,15 @@
-// The screen, in real pixels, and the two scales everything is drawn at.
+// Window geometry, coordinate spaces, and integer/smooth UI scaling.
 //
-// Not the original's: it drew 640x480 and nothing else. Three kinds of
-// coordinate, as in the Lua remake:
+// Three coordinate spaces are used, matching the Lua reference:
+//   - device: physical window/canvas pixels (HiDPI-aware). When the smooth
+//     view or CRT shader is active, rendering targets an offscreen canvas at
+//     the next integer scale up and downsamples or warps it onto the window.
+//   - UI: logical interface pixels (640x480 minimum), where 1 UI pixel equals
+//     `scale` device pixels.
+//   - map: map pixels (40 per tile), drawn at `zoom` device pixels per map
+//     pixel independently of the UI scale.
 //
-//   device  the window's own pixels -- on a high-density display, more than
-//           the window's size in points, so nothing resamples them. On a
-//           screen no whole scale fits well (1280x800: 1x leaves a third of
-//           it over, 2x is 160 rows too tall) the smooth view is offered as
-//           well, and is the default: device pixels are then a canvas bigger
-//           than the window, drawn at the next scale up and smoothly shrunk
-//           onto it. A whole scale goes through the canvas only for
-//           the CRT screen (platform/crt.hpp)
-//   UI      the interface's pixels: every rect in the game's data. One UI
-//           pixel is `scale` device pixels across, a whole number
-//   map     the map's own pixels, 40 to a tile, drawn at `zoom` device
-//           pixels each, apart from the UI's
-//
-// Handlers and hit tests all work in UI pixels: the mouse is brought down to
-// them before the front end sees it.
+// Input handlers and hit tests operate in UI pixels.
 #pragma once
 
 #include <optional>
@@ -28,74 +20,74 @@ struct SDL_Window;
 
 namespace display {
 
-constexpr int kW = 640, kH = 480;  // the original's screen, and the smallest
-constexpr int kShortH = 400;       // the fewest rows the main screen fits in (front/layout)
-constexpr int kSmooth = -1;        // the smooth view, as a chosen scale
+// NOLINTNEXTLINE(readability-identifier-length)
+constexpr int kW = 640, kH = 480;  ///< Classic 640x480 screen dimensions.
+constexpr int kShortH = 400;       ///< Minimum UI rows needed by the main screen layout.
+constexpr int kSmooth = -1;        ///< Sentinel scale value selecting smooth fractional scaling.
 
+/**
+ * @brief Current window, canvas, and scaling state.
+ */
 struct State {
-    double dpi = 1;           // device pixels to a window point
-    int pw = 640, ph = 480;   // the window, in device pixels
-    double shrink = 1;        // the window's real pixels to a device pixel: under 1 on a canvas
-    int scale = 1;            // device pixels to a UI pixel
-    int max_scale = 1;        // the biggest whole scale that fits
-    int max_short = 1;        // the biggest that fits the main screen, cut down to SHORT_H rows
-    int min_h = kH;           // the rows the screen in use needs: H for the start screens
-    double smooth_scale = 0;  // the smooth view's size, in real pixels a UI pixel; 0 for none
-    bool smooth = false;      // drawn in the smooth view
-    int chosen = 0;           // picked from the menu: a whole scale, SMOOTH, or 0 for none
-    bool windowed = false;    // in a window on the desktop, not full screen
-    bool crt = false;  // through an old monitor's tube (View > CRT screen): plain where there is no
-                       // canvas
-    std::optional<std::pair<int, int>> wanted;  // the frame to keep to: View > 4:3
-    int w = 640, h = 480;                       // the frame being drawn, in UI pixels
-    int ox = 0, oy = 0;                         // where its (0, 0) sits, in device pixels
-    bool mouse_inside = true;                   // over the window at all
-    std::optional<std::pair<int, int>> off;  // over the black round the frame: where, in UI pixels
-    std::string glass_shot;  // a .bmp to write the window to as the next frame shows it (a script's
-                             // glass)
+    double dpi = 1;          ///< Device pixels per window point.
+    int pw = 640, ph = 480;  ///< Render target dimensions in device pixels.
+    double shrink =
+            1;      ///< Ratio of physical window pixels to canvas device pixels (< 1 on canvas).
+    int scale = 1;  ///< Device pixels per UI pixel.
+    int max_scale = 1;  ///< Largest integer scale that fits 640x480.
+    int max_short = 1;  ///< Largest integer scale that fits 640x400 (`kShortH`).
+    int min_h = kH;  ///< Minimum UI height required by the active screen (`kH` on start screens).
+    double smooth_scale =
+            0;              ///< Fractional UI scale when smooth scaling is available; 0 otherwise.
+    bool smooth = false;    ///< True when rendering via the smooth-scaled offscreen canvas.
+    int chosen = 0;         ///< User-selected scale: integer scale, `kSmooth`, or 0 for auto.
+    bool windowed = false;  ///< True in windowed mode; false in fullscreen desktop mode.
+    bool crt = false;       ///< True when the CRT monitor effect (View > CRT screen) is enabled.
+    std::optional<std::pair<int, int>> wanted;  ///< Optional aspect-locked UI frame (View > 4:3).
+    int w = 640, h = 480;                       ///< Active frame dimensions in UI pixels.
+    int ox = 0, oy = 0;        ///< Top-left origin of the UI frame in device pixels.
+    bool mouse_inside = true;  ///< True while the mouse cursor is inside the window.
+    std::optional<std::pair<int, int>>
+            off;             ///< UI coordinates when cursor is over the black border.
+    std::string glass_shot;  ///< Path for a post-CRT window screenshot (`glass` script cmd).
 };
-extern State d;
+extern State d;  // NOLINT(readability-identifier-length)
 
-/** Open the game's window: full screen on the desktop, or a window. With a
- *  size, a window of exactly that many device pixels (--size). */
+/**
+ * @brief Opens the SDL window in fullscreen desktop or windowed mode (with
+ * optional explicit device-pixel size from `--size`).
+ */
 SDL_Window* Open(const char* title, bool windowed, int size_w = 0, int size_h = 0);
+/** @brief Returns the active `SDL_Window*`. */
 SDL_Window* Window();
-/** Read the window's size, and pick the UI's scale: the one chosen from the
- *  menu, or else the smooth view where there is one, and the biggest whole
- *  number that still fits 640x480 where not. The smooth view is there when
- *  that whole number leaves a quarter of the window over. A whole scale
- *  bigger than that leaves fewer than 480 rows, and is kept only where the
- *  screen in use needs no more than that (`minH`); elsewhere the scale is
- *  the one there would be with none chosen. */
+/** @brief Recomputes window dimensions and selects the active integer or smooth UI scale. */
 void Measure();
-/** Start a frame: on the canvas, when the scale or the CRT needs one. */
+/** @brief Begins rendering a frame, binding the offscreen canvas when smooth scaling or CRT is
+ * active. */
 void BeginFrame();
-/** Show the frame, shrinking the canvas onto the window, or through the
- *  CRT's tube. */
+/** @brief Presents the rendered frame to the window (applying downsampling or CRT warp if needed).
+ */
 void Present();
-/** Draw the UI at `n` device pixels a pixel from now on, as far as it fits,
- *  or in the smooth view (SMOOTH) where there is one. */
+/** @brief Selects UI scale `n` (or `kSmooth`) and remeasures the display. */
 void Choose(int n);
-/** How many UI pixels the game gets. */
+/** @brief Returns the available UI dimensions `(width, height)` in UI pixels. */
 std::pair<int, int> UiSize();
-/** Draw a frame of w x h UI pixels from here on, centred on the screen. */
-void SetFrame(int w, int h);
-/** Draw in UI pixels until the matching gfx::pop. */
+/** @brief Centres a UI frame of `width` by `height` UI pixels on the screen. */
+void SetFrame(int width, int height);
+/** @brief Pushes the UI coordinate transform onto the `gfx` transform stack. */
 void PushUi();
-/** Draw in map pixels until the matching pop, one map pixel to `zoom` device
- *  pixels, slid `camX, camY` device pixels from the UI point (x, y). */
+/** @brief Pushes the map coordinate transform at `zoom` device pixels per map pixel. */
 void PushMap(int x, int y, int cam_x, int cam_y, int zoom);
-/** A window position (in points) as a UI point, held to the frame. */
+/** @brief Converts a window position (in points) to clamped UI pixel coordinates. */
 std::pair<int, int> ToUi(double x, double y);
-/** Where a UI point shows on the window, in points: toUI's way back, for
- *  putting the mouse where a controller's pointer is. */
+/** @brief Converts UI pixel coordinates back to window coordinates (in points). */
 std::pair<double, double> FromUi(double x, double y);
-/** A window position off the frame as a UI point, not held to it; none
- *  when it is on the frame. */
+/** @brief Returns unclamped UI coordinates when `(x, y)` lies outside the active UI frame, or
+ * `std::nullopt`. */
 std::optional<std::pair<int, int>> OffFrame(double x, double y);
-/** Full screen or a window (View > Full screen, Window). */
-void SetWindowed(bool on);
-/** Is the pointer out of the window, so that it draws none? */
+/** @brief Switches between windowed and fullscreen desktop mode. */
+void SetWindowed(bool enabled);
+/** @brief True when the window is windowed and the cursor has left it. */
 bool PointerAway();
 
 }  // namespace display

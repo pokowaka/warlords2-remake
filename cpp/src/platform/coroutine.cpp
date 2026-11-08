@@ -9,7 +9,7 @@ Coroutine::Coroutine(Body body) : body_(std::move(body)) {
 
 Coroutine::~Coroutine() {
     if (started_ && !finished_) {
-        // unwind the body: its next yield throws, and it runs to its end
+        // Unwind the worker body: its next yield throws Cancelled and exits cleanly.
         SDL_LockMutex(lock_);
         cancel_ = true;
         body_turn_ = true;
@@ -22,8 +22,8 @@ Coroutine::~Coroutine() {
     SDL_DestroyMutex(lock_);
 }
 
-int Coroutine::Run(void* p) {
-    Coroutine* self = static_cast<Coroutine*>(p);
+int Coroutine::Run(void* self_ptr) {
+    Coroutine* self = static_cast<Coroutine*>(self_ptr);
     SDL_LockMutex(self->lock_);
     while (!self->body_turn_) SDL_CondWait(self->cond_, self->lock_);
     SDL_UnlockMutex(self->lock_);
@@ -47,8 +47,7 @@ bool Coroutine::Resume() {
     if (finished_) return false;
     if (!started_) {
         started_ = true;
-        // the AI recurses a little and keeps its working state on the heap; 16MB
-        // is far more than it needs
+        // Allocate a 16 MB stack so recursive AI search has ample headroom.
         thread_ = SDL_CreateThreadWithStackSize(Run, "computer", 16UZ * 1024 * 1024, this);
     }
     SDL_LockMutex(lock_);
@@ -57,16 +56,16 @@ bool Coroutine::Resume() {
     while (body_turn_) SDL_CondWait(cond_, lock_);
     SDL_UnlockMutex(lock_);
     if (error_) {
-        auto e = error_;
+        auto err = error_;
         error_ = nullptr;
-        std::rethrow_exception(e);
+        std::rethrow_exception(err);
     }
     return !finished_;
 }
 
-void Coroutine::YieldValue(Yield y) {
+void Coroutine::YieldValue(Yield yielded) {
     SDL_LockMutex(lock_);
-    value_ = std::move(y);
+    value_ = std::move(yielded);
     body_turn_ = false;
     SDL_CondBroadcast(cond_);
     while (!body_turn_) SDL_CondWait(cond_, lock_);

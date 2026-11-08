@@ -16,114 +16,125 @@ namespace crt {
 
 namespace {
 
-// How far the glass bows: at a corner of the frame the canvas shows from this
-// much further out, across and down, as a share of half the frame.
+// Barrel distortion factors along X and Y at the frame corners.
 constexpr double kBowX = 1.0 / 64, kBowY = 1.0 / 48;
-constexpr int kGridX = 64, kGridY = 48;       // the mesh's cells
-constexpr double kScanline = 0.45;            // how dark between rows, at full strength
-constexpr double kMask = 0.2;                 // how much of the other colours a stripe holds back
-constexpr int kGlowNear = 70, kGlowFar = 90;  // the two halos added back, out of 255
+constexpr int kGridX = 64, kGridY = 48;       // Mesh subdivisions for the fallback geometry path.
+constexpr double kScanline = 0.45;            // Peak scanline darkening between UI rows.
+constexpr double kMask = 0.2;                 // Subpixel aperture-grille attenuation.
+constexpr int kGlowNear = 70, kGlowFar = 90;  // Halation glow weights (out of 255).
 constexpr double kCorner = 0.05,
-                 kEdge = 0.012;  // the glass's corner and its soft rim, in frame heights
+                 kEdge = 0.012;  // Rounded corner radius and soft rim width in frame heights.
 
+/**
+ * @brief Cached auxiliary `SDL_Texture` with its dimensions and invalidation key.
+ */
 struct Tex {
-    SDL_Texture* t = nullptr;
-    int w = 0, h = 0;
-    double key = 0;  // what it was made for, besides its size
+    SDL_Texture* tex = nullptr;  ///< Underlying SDL texture handle.
+    int w = 0;                   ///< Width in pixels.
+    int h = 0;                   ///< Height in pixels.
+    double key = 0;              ///< Parameter key for invalidating cached content.
 };
 
-Tex half, quarter, eighth;  // the frame, smaller and smaller, for the glow
-Tex lines;                  // one column: a UI row's brightness, top to bottom
-Tex stripes;                // one row: the mask, across the window
-Tex shade;                  // the glass's darkening towards its rim
+Tex half, quarter, eighth;  // Downsampled frame pyramid for halation glow.
+Tex lines;                  // 1-column texture encoding scanline brightness across UI rows.
+Tex stripes;                // 1-row texture encoding RGB aperture-grille stripes across the window.
+Tex shade;                  // Vignette and rounded-corner darkening texture.
 
-// (Re)make a texture of this size; true when it is new, so wants filling.
-bool Need(SDL_Renderer* r, Tex& x, int w, int h, int access, double key = 0) {
-    w = std::max(1, w);
-    h = std::max(1, h);
-    if (x.t && x.w == w && x.h == h && x.key == key) return false;
-    if (x.t) SDL_DestroyTexture(x.t);
-    x.t = SDL_CreateTexture(r, SDL_PIXELFORMAT_ARGB8888, access, w, h);
-    x.w = w;
-    x.h = h;
-    x.key = key;
-    if (x.t) SDL_SetTextureScaleMode(x.t, SDL_ScaleModeLinear);
-    return x.t != nullptr;
+/**
+ * @brief Ensures `slot` holds a texture of `(width, height)` and `key`;
+ * returns true when newly created and needing pixel upload.
+ */
+bool Need(SDL_Renderer* ren, Tex& slot, int width, int height, int access, double key = 0) {
+    width = std::max(1, width);
+    height = std::max(1, height);
+    if (slot.tex && slot.w == width && slot.h == height && slot.key == key) return false;
+    if (slot.tex) SDL_DestroyTexture(slot.tex);
+    slot.tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ARGB8888, access, width, height);
+    slot.w = width;
+    slot.h = height;
+    slot.key = key;
+    if (slot.tex) SDL_SetTextureScaleMode(slot.tex, SDL_ScaleModeLinear);
+    return slot.tex != nullptr;
 }
 
-void Fill(Tex& x, const std::vector<Uint32>& px) {
-    if (x.t) SDL_UpdateTexture(x.t, nullptr, px.data(), x.w * 4);
+/** @brief Uploads ARGB8888 `pixels` into `slot`. */
+void Fill(Tex& slot, const std::vector<Uint32>& pixels) {
+    if (slot.tex) SDL_UpdateTexture(slot.tex, nullptr, pixels.data(), slot.w * 4);
 }
 
-Uint32 Grey(double v) {
-    Uint32 c = static_cast<Uint32>(std::clamp(static_cast<int>(std::lround(v * 255)), 0, 255));
-    return 0xff000000U | c << 16 | c << 8 | c;
+/** @brief Packs a normalized greyscale brightness `val` (`0..1`) into ARGB8888. */
+Uint32 Grey(double val) {
+    Uint32 byte = static_cast<Uint32>(std::clamp(static_cast<int>(std::lround(val * 255)), 0, 255));
+    return 0xff000000U | byte << 16 | byte << 8 | byte;
 }
 
-// Where a canvas point shows on the glass: the bow's inverse, in the frame's
-// own -1..1, found by going round until it settles.
-std::pair<double, double> Bow(double cx, double cy) {
-    double sx = cx, sy = cy;
+/**
+ * @brief Computes the inverse barrel distortion in normalized `-1..1` frame
+ * coordinates via fixed-point iteration.
+ */
+std::pair<double, double> Bow(double can_x, double can_y) {
+    double scr_x = can_x, scr_y = can_y;
     for (int i = 0; i < 8; i++) {
-        sx = cx / (1 + kBowX * sy * sy);
-        sy = cy / (1 + kBowY * sx * sx);
+        scr_x = can_x / (1 + kBowX * scr_y * scr_y);
+        scr_y = can_y / (1 + kBowY * scr_x * scr_x);
     }
-    return {sx, sy};
+    return {scr_x, scr_y};
 }
 
-// A UI row's brightness at `k` texels a row, `s` its strength: the beam
-// lights the row's top k - 1 texels and leaves the last the darkest, so at
-// two pixels a row it is one bright and one dark, as on the glass.
-void MakeLines(int rows, int k, double s) {
-    std::vector<Uint32> px(static_cast<size_t>(rows) * k);
-    double mid = 0.5 - 0.5 / k;
-    for (size_t i = 0; i < px.size(); i++) {
-        double t = (i % k + 0.5) / k - mid;
-        double beam = std::exp(-(t * t) / (0.3 * 0.3));
-        px[i] = Grey(1 - s * (1 - beam));
+/**
+ * @brief Populates the scanline texture for `rows` UI rows at `texels_per_row`
+ * vertical resolution and `strength` darkening.
+ */
+void MakeLines(int rows, int texels_per_row, double strength) {
+    std::vector<Uint32> pixels(static_cast<size_t>(rows) * texels_per_row);
+    double mid = 0.5 - 0.5 / texels_per_row;
+    for (size_t i = 0; i < pixels.size(); i++) {
+        double offset = (i % texels_per_row + 0.5) / texels_per_row - mid;
+        double beam = std::exp(-(offset * offset) / (0.3 * 0.3));
+        pixels[i] = Grey(1 - strength * (1 - beam));
     }
-    Fill(lines, px);
+    Fill(lines, pixels);
 }
 
-// The aperture grille: red, green and blue stripes, each `sw` pixels wide.
-void MakeStripes(int sw) {
-    std::vector<Uint32> px(stripes.w);
-    Uint32 off = static_cast<Uint32>(std::lround(255 * (1 - kMask)));
+/** @brief Populates the RGB aperture-grille texture with stripes `stripe_w` pixels wide. */
+void MakeStripes(int stripe_w) {
+    std::vector<Uint32> pixels(stripes.w);
+    Uint32 dim = static_cast<Uint32>(std::lround(255 * (1 - kMask)));
     for (int x = 0; x < stripes.w; x++) {
-        int c = x / sw % 3;
-        Uint32 r = c == 0 ? 255 : off, g = c == 1 ? 255 : off, b = c == 2 ? 255 : off;
-        px[x] = 0xff000000U | r << 16 | g << 8 | b;
+        int chan = x / stripe_w % 3;
+        Uint32 red = chan == 0 ? 255 : dim;
+        Uint32 green = chan == 1 ? 255 : dim;
+        Uint32 blue = chan == 2 ? 255 : dim;
+        pixels[x] = 0xff000000U | red << 16 | green << 8 | blue;
     }
-    Fill(stripes, px);
+    Fill(stripes, pixels);
 }
 
-// Dark at the glass's rounded rim, and a little towards it everywhere.
+/** @brief Populates the rounded-corner and vignette shading texture for `aspect`. */
 void MakeShade(double aspect) {
-    std::vector<Uint32> px(static_cast<size_t>(shade.w) * shade.h);
+    std::vector<Uint32> pixels(static_cast<size_t>(shade.w) * shade.h);
     for (int y = 0; y < shade.h; y++) {
         for (int x = 0; x < shade.w; x++) {
-            double u = (x + 0.5) / shade.w, v = (y + 0.5) / shade.h;
-            // how far inside the rounded rim, in frame heights
-            double qx = std::abs(u * 2 - 1) * aspect - (aspect - kCorner),
-                   qy = std::abs(v * 2 - 1) - (1 - kCorner);
-            double out = std::hypot(std::max(qx, 0.0), std::max(qy, 0.0)) +
-                         std::min(std::max(qx, qy), 0.0) - kCorner;
-            double rim = std::clamp(-out / kEdge, 0.0, 1.0);
+            double norm_u = (x + 0.5) / shade.w, norm_v = (y + 0.5) / shade.h;
+            double dist_x = std::abs(norm_u * 2 - 1) * aspect - (aspect - kCorner);
+            double dist_y = std::abs(norm_v * 2 - 1) - (1 - kCorner);
+            double outside = std::hypot(std::max(dist_x, 0.0), std::max(dist_y, 0.0)) +
+                             std::min(std::max(dist_x, dist_y), 0.0) - kCorner;
+            double rim = std::clamp(-outside / kEdge, 0.0, 1.0);
             rim = rim * rim * (3 - 2 * rim);
-            double vig = std::pow(std::max(0.0, 16 * u * (1 - u) * v * (1 - v)), 0.12);
-            px[static_cast<size_t>(y) * shade.w + x] = Grey(rim * vig);
+            double vig = std::pow(std::max(0.0, 16 * norm_u * (1 - norm_u) * norm_v * (1 - norm_v)),
+                                  0.12);
+            pixels[static_cast<size_t>(y) * shade.w + x] = Grey(rim * vig);
         }
     }
-    Fill(shade, px);
+    Fill(shade, pixels);
 }
 
-// --- the shader, where the renderer is OpenGL ------------------------------
-//
-// SDL draws everything else; the tube is one triangle over the window, drawn
-// between SDL's own commands. SDL2 and SDL3 (under sdl2-compat) both keep a
-// copy of the GL state they last set, so what is changed here goes back as it
-// was: the program, the viewport, the blend, the clip and the textures.
+// --- OpenGL shader path ------------------------------------------------------
 
+/**
+ * @brief Dynamically resolved OpenGL entry points used by the CRT shader pass.
+ */
 struct GLFuns {
     decltype(&glGetIntegerv) get_integerv;
     decltype(&glIsEnabled) is_enabled;
@@ -152,31 +163,29 @@ struct GLFuns {
     PFNGLUNIFORM1FPROC uniform1f;
     PFNGLUNIFORM2FPROC uniform2f;
     PFNGLUNIFORM4FPROC uniform4f;
-} gl;
+} gl_fns;
 
 enum class Shader { kUntried, kReady, kNone };
 Shader shader = Shader::kUntried;
 GLuint program = 0;
 struct {
-    GLint screen, nearer, farther, height, k, size, frame, rows, row_px, scan, stripe;
-} at;
+    GLint screen, nearer, farther, height, scale_k, size, frame, rows, row_px, scan, stripe;
+} uniforms;
 
-// A constant as GLSL reads it: a float, never an int.
-std::string Lit(double v) {
-    char b[32];
-    snprintf(b, sizeof b, "%.9g", v);
-    std::string s = b;
-    if (s.find_first_of(".e") == std::string::npos) s += ".0";
-    return s;
+/** @brief Formats `val` as a GLSL floating-point literal (always including a decimal point). */
+std::string Lit(double val) {
+    char buf[32];
+    snprintf(buf, sizeof buf, "%.9g", val);
+    std::string str = buf;
+    if (str.find_first_of(".e") == std::string::npos) str += ".0";
+    return str;
 }
 
 const char* vertex = R"(#version 120
 void main() { gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0); }
 )";
 
-// The web port's shader (web/src/crt.js) in GLSL 1.20, the version SDL's
-// OpenGL renderer gets on every system (on a Mac, OpenGL 2.1). The glow is
-// the frame two and three halvings down, as the mesh's is, not mipmaps.
+/** @brief Builds the GLSL 1.20 fragment shader source for the CRT pass. */
 std::string Fragment() {
     return R"(#version 120
 uniform sampler2D screen;   // the canvas
@@ -239,303 +248,323 @@ void main() {
 )";
 }
 
+/** @brief Loads OpenGL function `name` into `fn_ptr`; returns true on success. */
 template <class F>
-bool Load(F& f, const char* name) {
-    f = reinterpret_cast<F>(SDL_GL_GetProcAddress(name));
-    return f != nullptr;
+bool Load(F& fn_ptr, const char* name) {
+    fn_ptr = reinterpret_cast<F>(SDL_GL_GetProcAddress(name));
+    return fn_ptr != nullptr;
 }
 
+/** @brief Compiles a GLSL shader of `type` from `src`, or returns 0 on failure. */
 GLuint Compile(GLenum type, const char* src) {
-    GLuint s = gl.create_shader(type);
-    gl.shader_source(s, 1, &src, nullptr);
-    gl.compile_shader(s);
-    GLint ok = 0;
-    gl.get_shaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
+    GLuint shd = gl_fns.create_shader(type);
+    gl_fns.shader_source(shd, 1, &src, nullptr);
+    gl_fns.compile_shader(shd);
+    GLint compiled = 0;
+    gl_fns.get_shaderiv(shd, GL_COMPILE_STATUS, &compiled);
+    if (!compiled) {
         char log[1024] = "";
-        gl.get_shader_info_log(s, sizeof log, nullptr, log);
+        gl_fns.get_shader_info_log(shd, sizeof log, nullptr, log);
         fprintf(stderr, "CRT shader: %s\n", log);
-        gl.delete_shader(s);
+        gl_fns.delete_shader(shd);
         return 0;
     }
-    return s;
+    return shd;
 }
 
-// Load OpenGL and build the program, with SDL's context current.
+/** @brief Resolves OpenGL functions and links the CRT shader program. */
 bool MakeShader() {
-    bool ok =
-            Load(gl.get_integerv, "glGetIntegerv") && Load(gl.is_enabled, "glIsEnabled") &&
-            Load(gl.enable, "glEnable") && Load(gl.disable, "glDisable") &&
-            Load(gl.viewport, "glViewport") && Load(gl.bind_texture, "glBindTexture") &&
-            Load(gl.begin, "glBegin") && Load(gl.end, "glEnd") && Load(gl.vertex2f, "glVertex2f") &&
-            Load(gl.active_texture, "glActiveTexture") &&
-            Load(gl.create_shader, "glCreateShader") && Load(gl.shader_source, "glShaderSource") &&
-            Load(gl.compile_shader, "glCompileShader") && Load(gl.get_shaderiv, "glGetShaderiv") &&
-            Load(gl.get_shader_info_log, "glGetShaderInfoLog") &&
-            Load(gl.delete_shader, "glDeleteShader") &&
-            Load(gl.create_program, "glCreateProgram") &&
-            Load(gl.attach_shader, "glAttachShader") && Load(gl.link_program, "glLinkProgram") &&
-            Load(gl.get_programiv, "glGetProgramiv") &&
-            Load(gl.get_program_info_log, "glGetProgramInfoLog") &&
-            Load(gl.use_program, "glUseProgram") &&
-            Load(gl.get_uniform_location, "glGetUniformLocation") &&
-            Load(gl.uniform1i, "glUniform1i") && Load(gl.uniform1f, "glUniform1f") &&
-            Load(gl.uniform2f, "glUniform2f") && Load(gl.uniform4f, "glUniform4f");
-    if (!ok) return false;
+    bool loaded = Load(gl_fns.get_integerv, "glGetIntegerv") &&
+                  Load(gl_fns.is_enabled, "glIsEnabled") && Load(gl_fns.enable, "glEnable") &&
+                  Load(gl_fns.disable, "glDisable") && Load(gl_fns.viewport, "glViewport") &&
+                  Load(gl_fns.bind_texture, "glBindTexture") && Load(gl_fns.begin, "glBegin") &&
+                  Load(gl_fns.end, "glEnd") && Load(gl_fns.vertex2f, "glVertex2f") &&
+                  Load(gl_fns.active_texture, "glActiveTexture") &&
+                  Load(gl_fns.create_shader, "glCreateShader") &&
+                  Load(gl_fns.shader_source, "glShaderSource") &&
+                  Load(gl_fns.compile_shader, "glCompileShader") &&
+                  Load(gl_fns.get_shaderiv, "glGetShaderiv") &&
+                  Load(gl_fns.get_shader_info_log, "glGetShaderInfoLog") &&
+                  Load(gl_fns.delete_shader, "glDeleteShader") &&
+                  Load(gl_fns.create_program, "glCreateProgram") &&
+                  Load(gl_fns.attach_shader, "glAttachShader") &&
+                  Load(gl_fns.link_program, "glLinkProgram") &&
+                  Load(gl_fns.get_programiv, "glGetProgramiv") &&
+                  Load(gl_fns.get_program_info_log, "glGetProgramInfoLog") &&
+                  Load(gl_fns.use_program, "glUseProgram") &&
+                  Load(gl_fns.get_uniform_location, "glGetUniformLocation") &&
+                  Load(gl_fns.uniform1i, "glUniform1i") && Load(gl_fns.uniform1f, "glUniform1f") &&
+                  Load(gl_fns.uniform2f, "glUniform2f") && Load(gl_fns.uniform4f, "glUniform4f");
+    if (!loaded) return false;
     std::string frag = Fragment();
-    GLuint vs = Compile(GL_VERTEX_SHADER, vertex), fs = Compile(GL_FRAGMENT_SHADER, frag.c_str());
-    if (!vs || !fs) return false;
-    program = gl.create_program();
-    gl.attach_shader(program, vs);
-    gl.attach_shader(program, fs);
-    gl.link_program(program);
-    gl.delete_shader(vs);
-    gl.delete_shader(fs);
+    GLuint vert_shd = Compile(GL_VERTEX_SHADER, vertex);
+    GLuint frag_shd = Compile(GL_FRAGMENT_SHADER, frag.c_str());
+    if (!vert_shd || !frag_shd) return false;
+    program = gl_fns.create_program();
+    gl_fns.attach_shader(program, vert_shd);
+    gl_fns.attach_shader(program, frag_shd);
+    gl_fns.link_program(program);
+    gl_fns.delete_shader(vert_shd);
+    gl_fns.delete_shader(frag_shd);
     GLint linked = 0;
-    gl.get_programiv(program, GL_LINK_STATUS, &linked);
+    gl_fns.get_programiv(program, GL_LINK_STATUS, &linked);
     if (!linked) {
         char log[1024] = "";
-        gl.get_program_info_log(program, sizeof log, nullptr, log);
+        gl_fns.get_program_info_log(program, sizeof log, nullptr, log);
         fprintf(stderr, "CRT shader: %s\n", log);
         return false;
     }
-    at.screen = gl.get_uniform_location(program, "screen");
-    at.nearer = gl.get_uniform_location(program, "nearer");
-    at.farther = gl.get_uniform_location(program, "farther");
-    at.height = gl.get_uniform_location(program, "height");
-    at.k = gl.get_uniform_location(program, "k");
-    at.size = gl.get_uniform_location(program, "size");
-    at.frame = gl.get_uniform_location(program, "frame");
-    at.rows = gl.get_uniform_location(program, "rows");
-    at.row_px = gl.get_uniform_location(program, "rowPx");
-    at.scan = gl.get_uniform_location(program, "scan");
-    at.stripe = gl.get_uniform_location(program, "stripe");
+    uniforms.screen = gl_fns.get_uniform_location(program, "screen");
+    uniforms.nearer = gl_fns.get_uniform_location(program, "nearer");
+    uniforms.farther = gl_fns.get_uniform_location(program, "farther");
+    uniforms.height = gl_fns.get_uniform_location(program, "height");
+    uniforms.scale_k = gl_fns.get_uniform_location(program, "k");
+    uniforms.size = gl_fns.get_uniform_location(program, "size");
+    uniforms.frame = gl_fns.get_uniform_location(program, "frame");
+    uniforms.rows = gl_fns.get_uniform_location(program, "rows");
+    uniforms.row_px = gl_fns.get_uniform_location(program, "rowPx");
+    uniforms.scan = gl_fns.get_uniform_location(program, "scan");
+    uniforms.stripe = gl_fns.get_uniform_location(program, "stripe");
     return true;
 }
 
-// A texture's GL name, through SDL: 0 where it is not a plain 2D one.
-GLuint Name(SDL_Texture* t) {
-    float tw = 0, th = 0;
-    if (SDL_GL_BindTexture(t, &tw, &th) != 0) return 0;
-    GLint n = 0;
-    gl.get_integerv(GL_TEXTURE_BINDING_2D, &n);
-    SDL_GL_UnbindTexture(t);
-    return tw == 1 && th == 1 ? static_cast<GLuint>(n) : 0;
+/** @brief Queries the underlying `GL_TEXTURE_2D` handle of `tex`, or returns 0 if non-2D. */
+GLuint Name(SDL_Texture* tex) {
+    float tex_w = 0, tex_h = 0;
+    if (SDL_GL_BindTexture(tex, &tex_w, &tex_h) != 0) return 0;
+    GLint gl_id = 0;
+    gl_fns.get_integerv(GL_TEXTURE_BINDING_2D, &gl_id);
+    SDL_GL_UnbindTexture(tex);
+    return tex_w == 1 && tex_h == 1 ? static_cast<GLuint>(gl_id) : 0;
 }
 
+/**
+ * @brief Per-frame display parameters passed to the CRT shader.
+ */
 struct Look {
-    int ow, oh;     // the window, in its pixels
-    double kx, ky;  // window pixels to a canvas pixel
-    double row_px, strength,
-            stripe;  // a UI row and a stripe in window pixels; the scanlines' strength
+    int out_w, out_h;         ///< Physical window output size in pixels.
+    double ratio_x, ratio_y;  ///< Window pixels per canvas pixel.
+    double row_px;            ///< Window pixels per UI row.
+    double strength;          ///< Scanline darkening strength.
+    double stripe;            ///< Aperture-grille stripe width in window pixels.
 };
 
-// The tube in one pass, with the window the target and nothing of SDL's
-// waiting; false where it cannot be, and the mesh draws it.
-bool ThroughShader(SDL_Renderer* r, SDL_Texture* canvas, const Look& k) {
+/**
+ * @brief Renders the CRT pass via the OpenGL shader if available, preserving
+ * and restoring SDL's OpenGL state. Returns false when the fallback mesh is needed.
+ */
+bool ThroughShader(SDL_Renderer* ren, SDL_Texture* canvas, const Look& look) {
     if (shader == Shader::kNone) return false;
     if (shader == Shader::kUntried) {
         SDL_RendererInfo info{};
-        bool is_gl =
-                SDL_GetRendererInfo(r, &info) == 0 && info.name && strcmp(info.name, "opengl") == 0;
+        bool is_gl = SDL_GetRendererInfo(ren, &info) == 0 && info.name &&
+                     strcmp(info.name, "opengl") == 0;
         shader = is_gl && MakeShader() ? Shader::kReady : Shader::kNone;
         if (shader == Shader::kNone) return false;
     }
-    const auto& d = display::d;
-    SDL_RenderFlush(r);
+    const auto& disp = display::d;
+    SDL_RenderFlush(ren);
 
-    // as SDL left it
+    // Save SDL's current OpenGL state.
     GLint active = 0, prog = 0, view[4] = {};
     GLint bound[3] = {};
     GLboolean enabled[3] = {};
-    gl.get_integerv(GL_ACTIVE_TEXTURE, &active);
+    gl_fns.get_integerv(GL_ACTIVE_TEXTURE, &active);
     for (int i = 0; i < 3; i++) {
-        gl.active_texture(GL_TEXTURE0 + i);
-        gl.get_integerv(GL_TEXTURE_BINDING_2D, &bound[i]);
-        enabled[i] = gl.is_enabled(GL_TEXTURE_2D);
+        gl_fns.active_texture(GL_TEXTURE0 + i);
+        gl_fns.get_integerv(GL_TEXTURE_BINDING_2D, &bound[i]);
+        enabled[i] = gl_fns.is_enabled(GL_TEXTURE_2D);
     }
-    gl.active_texture(GL_TEXTURE0);
-    gl.get_integerv(GL_CURRENT_PROGRAM, &prog);
-    gl.get_integerv(GL_VIEWPORT, view);
-    GLboolean blend = gl.is_enabled(GL_BLEND), scissor = gl.is_enabled(GL_SCISSOR_TEST);
+    gl_fns.active_texture(GL_TEXTURE0);
+    gl_fns.get_integerv(GL_CURRENT_PROGRAM, &prog);
+    gl_fns.get_integerv(GL_VIEWPORT, view);
+    GLboolean blend = gl_fns.is_enabled(GL_BLEND), scissor = gl_fns.is_enabled(GL_SCISSOR_TEST);
 
-    GLuint tex[3] = {Name(canvas), Name(quarter.t), Name(eighth.t)};
-    bool ok = tex[0] && tex[1] && tex[2];
-    if (ok) {
+    GLuint tex[3] = {Name(canvas), Name(quarter.tex), Name(eighth.tex)};
+    bool ready = tex[0] && tex[1] && tex[2];
+    if (ready) {
         for (int i = 0; i < 3; i++) {
-            gl.active_texture(GL_TEXTURE0 + i);
-            gl.bind_texture(GL_TEXTURE_2D, tex[i]);
+            gl_fns.active_texture(GL_TEXTURE0 + i);
+            gl_fns.bind_texture(GL_TEXTURE_2D, tex[i]);
         }
-        gl.use_program(program);
-        gl.uniform1i(at.screen, 0);
-        gl.uniform1i(at.nearer, 1);
-        gl.uniform1i(at.farther, 2);
-        gl.uniform1f(at.height, static_cast<float>(k.oh));
-        gl.uniform2f(at.k, static_cast<float>(k.kx), static_cast<float>(k.ky));
-        gl.uniform2f(at.size, static_cast<float>(d.pw), static_cast<float>(d.ph));
-        gl.uniform4f(at.frame, static_cast<float>(d.ox), static_cast<float>(d.oy),
-                     static_cast<float>(d.w * d.scale), static_cast<float>(d.h * d.scale));
-        gl.uniform1f(at.rows, static_cast<float>(d.h));
-        gl.uniform1f(at.row_px, static_cast<float>(k.row_px));
-        gl.uniform1f(at.scan, static_cast<float>(k.strength));
-        gl.uniform1f(at.stripe, static_cast<float>(k.stripe));
-        gl.viewport(0, 0, k.ow, k.oh);
-        gl.disable(GL_BLEND);
-        gl.disable(GL_SCISSOR_TEST);
-        // one triangle over the whole window
-        gl.begin(GL_TRIANGLES);
-        gl.vertex2f(-1, -1);
-        gl.vertex2f(3, -1);
-        gl.vertex2f(-1, 3);
-        gl.end();
+        gl_fns.use_program(program);
+        gl_fns.uniform1i(uniforms.screen, 0);
+        gl_fns.uniform1i(uniforms.nearer, 1);
+        gl_fns.uniform1i(uniforms.farther, 2);
+        gl_fns.uniform1f(uniforms.height, static_cast<float>(look.out_h));
+        gl_fns.uniform2f(uniforms.scale_k, static_cast<float>(look.ratio_x),
+                         static_cast<float>(look.ratio_y));
+        gl_fns.uniform2f(uniforms.size, static_cast<float>(disp.pw), static_cast<float>(disp.ph));
+        gl_fns.uniform4f(uniforms.frame, static_cast<float>(disp.ox), static_cast<float>(disp.oy),
+                         static_cast<float>(disp.w * disp.scale),
+                         static_cast<float>(disp.h * disp.scale));
+        gl_fns.uniform1f(uniforms.rows, static_cast<float>(disp.h));
+        gl_fns.uniform1f(uniforms.row_px, static_cast<float>(look.row_px));
+        gl_fns.uniform1f(uniforms.scan, static_cast<float>(look.strength));
+        gl_fns.uniform1f(uniforms.stripe, static_cast<float>(look.stripe));
+        gl_fns.viewport(0, 0, look.out_w, look.out_h);
+        gl_fns.disable(GL_BLEND);
+        gl_fns.disable(GL_SCISSOR_TEST);
+        // Fullscreen triangle covering the window.
+        gl_fns.begin(GL_TRIANGLES);
+        gl_fns.vertex2f(-1, -1);
+        gl_fns.vertex2f(3, -1);
+        gl_fns.vertex2f(-1, 3);
+        gl_fns.end();
     }
 
-    // back as SDL left it
+    // Restore SDL's OpenGL state.
     for (int i = 2; i >= 0; i--) {
-        gl.active_texture(GL_TEXTURE0 + i);
-        gl.bind_texture(GL_TEXTURE_2D, bound[i]);
-        (enabled[i] ? gl.enable : gl.disable)(GL_TEXTURE_2D);
+        gl_fns.active_texture(GL_TEXTURE0 + i);
+        gl_fns.bind_texture(GL_TEXTURE_2D, bound[i]);
+        (enabled[i] ? gl_fns.enable : gl_fns.disable)(GL_TEXTURE_2D);
     }
-    gl.active_texture(active);
-    gl.use_program(prog);
-    gl.viewport(view[0], view[1], view[2], view[3]);
-    (blend ? gl.enable : gl.disable)(GL_BLEND);
-    (scissor ? gl.enable : gl.disable)(GL_SCISSOR_TEST);
-    if (!ok) shader = Shader::kNone;
-    return ok;
+    gl_fns.active_texture(active);
+    gl_fns.use_program(prog);
+    gl_fns.viewport(view[0], view[1], view[2], view[3]);
+    (blend ? gl_fns.enable : gl_fns.disable)(GL_BLEND);
+    (scissor ? gl_fns.enable : gl_fns.disable)(GL_SCISSOR_TEST);
+    if (!ready) shader = Shader::kNone;
+    return ready;
 }
 
 }  // namespace
 
 std::pair<double, double> Unwarp(double x, double y) {
-    const auto& d = display::d;
-    double fw = d.w * d.scale, fh = d.h * d.scale;
-    if (fw <= 0 || fh <= 0) return {x, y};
-    double nx = (x - d.ox) / fw * 2 - 1, ny = (y - d.oy) / fh * 2 - 1;
-    double cx = nx * (1 + kBowX * ny * ny), cy = ny * (1 + kBowY * nx * nx);
-    return {d.ox + (cx + 1) / 2 * fw, d.oy + (cy + 1) / 2 * fh};
+    const auto& disp = display::d;
+    double frame_w = disp.w * disp.scale, frame_h = disp.h * disp.scale;
+    if (frame_w <= 0 || frame_h <= 0) return {x, y};
+    double norm_x = (x - disp.ox) / frame_w * 2 - 1;
+    double norm_y = (y - disp.oy) / frame_h * 2 - 1;
+    double can_x = norm_x * (1 + kBowX * norm_y * norm_y);
+    double can_y = norm_y * (1 + kBowY * norm_x * norm_x);
+    return {disp.ox + (can_x + 1) / 2 * frame_w, disp.oy + (can_y + 1) / 2 * frame_h};
 }
 
-void Present(SDL_Renderer* r, SDL_Texture* canvas) {
-    const auto& d = display::d;
-    int fx = d.ox, fy = d.oy, fw = d.w * d.scale, fh = d.h * d.scale;
+void Present(SDL_Renderer* ren, SDL_Texture* canvas) {
+    const auto& disp = display::d;
+    int frame_x = disp.ox, frame_y = disp.oy;
+    int frame_w = disp.w * disp.scale, frame_h = disp.h * disp.scale;
     SDL_SetTextureBlendMode(canvas, SDL_BLENDMODE_NONE);
 
-    // the glow: the frame halved three times over, each step a box blur
-    SDL_Rect frame{fx, fy, fw, fh};
-    Need(r, half, fw / 2, fh / 2, SDL_TEXTUREACCESS_TARGET);
-    Need(r, quarter, fw / 4, fh / 4, SDL_TEXTUREACCESS_TARGET);
-    Need(r, eighth, fw / 8, fh / 8, SDL_TEXTUREACCESS_TARGET);
-    bool glow = half.t && quarter.t && eighth.t;
+    // Downsample the frame three times for the halation glow pyramid.
+    SDL_Rect frame{frame_x, frame_y, frame_w, frame_h};
+    Need(ren, half, frame_w / 2, frame_h / 2, SDL_TEXTUREACCESS_TARGET);
+    Need(ren, quarter, frame_w / 4, frame_h / 4, SDL_TEXTUREACCESS_TARGET);
+    Need(ren, eighth, frame_w / 8, frame_h / 8, SDL_TEXTUREACCESS_TARGET);
+    bool glow = half.tex && quarter.tex && eighth.tex;
     if (glow) {
-        SDL_RenderSetClipRect(r, nullptr);
-        SDL_SetRenderTarget(r, half.t);
-        SDL_RenderCopy(r, canvas, &frame, nullptr);
-        SDL_SetTextureBlendMode(half.t, SDL_BLENDMODE_NONE);
-        SDL_SetRenderTarget(r, quarter.t);
-        SDL_RenderCopy(r, half.t, nullptr, nullptr);
-        SDL_SetTextureBlendMode(quarter.t, SDL_BLENDMODE_NONE);
-        SDL_SetRenderTarget(r, eighth.t);
-        SDL_RenderCopy(r, quarter.t, nullptr, nullptr);
+        SDL_RenderSetClipRect(ren, nullptr);
+        SDL_SetRenderTarget(ren, half.tex);
+        SDL_RenderCopy(ren, canvas, &frame, nullptr);
+        SDL_SetTextureBlendMode(half.tex, SDL_BLENDMODE_NONE);
+        SDL_SetRenderTarget(ren, quarter.tex);
+        SDL_RenderCopy(ren, half.tex, nullptr, nullptr);
+        SDL_SetTextureBlendMode(quarter.tex, SDL_BLENDMODE_NONE);
+        SDL_SetRenderTarget(ren, eighth.tex);
+        SDL_RenderCopy(ren, quarter.tex, nullptr, nullptr);
     }
 
-    SDL_SetRenderTarget(r, nullptr);
-    SDL_RenderSetClipRect(r, nullptr);
-    int ow = 0, oh = 0;
-    SDL_GetRendererOutputSize(r, &ow, &oh);
-    double kx = static_cast<double>(ow) / d.pw,
-           ky = static_cast<double>(oh) / d.ph;  // window pixels to a device pixel
-    double row_px = d.scale * ky;                // window pixels to a UI row
-    // scanlines: on whole pixels at any scale, else fading out where a row is
-    // too few pixels to show one without beating against them
+    SDL_SetRenderTarget(ren, nullptr);
+    SDL_RenderSetClipRect(ren, nullptr);
+    int out_w = 0, out_h = 0;
+    SDL_GetRendererOutputSize(ren, &out_w, &out_h);
+    double ratio_x = static_cast<double>(out_w) / disp.pw;
+    double ratio_y = static_cast<double>(out_h) / disp.ph;
+    double row_px = disp.scale * ratio_y;
+    // Fade scanlines when a UI row spans fewer than ~3 fractional window pixels.
     bool whole = row_px >= 2 && std::abs(row_px - std::round(row_px)) < 0.01;
     double strength = kScanline * (whole ? 1 : std::clamp((row_px - 1.5) / 1.5, 0.0, 1.0));
-    // the mask, a stripe to a pixel of the screen (more on a dense one)
-    int sw = std::max(1, static_cast<int>(std::lround(d.dpi * d.shrink)));
-    if (glow &&
-        ThroughShader(r, canvas, {ow, oh, kx, ky, row_px, strength, static_cast<double>(sw)}))
+    int stripe_w = std::max(1, static_cast<int>(std::lround(disp.dpi * disp.shrink)));
+    if (glow && ThroughShader(ren, canvas,
+                              {out_w, out_h, ratio_x, ratio_y, row_px, strength,
+                               static_cast<double>(stripe_w)}))
         return;
 
-    // off the frame there is only black, and the pointer when it is there
-    SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
-    SDL_RenderClear(r);
-    SDL_RenderCopy(r, canvas, nullptr, nullptr);
-    SDL_Rect on_window{static_cast<int>(std::floor(fx * kx)), static_cast<int>(std::floor(fy * ky)),
-                       static_cast<int>(std::ceil(fw * kx)) + 1,
-                       static_cast<int>(std::ceil(fh * ky)) + 1};
-    SDL_RenderFillRect(r, &on_window);
+    // Fallback geometry path: draw border area, clear the frame region, and
+    // render the bowed mesh with overlay passes.
+    SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+    SDL_RenderClear(ren);
+    SDL_RenderCopy(ren, canvas, nullptr, nullptr);
+    SDL_Rect on_window{static_cast<int>(std::floor(frame_x * ratio_x)),
+                       static_cast<int>(std::floor(frame_y * ratio_y)),
+                       static_cast<int>(std::ceil(frame_w * ratio_x)) + 1,
+                       static_cast<int>(std::ceil(frame_h * ratio_y)) + 1};
+    SDL_RenderFillRect(ren, &on_window);
 
-    // the mesh: a grid on the canvas, each point where the glass shows it
     std::vector<SDL_Vertex> on_canvas, on_frame, on_lines;
-    std::vector<int> idx;
+    std::vector<int> indices;
     int row_texels = 2;
     {
         SDL_RendererInfo info{};
-        SDL_GetRendererInfo(r, &info);
+        SDL_GetRendererInfo(ren, &info);
         int max_h = info.max_texture_height > 0 ? info.max_texture_height : 8192;
         row_texels = std::clamp(static_cast<int>(std::lround(row_px)), 2, 8);
-        row_texels = std::max(2, std::min(row_texels, max_h / std::max(1, d.h)));
+        row_texels = std::max(2, std::min(row_texels, max_h / std::max(1, disp.h)));
     }
     for (int j = 0; j <= kGridY; j++) {
         for (int i = 0; i <= kGridX; i++) {
-            double u = static_cast<double>(i) / kGridX, v = static_cast<double>(j) / kGridY;
-            auto [sx, sy] = Bow(u * 2 - 1, v * 2 - 1);
-            SDL_Vertex vx{};
-            vx.position = {static_cast<float>((fx + (sx + 1) / 2 * fw) * kx),
-                           static_cast<float>((fy + (sy + 1) / 2 * fh) * ky)};
-            vx.color = {255, 255, 255, 255};
-            vx.tex_coord = {static_cast<float>((fx + u * fw) / d.pw),
-                            static_cast<float>((fy + v * fh) / d.ph)};
-            on_canvas.push_back(vx);
-            vx.tex_coord = {static_cast<float>(u), static_cast<float>(v)};
-            on_frame.push_back(vx);
-            vx.tex_coord = {0.5F, static_cast<float>(v)};
-            on_lines.push_back(vx);
+            double norm_u = static_cast<double>(i) / kGridX;
+            double norm_v = static_cast<double>(j) / kGridY;
+            auto [scr_x, scr_y] = Bow(norm_u * 2 - 1, norm_v * 2 - 1);
+            SDL_Vertex vert{};
+            vert.position = {static_cast<float>((frame_x + (scr_x + 1) / 2 * frame_w) * ratio_x),
+                             static_cast<float>((frame_y + (scr_y + 1) / 2 * frame_h) * ratio_y)};
+            vert.color = {255, 255, 255, 255};
+            vert.tex_coord = {static_cast<float>((frame_x + norm_u * frame_w) / disp.pw),
+                              static_cast<float>((frame_y + norm_v * frame_h) / disp.ph)};
+            on_canvas.push_back(vert);
+            vert.tex_coord = {static_cast<float>(norm_u), static_cast<float>(norm_v)};
+            on_frame.push_back(vert);
+            vert.tex_coord = {0.5F, static_cast<float>(norm_v)};
+            on_lines.push_back(vert);
         }
     }
     for (int j = 0; j < kGridY; j++) {
         for (int i = 0; i < kGridX; i++) {
-            int a = j * (kGridX + 1) + i, b = a + 1, c = a + kGridX + 1, e = c + 1;
-            idx.insert(idx.end(), {a, b, c, b, e, c});
+            int top_l = j * (kGridX + 1) + i, top_r = top_l + 1;
+            int bot_l = top_l + kGridX + 1, bot_r = bot_l + 1;
+            indices.insert(indices.end(), {top_l, top_r, bot_l, top_r, bot_r, bot_l});
         }
     }
-    auto draw = [&](SDL_Texture* t, std::vector<SDL_Vertex>& vs, SDL_BlendMode mode,
-                    Uint8 tint = 255) {
-        if (!t) return;
-        for (SDL_Vertex& vx : vs) vx.color = {tint, tint, tint, 255};
-        SDL_SetTextureBlendMode(t, mode);
-        SDL_RenderGeometry(r, t, vs.data(), static_cast<int>(vs.size()), idx.data(),
-                           static_cast<int>(idx.size()));
+    auto draw_mesh = [&](SDL_Texture* tex, std::vector<SDL_Vertex>& verts, SDL_BlendMode mode,
+                         Uint8 tint = 255) {
+        if (!tex) return;
+        for (SDL_Vertex& vert : verts) vert.color = {tint, tint, tint, 255};
+        SDL_SetTextureBlendMode(tex, mode);
+        SDL_RenderGeometry(ren, tex, verts.data(), static_cast<int>(verts.size()), indices.data(),
+                           static_cast<int>(indices.size()));
     };
 
-    draw(canvas, on_canvas, SDL_BLENDMODE_NONE);
+    draw_mesh(canvas, on_canvas, SDL_BLENDMODE_NONE);
 
-    if (Need(r, lines, 1, d.h * row_texels, SDL_TEXTUREACCESS_STATIC, row_texels * 1000 + strength))
-        MakeLines(d.h, row_texels, strength);
-    draw(lines.t, on_lines, SDL_BLENDMODE_MOD);
+    if (Need(ren, lines, 1, disp.h * row_texels, SDL_TEXTUREACCESS_STATIC,
+             row_texels * 1000 + strength))
+        MakeLines(disp.h, row_texels, strength);
+    draw_mesh(lines.tex, on_lines, SDL_BLENDMODE_MOD);
 
-    if (Need(r, stripes, ow, 1, SDL_TEXTUREACCESS_STATIC, sw)) {
-        SDL_SetTextureScaleMode(stripes.t, SDL_ScaleModeNearest);
-        MakeStripes(sw);
+    if (Need(ren, stripes, out_w, 1, SDL_TEXTUREACCESS_STATIC, stripe_w)) {
+        SDL_SetTextureScaleMode(stripes.tex, SDL_ScaleModeNearest);
+        MakeStripes(stripe_w);
     }
-    if (stripes.t) {
+    if (stripes.tex) {
         SDL_Rect src{0, 0, std::min(on_window.w, stripes.w), 1}, dst = on_window;
         dst.w = src.w;
-        SDL_SetTextureBlendMode(stripes.t, SDL_BLENDMODE_MOD);
-        SDL_RenderCopy(r, stripes.t, &src, &dst);
+        SDL_SetTextureBlendMode(stripes.tex, SDL_BLENDMODE_MOD);
+        SDL_RenderCopy(ren, stripes.tex, &src, &dst);
     }
 
     if (glow) {
-        draw(quarter.t, on_frame, SDL_BLENDMODE_ADD, kGlowNear);
-        draw(eighth.t, on_frame, SDL_BLENDMODE_ADD, kGlowFar);
+        draw_mesh(quarter.tex, on_frame, SDL_BLENDMODE_ADD, kGlowNear);
+        draw_mesh(eighth.tex, on_frame, SDL_BLENDMODE_ADD, kGlowFar);
     }
 
-    double aspect = fh > 0 ? static_cast<double>(fw) / fh : 4.0 / 3;
-    if (Need(r, shade, 256, std::clamp(static_cast<int>(std::lround(256 / aspect)), 64, 512),
+    double aspect = frame_h > 0 ? static_cast<double>(frame_w) / frame_h : 4.0 / 3;
+    if (Need(ren, shade, 256, std::clamp(static_cast<int>(std::lround(256 / aspect)), 64, 512),
              SDL_TEXTUREACCESS_STATIC, aspect))
         MakeShade(aspect);
-    draw(shade.t, on_frame, SDL_BLENDMODE_MOD);
+    draw_mesh(shade.tex, on_frame, SDL_BLENDMODE_MOD);
 }
 
 }  // namespace crt

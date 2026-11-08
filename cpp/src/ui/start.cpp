@@ -264,8 +264,8 @@ struct Options : kit::Modal {
             int value = st->options[i];
             // View Production's word is the other way round: its flag hides
             // other sides' production, so set it reads "Off"
-            bool on = i == 5 ? value == 0 : value != 0;
-            std::string word = i == 0 ? kit::Text(5, value) : (on ? "On" : "Off");
+            bool enabled = i == 5 ? value == 0 : value != 0;
+            std::string word = i == 0 ? kit::Text(5, value) : (enabled ? "On" : "Off");
             font.Colours(7, 0).Draw(word, x + 128, y);
         }
         kit::DrawControls(v);
@@ -409,9 +409,9 @@ struct SideDialog : kit::Modal {
         for (int row = 0; row < 5; row++)
             state[kSideRow + row] = rows[row] < 0 ? w2::uidata::kDisabled : w2::uidata::kNormal;
         state[kSideOk] = state[kSideCancel] = state[kSideName] = w2::uidata::kNormal;
-        bool up = EditedSide().computer && rows[0] >= 1;
+        bool can_up = EditedSide().computer && rows[0] >= 1;
         bool down = EditedSide().computer && rows[4] > 0 && rows[4] < DeckSize() - 1;
-        state[kSideUp] = state[kSidePageUp] = up ? w2::uidata::kNormal : w2::uidata::kDisabled;
+        state[kSideUp] = state[kSidePageUp] = can_up ? w2::uidata::kNormal : w2::uidata::kDisabled;
         state[kSideDown] = state[kSidePageDown] =
                 down ? w2::uidata::kNormal : w2::uidata::kDisabled;
     }
@@ -425,9 +425,9 @@ struct SideDialog : kit::Modal {
         editing.reset();
     }
 
-    /** @brief Closes the dialog; without `ok` the name and character are put back. */
-    void Close(bool ok) {
-        if (!ok) {
+    /** @brief Closes the dialog; without `confirmed` the name and character are put back. */
+    void Close(bool confirmed) {
+        if (!confirmed) {
             EditedSide().name = saved_name;
             EditedSide().card = saved_card;
         }
@@ -826,11 +826,11 @@ struct Chooser : kit::Modal {
     void Refresh() {
         auto& state = v.state;
         for (auto& control : v.dialog.controls) state[control.id] = w2::uidata::kNormal;
-        int up = top_row > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
+        int can_up = top_row > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
         int down = top_row + 7 < static_cast<int>(list.size()) ? w2::uidata::kNormal
                                                                : w2::uidata::kDisabled;
-        state[470] = up;
-        state[472] = up;
+        state[470] = can_up;
+        state[472] = can_up;
         state[471] = down;
         state[473] = down;
     }
@@ -864,8 +864,8 @@ struct Chooser : kit::Modal {
     }
 
     /** @brief Closes the chooser and calls `after` with the scenario chosen, or kNone. */
-    void Take(bool ok) {
-        int pick = ok ? top_row + cur : w2::kNone;
+    void Take(bool confirmed) {
+        int pick = confirmed ? top_row + cur : w2::kNone;
         auto done = after;
         kit::Pop(this);
         done(pick);

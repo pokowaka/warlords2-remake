@@ -170,7 +170,7 @@ inline bool HasKey(const std::map<int, int>& values, int key) {
 }
 
 /** @brief The straight-line distance between two tiles, truncated. */
-int Dist(int x1, int y1, int x2, int y2);
+int Dist(int from_x, int from_y, int to_x, int to_y);
 /** @brief The city's owner, with the neutral side for an unowned city. */
 inline int Owner(const City& city) {
     return city.owner_index == kNone ? kNeutral : city.owner_index;

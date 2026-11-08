@@ -8,14 +8,14 @@
 
 namespace kit {
 
-ModalP Push(ModalP d) {
-    G.modals.push_back(d);
-    return d;
+ModalP Push(ModalP modal) {
+    G.modals.push_back(modal);
+    return modal;
 }
 
-void Pop(const Modal* d) {
+void Pop(const Modal* modal) {
     for (int i = static_cast<int>(G.modals.size()) - 1; i >= 0; i--) {
-        if (G.modals[i].get() == d) {
+        if (G.modals[i].get() == modal) {
             G.modals.erase(G.modals.begin() + i);
             return;
         }
@@ -25,38 +25,42 @@ void Pop(const Modal* d) {
 Modal* Top() {
     return G.modals.empty() ? nullptr : G.modals.back().get();
 }
+
 ModalP TopShared() {
     return G.modals.empty() ? nullptr : G.modals.back();
 }
 
-void SetPal(int i) {
-    const auto& c = i >= 0 && i < static_cast<int>(G.palette.size()) ? G.palette[i] : G.palette[0];
-    gfx::SetColor(static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]));
+void SetPal(int index) {
+    const auto& colour = index >= 0 && index < static_cast<int>(G.palette.size()) ? G.palette[index]
+                                                                                  : G.palette[0];
+    gfx::SetColor(static_cast<float>(colour[0]), static_cast<float>(colour[1]),
+                  static_cast<float>(colour[2]));
 }
 
-void Outline(double x, double y, double w, double h) {
-    gfx::Rectangle(gfx::kFill, x, y, w, 1);
-    gfx::Rectangle(gfx::kFill, x, y + h - 1, w, 1);
-    gfx::Rectangle(gfx::kFill, x, y, 1, h);
-    gfx::Rectangle(gfx::kFill, x + w - 1, y, 1, h);
+void Outline(double x, double y, double width, double height) {
+    gfx::Rectangle(gfx::kFill, x, y, width, 1);
+    gfx::Rectangle(gfx::kFill, x, y + height - 1, width, 1);
+    gfx::Rectangle(gfx::kFill, x, y, 1, height);
+    gfx::Rectangle(gfx::kFill, x + width - 1, y, 1, height);
 }
 
-void PopupFrame(const Rect& r) {
+void PopupFrame(const Rect& rect) {
     gfx::SetColor(0, 0, 0);
-    Outline(r.x - 1, r.y - 1, r.w + 2, r.h + 2);
-    gfx::Rectangle(gfx::kFill, r.x + 1, r.y + r.h + 1, r.w + 2, 2);
-    gfx::Rectangle(gfx::kFill, r.x + r.w + 1, r.y + 1, 2, r.h + 2);
+    Outline(rect.x - 1, rect.y - 1, rect.w + 2, rect.h + 2);
+    gfx::Rectangle(gfx::kFill, rect.x + 1, rect.y + rect.h + 1, rect.w + 2, 2);
+    gfx::Rectangle(gfx::kFill, rect.x + rect.w + 1, rect.y + 1, 2, rect.h + 2);
 }
 
-void Popup(const Rect& r) {
-    PopupFrame(r);
+void Popup(const Rect& rect) {
+    PopupFrame(rect);
     gfx::SetColor(1, 1, 1);
-    gfx::SetScissor(r.x, r.y, r.w, r.h);
-    gfx::Draw(G.marble, r.x, r.y);
-    // past the marble's 480 columns the blit reads on into the next row
-    int mw = G.marble->w, mh = G.marble->h;
-    if (r.w > mw)
-        gfx::Draw(G.marble, gfx::NewQuad(0, 1, r.w - mw, std::min(r.h, mh - 1)), r.x + mw, r.y);
+    gfx::SetScissor(rect.x, rect.y, rect.w, rect.h);
+    gfx::Draw(G.marble, rect.x, rect.y);
+    // Past the marble's 480 columns the blit reads on into the next row.
+    int marble_w = G.marble->w, marble_h = G.marble->h;
+    if (rect.w > marble_w)
+        gfx::Draw(G.marble, gfx::NewQuad(0, 1, rect.w - marble_w, std::min(rect.h, marble_h - 1)),
+                  rect.x + marble_w, rect.y);
     gfx::SetScissor();
 }
 
@@ -66,26 +70,26 @@ const Font& GetFont(int n) {
     return *G.font;
 }
 
-void Centred(const Font& f, const std::string& text, double x, double y) {
-    f.Draw(text, x - std::floor(f.Width(text) / 2.0), y);
+void Centred(const Font& font, const std::string& text, double x, double y) {
+    font.Draw(text, x - std::floor(font.Width(text) / 2.0), y);
 }
 
-void Right(const Font& f, const std::string& text, double x, double y) {
-    f.Draw(text, x - f.Width(text), y);
+void Right(const Font& font, const std::string& text, double x, double y) {
+    font.Draw(text, x - font.Width(text), y);
 }
 
-void Bevel(double x, double y, double w, double h, int a, int b) {
+void Bevel(double x, double y, double width, double height, int top_col, int bot_col) {
     auto top_left = [&]() {
-        SetPal(a);
-        gfx::Rectangle(gfx::kFill, x, y, w, 1);
-        gfx::Rectangle(gfx::kFill, x, y, 1, h);
+        SetPal(top_col);
+        gfx::Rectangle(gfx::kFill, x, y, width, 1);
+        gfx::Rectangle(gfx::kFill, x, y, 1, height);
     };
     auto bottom_right = [&]() {
-        SetPal(b);
-        gfx::Rectangle(gfx::kFill, x + w - 1, y, 1, h);
-        gfx::Rectangle(gfx::kFill, x, y + h - 1, w, 1);
+        SetPal(bot_col);
+        gfx::Rectangle(gfx::kFill, x + width - 1, y, 1, height);
+        gfx::Rectangle(gfx::kFill, x, y + height - 1, width, 1);
     };
-    if (b < a) {
+    if (bot_col < top_col) {
         bottom_right();
         top_left();
     } else {
@@ -94,19 +98,20 @@ void Bevel(double x, double y, double w, double h, int a, int b) {
     }
 }
 
-void Field(double x, double y, double w, double h, const std::string* text, const Font* f) {
+void Field(double x, double y, double width, double height, const std::string* text,
+           const Font* font) {
     SetPal(3);
-    gfx::Rectangle(gfx::kFill, x, y, w, h);
-    Bevel(x, y, w, h, 4, 2);
+    gfx::Rectangle(gfx::kFill, x, y, width, height);
+    Bevel(x, y, width, height, 4, 2);
     gfx::SetColor(1, 1, 1);
-    if (text) (f ? *f : *G.big_font).Draw(*text, x + 3, y + 2);
+    if (text) (font ? *font : *G.big_font).Draw(*text, x + 3, y + 2);
 }
 
 gfx::Quad ArmyQuad(int type_id) {
-    int i = ((type_id % 32) + 32) % 32;
+    int cell = ((type_id % 32) + 32) % 32;
     // An army sheet is 16 cells across on a 32-pixel stride; its rows are 30
-    // apart and 29 tall, which is what 8611:08be reads out of it.
-    return gfx::NewQuad((i % 16) * 32, (i / 16) * 30, 32, 29);
+    // apart and 29 tall.
+    return gfx::NewQuad((cell % 16) * 32, (cell / 16) * 30, 32, 29);
 }
 
 void Army(int type_id, int side, double x, double y, int ring, bool shadow) {
@@ -124,46 +129,48 @@ void Shield(int side, double x, double y) {
     gfx::Draw(G.shields_img, gfx::NewQuad(side * 40, 0, 40, 40), x, y);
 }
 
-void Line(int c, int x0, int y0, int x1, int y1) {
-    SetPal(c);
-    int dx = std::abs(x1 - x0), dy = -std::abs(y1 - y0);
-    int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+void Line(int colour_index, int from_x, int from_y, int to_x, int to_y) {
+    SetPal(colour_index);
+    int dx = std::abs(to_x - from_x), dy = -std::abs(to_y - from_y);
+    int step_x = from_x < to_x ? 1 : -1, step_y = from_y < to_y ? 1 : -1;
     int err = dx + dy;
     for (;;) {
-        gfx::Rectangle(gfx::kFill, x0, y0, 1, 1);
-        if (x0 == x1 && y0 == y1) break;
-        int e2 = 2 * err;
-        if (e2 >= dy) {
+        gfx::Rectangle(gfx::kFill, from_x, from_y, 1, 1);
+        if (from_x == to_x && from_y == to_y) break;
+        int err2 = 2 * err;
+        if (err2 >= dy) {
             err += dy;
-            x0 += sx;
+            from_x += step_x;
         }
-        if (e2 <= dx) {
+        if (err2 <= dx) {
             err += dx;
-            y0 += sy;
+            from_y += step_y;
         }
     }
 }
 
-void MapTarget(int mx, int my, int hx, int hy, int tx, int ty) {
-    // with the hidden map nothing is drawn over ground the player has not
-    // seen: the line needs both its ends seen (828e:0a3f), the box and its
-    // frame the target's tile (828e:08cd, 828e:099e)
+void MapTarget(int map_x, int map_y, int hero_x, int hero_y, int target_x, int target_y) {
+    // With the hidden map nothing is drawn over ground the player has not
+    // seen: the line needs both its ends seen, and the box and its frame need
+    // the target's tile.
     auto seen = [](int x, int y) {
         return w2::game::Seen(*G.g, w2::game::ViewerSide(*G.g, G.player), x, y);
     };
-    if (!seen(tx, ty)) return;
-    gfx::SetScissor(mx, my, 224, 312);
-    if (seen(hx, hy)) Line(8, mx + hx * 2 - 2, my + hy * 2 - 2, mx + tx * 2 - 2, my + ty * 2 - 2);
+    if (!seen(target_x, target_y)) return;
+    gfx::SetScissor(map_x, map_y, 224, 312);
+    if (seen(hero_x, hero_y))
+        Line(8, map_x + hero_x * 2 - 2, map_y + hero_y * 2 - 2, map_x + target_x * 2 - 2,
+             map_y + target_y * 2 - 2);
     SetPal(8);
-    int bx = mx + tx * 2, by = my + ty * 2 - 1;
-    gfx::Rectangle(gfx::kFill, bx, by, 4, 5);
+    int box_x = map_x + target_x * 2, box_y = map_y + target_y * 2 - 1;
+    gfx::Rectangle(gfx::kFill, box_x, box_y, 4, 5);
     SetPal(0);
-    gfx::Rectangle(gfx::kFill, bx - 1, by, 6, 1);
-    gfx::Rectangle(gfx::kFill, bx, by + 5, 4, 1);
-    gfx::Rectangle(gfx::kFill, bx - 1, by, 1, 5);
-    gfx::Rectangle(gfx::kFill, bx + 4, by, 1, 5);
+    gfx::Rectangle(gfx::kFill, box_x - 1, box_y, 6, 1);
+    gfx::Rectangle(gfx::kFill, box_x, box_y + 5, 4, 1);
+    gfx::Rectangle(gfx::kFill, box_x - 1, box_y, 1, 5);
+    gfx::Rectangle(gfx::kFill, box_x + 4, box_y, 1, 5);
     SetPal(8);
-    Outline(mx + tx * 2 - 2, my + ty * 2 - 2, 8, 8);
+    Outline(map_x + target_x * 2 - 2, map_y + target_y * 2 - 2, 8, 8);
     gfx::SetScissor();
 }
 
@@ -171,28 +178,29 @@ screen::View View(int dialog_id) {
     return screen::MakeView(*G.screen, dialog_id);
 }
 
-void DrawControls(const screen::View& v, const std::set<int>* hidden) {
-    screen::DrawDialogControls(*G.screen, v, hidden);
+void DrawControls(const screen::View& view, const std::set<int>* hidden) {
+    screen::DrawDialogControls(*G.screen, view, hidden);
 }
 
-const w2::uidata::Control* ControlAt(const screen::View& v, int x, int y,
+const w2::uidata::Control* ControlAt(const screen::View& view, int x, int y,
                                      const std::set<int>* hidden) {
-    for (const auto& c : v.dialog.controls) {
-        if (c.w > 0 && c.h > 0 && !(hidden && hidden->count(c.id)) && x >= c.x && x < c.x + c.w &&
-            y >= c.y && y < c.y + c.h) {
-            if (v.StateOf(c.id) == w2::uidata::kDisabled) return nullptr;
-            return &c;
+    for (const auto& control : view.dialog.controls) {
+        if (control.w > 0 && control.h > 0 && !(hidden && hidden->count(control.id)) &&
+            x >= control.x && x < control.x + control.w && y >= control.y &&
+            y < control.y + control.h) {
+            if (view.StateOf(control.id) == w2::uidata::kDisabled) return nullptr;
+            return &control;
         }
     }
     return nullptr;
 }
 
-const w2::uidata::Control* FindControl(const screen::View& v, int id) {
-    return screen::DialogControl(v, id);
+const w2::uidata::Control* FindControl(const screen::View& view, int control_id) {
+    return screen::DialogControl(view, control_id);
 }
 
-std::string Text(int group, int i) {
-    return w2::uidata::Text(G.screen->ui, group, i);
+std::string Text(int group, int index) {
+    return w2::uidata::Text(G.screen->ui, group, index);
 }
 
 double Now() {

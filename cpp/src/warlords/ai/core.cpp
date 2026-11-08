@@ -19,8 +19,8 @@
 
 namespace w2::ai::core {
 
-int Dist(int x1, int y1, int x2, int y2) {
-    double dx = x1 - x2, dy = y1 - y2;
+int Dist(int from_x, int from_y, int to_x, int to_y) {
+    double dx = from_x - to_x, dy = from_y - to_y;
     return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
 }
 
@@ -145,7 +145,7 @@ std::pair<std::vector<City*>, std::vector<int>> FindNeighbours(Game& game, const
     std::pair<std::vector<City*>, std::vector<int>> out;
     if (city.index >= 0 && city.index < static_cast<int>(game.ai_neighbours->by_city.size())) {
         const auto& entry = game.ai_neighbours->by_city[city.index];
-        for (int i : entry.cities) out.first.push_back(&game.map->cities[i]);
+        for (int city_index : entry.cities) out.first.push_back(&game.map->cities[city_index]);
         out.second = entry.dist;
     }
     return out;
@@ -191,7 +191,7 @@ int PickNeighbours(Game& game, const City& city, const Flood& flood, std::vector
             slot_dist[chosen] = distance & 0xff;
         }
     }
-    int left = 0, right = 0, up = 0, down = 0;
+    int left = 0, right = 0, above = 0, down = 0;
     picked.clear();
     dists.clear();
     while (picked.size() < 6) {
@@ -201,7 +201,7 @@ int PickNeighbours(Game& game, const City& city, const Flood& flood, std::vector
                 const City& other = game.map->cities[slot_city[slot]];
                 int score = slot_dist[slot];
                 if ((other.x < city.x && left > 2) || (city.x < other.x && right > 2) ||
-                    (other.y < city.y && up > 2) || (city.y < other.y && down > 2)) {
+                    (other.y < city.y && above > 2) || (city.y < other.y && down > 2)) {
                     score += 50;
                 }
                 if (score < best_score) {
@@ -216,7 +216,7 @@ int PickNeighbours(Game& game, const City& city, const Flood& flood, std::vector
         dists.push_back(slot_dist[best]);
         if (other.x < city.x) left++;
         if (city.x < other.x) right++;
-        if (other.y < city.y) up++;
+        if (other.y < city.y) above++;
         if (city.y < other.y) down++;
         slot_city[best] = -1;
     }

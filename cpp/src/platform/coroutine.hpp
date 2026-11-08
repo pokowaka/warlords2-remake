@@ -1,7 +1,7 @@
-// A computer's turn played on a thread of its own, handing control back and
-// forth with the front end so that only one of them ever runs: the Lua's
-// coroutine, which the front end resumes once it has shown what the turn
-// yielded (a walk, a battle, a pause).
+// Runs a computer side's turn on a dedicated worker thread, handing control
+// back and forth with the front end so that only one thread executes at a
+// time. Mirrors the Lua remake's coroutine model, where the front end resumes
+// the AI after animating each yielded action (walk, battle, pause).
 #pragma once
 
 #include <exception>
@@ -16,16 +16,22 @@ struct SDL_Thread;
 struct SDL_mutex;
 struct SDL_cond;
 
-/** What a computer's turn yields to the front end. */
+/**
+ * @brief Action yielded by a computer turn to the front end.
+ */
 struct Yield {
-    std::string what;  // "walk", "pause", "assault", "progress", "turn", "nohumans", "fallen"
-    int ticks = 0;     // "pause": BIOS ticks to wait
-    std::string text;  // "fallen": the line to say
-    std::vector<w2::Army*> armies;           // "walk": the stack
-    std::vector<std::pair<int, int>> tiles;  // "walk": the tiles it covered
-    bool sea_before = false;                 // "walk": at sea as it set off
+    std::string
+            what;   ///< Kind: "walk", "pause", "assault", "progress", "turn", "nohumans", "fallen".
+    int ticks = 0;  ///< For "pause": BIOS ticks to wait.
+    std::string text;                        ///< For "fallen": elimination message line.
+    std::vector<w2::Army*> armies;           ///< For "walk": the moving stack.
+    std::vector<std::pair<int, int>> tiles;  ///< For "walk": tile path covered.
+    bool sea_before = false;                 ///< For "walk": true if stack started at sea.
 };
 
+/**
+ * @brief Synchronous handoff thread emulating a Lua coroutine for AI turns.
+ */
 class Coroutine {
   public:
     using Body = std::function<void(Coroutine&)>;
@@ -34,24 +40,30 @@ class Coroutine {
     Coroutine(const Coroutine&) = delete;
     Coroutine& operator=(const Coroutine&) = delete;
 
-    /** Run the body until it yields or ends. False once it has ended. Any
-     *  exception it threw is thrown again here. */
+    /**
+     * @brief Runs the coroutine body until it yields or finishes.
+     * @return False once the body has finished; rethrows any uncaught exception.
+     */
     bool Resume();
-    /** From inside the body: hand `y` to the front end and wait to be resumed. */
-    void YieldValue(Yield y);
+    /** @brief Called from inside the body: hands `yielded` to the front end and waits. */
+    void YieldValue(Yield yielded);
+    /** @brief True once the coroutine body has returned. */
     bool Done() const { return finished_; }
+    /** @brief Returns the most recently yielded value. */
     const Yield& Value() const { return value_; }
 
   private:
-    static int Run(void* self);
+    static int Run(void* self_ptr);
     struct Cancelled {};
 
-    Body body_;
-    SDL_Thread* thread_ = nullptr;
-    SDL_mutex* lock_ = nullptr;
-    SDL_cond* cond_ = nullptr;
-    bool body_turn_ = false;  // whose turn it is to run
-    bool started_ = false, finished_ = false, cancel_ = false;
-    Yield value_;
-    std::exception_ptr error_;
+    Body body_;                     ///< Function executed on the worker thread.
+    SDL_Thread* thread_ = nullptr;  ///< Worker thread handle.
+    SDL_mutex* lock_ = nullptr;     ///< Mutex guarding handoff state.
+    SDL_cond* cond_ = nullptr;      ///< Condition variable signalling turn handoff.
+    bool body_turn_ = false;        ///< True when the worker thread owns execution.
+    bool started_ = false;          ///< True once the worker thread has been spawned.
+    bool finished_ = false;         ///< True once `body_` has completed.
+    bool cancel_ = false;           ///< True when the destructor requests unwind.
+    Yield value_;                   ///< Latest value passed to `YieldValue`.
+    std::exception_ptr error_;      ///< Exception thrown inside `body_`, if any.
 };

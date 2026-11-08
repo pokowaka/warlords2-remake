@@ -21,16 +21,16 @@ void Clear() {
 }
 
 bool IsDown(std::initializer_list<const char*> names) {
-    for (auto n : names)
-        if (down.count(n)) return true;
+    for (const char* name : names)
+        if (down.count(name)) return true;
     return false;
 }
 bool IsDown(const std::string& name) {
     return down.count(name) > 0;
 }
 
-std::string LoveName(int k) {
-    switch (k) {
+std::string LoveName(int sdl_keycode) {
+    switch (sdl_keycode) {
     case SDLK_LSHIFT:
         return "lshift";
     case SDLK_RSHIFT:
@@ -118,11 +118,12 @@ std::string LoveName(int k) {
     default:
         break;
     }
-    if (k >= SDLK_F1 && k <= SDLK_F12) return "f" + std::to_string(k - SDLK_F1 + 1);
-    if (k >= 32 && k < 127) {
-        char c = static_cast<char>(k);
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-        return std::string(1, c);
+    if (sdl_keycode >= SDLK_F1 && sdl_keycode <= SDLK_F12)
+        return "f" + std::to_string(sdl_keycode - SDLK_F1 + 1);
+    if (sdl_keycode >= 32 && sdl_keycode < 127) {
+        char chr = static_cast<char>(sdl_keycode);
+        if (chr >= 'A' && chr <= 'Z') chr = static_cast<char>(chr - 'A' + 'a');
+        return std::string(1, chr);
     }
     return "";
 }

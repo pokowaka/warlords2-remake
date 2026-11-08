@@ -1015,23 +1015,23 @@ static void PickMembers(Game& game, Side& side, Group& group) {
                 auto [good, slot_index] = BuildsWell(game, side, *city);
                 if (good && min_max <= city->slots[slot_index].move) {
                     const Slot& slot = city->slots[slot_index];
-                    int at = kNone;
+                    int target_slot = kNone;
                     if (count < 4) {
-                        at = count + 1;
+                        target_slot = count + 1;
                     } else {
                         int least = 100;
                         for (int member = 1; member <= 4; member++) {
                             if (strength.count(member) && strength[member] < least) {
                                 least = strength[member];
-                                at = member;
+                                target_slot = member;
                             }
                         }
-                        if (at != kNone && !(least <= slot.strength)) at = kNone;
+                        if (target_slot != kNone && !(least <= slot.strength)) target_slot = kNone;
                     }
-                    if (at != kNone) {
-                        if (!members.count(at)) count++;
-                        members[at] = city;
-                        strength[at] = slot.strength;
+                    if (target_slot != kNone) {
+                        if (!members.count(target_slot)) count++;
+                        members[target_slot] = city;
+                        strength[target_slot] = slot.strength;
                     }
                 }
             }

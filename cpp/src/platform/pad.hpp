@@ -1,11 +1,8 @@
-// Game controllers, through SDL's GameController API: the Steam Deck's own
-// controls as Steam Input hands them to the game (a virtual Xbox pad), and
-// any pad plugged in or paired. Not the original's, which knew the mouse and
-// the keyboard only.
+// Game controller input via SDL's GameController API, supporting the Steam
+// Deck (via Steam Input's virtual Xbox controller) and external gamepads.
 //
-// This layer only reads the pads: buttons by position, the triggers as two
-// more buttons, and the sticks past their dead zones. What they do is the
-// front end's (main.cpp > the controller).
+// Reads controller buttons by physical position, converts analog triggers into
+// digital button presses, and applies radial dead zones to thumbsticks.
 #pragma once
 
 #include <string>
@@ -14,33 +11,39 @@ union SDL_Event;
 
 namespace pad {
 
-// SDL's buttons (SDL_GameControllerButton) by position, the bottom face
-// button A, and the triggers after them
+/// Synthetic button IDs assigned to the analog triggers after SDL_GameControllerButton.
 constexpr int kLeftTrigger = 100, kRightTrigger = 101;
 
-/** SDL's hints, set before SDL_Init: left to the environment where it sets
- *  them. */
+/** @brief Sets SDL controller hints before `SDL_Init`. */
 void Hints();
 
-/** A controller's event: pads opened and closed as they come and go, and a
- *  button (or a trigger pulled past halfway) pressed or let go. True when
- *  `button` and `down` were set. */
-bool TranslateEvent(const SDL_Event& e, int& button, bool& down);
-/** The triggers: read once a frame, as SDL sends their travel and not a
- *  press. */
+/**
+ * @brief Processes an SDL controller hotplug or button event.
+ * @return True when `button` and `down` were populated with a button press/release.
+ */
+bool TranslateEvent(const SDL_Event& event, int& button, bool& down);
+/** @brief Polls analog triggers once per frame, emitting a press/release on threshold crossings. */
 bool Trigger(int& button, bool& down);
 
+/**
+ * @brief Combined normalized thumbstick deflection across connected controllers.
+ */
 struct Sticks {
-    double lx = 0, ly = 0, rx = 0, ry = 0;  // -1..1 each, 0 inside the dead zone
+    double lx = 0;  ///< Left stick horizontal axis (-1..1, 0 inside dead zone).
+    double ly = 0;  ///< Left stick vertical axis (-1..1, 0 inside dead zone).
+    double rx = 0;  ///< Right stick horizontal axis (-1..1, 0 inside dead zone).
+    double ry = 0;  ///< Right stick vertical axis (-1..1, 0 inside dead zone).
 };
-/** Every pad's sticks, together. */
+/** @brief Reads the combined thumbstick positions across all connected controllers. */
 Sticks ReadSticks();
-/** A script's sticks in place of the pads' (stick LX LY RX RY), until set back
- *  to nothing. */
-void Script(const Sticks& s);
+/** @brief Overrides thumbstick input from a test script (`stick LX LY RX RY`), or clears when all
+ * 0. */
+void Script(const Sticks& sticks);
 
-/** A button by SDL's name for it ("a", "dpup", "leftshoulder"), or
- *  "lefttrigger" and "righttrigger"; -1 for none. */
+/**
+ * @brief Maps an SDL button name ("a", "dpup", "leftshoulder", "lefttrigger",
+ * "righttrigger") to its button ID, or -1 if unknown.
+ */
 int FromName(const std::string& name);
 
 }  // namespace pad
