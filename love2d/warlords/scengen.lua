@@ -617,22 +617,44 @@ local function pickWord(rng, list) return list[rng:below(#list) + 1] end
 --- line of description (at most 30), drawn from the seed alone -- "The
 --- Shattered Isles", "Kingdoms of Ravenmere" -- so the same seed always gets
 --- the same name, and naming never changes the world. Returns name, text.
+-- How far each letter moves the pen in CHANCE17, the font New Scenario's
+-- list draws names in (CHANCE17.FIN), and the widest name the list's box
+-- holds: "The Frozen Steppe", 140 pixels; the shipped names reach 130.
+local UPPER_WIDTH = { 15, 16, 13, 17, 15, 18, 15, 16, 12, 14, 15, 14, 18, 16, 15, 15, 15, 16, 14, 13, 16, 17, 24, 16, 13, 14 }
+local LOWER_WIDTH = { 7, 6, 7, 9, 6, 8, 6, 7, 4, 7, 7, 4, 12, 8, 7, 8, 6, 6, 6, 5, 9, 9, 14, 9, 9, 8 }
+local NAME_WIDTH, NAME_CHARS = 140, 20
+
+local function nameWidth(s)
+  local n = 0
+  for i = 1, #s do
+    local c = s:byte(i)
+    if c >= 65 and c <= 90 then n = n + UPPER_WIDTH[c - 64]
+    elseif c >= 97 and c <= 122 then n = n + LOWER_WIDTH[c - 96]
+    elseif c == 32 then n = n + 7
+    elseif c == 39 then n = n + 3
+    else n = n + 16 end
+  end
+  return n
+end
+local function fits(s) return #s <= NAME_CHARS and nameWidth(s) <= NAME_WIDTH end
+M.nameWidth = nameWidth
+
 function M.title(shape, seed)
   local rng = require("warlords.rng").new(seed + 1000003)   -- its own dice
   local nouns = NOUNS[M.shapeName(shape)]
-  local name = ""
+  local name, noun = "", ""
   for _ = 1, 50 do
     local first = pickWord(rng, FIRST)
     local place = first .. pickWord(rng, SECOND)
-    local noun = pickWord(rng, nouns)
+    noun = pickWord(rng, nouns)
     local adj = pickWord(rng, ADJECTIVES)
     local form = rng:below(3)
     if form == 0 then name = "The " .. adj .. " " .. noun
     elseif form == 1 then name = noun .. " of " .. place
     else name = place .. " " .. noun end
-    if #name <= 20 then break end
+    if fits(name) then break end
   end
-  if #name > 20 then name = name:sub(1, 20) end
+  if not fits(name) then name = "The " .. noun end   -- fits whatever the noun
   return name, pickWord(rng, LINES)
 end
 

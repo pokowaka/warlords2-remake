@@ -553,21 +553,43 @@ const pickWord = (rng, list) => list[rng.below(list.length)];
  *  line of description (at most 30), drawn from the seed alone -- "The
  *  Shattered Isles", "Kingdoms of Ravenmere" -- so the same seed always gets
  *  the same name, and naming never changes the world. { name, text }. */
+// How far each letter moves the pen in CHANCE17, the font New Scenario's
+// list draws names in (CHANCE17.FIN), and the widest name the list's box
+// holds: "The Frozen Steppe", 140 pixels; the shipped names reach 130.
+const UPPER_WIDTH = [15, 16, 13, 17, 15, 18, 15, 16, 12, 14, 15, 14, 18, 16, 15, 15, 15, 16, 14, 13, 16, 17, 24, 16, 13, 14];
+const LOWER_WIDTH = [7, 6, 7, 9, 6, 8, 6, 7, 4, 7, 7, 4, 12, 8, 7, 8, 6, 6, 6, 5, 9, 9, 14, 9, 9, 8];
+const NAME_WIDTH = 140, NAME_CHARS = 20;
+
+function nameWidth(s) {
+  let n = 0;
+  for (const c of s) {
+    if (c >= "A" && c <= "Z") n += UPPER_WIDTH[c.charCodeAt(0) - 65];
+    else if (c >= "a" && c <= "z") n += LOWER_WIDTH[c.charCodeAt(0) - 97];
+    else if (c === " ") n += 7;
+    else if (c === "'") n += 3;
+    else n += 16;
+  }
+  return n;
+}
+const fits = (s) => s.length <= NAME_CHARS && nameWidth(s) <= NAME_WIDTH;
+
 export function title(shape, seed) {
   const rng = new Rng(seed + 1000003.0);   // its own dice: naming never touches the world's
   const nouns = NOUNS[shape === "pangaea" ? 1 : shape === "islands" ? 2 : 0];
   const t = { name: "", text: "" };
+  let noun = "";
   for (let tries = 0; tries < 50; tries++) {
     const first = pickWord(rng, FIRST);
     const place = first + pickWord(rng, SECOND);
-    const noun = pickWord(rng, nouns), adj = pickWord(rng, ADJECTIVES);
+    noun = pickWord(rng, nouns);
+    const adj = pickWord(rng, ADJECTIVES);
     const form = rng.below(3);
     if (form === 0) t.name = "The " + adj + " " + noun;
     else if (form === 1) t.name = noun + " of " + place;
     else t.name = place + " " + noun;
-    if (t.name.length <= 20) break;
+    if (fits(t.name)) break;
   }
-  if (t.name.length > 20) t.name = t.name.slice(0, 20);
+  if (!fits(t.name)) t.name = "The " + noun;   // fits whatever the noun
   t.text = pickWord(rng, LINES);
   return t;
 }

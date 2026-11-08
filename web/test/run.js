@@ -2047,6 +2047,17 @@ function testScenarioGenerator() {
     }
   }
   ok(fits, "every world's name fits New Scenario's list (20) and its line its box (30)");
+  // and no wider than "The Frozen Steppe" in CHANCE17, the list's font
+  const fin = vfs.read("CHANCE17.FIN");
+  const width = (t) => {
+    let n = 0;
+    for (const ch of t) { const c = ch.charCodeAt(0); if (c >= fin[1] && c < fin[1] + fin[0]) n += fin[11 + fin[0] + c - fin[1]]; }
+    return n;
+  };
+  let widest = 0;
+  for (const shape of scengen.SHAPES)
+    for (let seed = 1; seed <= 600; seed++) widest = Math.max(widest, width(scengen.title(shape, seed).name));
+  ok(widest <= width("The Frozen Steppe"), "every name fits New Scenario's list box (" + widest + " px)");
   eq(scengen.title("pangaea", 9).name, scengen.title("pangaea", 9).name, "the same seed, the same name");
 
   // New Scenario's list: SCENARIO.DAT's six, then a generated world's folder

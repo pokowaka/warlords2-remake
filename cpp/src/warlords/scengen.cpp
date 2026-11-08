@@ -472,23 +472,45 @@ const char* const LINES[] = {"Eight warlords, one throne",    "Where empires ris
 template <class T, size_t N>
 const char* pickWord(Rng& rng, const T (&list)[N]) { return list[rng.below((int)N)]; }
 
+// How far each letter moves the pen in CHANCE17, the font New Scenario's
+// list draws names in (CHANCE17.FIN), and the widest name the list's box
+// holds: "The Frozen Steppe", 140 pixels; the shipped names reach 130.
+constexpr int UPPER_WIDTH[26] = {15, 16, 13, 17, 15, 18, 15, 16, 12, 14, 15, 14, 18, 16, 15, 15, 15, 16, 14, 13, 16, 17, 24, 16, 13, 14};
+constexpr int LOWER_WIDTH[26] = {7, 6, 7, 9, 6, 8, 6, 7, 4, 7, 7, 4, 12, 8, 7, 8, 6, 6, 6, 5, 9, 9, 14, 9, 9, 8};
+constexpr int NAME_WIDTH = 140, NAME_CHARS = 20;
+
+int nameWidth(const std::string& s) {
+  int n = 0;
+  for (char c : s) {
+    if (c >= 'A' && c <= 'Z') n += UPPER_WIDTH[c - 'A'];
+    else if (c >= 'a' && c <= 'z') n += LOWER_WIDTH[c - 'a'];
+    else if (c == ' ') n += 7;
+    else if (c == '\'') n += 3;
+    else n += 16;
+  }
+  return n;
+}
+bool fits(const std::string& s) { return (int)s.size() <= NAME_CHARS && nameWidth(s) <= NAME_WIDTH; }
+
 }  // namespace
 
 Title title(Shape shape, long seed) {
   Rng rng((double)seed + 1000003.0);   // its own dice: naming never touches the world's
   const auto& nouns = NOUNS[shape == Shape::Pangaea ? 1 : shape == Shape::Islands ? 2 : 0];
   Title t;
+  std::string noun;
   for (int tries = 0; tries < 50; tries++) {
     std::string place = pickWord(rng, FIRST);   // two statements: the dice in a fixed order
     place += pickWord(rng, SECOND);
-    std::string noun = pickWord(rng, nouns), adj = pickWord(rng, ADJECTIVES);
+    noun = pickWord(rng, nouns);
+    std::string adj = pickWord(rng, ADJECTIVES);
     int form = rng.below(3);
     if (form == 0) t.name = "The " + adj + " " + noun;
     else if (form == 1) t.name = noun + " of " + place;
     else t.name = place + " " + noun;
-    if (t.name.size() <= 20) break;
+    if (fits(t.name)) break;
   }
-  if (t.name.size() > 20) t.name = t.name.substr(0, 20);
+  if (!fits(t.name)) t.name = "The " + noun;   // fits whatever the noun
   t.text = pickWord(rng, LINES);
   return t;
 }

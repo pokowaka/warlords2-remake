@@ -2960,6 +2960,24 @@ local function testScenarioGenerator()
     end
   end
   ok(fits, "every name fits the list's 20 characters and every line its 30")
+  -- and no wider than "The Frozen Steppe" in CHANCE17, the list's font
+  local fh = io.open(DATA .. "/CHANCE17.FIN", "rb")
+  local fin = fh:read("*a")
+  fh:close()
+  local count, firstChar = fin:byte(1), fin:byte(2)
+  local function width(t)
+    local n = 0
+    for i = 1, #t do
+      local c = t:byte(i)
+      if c >= firstChar and c < firstChar + count then n = n + fin:byte(12 + count + c - firstChar) end
+    end
+    return n
+  end
+  local widest = 0
+  for _, shape in ipairs(scengen.SHAPES) do
+    for seed = 1, 600 do widest = math.max(widest, width((scengen.title(shape, seed)))) end
+  end
+  ok(widest <= width("The Frozen Steppe"), "every name fits New Scenario's list box (" .. widest .. " px)")
   eq(scengen.parseShape("islands"), "islands", "the shapes are parsed")
   eq(scengen.parseShape("atlantis"), nil, "... and an unknown one is not")
 

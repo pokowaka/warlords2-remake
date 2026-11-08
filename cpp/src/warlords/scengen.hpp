@@ -46,8 +46,10 @@ struct Settings {
   int rivers = 5;
 };
 
-/** A world's name for New Scenario's list (at most 20 characters) and its
- *  line of description (at most 30), drawn from the seed alone -- "The
+/** A world's name for New Scenario's list (at most 20 characters, and no
+ *  wider than "The Frozen Steppe" in the list's font, so it stays inside the
+ *  list's box) and its line of description (at most 30), drawn from the
+ *  seed alone -- "The
  *  Shattered Isles", "Kingdoms of Ravenmere" -- so the same seed always gets
  *  the same name, and naming never changes the world. */
 struct Title {

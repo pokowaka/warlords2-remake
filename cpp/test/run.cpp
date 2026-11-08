@@ -2545,6 +2545,28 @@ static void testMapEval() {
       eq(world->options.militaryAdvisor, 1, e.name + " reads as an ordinary scenario");
     }
   }
+  // names: no wider than "The Frozen Steppe" in CHANCE17, the font New
+  // Scenario's list draws them in, measured from the font's own metrics
+  {
+    std::string fin = *readFile(DATA + "/CHANCE17.FIN");
+    int count = (uint8_t)fin[0], firstChar = (uint8_t)fin[1];
+    auto width = [&](const std::string& t) {
+      int n = 0;
+      for (unsigned char c : t)
+        if (c >= firstChar && c < firstChar + count) n += (uint8_t)fin[11 + count + (c - firstChar)];
+      return n;
+    };
+    int widest = 0;
+    bool fit = true;
+    for (auto shape : {scengen::Shape::Continents, scengen::Shape::Pangaea, scengen::Shape::Islands})
+      for (long seed = 1; seed <= 600; seed++) {
+        auto t = scengen::title(shape, seed);
+        widest = std::max(widest, width(t.name));
+        if (t.name.empty() || t.name.size() > 20 || t.text.empty() || t.text.size() > 30) fit = false;
+      }
+    ok(widest <= width("The Frozen Steppe"), "every name fits New Scenario's list box (" + std::to_string(widest) + " px)");
+    ok(fit, "and its 20 characters, and its line its 30");
+  }
   // New Scenario's list: SCENARIO.DAT's six, then a generated world's folder
   // with its NAME.INF (warlords/scenarios), in a data folder of its own
   {
