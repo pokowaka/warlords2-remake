@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "warlords/model/army_type.hpp"
+#include "warlords/model/tile_pos.hpp"
 
 namespace w2 {
 
@@ -60,6 +61,21 @@ struct City {
     bool ContainsTile(int tile_x, int tile_y) const {
         return tile_x >= x && tile_x <= x + 1 && tile_y >= y && tile_y <= y + 1;
     }
+    /** @brief True if the city is intact and currently building a production slot. */
+    bool IsProducing() const {
+        return !razed && producing >= 0 && producing < static_cast<int>(slots.size()) &&
+               countdown > 0;
+    }
+    /** @brief Returns the production slot currently selected, or `nullptr` if none. */
+    const Slot* ActiveSlot() const {
+        return !razed && producing >= 0 && producing < static_cast<int>(slots.size())
+                       ? &slots[producing]
+                       : nullptr;
+    }
+    /** @brief True if the city is vectoring its production to another city or standard. */
+    bool IsVectored() const { return vector_to != kNone; }
+    /** @brief Returns the top-left tile position `(x, y)` of the city. */
+    TilePos Position() const { return {x, y}; }
 };
 
 }  // namespace w2

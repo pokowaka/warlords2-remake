@@ -31,4 +31,5 @@
 #include "warlords/model/options.hpp"
 #include "warlords/model/side.hpp"
 #include "warlords/model/site.hpp"
+#include "warlords/model/tile_pos.hpp"
 #include "warlords/rng.hpp"

@@ -1,5 +1,25 @@
-# Commits git blame skips: formatting only. Use it with
+# Commits git blame skips: formatting and mechanical bulk renames. Use it with
 #   git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 # style: Format the C++ with clang-format
 18c4c50cdba3cd4a2a0c7bb130815019584263dd
+# style: Make casts and conversions explicit
+1f6f7108a7f61d8b346bf56c5d5e280c8dae8e1c
+# style: Name file-local C++ symbols Google style
+65fcf082862e3e65a6c4944f51adb7ff40932ce6
+# style: Name header C++ symbols Google style
+a451f613b1124bb10b867ee1aec262f2c4de65d7
+# style: Apply Phase 2b descriptive names and Doxygen (batch 1)
+7770e568a22596bde688da61c13ade0358a3c9de
+# style: Finish Phase 2b for ui, util, platform, save, and ai/core
+0a35551c20affae49a54aa8848fb6ced1c6814b6
+# style: Finish Phase 2b for scengen
+552d1460319657274df875dd2358392892d8118b
+# style(front): Name locals and add Doxygen
+9db4ffe9c3b52c6c533d98d077e610882861ad86
+# style(ai): Name locals and document modern AI
+ca3c4a11fef07869b41a6a7b5a1c334595d7b638
+# style(test): Name locals and document run/arena
+024d45e0707170471177e7b3ff02587fb1d97004
+# style: Complete Phase 2b naming and Doxygen
+48a37369c330afa58de0199b2a10c2e7a49f46c1

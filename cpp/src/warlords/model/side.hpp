@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "warlords/model/army_type.hpp"
+#include "warlords/model/tile_pos.hpp"
 
 namespace w2 {
 
@@ -131,6 +132,19 @@ struct Side {
     int cap_now_y = kNone;  ///< Row of where the capital now stands.
     bool production_due = false;      ///< A human's cities build once the offer is settled.
     std::vector<Promotion> promoted;  ///< For the interface to show.
+
+    /** @brief True if this side is participating in the scenario and still alive. */
+    bool IsActive() const { return in_use && alive; }
+    /** @brief True if this side is an active human player. */
+    bool IsHuman() const { return in_use && alive && !computer; }
+    /** @brief True if this side is an active computer player. */
+    bool IsComputer() const { return in_use && alive && computer; }
+    /** @brief Net gold per turn (`income - upkeep_total`). */
+    int NetIncome() const { return income - upkeep_total; }
+    /** @brief Current capital position (`cap_now_x, cap_now_y` if set, else `cap_x, cap_y`). */
+    TilePos CapitalPosition() const {
+        return cap_now_x != kNone ? TilePos{cap_now_x, cap_now_y} : TilePos{cap_x, cap_y};
+    }
 };
 
 }  // namespace w2

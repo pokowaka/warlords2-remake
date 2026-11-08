@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "warlords/model/army_type.hpp"
+#include "warlords/model/tile_pos.hpp"
 
 namespace w2 {
 
@@ -64,6 +65,14 @@ struct Army {
 
     /** @brief Is it a hero? */
     bool Hero() const;
+    /** @brief True if the army is standing on a valid map tile (not in transit). */
+    bool OnMap() const { return !transit.has_value() && x != kNone && y != kNone; }
+    /** @brief True if the army belongs to `side_index`. */
+    bool OwnedBy(int side_index) const { return owner == side_index; }
+    /** @brief True if the army is on the map, has moves remaining, and is not done/fortified. */
+    bool CanMove() const { return moves > 0 && !done && !fortified && OnMap(); }
+    /** @brief Returns the army's current tile position `(x, y)`. */
+    TilePos Position() const { return {x, y}; }
 };
 
 }  // namespace w2

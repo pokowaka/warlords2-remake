@@ -56,27 +56,33 @@ void Game::Remove(const Army* army) {
     if (pos != armies.end()) armies.erase(pos);
 }
 
-namespace game {
-
-static const int kTransitTurns = 2;  ///< A vectored army arrives two turns later.
-
-/** @brief Flat tile index in `game.map` for column `x`, row `y`. */
-static int Key(const Game& game, int x, int y) {
-    return y * game.map->width + x;
-}
-
-std::vector<Army*> ArmiesAt(const Game& game, int x, int y) {
+std::vector<Army*> Game::ArmiesOnTile(int x, int y) const {
     std::vector<Army*> out;
-    for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
-        Army* army = game.armies[i];
+    for (int i = static_cast<int>(armies.size()) - 1; i >= 0; i--) {
+        Army* army = armies[i];
         if (!army->transit && army->x == x && army->y == y) out.push_back(army);
     }
     return out;
 }
 
+int Game::LivingSideCount() const {
+    int count = 0;
+    for (const Side* side_ptr : sides) {
+        if (side_ptr && side_ptr->alive) count++;
+    }
+    return count;
+}
+
+namespace game {
+
+static const int kTransitTurns = 2;  ///< A vectored army arrives two turns later.
+
+std::vector<Army*> ArmiesAt(const Game& game, int x, int y) {
+    return game.ArmiesOnTile(x, y);
+}
+
 City* CityAt(const Game& game, int x, int y) {
-    if (x < 0 || y < 0 || x >= game.map->width || y >= game.map->height) return nullptr;
-    return game.map->city_tile[Key(game, x, y)];
+    return game.map ? game.map->CityAtFootprint(x, y) : nullptr;
 }
 
 void SetCityOwner(Game& game, City& city, int side_index) {

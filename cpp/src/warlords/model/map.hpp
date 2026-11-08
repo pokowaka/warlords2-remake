@@ -51,10 +51,36 @@ struct Map {
     int active_y1 = kMapH - 1;  ///< Bottom row of the part in play.
 
     /** @brief The side with this index, or null. */
-    Side* Side(int index) { return index >= 0 && index < 8 ? &sides[index] : nullptr; }
+    struct Side* Side(int index) { return index >= 0 && index < 8 ? &sides[index] : nullptr; }
+    /** @brief The side with this index (const), or null. */
+    const struct Side* Side(int index) const {
+        return index >= 0 && index < 8 ? &sides[index] : nullptr;
+    }
     /** @brief The city with this index, or null. */
-    City* City(int index) {
+    struct City* City(int index) {
         return index >= 0 && index < static_cast<int>(cities.size()) ? &cities[index] : nullptr;
+    }
+    /** @brief The city with this index (const), or null. */
+    const struct City* City(int index) const {
+        return index >= 0 && index < static_cast<int>(cities.size()) ? &cities[index] : nullptr;
+    }
+    /** @brief True if `(x, y)` lies inside the full map dimensions `(0..width-1, 0..height-1)`. */
+    bool InBounds(int x, int y) const { return x >= 0 && x < width && y >= 0 && y < height; }
+    /** @brief True if `(x, y)` lies inside the cropped active playable area. */
+    bool InActiveArea(int x, int y) const {
+        return x >= active_x0 && x <= active_x1 && y >= active_y0 && y <= active_y1;
+    }
+    /** @brief Returns the city whose top-left tile is `(x, y)`, or `nullptr`. */
+    struct City* CityAtTopLeft(int x, int y) const {
+        return InBounds(x, y) && !city_at.empty() ? city_at[y * width + x] : nullptr;
+    }
+    /** @brief Returns the city covering tile `(x, y)` in its 2x2 footprint, or `nullptr`. */
+    struct City* CityAtFootprint(int x, int y) const {
+        return InBounds(x, y) && !city_tile.empty() ? city_tile[y * width + x] : nullptr;
+    }
+    /** @brief Returns the temple or ruin on tile `(x, y)`, or `nullptr`. */
+    struct Site* SiteAt(int x, int y) const {
+        return InBounds(x, y) && !site_at.empty() ? site_at[y * width + x] : nullptr;
     }
 };
 

@@ -81,6 +81,14 @@ struct Game {
     bool Alive(const Army* army) const;
     /** @brief Takes the army out of the game (it stays in the pool). */
     void Remove(const Army* army);
+    /** @brief True if an encampment (tower) stands on tile `(x, y)`. */
+    bool HasTower(int x, int y) const {
+        return map && map->InBounds(x, y) && towers.count(y * map->width + x) != 0;
+    }
+    /** @brief Returns all armies standing on tile `(x, y)` in top-down slot order. */
+    std::vector<Army*> ArmiesOnTile(int x, int y) const;
+    /** @brief Returns the number of sides still alive in the game. */
+    int LivingSideCount() const;
 };
 
 }  // namespace w2
