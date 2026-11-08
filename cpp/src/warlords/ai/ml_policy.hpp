@@ -215,6 +215,7 @@ class PolicyNetwork {
             kLegacyV3Params +
             MlpParamsWithInput<StackValueNet>(StackValueNet::kInDim - kV4CriticDropped);
 
+    /** @brief Initializes all five heads with default random weights (seed 42). */
     PolicyNetwork();
 
     /** @brief Initializes all parameters from zero-mean random noise (no human priors). */
