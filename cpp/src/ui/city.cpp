@@ -1,16 +1,19 @@
-// The city dialog: dialog 6 over popup 2, (80, 60) 480x312.
-//
-// One frame, four modes, switched by the row of buttons along the foot
-// (193-196) -- 7204:0000 takes the mode as its argument:
-//
-//   0  Info        any city; what anyone can see of it
-//   1  City        Rename, Raze, Build Prod
-//   2  Production  what it builds
-//   3  Vector      where what it builds goes
-//
-// Modes 1-3 are only for a city of the side's own (7204:03a9). The left half
-// is the strategic map; the right half is auto_ui_city_info (7204:06de), one
-// case per mode, every position out of its data segment (4125:0ea0 on).
+/**
+ * @file
+ * @brief The city dialog: dialog 6 over popup 2, at (80, 60), 480x312.
+ *
+ * One frame with four modes, switched by the row of buttons along its foot
+ * (controls 193-196):
+ *
+ *   0  Info        any city; what anyone can see of it
+ *   1  City        Rename, Raze, Build Prod
+ *   2  Production  what it builds
+ *   3  Vector      where what it builds goes
+ *
+ * Modes 1-3 are only for a city of the player's own side. The left half of
+ * the dialog is the strategic map; the right half is drawn per mode, every
+ * position taken from the original program's layout tables.
+ */
 #include <algorithm>
 #include <cstdlib>
 
@@ -25,25 +28,26 @@ using w2::Format;
 using w2::kNone;
 
 namespace {
-const kit::Rect kR{80, 60, 480, 312};    // popup 2
-const kit::Rect kMap{80, 60, 224, 312};  // area screen 3, region 6
+const kit::Rect kPopupRect{80, 60, 480, 312};  // popup 2
+const kit::Rect kMap{80, 60, 224, 312};        // area screen 3, region 6
 const int kDialog = 6;
 const int kDone = 192, kDoneProd = 201, kStop = 202;
 const int kModeFirst = 193;
 const int kSlotFirst = 197;  // 197-200, Production only
 const int kRename = 203, kBuild = 204, kRaze = 205;
-const int kVSend = 210, kVMove = 211, kVAll = 212;
-const int kVSendLit = 214, kVMoveLit = 215, kVAllLit = 216;
+const int kVectorSend = 210, kVectorMove = 211, kVectorAll = 212;
+const int kVectorSendLit = 214, kVectorMoveLit = 215, kVectorAllLit = 216;
 
-const int kSStats = 0x74, kSCurrent = 0x75;
-const int kSRename = 0x77, kSRaze = 0x78, kSBuild = 0x79;
-const int kSVector = 0x9a, kSHelP1 = 0x9b, kSHelP2 = 0x9c;
+// String groups the dialog's texts come from.
+const int kTextStats = 0x74, kTextCurrent = 0x75;
+const int kTextRename = 0x77, kTextRaze = 0x78, kTextBuild = 0x79;
+const int kTextVector = 0x9a, kTextSendHelp = 0x9b, kTextMoveHelp = 0x9c;
 
-// Rename and Raze keep their words in the executable (4125:1003, 4125:0a6c).
+// Rename and Raze keep their titles in the executable, not in a string group.
 const char* rename_title = "Rename City";
 const char* raze_title = "Raze City";
 
-const int kShieldL[2] = {312, 102}, kShieldR[2] = {512, 102};
+const int kLeftShieldAt[2] = {312, 102}, kRightShieldAt[2] = {512, 102};
 const int kStatAt[3][2] = {{356, 106}, {356, 126}, {356, 150}};
 const int kTextAt[3][2] = {{310, 259}, {310, 279}, {310, 299}};
 const int kInfoSlots[4][2] = {{320, 190}, {376, 190}, {432, 190}, {488, 190}};
@@ -51,140 +55,159 @@ const int kProdSlots[4][2] = {{312, 142}, {360, 142}, {408, 142}, {456, 142}};
 const int kCityText[6][2] = {{376, 183}, {376, 203}, {376, 231},
                              {376, 251}, {376, 279}, {376, 299}};
 
+/// Vector mode's "see all" toggle; kept for the session, across dialogs.
 bool vector_see_all = false;
 
+/** @brief The index of the side whose capital the city is, or kNone. */
 int CapitalOf(const w2::City* city) {
-    for (auto& s : G.g->map->sides)
-        if (s.capital == city) return s.index;
+    for (auto& side : G.g->map->sides)
+        if (side.capital == city) return side.index;
     return kNone;
 }
 
-// The small shield (8611:0bf7, size 4): BSHIELD.PCK's bottom row.
+/** @brief Draws a side's small shield: the bottom row of BSHIELD.PCK. */
 void SmallShield(int side, int x, int y) {
     gfx::SetColor(1, 1, 1);
     gfx::Draw(G.shield_img, gfx::NewQuad(side * 32, 36, 32, 23), x, y);
 }
 
+/** @brief The slot the city is building from, or nullptr when it builds nothing. */
 const w2::Slot* Building(const w2::City* city) {
     return w2::game::Producing(*city) && city->producing < static_cast<int>(city->slots.size())
                    ? &city->slots[city->producing]
                    : nullptr;
 }
 
-// Income, defence and owner (7204:0727, :1769).
+/** @brief Draws the city's income, defence and owner; a razed city shows nothing. */
 void Stats(const w2::City* city) {
-    const Font& f = kit::GetFont(2);
+    const Font& font = kit::GetFont(2);
     gfx::SetColor(1, 1, 1);
     bool razed = city->razed;
-    f.Draw(Format(kit::Text(kSStats, 0), razed ? 0 : city->income), kStatAt[0][0], kStatAt[0][1]);
-    f.Draw(Format(kit::Text(kSStats, 1), razed ? 0 : city->defence), kStatAt[1][0], kStatAt[1][1]);
+    font.Draw(Format(kit::Text(kTextStats, 0), razed ? 0 : city->income), kStatAt[0][0],
+              kStatAt[0][1]);
+    font.Draw(Format(kit::Text(kTextStats, 1), razed ? 0 : city->defence), kStatAt[1][0],
+              kStatAt[1][1]);
     std::string owner;
     if (razed)
-        owner = kit::Text(kSStats, 2);
+        owner = kit::Text(kTextStats, 2);
     else if (city->owner_index == kNone)
-        owner = kit::Text(kSStats, 3);
+        owner = kit::Text(kTextStats, 3);
     else
-        owner = Format(kit::Text(kSStats, 4), G.g->map->sides[city->owner_index].name);
-    f.Draw(owner, kStatAt[2][0], kStatAt[2][1]);
+        owner = Format(kit::Text(kTextStats, 4), G.g->map->sides[city->owner_index].name);
+    font.Draw(owner, kStatAt[2][0], kStatAt[2][1]);
 }
 
+/** @brief Draws the owner's shield on both sides of the dialog's title; neutral is side 8. */
 void Shields(const w2::City* city) {
     int side = city->owner_index == kNone ? 8 : city->owner_index;
-    kit::Shield(side, kShieldL[0], kShieldL[1]);
-    kit::Shield(side, kShieldR[0], kShieldR[1]);
+    kit::Shield(side, kLeftShieldAt[0], kLeftShieldAt[1]);
+    kit::Shield(side, kRightShieldAt[0], kRightShieldAt[1]);
 }
 
-void Tile(int mx, int my, int x, int y) {
-    int t = w2::scn::TileAt(*G.g->map, mx, my);
-    int sheet = t / 96, i = t % 96;
+/** @brief Draws the 40x40 map tile at map position (map_x, map_y) at screen (x, y). */
+void Tile(int map_x, int map_y, int x, int y) {
+    int tile = w2::scn::TileAt(*G.g->map, map_x, map_y);
+    int sheet = tile / 96, cell = tile % 96;
     gfx::SetColor(1, 1, 1);
-    gfx::Draw(G.sheets[std::min(sheet, 1)], gfx::NewQuad((i % 16) * 40, (i / 16) * 40, 40, 40), x,
-              y);
+    gfx::Draw(G.sheets[std::min(sheet, 1)],
+              gfx::NewQuad((cell % 16) * 40, (cell / 16) * 40, 40, 40), x, y);
 }
 
+/**
+ * @brief The city dialog itself: one city, shown in one of four modes.
+ *
+ * Moving to another city closes this dialog and opens a new one on it.
+ */
 struct CityDialog : kit::Modal {
-    w2::City* city = nullptr;
-    screen::View v;
-    int mode = kNone, sub = 0;
-    int chosen = kNone;
+    w2::City* city = nullptr;  ///< The city shown.
+    screen::View v;            ///< Dialog 6 and its controls' states.
+    int mode = kNone;          ///< kInfo, kCity, kProduction or kVector.
+    int sub = 0;         ///< Vector mode's step: 0 none, 1 choosing where to send, 2 where to move.
+    int chosen = kNone;  ///< The army type chosen in Production mode, or kNone.
 
+    /** @brief Whether the city is the player's and the player has cities at all. */
     bool Owned() const {
         return city->owner_index == G.player->index &&
                !w2::game::SideCities(*G.g, *G.player).empty();
     }
 
-    // Which controls this mode shows, and in what state (7204:03a9).
+    /** @brief Sets which controls the current mode shows, and in what state. */
     void Refresh() {
-        auto& st = v.state;
+        auto& state = v.state;
         bool mine = Owned();
         for (int i = 0; i <= 3; i++) {
-            int id = kModeFirst + i;
+            int button_id = kModeFirst + i;
             if (i == mode)
-                st[id] = w2::uidata::kActive;
+                state[button_id] = w2::uidata::kActive;
             else if (i > 0 && !mine)
-                st[id] = w2::uidata::kDisabled;
+                state[button_id] = w2::uidata::kDisabled;
             else
-                st[id] = w2::uidata::kNormal;
+                state[button_id] = w2::uidata::kNormal;
         }
         std::set<int> shown = {193, 194, 195, 196};
         if (mode == kProduction) {
             for (int i = 0; i <= 3; i++) {
                 shown.insert(kSlotFirst + i);
-                st[kSlotFirst + i] = w2::uidata::kNormal;
+                state[kSlotFirst + i] = w2::uidata::kNormal;
             }
             shown.insert(kDoneProd);
-            st[kDoneProd] = w2::uidata::kNormal;
+            state[kDoneProd] = w2::uidata::kNormal;
             shown.insert(kStop);
-            st[kStop] = w2::game::Producing(*city) ? w2::uidata::kNormal : w2::uidata::kDisabled;
+            state[kStop] = w2::game::Producing(*city) ? w2::uidata::kNormal : w2::uidata::kDisabled;
         } else {
             shown.insert(kDone);
-            st[kDone] = w2::uidata::kNormal;
+            state[kDone] = w2::uidata::kNormal;
         }
         if (mode == kCity) {
-            for (int id : {kRename, kRaze, kBuild}) {
-                shown.insert(id);
-                st[id] = w2::uidata::kNormal;
+            for (int button_id : {kRename, kRaze, kBuild}) {
+                shown.insert(button_id);
+                state[button_id] = w2::uidata::kNormal;
             }
         }
         if (mode == kVector) {
-            int all = vector_see_all ? kVAllLit : kVAll;
-            shown.insert(all);
-            st[all] = w2::uidata::kNormal;
-            int send = sub == 1 ? kVSendLit : kVSend;
-            shown.insert(send);
-            st[send] = (sub == 1 || w2::game::Producing(*city)) ? w2::uidata::kNormal
-                                                                : w2::uidata::kDisabled;
-            int mv = sub == 2 ? kVMoveLit : kVMove;
-            shown.insert(mv);
-            st[mv] = (sub == 2 || !w2::game::VectoredTo(*G.g, city).empty())
-                             ? w2::uidata::kNormal
-                             : w2::uidata::kDisabled;
+            int all_button = vector_see_all ? kVectorAllLit : kVectorAll;
+            shown.insert(all_button);
+            state[all_button] = w2::uidata::kNormal;
+            int send_button = sub == 1 ? kVectorSendLit : kVectorSend;
+            shown.insert(send_button);
+            state[send_button] = (sub == 1 || w2::game::Producing(*city)) ? w2::uidata::kNormal
+                                                                          : w2::uidata::kDisabled;
+            int move_button = sub == 2 ? kVectorMoveLit : kVectorMove;
+            shown.insert(move_button);
+            state[move_button] = (sub == 2 || !w2::game::VectoredTo(*G.g, city).empty())
+                                         ? w2::uidata::kNormal
+                                         : w2::uidata::kDisabled;
         }
         hidden.clear();
-        for (auto& c : v.dialog.controls)
-            if (!shown.count(c.id)) hidden.insert(c.id);
+        for (auto& control : v.dialog.controls)
+            if (!shown.count(control.id)) hidden.insert(control.id);
     }
 
-    void SetMode(int m) {
-        if (m != kInfo && city->owner_index != G.player->index) m = kInfo;
-        // 7204:0000: going into Production chooses what the city builds now
-        if (m == kProduction && mode != kProduction) {
-            const w2::Slot* b = Building(city);
-            chosen = b ? b->type : kNone;
+    /**
+     * @brief Switches to another mode; only Info for a city that is not the player's.
+     *
+     * Going into Production chooses what the city builds now.
+     */
+    void SetMode(int new_mode) {
+        if (new_mode != kInfo && city->owner_index != G.player->index) new_mode = kInfo;
+        if (new_mode == kProduction && mode != kProduction) {
+            const w2::Slot* building = Building(city);
+            chosen = building ? building->type : kNone;
         }
-        mode = m;
+        mode = new_mode;
         sub = 0;
         Refresh();
     }
 
+    /** @brief Closes the dialog and shows the tutorial's next moment, if any. */
     void Close() {
         kit::Pop(this);
-        tutorial::Show("select");  // 7204:0321
+        tutorial::Show("select");
     }
 
-    // Choose what the city builds: slot n of the list, from 0 (7087:00c8).
-    void Pick(int n) {
-        if (n < static_cast<int>(city->slots.size())) chosen = city->slots[n].type;
+    /** @brief Chooses what the city builds: slot `slot` of its list, from 0. */
+    void Pick(int slot) {
+        if (slot < static_cast<int>(city->slots.size())) chosen = city->slots[slot].type;
         if (chosen == kNone) return;
         for (size_t i = 0; i < city->slots.size(); i++)
             if (city->slots[i].type == chosen)
@@ -192,60 +215,71 @@ struct CityDialog : kit::Modal {
         Refresh();
     }
 
+    /** @brief Stops the city's production. */
     void Stop() {
         w2::game::SetProduction(*G.g, *city, kNone);
         chosen = kNone;
         Refresh();
     }
 
+    /** @brief Asks for the city's new name (15 characters, 128 pixels) and renames it. */
     void Rename() {
         std::weak_ptr<Modal> self = weak_from_this();
-        CityDialog* me = this;
-        w2::City* c = city;
-        input::Options o;
-        o.title = rename_title;
-        o.lines = {"Type the new name for", "this city"};
-        o.text = city->name;
-        o.max_chars = 15;
-        o.max_width = 128;  // 7204:2013
-        o.ok = [self, me, c](const std::string& name) {
-            w2::game::RenameCity(*G.g, *c, name);
-            if (!self.expired()) me->SetMode(kCity);
+        CityDialog* dialog = this;
+        w2::City* renamed = city;
+        input::Options options;
+        options.title = rename_title;
+        options.lines = {"Type the new name for", "this city"};
+        options.text = city->name;
+        options.max_chars = 15;
+        options.max_width = 128;
+        options.ok = [self, dialog, renamed](const std::string& name) {
+            w2::game::RenameCity(*G.g, *renamed, name);
+            if (!self.expired()) dialog->SetMode(kCity);
         };
-        o.cancelled = [self, me]() {
-            if (!self.expired()) me->SetMode(kCity);
+        options.cancelled = [self, dialog]() {
+            if (!self.expired()) dialog->SetMode(kCity);
         };
-        input::Open(o);
+        input::Open(options);
     }
 
+    /** @brief Asks whether to raze the city, and razes it if the player agrees. */
     void Raze() {
         std::weak_ptr<Modal> self = weak_from_this();
-        CityDialog* me = this;
-        w2::City* c = city;
-        input::Options o;
-        o.title = raze_title;
-        o.lines = {"Are you sure that you", "want to", "raze " + city->name + "?",
-                   "You won't be popular!"};
-        o.confirm = true;
-        o.ok = [self, me, c](const std::string&) {
-            w2::game::Raze(*G.g, *G.player, *c, {}, true);
+        CityDialog* dialog = this;
+        w2::City* razed = city;
+        input::Options options;
+        options.title = raze_title;
+        options.lines = {"Are you sure that you", "want to", "raze " + city->name + "?",
+                         "You won't be popular!"};
+        options.confirm = true;
+        options.ok = [self, dialog, razed](const std::string&) {
+            w2::game::Raze(*G.g, *G.player, *razed, {}, true);
             front::StratDirty();
-            if (!self.expired()) me->SetMode(kInfo);
+            if (!self.expired()) dialog->SetMode(kInfo);
         };
-        o.cancelled = [self, me]() {
-            if (!self.expired()) me->SetMode(kCity);
+        options.cancelled = [self, dialog]() {
+            if (!self.expired()) dialog->SetMode(kCity);
         };
-        input::Open(o);
+        input::Open(options);
     }
 
+    /** @brief Opens Build Production, coming back to City mode afterwards. */
     void Build() {
         std::weak_ptr<Modal> self = weak_from_this();
-        CityDialog* me = this;
-        buyprod::Open(city, [self, me]() {
-            if (!self.expired()) me->SetMode(kCity);
+        CityDialog* dialog = this;
+        buyprod::Open(city, [self, dialog]() {
+            if (!self.expired()) dialog->SetMode(kCity);
         });
     }
 
+    /**
+     * @brief Draws Info mode: the stats, what the city can build and its texts.
+     *
+     * When the View Production option hides other sides' production, or the
+     * city is razed, a picture of the city's four tiles stands in for the
+     * slots.
+     */
     void DrawInfo() {
         Shields(city);
         Stats(city);
@@ -268,107 +302,118 @@ struct CityDialog : kit::Modal {
             Tile(city->x + 1, city->y, 432, 176);
             Tile(city->x + 1, city->y + 1, 432, 216);
         }
-        int cap = CapitalOf(city);
-        if (cap != kNone) SmallShield(cap, 408, 170);
-        auto it = G.g->map->city_text.find(city->index);
-        const Font& f = kit::GetFont(2);
+        int capital_side = CapitalOf(city);
+        if (capital_side != kNone) SmallShield(capital_side, 408, 170);
+        auto text = G.g->map->city_text.find(city->index);
+        const Font& font = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
-        if (it != G.g->map->city_text.end())
+        if (text != G.g->map->city_text.end())
             for (int i = 0; i < 3; i++)
-                if (!it->second[i].empty()) f.Draw(it->second[i], kTextAt[i][0], kTextAt[i][1]);
+                if (!text->second[i].empty())
+                    font.Draw(text->second[i], kTextAt[i][0], kTextAt[i][1]);
     }
 
+    /** @brief Draws City mode: the stats and two lines on each of Rename, Raze and Build. */
     void DrawCityMode() {
         Shields(city);
         Stats(city);
-        const Font& f = kit::GetFont(2);
+        const Font& font = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
-        int k = 0;
-        for (int group : {kSRename, kSRaze, kSBuild}) {
+        int line = 0;
+        for (int group : {kTextRename, kTextRaze, kTextBuild}) {
             for (int i = 0; i <= 1; i++) {
-                f.Draw(kit::Text(group, i), kCityText[k][0], kCityText[k][1]);
-                k++;
+                font.Draw(kit::Text(group, i), kCityText[line][0], kCityText[line][1]);
+                line++;
             }
         }
     }
 
+    /**
+     * @brief Draws Production mode: what is built now, how long it takes and
+     * where it goes, the four slots, and the chosen army type's figures.
+     */
     void DrawProduction() {
-        const Font& f = kit::GetFont(2);
+        const Font& font = kit::GetFont(2);
         int owner = city->owner_index == kNone ? 8 : city->owner_index;
-        int cap = CapitalOf(city);
-        if (cap != kNone) SmallShield(cap, 312, 110);
+        int capital_side = CapitalOf(city);
+        if (capital_side != kNone) SmallShield(capital_side, 312, 110);
         gfx::SetColor(1, 1, 1);
-        kit::Right(f, kit::Text(kSCurrent, 0), 408, 110);
-        const w2::Slot* b = Building(city);
-        kit::Army(b ? b->type : kNone, owner, 416, 104, 1);
-        std::string text = w2::game::Producing(*city) ? w2::Fmt("%dt", city->countdown) : "-";
+        kit::Right(font, kit::Text(kTextCurrent, 0), 408, 110);
+        const w2::Slot* building = Building(city);
+        kit::Army(building ? building->type : kNone, owner, 416, 104, 1);
+        std::string turns_left = w2::game::Producing(*city) ? w2::Fmt("%dt", city->countdown) : "-";
         gfx::SetColor(1, 1, 1);
         if (city->vector_to != kNone) {
             std::string where;
             if (city->vector_to == w2::game::kStandard) {
-                where = kit::Text(kSCurrent,
+                where = kit::Text(kTextCurrent,
                                   w2::game::StandardAt(*G.g, *G.player).first != kNone ? 2 : 3);
             } else {
                 w2::City* dest = G.g->map->City(city->vector_to);
-                where = dest ? dest->name : kit::Text(kSCurrent, 3);
+                where = dest ? dest->name : kit::Text(kTextCurrent, 3);
             }
-            f.Draw(text + kit::Text(kSCurrent, 1), 456, 102);
-            f.Draw(where, 456, 122);
+            font.Draw(turns_left + kit::Text(kTextCurrent, 1), 456, 102);
+            font.Draw(where, 456, 122);
         } else {
-            f.Draw(text, 456, 110);
+            font.Draw(turns_left, 456, 110);
         }
-        const w2::Slot* ch = nullptr;
+        const w2::Slot* chosen_slot = nullptr;
         for (int i = 0; i < 4; i++) {
             bool have = i < static_cast<int>(city->slots.size());
             bool mine = have && city->slots[i].type == chosen;
-            if (mine) ch = &city->slots[i];
+            if (mine) chosen_slot = &city->slots[i];
             kit::Army(have ? city->slots[i].type : kNone, owner, kProdSlots[i][0], kProdSlots[i][1],
                       mine ? G.player->index + 2 : 1);
         }
-        if (ch) {
+        if (chosen_slot) {
             gfx::SetColor(1, 1, 1);
             gfx::Draw(G.big_army, 320, 182);
-            int x = 320 + 136;  // 4125:060a
-            f.Draw(ch->name, x, 182);
-            f.Draw(w2::Fmt("Time: %d", ch->time), x, 212);
-            f.Draw(w2::Fmt("Cost: %d", ch->cost), x, 232);
-            f.Draw(w2::Fmt("Strength: %d", ch->strength), x, 252);
-            f.Draw(w2::Fmt("Move: %d", ch->move), x, 272);
+            int x = 320 + 136;
+            font.Draw(chosen_slot->name, x, 182);
+            font.Draw(w2::Fmt("Time: %d", chosen_slot->time), x, 212);
+            font.Draw(w2::Fmt("Cost: %d", chosen_slot->cost), x, 232);
+            font.Draw(w2::Fmt("Strength: %d", chosen_slot->strength), x, 252);
+            font.Draw(w2::Fmt("Move: %d", chosen_slot->move), x, 272);
         }
     }
 
+    /**
+     * @brief Draws Vector mode: what is built, the armies on the road out of
+     * and into the city, and the help text for the current step.
+     */
     void DrawVector() {
-        const Font& f = kit::GetFont(2);
+        const Font& font = kit::GetFont(2);
         int owner = city->owner_index == kNone ? 8 : city->owner_index;
         gfx::SetColor(1, 1, 1);
-        kit::Right(f, kit::Text(kSVector, 0), 360, 109);
-        const w2::Slot* b = Building(city);
-        kit::Army(b ? b->type : kNone, owner, 368, 103, 1);
+        kit::Right(font, kit::Text(kTextVector, 0), 360, 109);
+        const w2::Slot* building = Building(city);
+        kit::Army(building ? building->type : kNone, owner, 368, 103, 1);
         gfx::SetColor(1, 1, 1);
-        f.Draw(w2::game::Producing(*city) ? Format(kit::Text(kSVector, 1), city->countdown) : "-",
-               408, 109);
+        font.Draw(w2::game::Producing(*city) ? Format(kit::Text(kTextVector, 1), city->countdown)
+                                             : "-",
+                  408, 109);
         w2::Army* out = nullptr;
         w2::Army* on_road = nullptr;
         std::vector<w2::Army*> next, after;
-        for (w2::Army* a : G.g->armies) {
-            if (a->transit && a->owner == G.player->index) {
-                if (a->home_city == city->index && a->transit->dest == city->vector_to) {
-                    if (a->transit->turns >= 2)
-                        out = a;
+        for (w2::Army* army : G.g->armies) {
+            if (army->transit && army->owner == G.player->index) {
+                if (army->home_city == city->index && army->transit->dest == city->vector_to) {
+                    if (army->transit->turns >= 2)
+                        out = army;
                     else
-                        on_road = a;
+                        on_road = army;
                 }
-                if (a->transit->dest == city->index && a->home_city != city->index) {
-                    auto& row = a->transit->turns >= 2 ? after : next;
-                    if (row.size() < 4) row.push_back(a);
+                if (army->transit->dest == city->index && army->home_city != city->index) {
+                    auto& row = army->transit->turns >= 2 ? after : next;
+                    if (row.size() < 4) row.push_back(army);
                 }
             }
         }
         kit::Army(out ? out->type : kNone, owner, 432, 103, 1);
         kit::Army(on_road ? on_road->type : kNone, owner, 472, 103, 1);
         gfx::SetColor(1, 1, 1);
-        kit::Right(f, kit::Text(kSVector, 2), 392, 155);
-        kit::Right(f, kit::Text(kSVector, 3), 392, 188);
+        kit::Right(font, kit::Text(kTextVector, 2), 392, 155);
+        kit::Right(font, kit::Text(kTextVector, 3), 392, 188);
         for (int i = 0; i < 4; i++) {
             int x = 400 + i * 40;
             kit::Army(i < static_cast<int>(next.size()) ? next[i]->type : kNone, G.player->index, x,
@@ -377,16 +422,17 @@ struct CityDialog : kit::Modal {
                       x, 182, 1);
         }
         gfx::SetColor(1, 1, 1);
-        int a0 = sub == 1 ? 2 : 0;
-        f.Draw(kit::Text(kSHelP1, a0), 368, 221);
-        f.Draw(kit::Text(kSHelP1, a0 + 1), 368, 241);
-        int b0 = sub == 2 ? 2 : 0;
-        f.Draw(kit::Text(kSHelP2, b0), 368, 272);
-        f.Draw(kit::Text(kSHelP2, b0 + 1), 368, 292);
+        int send_help_line = sub == 1 ? 2 : 0;
+        font.Draw(kit::Text(kTextSendHelp, send_help_line), 368, 221);
+        font.Draw(kit::Text(kTextSendHelp, send_help_line + 1), 368, 241);
+        int move_help_line = sub == 2 ? 2 : 0;
+        font.Draw(kit::Text(kTextMoveHelp, move_help_line), 368, 272);
+        font.Draw(kit::Text(kTextMoveHelp, move_help_line + 1), 368, 292);
     }
 
+    /** @brief Draws the dialog: the map on the left, the mode's half on the right. */
     void Draw() override {
-        kit::Popup(kR);
+        kit::Popup(kPopupRect);
         if (mode == kVector) {
             int filter = kNone;
             if (sub == 1)
@@ -410,55 +456,72 @@ struct CityDialog : kit::Modal {
         kit::DrawControls(v, hidden);
     }
 
-    // Move the dialog to another city, in the mode it is in (7204:0000).
-    void SwitchTo(w2::City* target, int m) {
-        int keep = m == kNone ? mode : m;
+    /**
+     * @brief Moves the dialog to another city.
+     * @param new_mode The mode to open it in; kNone keeps the current one.
+     */
+    void SwitchTo(w2::City* target, int new_mode) {
+        int keep = new_mode == kNone ? mode : new_mode;
         kit::Pop(this);
         Open(target, keep);
     }
 
-    // Send what this city builds to the side's city nearest (mx, my), or its
-    // planted standard if that is nearer (828e:0651).
-    void SendTo(int mx, int my) {
+    /**
+     * @brief Sends what this city builds to the player's city nearest map
+     * position (map_x, map_y), or to the planted standard if that is nearer.
+     */
+    void SendTo(int map_x, int map_y) {
         if (!w2::game::Producing(*city)) return;
-        w2::City* target = w2::game::NearestCity(*G.g, mx, my, G.player);
+        w2::City* target = w2::game::NearestCity(*G.g, map_x, map_y, G.player);
         if (!target) return;
-        auto [sx, sy] = w2::game::StandardAt(*G.g, *G.player);
+        auto [standard_x, standard_y] = w2::game::StandardAt(*G.g, *G.player);
         bool to_standard =
-                sx != kNone && std::max(std::abs(sx - mx), std::abs(sy - my)) <
-                                       std::max(std::abs(target->x - mx), std::abs(target->y - my));
+                standard_x != kNone &&
+                std::max(std::abs(standard_x - map_x), std::abs(standard_y - map_y)) <
+                        std::max(std::abs(target->x - map_x), std::abs(target->y - map_y));
         if (to_standard)
             w2::game::VectorToStandard(*G.g, *city, *G.player);
         else
             w2::game::Vector(*G.g, *city, target);
     }
 
-    // A click on the map in Info, City or Production (7204:1afa).
-    void PickOnMap(int mx, int my) {
+    /**
+     * @brief Handles a click on the map in Info, City or Production mode.
+     *
+     * Shift-click in Production sends the production there; any other click
+     * moves the dialog to the nearest city the mode may show.
+     */
+    void PickOnMap(int map_x, int map_y) {
         bool shift = keys::IsDown({"lshift", "rshift"});
         if (mode == kProduction && shift) {
-            SendTo(mx, my);
+            SendTo(map_x, map_y);
             Refresh();
             return;
         }
         w2::City* target;
         if (mode == kInfo)
-            target = w2::game::NearestCity(*G.g, mx, my, nullptr, G.player);
+            target = w2::game::NearestCity(*G.g, map_x, map_y, nullptr, G.player);
         else if (mode == kProduction)
-            target = w2::game::NearestCity(*G.g, mx, my, G.player);
+            target = w2::game::NearestCity(*G.g, map_x, map_y, G.player);
         else
-            target = w2::game::NearestCity(*G.g, mx, my, G.player, G.player);
+            target = w2::game::NearestCity(*G.g, map_x, map_y, G.player, G.player);
         if (target && target != city) SwitchTo(target, kNone);
     }
 
-    // A click on the map in Vector mode (7087:072e, 7087:028b).
-    void MapClick(int mx, int my) {
-        w2::City* target = w2::game::NearestCity(*G.g, mx, my, G.player);
+    /**
+     * @brief Handles a click on the map in Vector mode.
+     *
+     * Sends the production there (step 1 or shift), moves every city vectored
+     * here to vector there instead (step 2, within the limit of cities
+     * vectored to one), and otherwise moves the dialog to the city clicked.
+     */
+    void MapClick(int map_x, int map_y) {
+        w2::City* target = w2::game::NearestCity(*G.g, map_x, map_y, G.player);
         if (!target) return;
         bool shift = keys::IsDown({"lshift", "rshift"});
         int was = sub;
         if (shift || was == 1) {
-            SendTo(mx, my);
+            SendTo(map_x, map_y);
             if (shift) {
                 sub = 0;
                 Refresh();
@@ -467,11 +530,12 @@ struct CityDialog : kit::Modal {
         } else if (was == 2) {
             auto incoming = w2::game::VectoredTo(*G.g, city);
             auto there = w2::game::VectoredTo(*G.g, target);
-            bool ok = !incoming.empty() &&
-                      static_cast<int>(incoming.size() + there.size()) <= w2::game::kMaxVectoredTo;
-            if (std::find(incoming.begin(), incoming.end(), target) != incoming.end()) ok = false;
-            if (ok)
-                for (w2::City* c : incoming) c->vector_to = target->index;
+            bool allowed = !incoming.empty() && static_cast<int>(incoming.size() + there.size()) <=
+                                                        w2::game::kMaxVectoredTo;
+            if (std::find(incoming.begin(), incoming.end(), target) != incoming.end())
+                allowed = false;
+            if (allowed)
+                for (w2::City* source : incoming) source->vector_to = target->index;
         }
         sub = 0;
         if (was != 1 && target != city) {
@@ -481,89 +545,105 @@ struct CityDialog : kit::Modal {
         Refresh();
     }
 
+    /** @brief Handles a left click: a control, or the map (two pixels a tile). */
     void Mousepressed(int x, int y, int) override {
-        auto c = kit::ControlAt(v, x, y, hidden);
-        if (c) {
-            int id = c->id;
-            if (id == kDone || id == kDoneProd)
+        auto control = kit::ControlAt(v, x, y, hidden);
+        if (control) {
+            int control_id = control->id;
+            if (control_id == kDone || control_id == kDoneProd)
                 Close();
-            else if (id >= kModeFirst && id < kModeFirst + 4)
-                SetMode(id - kModeFirst);
-            else if (id >= kSlotFirst && id < kSlotFirst + 4)
-                Pick(id - kSlotFirst);
-            else if (id == kStop)
+            else if (control_id >= kModeFirst && control_id < kModeFirst + 4)
+                SetMode(control_id - kModeFirst);
+            else if (control_id >= kSlotFirst && control_id < kSlotFirst + 4)
+                Pick(control_id - kSlotFirst);
+            else if (control_id == kStop)
                 Stop();
-            else if (id == kRename)
+            else if (control_id == kRename)
                 Rename();
-            else if (id == kRaze)
+            else if (control_id == kRaze)
                 Raze();
-            else if (id == kBuild)
+            else if (control_id == kBuild)
                 Build();
-            else if (id == kVSend || id == kVSendLit) {
+            else if (control_id == kVectorSend || control_id == kVectorSendLit) {
                 sub = sub == 1 ? 0 : 1;
                 Refresh();
-            } else if (id == kVMove || id == kVMoveLit) {
+            } else if (control_id == kVectorMove || control_id == kVectorMoveLit) {
                 sub = sub == 2 ? 0 : 2;
                 Refresh();
-            } else if (id == kVAll || id == kVAllLit) {
+            } else if (control_id == kVectorAll || control_id == kVectorAllLit) {
                 vector_see_all = !vector_see_all;
                 Refresh();
             }
             return;
         }
         if (kMap.Contains(x, y)) {
-            int mx = (x - kMap.x) / 2, my = (y - kMap.y) / 2;
+            int map_x = (x - kMap.x) / 2, map_y = (y - kMap.y) / 2;
             if (mode == kVector)
-                MapClick(mx, my);
+                MapClick(map_x, map_y);
             else
-                PickOnMap(mx, my);
+                PickOnMap(map_x, map_y);
         }
     }
 
-    // the right button on a production slot (sub-ids 1-4, 54bd:00df)
-    bool Info(int s, int sx, int sy) override {
-        int n = s - 1;
-        if (n < 0 || n >= static_cast<int>(city->slots.size())) return false;
-        infobox::ArmyType(sx, sy, city->slots[n].type, city->slots[n]);
+    /**
+     * @brief The right button on a production slot: the army type's info box.
+     * @param sub_id The slot's sub-id, 1-4.
+     */
+    bool Info(int sub_id, int screen_x, int screen_y) override {
+        int slot = sub_id - 1;
+        if (slot < 0 || slot >= static_cast<int>(city->slots.size())) return false;
+        infobox::ArmyType(screen_x, screen_y, city->slots[slot].type, city->slots[slot]);
         return true;
     }
 
-    // The right button off the controls (1726:0009, screen 3).
-    void Rightpressed(int x, int y, int sx, int sy) override {
+    /**
+     * @brief The right button off the controls: help on the map, or in Info
+     * mode on the production slots (or the city picture standing in for them).
+     */
+    void Rightpressed(int x, int y, int screen_x, int screen_y) override {
         if (kMap.Contains(x, y)) {
             int first = mode == kProduction ? 4 : mode == kVector ? 6 : 0;
-            infobox::ShowLines(sx, sy, kit::Text(0x7a, first), kit::Text(0x7a, first + 1));
+            infobox::ShowLines(screen_x, screen_y, kit::Text(0x7a, first),
+                               kit::Text(0x7a, first + 1));
             return;
         }
         if (mode == kInfo && x >= 308 && x < 532 && y >= 180 && y < 230) {
             if (city->razed ||
                 (G.g->map->options.view_production != 0 && city->owner_index != G.player->index)) {
-                infobox::ShowLines(sx, sy, city->name, "A picture of the city!");  // 4125:0fe7
+                infobox::ShowLines(screen_x, screen_y, city->name, "A picture of the city!");
                 return;
             }
-            int n = std::min(3, (x - 308) / 56);
-            if (n < static_cast<int>(city->slots.size()))
-                infobox::ArmyType(sx, sy, city->slots[n].type, city->slots[n],
+            int slot = std::min(3, (x - 308) / 56);
+            if (slot < static_cast<int>(city->slots.size()))
+                infobox::ArmyType(screen_x, screen_y, city->slots[slot].type, city->slots[slot],
                                   city->owner_index == kNone ? 8 : city->owner_index);
             else
-                infobox::ShowLines(sx, sy, city->name, "Info about city production");  // 4125:0fcc
+                infobox::ShowLines(screen_x, screen_y, city->name, "Info about city production");
         }
     }
 
+    /** @brief Escape and Return close the dialog. */
     void Keypressed(const std::string& key) override {
         if (key == "escape" || key == "return" || key == "kpenter") Close();
     }
 };
 }  // namespace
 
-void Open(w2::City* c, int mode) {
-    auto d = std::make_shared<CityDialog>();
-    d->city = c;
-    d->v = kit::View(kDialog);
-    d->view = &d->v;
-    kit::Push(d);
-    d->SetMode(mode == kNone ? (c->owner_index == G.player->index ? kProduction : kInfo) : mode);
-    // the tutorial on production (7204:025d)
+/**
+ * @brief Opens the city dialog on a city.
+ * @param mode The mode to open in; kNone picks Production for one of the
+ *     player's own cities and Info for any other.
+ *
+ * Also runs the tutorial's moments on production.
+ */
+void Open(w2::City* city, int mode) {
+    auto dialog = std::make_shared<CityDialog>();
+    dialog->city = city;
+    dialog->v = kit::View(kDialog);
+    dialog->view = &dialog->v;
+    kit::Push(dialog);
+    dialog->SetMode(mode == kNone ? (city->owner_index == G.player->index ? kProduction : kInfo)
+                                  : mode);
     std::vector<std::string> moments = {"prod"};
     if (w2::game::SideCities(*G.g, *G.player).size() >= 2) moments.push_back("prod2");
     tutorial::Chain(moments);
