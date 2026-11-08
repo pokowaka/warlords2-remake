@@ -1,12 +1,18 @@
-// Generated from love2d/warlords/stonetile.lua (tools/stone_tile.py) -- do not edit.
-//
-// The main screen's 244x220 stone tile, as the rects of the original's
-// 640x480 screen it is made from: {tx, ty, w, h, sx, sy}, drawn in order.
+/**
+ * @file
+ * @brief The main screen's 244x220 stone tile, cut from the original screen.
+ *
+ * Generated from love2d/warlords/stonetile.lua (tools/stone_tile.py) -- do
+ * not edit the numbers. A screen bigger than 640x480 is papered with this
+ * tile (screen::DrawBackground).
+ */
 #pragma once
 
 namespace stonetile {
 
-constexpr int kW = 244, kH = 220;
+constexpr int kWidth = 244, kHeight = 220;  ///< The tile's size.
+/** The rects of the original's 640x480 screen the tile is made from, drawn
+ *  in order: {tile x, tile y, width, height, screen x, screen y}. */
 constexpr int kRects[][6] = {
     {0, 1, 244, 27, 244, 1},     {0, 32, 244, 7, 244, 472},  {0, 31, 151, 1, 488, 471},
     {151, 31, 93, 1, 151, 471},  {1, 18, 13, 202, 1, 18},    {1, 0, 13, 18, 1, 220},
@@ -254,6 +260,6 @@ constexpr int kRects[][6] = {
     {223, 0, 8, 1, 383, 332},    {231, 0, 8, 1, 579, 18},    {239, 0, 5, 1, 385, 84},
     {0, 0, 1, 1, 487, 23},
 };
-constexpr int kCount = sizeof(kRects) / sizeof(kRects[0]);
+constexpr int kCount = sizeof(kRects) / sizeof(kRects[0]);  ///< How many rects.
 
 }  // namespace stonetile
