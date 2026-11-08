@@ -97,6 +97,31 @@ The classic generator stays byte-identical to the original, so its failures
 are reported, not asserted in `w2test`. These numbers are the baseline a new
 generator has to beat.
 
+## Human votes
+
+`tools/mapvote.py` checks the scores against what a player prefers. It draws
+pairs of maps side by side (A | B, using the game's own tiles, with roads,
+cities, capitals and sites drawn bold). The voter picks A, B or `=`, and the
+votes go to `tools/mapvotes.jsonl`.
+
+```bash
+cpp/build/w2mapeval --seeds 1-200 --json /tmp/mv/eval.json --export /tmp/mv/maps
+python3 tools/mapvote.py ballot --eval /tmp/mv/eval.json --maps /tmp/mv/maps --out /tmp/mv/b1 --batch 1
+python3 tools/mapvote.py record --ballot /tmp/mv/b1/ballot-1.json 1A 2B 3= --note 2 "roads make sense"
+python3 tools/mapvote.py agree --eval /tmp/mv/eval.json
+```
+
+A ballot mixes three kinds of pair:
+
+- **clear:** a low penalty against a high one, to test that the score points the right way;
+- **close:** similar penalties but different problems, to learn which problems matter more;
+- **rules:** a map that breaks a hard rule but otherwise scores well, against one that passes.
+
+Each pair also gets a `-issues.png` with the problems ringed. It is shown only
+after the vote, so it does not sway it. `agree` reports how often the lower
+penalty won, and for each metric how often the map closer to the reference
+won. That shows which metrics deserve more weight.
+
 ## Next
 
 - A problem overlay image (stray roads, crowded cities, unreachable places)

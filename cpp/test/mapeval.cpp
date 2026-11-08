@@ -17,12 +17,15 @@
 //   --reference LIST   the hand-made maps the metrics are scored against
 //                      (default ERYTHEA,HADESHA,ISLADIA,DRAGON,SORCERY)
 //   --json PATH        every evaluation, its issues and score, as JSON
+//   --export DIR       write each generated map's files to DIR/<generator>-<seed>/
+//                      (RANDOM.MAP, .RD, ...), for tools/mapren.py and tools/mapvote.py
 //   --issues N         print the first N issues of each map (default 0)
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -139,7 +142,7 @@ void printIssues(const mapeval::Evaluation& e, int limit) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string data = "original", generator = "classic", jsonPath;
+  std::string data = "original", generator = "classic", jsonPath, exportDir;
   std::string referenceList = "ERYTHEA,HADESHA,ISLADIA,DRAGON,SORCERY";
   std::vector<std::string> scenarios;
   std::vector<int> seeds = parseSeeds("1-50");
@@ -159,6 +162,7 @@ int main(int argc, char** argv) {
     else if (a == "--scenarios") scenarios = splitList(next());
     else if (a == "--reference") referenceList = next();
     else if (a == "--json") jsonPath = next();
+    else if (a == "--export") exportDir = next();
     else if (a == "--issues") issueLimit = std::stoi(next());
     else if (a == "--threads") threads = std::max(1, std::stoi(next()));
     else if (a == "--allies") allies = true;
@@ -211,6 +215,13 @@ int main(int argc, char** argv) {
           o.sliders = randommap::settle(sliders, r);
           o.allies = allies;
           auto files = g->second(o);
+          if (!exportDir.empty()) {
+            std::string dir = exportDir + "/" + generator + "-" + std::to_string(seeds[k]);
+            std::filesystem::create_directories(dir);
+            for (auto& [ext, bytes] : files)
+              if (!writeFile(dir + "/" + randommap::DIR + "." + ext, bytes))
+                throw std::runtime_error("could not write " + dir);
+          }
           // straight from memory: nothing is written to the data folder
           auto map = scn::loadFromFiles(data + "/" + randommap::DIR, randommap::DIR, files);
           made[k] = mapeval::evaluate(*map, generator + "#" + std::to_string(seeds[k]));
