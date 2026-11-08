@@ -31,7 +31,7 @@ static void sage(Game& g, Side& side) {
     int gold = g.rng.dice(3, 500, 500);
     City* best = nullptr;
     int bestCount = -1, bestD = 0;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == NONE && cflag(d, c, CF_UNSEEN)) {
             bool nextToUs = false;
@@ -108,7 +108,7 @@ int party(Game& g, Side& side, std::vector<Army*> list) {
     int score = -1;
     Site* bestSite = nullptr;
     City* bestCity = nullptr;
-    for (int i = (int)g.map->sites.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->sites.size()) - 1; i >= 0; i--) {
         Site& s = g.map->sites[i];
         bool taken = false;
         for (Army* o : armies(g, side.index)) {
@@ -129,7 +129,7 @@ int party(Game& g, Side& side, std::vector<Army*> list) {
             }
         }
     }
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == side.index) {
             int dd = dist(hero->x, hero->y, c.x, c.y);
@@ -260,7 +260,7 @@ std::pair<int, int> unseenCity(Game& g, Side& side, Army* a) {
     AIData& d = data(g, side);
     City* best = nullptr;
     int bestD = NONE;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (standing(c) && cflag(d, c, CF_UNSEEN)) {
             int dd = dist(c.x, c.y, a->x, a->y) + g.rng.dice(1, 10, 0);
@@ -279,7 +279,7 @@ std::pair<int, int> unseenCity(Game& g, Side& side, Army* a) {
 bool tryCity(Game& g, Side& side, Army* a, int ex, int ey) {
     AIData& d = data(g, side);
     City* pick = nullptr;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (standing(c) && c.ownerIndex != side.index && d.questCity != c.index &&
             dist(c.x, c.y, ex, ey) <= 2 && diplo::canAttack(g, side, c)) {
@@ -296,7 +296,7 @@ bool tryCity(Game& g, Side& side, Army* a, int ex, int ey) {
     int o = odds(g, *sel, pick->x, pick->y);
     int need = 75;
     if (!isHero(a) && a->strength < 4) {
-        if (d.neutral < (int)g.map->cities.size() / 10)
+        if (d.neutral < static_cast<int>(g.map->cities.size()) / 10)
             need = 50;
         else if (d.own <= std::min(g.turn / 2, 10))
             need = 40;
@@ -470,7 +470,7 @@ static bool neutralStillOn(Game& g, Side& side, Sel& sel) {
         int oddsV = 100;
         City* best = nullptr;
         int bd = 1000;
-        for (int j = (int)nb.size() - 1; j >= 0; j--) {
+        for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
             City* n = nb[j].city;
             if (!cflag(d, *n, CF_UNSEEN)) {
                 if (g.map->options.neutralCities != 0) oddsV = odds(g, sel, n->x, n->y);
@@ -559,7 +559,7 @@ static City* idleTarget(Game& g, Side& side, const Sel& sel, const Flood& flood,
     AIData& d = data(g, side);
     City* best = nullptr;
     int bestD = 1000;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         int ow = owner(c);
         if (standing(c) && !cflag(d, c, CF_UNSEEN) && d.questCity != c.index &&
@@ -622,7 +622,7 @@ void sendIdle(Game& g, Side& side, Army* a) {
     int range = sel.hero ? 50 : (a->strength / 2) * 10;
     range = std::min(range, home + 10);
     Flood flood = floodFrom(g, side.index, a->x, a->y, range, &sel);
-    City* c = idleTarget(g, side, sel, flood, (int)list.size());
+    City* c = idleTarget(g, side, sel, flood, static_cast<int>(list.size()));
     if (!c) {
         game::disband(g, side, list);
         return;

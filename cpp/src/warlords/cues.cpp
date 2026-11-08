@@ -18,10 +18,10 @@ const std::map<int, int> WINNING = {{10, 48}, {15, 49}, {20, 50}, {25, 51}, {30,
 
 std::string entry(const uidata::Strings& files, int group, int index, const Roll& roll) {
     static const std::vector<std::string> none;
-    const auto& g = group >= 0 && group < (int)files.size() ? files[group] : none;
-    if (index < 0) index = roll((int)g.size()) - 1;
-    if (index > (int)g.size() - 1) index = (int)g.size() - 1;
-    if (index < 0 || index >= (int)g.size()) return "";
+    const auto& g = group >= 0 && group < static_cast<int>(files.size()) ? files[group] : none;
+    if (index < 0) index = roll(static_cast<int>(g.size())) - 1;
+    if (index > static_cast<int>(g.size()) - 1) index = static_cast<int>(g.size()) - 1;
+    if (index < 0 || index >= static_cast<int>(g.size())) return "";
     return g[index];
 }
 }  // namespace
@@ -97,12 +97,12 @@ std::pair<std::string, std::string> clip(const uidata::Strings& files, int group
                                          const Roll& roll) {
     if (group >= GREET) return {entry(files, group, 0, roll), entry(files, group, 1, roll)};
     static const std::vector<std::string> none;
-    const auto& g = group >= 0 && group < (int)files.size() ? files[group] : none;
-    int i = roll((int)g.size());
-    const auto& t = group + 30 < (int)files.size() ? files[group + 30] : none;
-    std::string sample = i >= 1 && i <= (int)g.size() ? g[i - 1] : "";
-    int ti = std::min(i, (int)t.size()) - 1;
-    std::string text = ti >= 0 && ti < (int)t.size() ? t[ti] : "";
+    const auto& g = group >= 0 && group < static_cast<int>(files.size()) ? files[group] : none;
+    int i = roll(static_cast<int>(g.size()));
+    const auto& t = group + 30 < static_cast<int>(files.size()) ? files[group + 30] : none;
+    std::string sample = i >= 1 && i <= static_cast<int>(g.size()) ? g[i - 1] : "";
+    int ti = std::min(i, static_cast<int>(t.size())) - 1;
+    std::string text = ti >= 0 && ti < static_cast<int>(t.size()) ? t[ti] : "";
     return {sample, text};
 }
 

@@ -50,7 +50,8 @@ void fillItemPool(Game& g, int reserved) {
         bool want = idx < 8 + reserved;
         std::vector<int> choices;
         for (size_t i = 0; i < pool.size(); i++) {
-            if (!used[(int)i] && itemReserved(pool[i]) == want) choices.push_back((int)i);
+            if (!used[static_cast<int>(i)] && itemReserved(pool[i]) == want)
+                choices.push_back(static_cast<int>(i));
         }
         int k = g.rng.pickIndex(choices.size());
         if (k >= 0) {
@@ -70,9 +71,9 @@ void markRich(Game& g) {
         s.revealed = 0xff;
         if (s.type != TEMPLE) ruins.push_back(&s);
     }
-    int want = (int)g.map->sites.size() * RICH_SHARE / 10;
+    int want = static_cast<int>(g.map->sites.size()) * RICH_SHARE / 10;
     g.rng.shuffle(ruins);
-    for (int i = 0; i < std::min(want, (int)ruins.size()); i++) {
+    for (int i = 0; i < std::min(want, static_cast<int>(ruins.size())); i++) {
         ruins[i]->rich = true;
         if (g.map->options.quests != 0) ruins[i]->revealed = 0;
     }
@@ -84,7 +85,8 @@ static std::string band(const Site& s, const std::vector<std::pair<int, int>>& c
     if (s.rich) return "rich";
     for (auto& c : capitals) {
         double dx = s.x - c.first, dy = s.y - c.second;
-        if ((int)std::floor(std::sqrt(dx * dx + dy * dy)) < CAPITAL_RANGE) return "near";
+        if (static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy))) < CAPITAL_RANGE)
+            return "near";
     }
     return "far";
 }
@@ -109,7 +111,7 @@ void setup(Game& g) {
         s.band = band(s, capitals);
     }
 
-    int nSites = (int)g.map->sites.size();
+    int nSites = static_cast<int>(g.map->sites.size());
     int reserved = nSites * 2 / 10;
     fillItemPool(g, reserved);
 
@@ -159,7 +161,7 @@ void setup(Game& g) {
             s.guardian = g.rng.dice(1, 9, 0);
         }
     }
-    g.map->siteAt.assign(g.map->width * g.map->height, nullptr);
+    g.map->siteAt.assign(static_cast<size_t>(g.map->width) * g.map->height, nullptr);
     for (auto& s : g.map->sites) g.map->siteAt[s.y * g.map->width + s.x] = &s;
 }
 
@@ -171,7 +173,7 @@ static Army* heroIn(const std::vector<Army*>& stack) {
 
 bool survivesGuardian(Game& g, const Army& h, int monsterStrength) {
     int margin = 90 + 5 * (h.strength + combat::battleItems(h) - monsterStrength) +
-                 3 * (int)game::armiesAt(g, h.x, h.y).size();
+                 3 * static_cast<int>(game::armiesAt(g, h.x, h.y).size());
     return g.rng.dice(1, 100, 0) <= margin;
 }
 
@@ -306,7 +308,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
 
 static int sageDistance(const Site& s, int hx, int hy) {
     double dx = s.x - hx, dy = s.y - hy;
-    return (int)std::floor(std::sqrt(dx * dx + dy * dy));  // 2012:1199
+    return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));  // 2012:1199
 }
 
 bool shownTo(const Site& s, const Side& side) {

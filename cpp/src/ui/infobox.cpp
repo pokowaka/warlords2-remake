@@ -111,7 +111,7 @@ std::map<int, HelpRecord>& helpFile() {
     if (auto s = w2::readFile(G.dataDir + "/HELP/WARLORD2.HLP")) {
         int n = w2::u16(*s, 0);
         for (int i = 0; i < n; i++) {
-            size_t at = 2 + (size_t)i * 104;
+            size_t at = 2 + static_cast<size_t>(i) * 104;
             if (at + 104 > s->size()) break;
             int id = w2::u16(*s, at);
             if (!out.count(id))

@@ -65,7 +65,7 @@ static void writeString(std::string& out, const std::string& s) {
                 snprintf(buf, sizeof buf, "\\u%04x", c);
                 out += buf;
             } else {
-                out += (char)c;
+                out += static_cast<char>(c);
             }
         }
     }
@@ -167,9 +167,10 @@ struct Parser {
                     out += '\f';
                     break;
                 case 'u': {
-                    unsigned cp = (unsigned)strtoul(s.substr(i, 4).c_str(), nullptr, 16);
+                    unsigned cp =
+                            static_cast<unsigned>(strtoul(s.substr(i, 4).c_str(), nullptr, 16));
                     i += 4;
-                    out += cp < 256 ? (char)cp : '?';
+                    out += cp < 256 ? static_cast<char>(cp) : '?';
                     break;
                 }
                 default:

@@ -7,11 +7,12 @@ namespace pckimage {
 
 gfx::ImageP fromPixels(const w2::pck::Pixels& p, const w2::pal::Palette& palette,
                        const std::map<int, int>& map, const std::set<int>& keys) {
-    std::vector<uint8_t> out((size_t)p.w * p.h * 4, 0);
+    std::vector<uint8_t> out(static_cast<size_t>(p.w) * p.h * 4, 0);
     uint8_t lut[16][3];
     for (int i = 0; i < 16; i++) {
-        w2::pal::Colour c = i < (int)palette.size() ? palette[i] : w2::pal::Colour{0, 0, 0};
-        for (int k = 0; k < 3; k++) lut[i][k] = (uint8_t)std::floor(c[k] * 255);
+        w2::pal::Colour c =
+                i < static_cast<int>(palette.size()) ? palette[i] : w2::pal::Colour{0, 0, 0};
+        for (int k = 0; k < 3; k++) lut[i][k] = static_cast<uint8_t>(std::floor(c[k] * 255));
     }
     for (size_t i = 0; i < p.px.size(); i++) {
         int idx = p.px[i];

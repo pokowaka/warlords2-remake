@@ -85,7 +85,7 @@ City* raze(Game& g, Side& side, City& c, bool force, Sel* sel) {
     if (!force) {
         auto [nb, nd] = neighbours(g, c);
         int n = 0;
-        for (int j = (int)nb.size() - 1; j >= 0; j--) {
+        for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
             if (nb[j]->ownerIndex == side.index && nd[j] < 45) n++;
         }
         if (n > 2) return nullptr;
@@ -245,7 +245,7 @@ void prepare(Game& g, Side& side) {
     }
     bool fastEnough = d.fastCities >= 4;
     left = fastEnough ? d.fastCities - 4 : d.fastCities;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == side.index && !cflag(d, c, CF_FLYGROUP) && !cflag(d, c, CF_MOVE16) &&
             cflag(d, c, CF_MOVE12) && left != 0) {
@@ -311,7 +311,7 @@ static int checkPlan(Game& g, Side& side, int gi) {
     City* rally = city(g, grp->rally);
     if (!rally) return n;
     auto [nb, nd] = neighbours(g, *rally);
-    for (int j = (int)nb.size() - 1; j >= 0; j--) {
+    for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
         City* m = nb[j];
         if (owner(*m) == grp->target && !cflag(d, *m, CF_UNSEEN)) {
             bool have = false;
@@ -391,7 +391,7 @@ static bool relocate(Game& g, Side& side, int gi) {
     if (r) {
         auto nb = neighbours(g, *r).first;
         int bestD = 1000;
-        for (int j = (int)nb.size() - 1; j >= 0; j--) {
+        for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
             City* m = nb[j];
             if (m->ownerIndex == side.index && !isRally(g, side, *m)) {
                 int dd = dist(m->x, m->y, r->x, r->y);
@@ -537,7 +537,7 @@ static int hitArmies(Game& g, Side& side, int gi, std::vector<Army*>& list, int 
                 if (!here.empty() && here[0]->owner == target && t != move::CITY &&
                     t != move::SHORE && t != move::WATER &&
                     floodAt(flood, x, y) <= sel.minMoves - 1 && game::seen(g, side.index, x, y)) {
-                    int count = (int)here.size();
+                    int count = static_cast<int>(here.size());
                     int strength = 0, heroes = 0;
                     for (Army* a : here) {
                         strength += a->strength;
@@ -574,7 +574,7 @@ static int stagedStep(Game& g, Side& side, int gi, std::vector<Army*>& list, int
                       const Flood& flood, const Sel& sel) {
     City* nearest = nullptr;
     int nd = 1000;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == target) {
             int dd = std::get<0>(cityDistance(g, flood, c));
@@ -641,7 +641,7 @@ static bool strike(Game& g, Side& side, int gi) {
     City* r = city(g, grp->rally);
     if (!r) return false;
     auto list = collect(g, side.index, r->x + 1, r->y, 0);
-    int n = (int)list.size();
+    int n = static_cast<int>(list.size());
     if (n == 0) return false;
     Sel sel = select(g, list);
     City* best = nullptr;
@@ -675,7 +675,7 @@ static bool strike(Game& g, Side& side, int gi) {
     if (slot != NONE) {
         Army* pick = nullptr;
         int strongest = -1;
-        for (int i = (int)list.size() - 1; i >= 0; i--) {
+        for (int i = static_cast<int>(list.size()) - 1; i >= 0; i--) {
             Army* a = list[i];
             if (isHero(a)) {
                 pick = a;
@@ -701,7 +701,7 @@ void followUp(Game& g, Side& side, int gi) {
         if (t && t->index != grp->rally && t->ownerIndex == side.index) {
             auto [nb, nd] = neighbours(g, *t);
             int near = 0;
-            for (int j = (int)nb.size() - 1; j >= 0; j--) {
+            for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
                 int o = nb[j]->ownerIndex;
                 if (o != NONE && o != side.index && nd[j] < 25) near++;
             }
@@ -798,12 +798,12 @@ void assault(Game& g, Side& side) {
 static City* hub(Game& g, int enemy) {
     City* best = nullptr;
     int most = 0;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == enemy) {
             int n = 1;
             auto nb = neighbours(g, c).first;
-            for (int j = (int)nb.size() - 1; j >= 0; j--)
+            for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--)
                 if (nb[j]->ownerIndex == enemy) n++;
             if (n > most || (n == most && g.rng.dice(1, 2, -1) != 0)) {
                 best = &c;
@@ -825,13 +825,13 @@ static void spread(Game& g, const City& from, std::vector<char>& reached, std::v
     bool changed = true;
     while (changed) {
         changed = false;
-        for (int i = (int)n - 1; i >= 0; i--) {
+        for (int i = static_cast<int>(n) - 1; i >= 0; i--) {
             City& c = g.map->cities[i];
             if (reached[c.index] && !done[c.index]) {
                 changed = true;
                 done[c.index] = 1;
                 auto [nb, nd] = neighbours(g, c);
-                for (int j = (int)nb.size() - 1; j >= 0; j--) {
+                for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
                     City* m = nb[j];
                     int nd2 = dist[c.index] + nd[j];
                     if (!reached[m->index]) {
@@ -888,7 +888,7 @@ static City* plan(Game& g, Side& side, Group& grp, int enemy) {
     for (int k = 1; k <= 6; k++) {
         City* pick = nullptr;
         long pd = 1000000000;
-        for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+        for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
             City& c = g.map->cities[i];
             if (c.ownerIndex == enemy && !cflag(d, c, CF_UNSEEN) && reached[c.index] &&
                 dist[c.index] < pd) {
@@ -898,7 +898,7 @@ static City* plan(Game& g, Side& side, Group& grp, int enemy) {
         }
         if (!pick) break;
         grp.cities[k] = pick->index;
-        grp.dist[k] = (int)pd;
+        grp.dist[k] = static_cast<int>(pd);
         reached[pick->index] = 0;
         n++;
     }
@@ -926,7 +926,7 @@ int pickEnemy(Game& g, Side& side) {
         targeted[s] = 0;
         rnd[s] = g.rng.dice(1, 10, 0);
     }
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         int o = c.ownerIndex;
         if (o != NONE) {

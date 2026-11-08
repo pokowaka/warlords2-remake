@@ -96,9 +96,9 @@ std::vector<int> parseSeeds(const std::string& s) {
 double quantile(std::vector<double> v, double q) {
     if (v.empty()) return 0;
     std::sort(v.begin(), v.end());
-    double at = q * (double)(v.size() - 1);
-    size_t lo = (size_t)std::floor(at), hi = (size_t)std::ceil(at);
-    return v[lo] + (v[hi] - v[lo]) * (at - (double)lo);
+    double at = q * static_cast<double>(v.size() - 1);
+    size_t lo = static_cast<size_t>(std::floor(at)), hi = static_cast<size_t>(std::ceil(at));
+    return v[lo] + (v[hi] - v[lo]) * (at - static_cast<double>(lo));
 }
 
 mapeval::Evaluation evaluateScenario(const std::string& data, const std::string& name) {
@@ -156,7 +156,7 @@ void report(const std::string& title, const std::vector<mapeval::Evaluation>& ma
 void printIssues(const mapeval::Evaluation& e, int limit) {
     if (limit <= 0 || e.issues.empty()) return;
     printf("\n%s: %zu issue(s)\n", e.name.c_str(), e.issues.size());
-    for (int i = 0; i < (int)e.issues.size() && i < limit; i++) {
+    for (int i = 0; i < static_cast<int>(e.issues.size()) && i < limit; i++) {
         auto& is = e.issues[i];
         printf("  %-12s (%3d,%3d) %s\n", is.check.c_str(), is.x, is.y, is.detail.c_str());
     }
@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
     bool allies = false;
     scengen::Shape shape = scengen::Shape::Continents;
     int issueLimit = 0;
-    int threads = (int)std::max(1u, std::thread::hardware_concurrency());
+    int threads = static_cast<int>(std::max(1U, std::thread::hardware_concurrency()));
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
         auto next = [&]() -> std::string {
@@ -287,7 +287,8 @@ int main(int argc, char** argv) {
             }
         };
         std::vector<std::thread> pool;
-        for (int t = 0; t < std::min<int>(threads, (int)seeds.size()); t++) pool.emplace_back(work);
+        for (int t = 0; t < std::min<int>(threads, static_cast<int>(seeds.size())); t++)
+            pool.emplace_back(work);
         for (auto& t : pool) t.join();
         report("generator " + generator, made, ref);
         for (auto& e : made) printIssues(e, issueLimit);

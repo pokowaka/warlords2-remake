@@ -43,9 +43,9 @@ constexpr int REMOTE_TURNS = 5;
 double quantile(std::vector<double> v, double q) {
     if (v.empty()) return 0;
     std::sort(v.begin(), v.end());
-    double at = q * (double)(v.size() - 1);
-    size_t lo = (size_t)std::floor(at), hi = (size_t)std::ceil(at);
-    return v[lo] + (v[hi] - v[lo]) * (at - (double)lo);
+    double at = q * static_cast<double>(v.size() - 1);
+    size_t lo = static_cast<size_t>(std::floor(at)), hi = static_cast<size_t>(std::ceil(at));
+    return v[lo] + (v[hi] - v[lo]) * (at - static_cast<double>(lo));
 }
 
 /** The map, read once into flat grids the checks share. */
@@ -133,7 +133,7 @@ bool overlap(const City& a, const City& b) {
 void cities(Context& cx) {
     const Map& m = cx.v.m;
     const View& v = cx.v;
-    int n = (int)m.cities.size();
+    int n = static_cast<int>(m.cities.size());
     std::vector<double> nearestGap, nearestDist;
     int crowded = 0;
     std::map<std::string, int> names;
@@ -176,13 +176,13 @@ void cities(Context& cx) {
     for (int i = 0; i < v.w * v.h; i++) land += !v.sea(i);
     double mean = 0;
     for (double d : nearestDist) mean += d;
-    mean = nearestDist.empty() ? 0 : mean / (double)nearestDist.size();
-    double expected = n > 0 && land > 0 ? 0.5 / std::sqrt((double)n / land) : 0;
+    mean = nearestDist.empty() ? 0 : mean / static_cast<double>(nearestDist.size());
+    double expected = n > 0 && land > 0 ? 0.5 / std::sqrt(static_cast<double>(n) / land) : 0;
     cx.metric("cities", n);
     cx.metric("cityGapMin", quantile(nearestGap, 0));
     cx.metric("cityGapP5", quantile(nearestGap, 0.05));
     cx.metric("cityGapMedian", quantile(nearestGap, 0.5));
-    cx.metric("crowdedCityFrac", n ? (double)crowded / n : 0);
+    cx.metric("crowdedCityFrac", n ? static_cast<double>(crowded) / n : 0);
     cx.metric("clarkEvansR", expected > 0 ? mean / expected : 0);
 }
 
@@ -222,7 +222,7 @@ void roads(Context& cx) {
         }
     }
     // the networks: 4-connected roads and bridges, and what each one reaches
-    std::vector<int> comp(w * h, -1);
+    std::vector<int> comp(static_cast<size_t>(w) * h, -1);
     int comps = 0, stray = 0, spurs = 0, mainSize = 0;
     std::vector<std::set<int>> compCities;
     for (int s = 0; s < w * h; s++) {
@@ -255,7 +255,7 @@ void roads(Context& cx) {
             }
         }
         roadTiles += size;
-        int ends = (int)reached.size() + (int)others.size();
+        int ends = static_cast<int>(reached.size()) + static_cast<int>(others.size());
         if (ends == 0) {
             stray++;
             cx.issue("road-to-nowhere", s % w, s / w,
@@ -265,20 +265,21 @@ void roads(Context& cx) {
             cx.issue("spur-road", s % w, s / w,
                      "a road of " + std::to_string(size) + " tile(s) reaching one place only");
         }
-        if ((int)reached.size() > mainSize) mainSize = (int)reached.size();
+        if (static_cast<int>(reached.size()) > mainSize)
+            mainSize = static_cast<int>(reached.size());
         compCities.push_back(reached);
         comps++;
     }
-    int n = (int)m.cities.size();
+    int n = static_cast<int>(m.cities.size());
     std::vector<bool> onRoad(n, false);
     for (auto& r : compCities)
         for (int c : r) onRoad[c] = true;
-    int linked = (int)std::count(onRoad.begin(), onRoad.end(), true);
+    int linked = static_cast<int>(std::count(onRoad.begin(), onRoad.end(), true));
 
     // detours: from each city along its roads to the first other cities met
     std::vector<double> detours;
     for (const City& c : m.cities) {
-        std::vector<int> dist(w * h, -1);
+        std::vector<int> dist(static_cast<size_t>(w) * h, -1);
         std::deque<int> q;
         for (int dy = -1; dy <= 2; dy++)
             for (int dx = -1; dx <= 2; dx++) {
@@ -305,7 +306,7 @@ void roads(Context& cx) {
             if (other >= 0) {
                 if (met.insert(other).second) {
                     auto [gx, gy] = gaps(c, m.cities[other]);
-                    detours.push_back((double)dist[i] / std::max(1, gx + gy));
+                    detours.push_back(static_cast<double>(dist[i]) / std::max(1, gx + gy));
                 }
                 continue;  // a road through a city is two roads
             }
@@ -324,13 +325,13 @@ void roads(Context& cx) {
     cx.metric("roadNetworks", comps);
     cx.metric("roadsToNowhere", stray);
     cx.metric("spurRoads", spurs);
-    cx.metric("spurRoadsPerCity", n ? (double)spurs / n : 0);
+    cx.metric("spurRoadsPerCity", n ? static_cast<double>(spurs) / n : 0);
     cx.metric("deadEnds", deadEnds);
     cx.metric("deadEndsPer100Road", roadTiles ? 100.0 * deadEnds / roadTiles : 0);
-    cx.metric("roadShapeMismatchFrac", pieces ? (double)mismatched / pieces : 0);
-    cx.metric("cityRoadCoverage", n ? (double)linked / n : 0);
-    cx.metric("mainNetworkCityShare", n ? (double)mainSize / n : 0);
-    cx.metric("roadTilesPerCity", n ? (double)roadTiles / n : 0);
+    cx.metric("roadShapeMismatchFrac", pieces ? static_cast<double>(mismatched) / pieces : 0);
+    cx.metric("cityRoadCoverage", n ? static_cast<double>(linked) / n : 0);
+    cx.metric("mainNetworkCityShare", n ? static_cast<double>(mainSize) / n : 0);
+    cx.metric("roadTilesPerCity", n ? static_cast<double>(roadTiles) / n : 0);
     cx.metric("roadDetourMedian", quantile(detours, 0.5));
     cx.metric("roadDetourP95", quantile(detours, 0.95));
 }
@@ -342,7 +343,7 @@ void roads(Context& cx) {
  *  port city's footprint) -- docs/rules.md > Movement. Land only: no sea. */
 std::vector<bool> reach(const View& v, int x0, int y0, bool landOnly) {
     int w = v.w, h = v.h;
-    std::vector<bool> seen(w * h, false);
+    std::vector<bool> seen(static_cast<size_t>(w) * h, false);
     // a road over mountains is a pass (18a9:0896): any road tile costs 1
     auto open = [&](int i) {
         return (v.terrain[i] != MOUNTAINS || v.road[i]) && !(landOnly && v.sea(i));
@@ -390,7 +391,7 @@ void reachability(Context& cx) {
         for (const Site& s : m.sites)
             if (!all[s.y * w + s.x] && lostSites.insert(s.index).second)
                 cx.issue("unreachable", s.x, s.y, s.name + " cannot be reached from " + cap->name);
-        landShare += m.cities.empty() ? 0 : (double)byLand / m.cities.size();
+        landShare += m.cities.empty() ? 0 : static_cast<double>(byLand) / m.cities.size();
     }
     cx.metric("capitals", capitals.size());
     cx.metric("landReachShare", capitals.empty() ? 0 : landShare / capitals.size());
@@ -404,10 +405,10 @@ double gini(std::vector<double> v) {
     double sum = 0, weighted = 0;
     for (size_t i = 0; i < v.size(); i++) {
         sum += v[i];
-        weighted += (double)(i + 1) * v[i];
+        weighted += static_cast<double>(i + 1) * v[i];
     }
     if (sum <= 0) return 0;
-    double n = (double)v.size();
+    double n = static_cast<double>(v.size());
     return (2 * weighted) / (n * sum) - (n + 1) / n;
 }
 
@@ -444,7 +445,7 @@ void fairness(Context& cx) {
     std::vector<const City*> caps;
     for (const Side& s : m.sides)
         if (s.capital) caps.push_back(s.capital);
-    int k = (int)caps.size();
+    int k = static_cast<int>(caps.size());
     if (k < 2) return;
     std::vector<std::vector<int>> field(k);
     for (int i = 0; i < k; i++) field[i] = travel::costs(ground, footprint(*caps[i]));
@@ -456,14 +457,15 @@ void fairness(Context& cx) {
         for (int j = 0; j < k; j++)
             if (j != i) best = std::min(best, costTo(field[i], *caps[j]));
         if (best == travel::UNREACHED) continue;
-        double turns = (double)best / travel::TURN;
+        double turns = static_cast<double>(best) / travel::TURN;
         gaps.push_back(turns);
         for (int j = i + 1; j < k; j++) {
             int c = costTo(field[i], *caps[j]);
-            if (c != travel::UNREACHED && (double)c / travel::TURN < CAPITAL_GAP_TURNS)
+            if (c != travel::UNREACHED && static_cast<double>(c) / travel::TURN < CAPITAL_GAP_TURNS)
                 cx.issue("capital-gap", caps[i]->x, caps[i]->y,
                          caps[i]->name + " and " + caps[j]->name + " are " +
-                                 fmt("%.1f", (double)c / travel::TURN) + " turns apart");
+                                 fmt("%.1f", static_cast<double>(c) / travel::TURN) +
+                                 " turns apart");
         }
     }
     // the neutral cities each side reaches first, and those within reach
@@ -494,7 +496,7 @@ void fairness(Context& cx) {
             (second >= 2 * best && second - best >= 2 * travel::TURN))
             hinterland[who]++;
     }
-    double fair = neutral > 0 ? (double)neutral / k : 1;
+    double fair = neutral > 0 ? static_cast<double>(neutral) / k : 1;
     cx.metric("capitalGapMinTurns", gaps.empty() ? 0 : quantile(gaps, 0));
     cx.metric("capitalGapMedianTurns", quantile(gaps, 0.5));
     cx.metric("expansionMinShare", *std::min_element(cities.begin(), cities.end()) / fair);
@@ -504,7 +506,7 @@ void fairness(Context& cx) {
     cx.metric("near2MinShare", *std::min_element(near2.begin(), near2.end()) / fair);
     cx.metric("near4MinShare", *std::min_element(near4.begin(), near4.end()) / fair);
     cx.metric("hinterlandMaxShare", *std::max_element(hinterland.begin(), hinterland.end()) / fair);
-    cx.metric("remoteCityFrac", neutral ? (double)remote / neutral : 0);
+    cx.metric("remoteCityFrac", neutral ? static_cast<double>(remote) / neutral : 0);
 }
 
 // ---------------------------------------------------------------- terrain
@@ -531,7 +533,7 @@ void terrain(Context& cx) {
     std::vector<int> massCities;
     for (int s = 0; s < n; s++) {
         if (v.sea(s) || mass[s] >= 0) continue;
-        int id = (int)massCities.size();
+        int id = static_cast<int>(massCities.size());
         massCities.push_back(0);
         std::deque<int> q{s};
         mass[s] = id;
@@ -596,15 +598,16 @@ void terrain(Context& cx) {
     patches(MOUNTAINS, mountains, lone, total);
     patches(MARSH, marsh, lone, total);
 
-    cx.metric("landFrac", (double)land / n);
-    cx.metric("coastComplexity", land ? coast / std::sqrt((double)land) : 0);
+    cx.metric("landFrac", static_cast<double>(land) / n);
+    cx.metric("coastComplexity", land ? coast / std::sqrt(static_cast<double>(land)) : 0);
     cx.metric("inhabitedLandmasses", inhabited);
-    cx.metric("biggestLandmassCityShare", m.cities.empty() ? 0 : (double)biggest / m.cities.size());
+    cx.metric("biggestLandmassCityShare",
+              m.cities.empty() ? 0 : static_cast<double>(biggest) / m.cities.size());
     cx.metric("forestPatchMedian", forest);
     cx.metric("hillsPatchMedian", hills);
     cx.metric("mountainPatchMedian", mountains);
     cx.metric("marshPatchMedian", marsh);
-    cx.metric("speckleFrac", total ? (double)lone / total : 0);
+    cx.metric("speckleFrac", total ? static_cast<double>(lone) / total : 0);
 }
 
 // ---------------------------------------------------------------- signs, ports
@@ -637,7 +640,7 @@ void signsAndPorts(Context& cx) {
             continue;
         }
         pointing++;
-        int said = (int)std::stol(g[1]);
+        int said = static_cast<int>(std::stol(g[1]));
         // any tile of the footprint will do: designers may aim at the middle
         bool way = false, far = false;
         for (const City* city : named)
@@ -645,7 +648,7 @@ void signsAndPorts(Context& cx) {
                 for (int dx = 0; dx <= 1; dx++) {
                     int cxx = city->x + dx, cyy = city->y + dy;
                     bool w = COMPASS[compass(s.x, s.y, cxx, cyy)] == g[2];
-                    int truth = 2 * (int)std::floor(std::hypot(s.x - cxx, s.y - cyy));
+                    int truth = 2 * static_cast<int>(std::floor(std::hypot(s.x - cxx, s.y - cyy)));
                     bool f = std::abs(said - truth) <= std::max(4, truth / 4);
                     way = way || w;
                     far = far || f;
@@ -682,8 +685,8 @@ double Evaluation::metric(const std::string& key, double dflt) const {
 }
 
 int Evaluation::count(const std::string& check) const {
-    return (int)std::count_if(issues.begin(), issues.end(),
-                              [&](const Issue& i) { return i.check == check; });
+    return static_cast<int>(std::count_if(issues.begin(), issues.end(),
+                                          [&](const Issue& i) { return i.check == check; }));
 }
 
 const std::vector<std::string>& checks() {
@@ -762,9 +765,9 @@ Reference reference(const std::vector<Evaluation>& maps) {
             r.max = std::max(r.max, x);
             r.mean += x;
         }
-        r.mean /= (double)maps.size();
+        r.mean /= static_cast<double>(maps.size());
         for (const Evaluation& e : maps) r.sd += std::pow(e.metric(k) - r.mean, 2);
-        r.sd = std::sqrt(r.sd / (double)maps.size());
+        r.sd = std::sqrt(r.sd / static_cast<double>(maps.size()));
         ref[k] = r;
     }
     return ref;

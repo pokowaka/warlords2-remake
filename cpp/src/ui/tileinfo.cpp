@@ -46,7 +46,7 @@ void open(int tx, int ty) {
     if (!w2::game::seen(g, viewer, tx, ty)) return;
     const auto& L = G.layout;
     auto [fcx, fcy] = front::mapToUI(tx + 0.5, ty + 0.5);
-    int cx = (int)std::floor(fcx), cy = (int)std::floor(fcy);
+    int cx = static_cast<int>(std::floor(fcx)), cy = static_cast<int>(std::floor(fcy));
     cx = (cx + 4) / 8 * 8;
     cx = std::max(W / 2, std::min(L.w - W / 2, cx));
     cy = std::max(H / 2, std::min(L.h - 2 - H / 2, cy));
@@ -77,7 +77,7 @@ void open(int tx, int ty) {
             d->paint = [twoLines]() { twoLines(kit::text(0x82, 0), kit::text(0x82, 1), false); };
         } else {
             d->paint = [armies, bx, by]() {
-                int n = (int)armies.size();
+                int n = static_cast<int>(armies.size());
                 int x = (bx + W / 2 - n * 12 - 16 + 4) / 8 * 8;
                 for (int i = 0; i < n; i++)
                     kit::army(armies[i]->type, armies[i]->owner, x + 24 * i, by + 16, 0);

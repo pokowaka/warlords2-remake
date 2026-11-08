@@ -19,15 +19,20 @@ using namespace w2;
 static void trace(const Game& g, const Side& side) {
     long long h = 0;
     for (Army* a : g.armies) {
-        h = (h * 31 + (a->x == NONE ? 999 : a->x) * 7 + (a->y == NONE ? 999 : a->y) * 13 +
-             a->type * 17 + (a->owner == NONE ? 15 : a->owner) * 19 + a->strength + a->moves * 3) %
+        h = (h * 31 + static_cast<int64_t>(a->x == NONE ? 999 : a->x) * 7 +
+             static_cast<int64_t>(a->y == NONE ? 999 : a->y) * 13 +
+             static_cast<int64_t>(a->type) * 17 +
+             static_cast<int64_t>(a->owner == NONE ? 15 : a->owner) * 19 + a->strength +
+             static_cast<int64_t>(a->moves) * 3) %
             1000000007;
     }
     std::string owners;
     for (auto& c : g.map->cities)
-        owners += c.razed ? 'x' : c.ownerIndex != NONE ? (char)('0' + c.ownerIndex) : '.';
+        owners += c.razed                ? 'x'
+                  : c.ownerIndex != NONE ? static_cast<char>('0' + c.ownerIndex)
+                                         : '.';
     printf("%d %d gold=%d armies=%d rng=%u h=%lld %s\n", g.turn, side.index, side.gold,
-           (int)g.armies.size(), g.rng.state, h, owners.c_str());
+           static_cast<int>(g.armies.size()), g.rng.state, h, owners.c_str());
 }
 
 int main(int argc, char** argv) {

@@ -66,7 +66,7 @@ void smallShield(int side, int x, int y) {
 }
 
 const w2::Slot* building(const w2::City* city) {
-    return w2::game::producing(*city) && city->producing < (int)city->slots.size()
+    return w2::game::producing(*city) && city->producing < static_cast<int>(city->slots.size())
                    ? &city->slots[city->producing]
                    : nullptr;
 }
@@ -183,10 +183,11 @@ struct CityDialog : kit::Modal {
 
     // Choose what the city builds: slot n of the list, from 0 (7087:00c8).
     void pick(int n) {
-        if (n < (int)city->slots.size()) chosen = city->slots[n].type;
+        if (n < static_cast<int>(city->slots.size())) chosen = city->slots[n].type;
         if (chosen == NONE) return;
         for (size_t i = 0; i < city->slots.size(); i++)
-            if (city->slots[i].type == chosen) w2::game::setProduction(*G.g, *city, (int)i);
+            if (city->slots[i].type == chosen)
+                w2::game::setProduction(*G.g, *city, static_cast<int>(i));
         refresh();
     }
 
@@ -251,7 +252,7 @@ struct CityDialog : kit::Modal {
         if (!city->razed &&
             (G.g->map->options.viewProduction == 0 || city->ownerIndex == G.player->index)) {
             for (int i = 0; i < 4; i++) {
-                bool have = i < (int)city->slots.size();
+                bool have = i < static_cast<int>(city->slots.size());
                 kit::army(have ? city->slots[i].type : NONE, owner, INFO_SLOTS[i][0],
                           INFO_SLOTS[i][1], 1);
             }
@@ -317,7 +318,7 @@ struct CityDialog : kit::Modal {
         }
         const w2::Slot* ch = nullptr;
         for (int i = 0; i < 4; i++) {
-            bool have = i < (int)city->slots.size();
+            bool have = i < static_cast<int>(city->slots.size());
             bool mine = have && city->slots[i].type == chosen;
             if (mine) ch = &city->slots[i];
             kit::army(have ? city->slots[i].type : NONE, owner, PROD_SLOTS[i][0], PROD_SLOTS[i][1],
@@ -369,8 +370,10 @@ struct CityDialog : kit::Modal {
         kit::right(f, kit::text(S_VECTOR, 3), 392, 188);
         for (int i = 0; i < 4; i++) {
             int x = 400 + i * 40;
-            kit::army(i < (int)next.size() ? next[i]->type : NONE, G.player->index, x, 149, 1);
-            kit::army(i < (int)after.size() ? after[i]->type : NONE, G.player->index, x, 182, 1);
+            kit::army(i < static_cast<int>(next.size()) ? next[i]->type : NONE, G.player->index, x,
+                      149, 1);
+            kit::army(i < static_cast<int>(after.size()) ? after[i]->type : NONE, G.player->index,
+                      x, 182, 1);
         }
         gfx::setColor(1, 1, 1);
         int a0 = sub == 1 ? 2 : 0;
@@ -388,7 +391,7 @@ struct CityDialog : kit::Modal {
             if (sub == 1)
                 filter = -1;
             else if (sub == 2)
-                filter = (int)w2::game::vectoredTo(*G.g, city).size();
+                filter = static_cast<int>(w2::game::vectoredTo(*G.g, city).size());
             front::drawVectorMap(MAP.x, MAP.y, city, filter, vectorSeeAll && sub == 0);
         } else {
             front::drawStrategicPanel(MAP.x, MAP.y, city);
@@ -464,7 +467,7 @@ struct CityDialog : kit::Modal {
             auto incoming = w2::game::vectoredTo(*G.g, city);
             auto there = w2::game::vectoredTo(*G.g, target);
             bool ok = !incoming.empty() &&
-                      (int)(incoming.size() + there.size()) <= w2::game::MAX_VECTORED_TO;
+                      static_cast<int>(incoming.size() + there.size()) <= w2::game::MAX_VECTORED_TO;
             if (std::find(incoming.begin(), incoming.end(), target) != incoming.end()) ok = false;
             if (ok)
                 for (w2::City* c : incoming) c->vectorTo = target->index;
@@ -519,7 +522,7 @@ struct CityDialog : kit::Modal {
     // the right button on a production slot (sub-ids 1-4, 54bd:00df)
     bool info(int s, int sx, int sy) override {
         int n = s - 1;
-        if (n < 0 || n >= (int)city->slots.size()) return false;
+        if (n < 0 || n >= static_cast<int>(city->slots.size())) return false;
         infobox::armyType(sx, sy, city->slots[n].type, city->slots[n]);
         return true;
     }
@@ -538,7 +541,7 @@ struct CityDialog : kit::Modal {
                 return;
             }
             int n = std::min(3, (x - 308) / 56);
-            if (n < (int)city->slots.size())
+            if (n < static_cast<int>(city->slots.size()))
                 infobox::armyType(sx, sy, city->slots[n].type, city->slots[n],
                                   city->ownerIndex == NONE ? 8 : city->ownerIndex);
             else

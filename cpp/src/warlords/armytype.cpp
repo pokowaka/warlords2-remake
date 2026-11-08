@@ -10,8 +10,9 @@ namespace w2::armytype {
 void load(const std::string& path, Types& out) {
     const int COUNT = 29, STRIDE = 62, N_BONUS = 15;
     std::string s = mustRead(path);
-    if ((int)s.size() != COUNT * STRIDE)
-        throw std::runtime_error(fmt("unexpected %s size: %d", path.c_str(), (int)s.size()));
+    if (static_cast<int>(s.size()) != COUNT * STRIDE)
+        throw std::runtime_error(
+                fmt("unexpected %s size: %d", path.c_str(), static_cast<int>(s.size())));
     out.all.clear();
     out.all.reserve(COUNT);
     for (int i = 0; i < COUNT; i++) {

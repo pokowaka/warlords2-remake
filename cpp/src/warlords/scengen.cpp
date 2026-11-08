@@ -45,7 +45,7 @@ class Noise {
     }
     /** About -1..1. */
     double at(double x, double y) const {
-        int xi = (int)std::floor(x), yi = (int)std::floor(y);
+        int xi = static_cast<int>(std::floor(x)), yi = static_cast<int>(std::floor(y));
         double xf = x - xi, yf = y - yi;
         int X = xi & 255, Y = yi & 255;
         auto fade = [](double t) { return t * t * t * (t * (t * 6 - 15) + 10); };
@@ -96,8 +96,9 @@ class Noise {
 /** The value at quantile q (0..1) of the listed values. */
 double cut(std::vector<double> v, double q) {
     if (v.empty()) return 0;
-    double at = std::max(0.0, q * (double)(v.size() - 1));  // a share above 1 asks for the lowest
-    size_t k = std::min(v.size() - 1, (size_t)at);
+    double at = std::max(
+            0.0, q * static_cast<double>(v.size() - 1));  // a share above 1 asks for the lowest
+    size_t k = std::min(v.size() - 1, static_cast<size_t>(at));
     std::nth_element(v.begin(), v.begin() + k, v.end());
     return v[k];
 }
@@ -108,7 +109,7 @@ struct Grid {
     /** The 8-connected (or 4-connected) parts of the tiles that pass `test`. */
     std::vector<std::vector<int>> parts(const std::function<bool(int)>& test,
                                         bool eight = true) const {
-        std::vector<int> seen(w * h, 0);
+        std::vector<int> seen(static_cast<size_t>(w) * h, 0);
         std::vector<std::vector<int>> out;
         for (int s = 0; s < w * h; s++) {
             if (seen[s] || !test(s)) continue;
@@ -133,7 +134,7 @@ struct Grid {
     }
     /** Steps (4-connected) from the nearest tile passing `from`. */
     std::vector<int> distance(const std::function<bool(int)>& from) const {
-        std::vector<int> d(w * h, -1);
+        std::vector<int> d(static_cast<size_t>(w) * h, -1);
         std::deque<int> q;
         for (int i = 0; i < w * h; i++)
             if (from(i)) {
@@ -226,10 +227,10 @@ std::vector<bool> land(const Settings& s, Rng& rng, const Grid& g, std::vector<d
     // specks of land go under; small lakes fill in
     int minIsland = s.shape == Shape::Islands ? 40 : 70;
     for (auto& part : g.parts([&](int i) { return isLand[i]; }))
-        if ((int)part.size() < minIsland)
+        if (static_cast<int>(part.size()) < minIsland)
             for (int i : part) isLand[i] = false;
     for (auto& part : g.parts([&](int i) { return !isLand[i]; }, false))
-        if ((int)part.size() < 30)
+        if (static_cast<int>(part.size()) < 30)
             for (int i : part) isLand[i] = true;
     // the height inland: distance from the coast, roughened by the noise
     auto coast = g.distance([&](int i) { return !isLand[i]; });
@@ -367,7 +368,7 @@ void rivers(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t)
         cost[i] = 1 + 14 * v * v;
     }
     for (int src : sources) {
-        if ((int)started.size() >= want) break;
+        if (static_cast<int>(started.size()) >= want) break;
         bool apart = true;
         for (int o : started)
             if (dist(o % w - src % w, o / w - src / w) < 22) apart = false;
@@ -487,7 +488,7 @@ std::vector<std::pair<int, int>> spread(Rng& rng, const std::vector<int>& spots,
         // `candidates` that keep their distance; on crowded land it may take
         // many draws to find them
         for (int c = 0, found = 0; found < candidates && c < 600; c++) {
-            int s = spots[rng.below((int)spots.size())];
+            int s = spots[rng.below(static_cast<int>(spots.size()))];
             int x = s % w, y = s / w;
             double d = nearest(x, y);
             if (d < minDist) continue;
@@ -532,7 +533,7 @@ const char* const LINES[] = {"Eight warlords, one throne",    "Where empires ris
 
 template <class T, size_t N>
 const char* pickWord(Rng& rng, const T (&list)[N]) {
-    return list[rng.below((int)N)];
+    return list[rng.below(static_cast<int>(N))];
 }
 
 // How far each letter moves the pen in CHANCE17, the font New Scenario's
@@ -561,13 +562,14 @@ int nameWidth(const std::string& s) {
     return n;
 }
 bool fits(const std::string& s) {
-    return (int)s.size() <= NAME_CHARS && nameWidth(s) <= NAME_WIDTH;
+    return static_cast<int>(s.size()) <= NAME_CHARS && nameWidth(s) <= NAME_WIDTH;
 }
 
 }  // namespace
 
 Title title(Shape shape, long seed) {
-    Rng rng((double)seed + 1000003.0);  // its own dice: naming never touches the world's
+    Rng rng(static_cast<double>(seed) +
+            1000003.0);  // its own dice: naming never touches the world's
     const auto& nouns = NOUNS[shape == Shape::Pangaea ? 1 : shape == Shape::Islands ? 2 : 0];
     Title t;
     std::string noun;
@@ -650,7 +652,7 @@ World makeWorld(const Settings& s, Rng& rng, int w, int h) {
     std::vector<int> part(n, -1);
     std::vector<bool> settled(open.size(), false);
     for (size_t k = 0; k < open.size(); k++)
-        for (int i : open[k]) part[i] = (int)k;
+        for (int i : open[k]) part[i] = static_cast<int>(k);
     for (auto& [x, y] : world.cities)
         if (part[y * w + x] >= 0) settled[part[y * w + x]] = true;
     std::vector<int> wild;
@@ -705,8 +707,8 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         int bx = sp.ew ? sp.x + 2 : sp.x, by = sp.ew ? sp.y : sp.y + 2;
         if (!g.in(ax, ay) || !g.in(bx, by)) continue;
         int a = ay * w + ax, b = by * w + bx;
-        leap[a].push_back({b, (int)k});
-        leap[b].push_back({a, (int)k});
+        leap[a].push_back({b, static_cast<int>(k)});
+        leap[b].push_back({a, static_cast<int>(k)});
     }
     // the tiles a road may leave a city from: the eight beside its footprint
     auto doors = [&](int c) {
@@ -723,8 +725,8 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
     std::vector<std::vector<int>> door(cities.size());
     std::vector<int> doorOf(n, -1);
     for (size_t c = 0; c < cities.size(); c++) {
-        door[c] = doors((int)c);
-        for (int i : door[c]) doorOf[i] = (int)c;
+        door[c] = doors(static_cast<int>(c));
+        for (int i : door[c]) doorOf[i] = static_cast<int>(c);
     }
     // A*: the cheapest road from any door of a to any door of b, existing
     // roads cheap so new ones join them; returns its cost and tiles
@@ -790,7 +792,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         int a, b;
     };
     std::vector<Link> links;
-    int m = (int)cities.size();
+    int m = static_cast<int>(cities.size());
     for (int a = 0; a < m; a++) {
         std::vector<std::pair<double, int>> near;
         for (int b = 0; b < m; b++)
@@ -799,7 +801,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
                                      cities[a].second - cities[b].second),
                                 b});
         std::sort(near.begin(), near.end());
-        for (int k = 0; k < 4 && k < (int)near.size(); k++) {
+        for (int k = 0; k < 4 && k < static_cast<int>(near.size()); k++) {
             int b = near[k].second;
             if (near[k].first > 26 || b < a) continue;
             double c = route(a, b, nullptr, nullptr);
@@ -861,7 +863,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h,
         for (int k : used) bridged[k] = 1;
     }
     for (size_t k = 0; k < spans.size(); k++)
-        if (bridged[k]) out.bridges.push_back((int)k);
+        if (bridged[k]) out.bridges.push_back(static_cast<int>(k));
     return out;
 }
 

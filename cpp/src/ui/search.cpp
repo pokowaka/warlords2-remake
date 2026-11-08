@@ -76,7 +76,7 @@ std::vector<std::string> ruinLines(const w2::SearchResult& r) {
         lines.push_back(format(kit::text(0x35, 0), name, r.gold));
     } else if (r.kind == "allies") {
         // the number rolled (6536:01ab), placed or not
-        int n = r.count > 0 ? r.count : (int)r.armies.size();
+        int n = r.count > 0 ? r.count : static_cast<int>(r.armies.size());
         std::string tname = r.type ? r.type->name : "";
         lines.push_back(n == 1 ? format(kit::text(0x36, 0), tname, name)
                                : format(kit::text(0x36, 1), n, tname, name));
@@ -115,7 +115,7 @@ struct Ruin : kit::Modal {
         const Font& f = kit::font(2);
         gfx::setColor(1, 1, 1);
         for (size_t i = 0; i < shown && i < lines.size(); i++)
-            f.draw(lines[i], 128, 300 + 20 * (int)i);
+            f.draw(lines[i], 128, 300 + 20 * static_cast<int>(i));
         if (done() && !after) kit::drawControls(v, hidden);
     }
     void mousepressed(int x, int y, int) override {
@@ -278,7 +278,8 @@ struct Sage : kit::Modal {
         kit::centred(kit::font(1), "A Sage!", 432, 62);  // 4125:0c7c
         const Font& f = kit::font(2);
         for (int i = 0; i <= 4; i++) kit::centred(f, kit::text(0x3f, i), 432, 120 + 20 * i);
-        for (size_t i = 0; i < said.size(); i++) kit::centred(f, said[i], 432, 240 + 20 * (int)i);
+        for (size_t i = 0; i < said.size(); i++)
+            kit::centred(f, said[i], 432, 240 + 20 * static_cast<int>(i));
         kit::drawControls(v, hidden);
     }
     void items() {

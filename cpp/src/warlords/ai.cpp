@@ -165,7 +165,7 @@ void shareOutCities(Game& g) {
         auto [x, y] = from[turn];
         City* pick = nullptr;
         int bestD = NONE;
-        for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+        for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
             City& c = g.map->cities[i];
             if (core::standing(c) && c.claim == core::NEUTRAL) {
                 int d = core::dist(x, y, c.x, c.y);
@@ -192,11 +192,11 @@ void shareOutCities(Game& g) {
 void turnSetup(Game& g, Side& side) {
     AIData& d = core::data(g, side);
     // the side is at peace with itself, state and proposal (5db9:0000)
-    g.diplomacy.state[side.index * 9] = 0;
-    g.diplomacy.proposal[side.index * 9] = 0;
+    g.diplomacy.state[static_cast<size_t>(side.index) * 9] = 0;
+    g.diplomacy.proposal[static_cast<size_t>(side.index) * 9] = 0;
     side.aiSolidarity = d.solidarity;
     bool quick = g.map->options.quickStart != 0 && g.map->options.hiddenMap != 0;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == side.index) {
             int r = core::role(d, c);
@@ -316,7 +316,7 @@ City* heroCity(Game& g, Side& side, City* dflt) {
     AIData& d = core::data(g, side);
     City* best = dflt;
     int bestScore = 0;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == side.index) {
             int r = core::role(d, c);

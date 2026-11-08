@@ -74,11 +74,11 @@ static std::string show(bool v) {
 }
 template <class T, std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, int> = 0>
 static std::string show(T v) {
-    return std::is_signed_v<T> && (long long)v == NONE ? "nil" : std::to_string(v);
+    return std::is_signed_v<T> && static_cast<long long>(v) == NONE ? "nil" : std::to_string(v);
 }
 template <class T, std::enable_if_t<std::is_enum_v<T>, int> = 0>
 static std::string show(T v) {
-    return std::to_string((long long)v);
+    return std::to_string(static_cast<long long>(v));
 }
 static std::string show(const std::string& v) {
     return v;
@@ -88,7 +88,7 @@ static std::string show(const char* v) {
 }
 template <class T>
 static std::string show(T* p) {
-    return p ? fmt("%p", (const void*)p) : "nil";
+    return p ? fmt("%p", static_cast<const void*>(p)) : "nil";
 }
 
 template <class A, class B>
@@ -205,7 +205,7 @@ static void testArmyTypes() {
     printf("ARMYTYPE.DAT\n");
     Types t;
     armytype::load(DATA + "/TERRAIN0/ARMYTYPE.DAT", t);
-    eq((int)t.all.size(), 29, "29 army types");
+    eq(static_cast<int>(t.all.size()), 29, "29 army types");
     ok(t.byId(armytype::HERO) != nullptr, "type 28 exists");
     eq(t.byId(armytype::HERO)->name, "Hero", "type 28 is the Hero");
     eq(t.byId(armytype::SCOUTS)->name, "Scouts", "type 11 is Scouts");
@@ -237,7 +237,7 @@ static void testProduction() {
     armytype::load(DATA + "/TERRAIN0/ARMYTYPE.DAT", t);
     Rng r(42);
     auto sl = rules::citySlots({4, 11, 2}, t, r);
-    eq((int)sl.size(), 3, "one slot per production type");
+    eq(static_cast<int>(sl.size()), 3, "one slot per production type");
     bool sorted = true;
     for (size_t i = 1; i < sl.size(); i++)
         if (sl[i].price < sl[i - 1].price) sorted = false;
@@ -281,16 +281,17 @@ static void testGame(const std::string& scenario) {
     auto gp = newGame(scenario, seed(3));
     Game& g = *gp;
     ok(g.sides.size() >= 2, "at least two sides in play");
-    eq((int)g.armies.size(), (int)g.map->cities.size(), "exactly one starting army per city");
+    eq(static_cast<int>(g.armies.size()), static_cast<int>(g.map->cities.size()),
+       "exactly one starting army per city");
     for (Side* s : g.sides) {
-        eq((int)game::sideCities(g, *s).size(), 1, s->name + " owns only its capital");
+        eq(static_cast<int>(game::sideCities(g, *s).size()), 1, s->name + " owns only its capital");
         eq(game::sideCities(g, *s)[0]->index, s->capital->index,
            s->name + "'s city is its capital");
     }
     for (auto& c : g.map->cities) {
         for (auto& slot : c.slots)
             ok(slot.type != armytype::NAVY, c.name + " does not produce Navy");
-        eq(c.defence, rules::cityDefence((int)c.slots.size()), c.name + " defence");
+        eq(c.defence, rules::cityDefence(static_cast<int>(c.slots.size())), c.name + " defence");
         ok(c.slots.size() <= 4, c.name + " has at most 4 slots");
     }
     for (Army* a : g.armies) {
@@ -364,7 +365,7 @@ static void testTurnLoop(const std::string& scenario) {
     Side* victim = g.sides.back();
     for (City* c : game::sideCities(g, *victim)) c->ownerIndex = NONE;
     victim->gold = 500;
-    g.diplomacy.state[victim->index * 8] = diplomacy::WAR;
+    g.diplomacy.state[static_cast<size_t>(victim->index) * 8] = diplomacy::WAR;
     ok(!game::sideArmies(g, *victim).empty(), "the beaten side still has armies");
     int roundOf = g.turn;
     while (g.turn == roundOf) {
@@ -372,7 +373,8 @@ static void testTurnLoop(const std::string& scenario) {
         endTurn(g);
     }
     ok(!victim->alive, "a side with no cities is eliminated as the round ends");
-    eq((int)game::sideArmies(g, *victim).size(), 0, "the eliminated side's armies are gone");
+    eq(static_cast<int>(game::sideArmies(g, *victim).size()), 0,
+       "the eliminated side's armies are gone");
     eq(victim->gold, 0, "the eliminated side's gold is gone");
     eq(diplomacy::state(g, victim->index, 0), diplomacy::INTERMEDIATE,
        "the eliminated side's diplomacy is reset to uneasy");
@@ -446,7 +448,8 @@ static void testVectoring(const std::string& scenario) {
         ok(game::vector(g, *senders[i], dest), "vector " + std::to_string(i + 1) + " is taken");
     ok(!game::vector(g, *senders[4], dest), "a fifth is refused");
     eq(senders[4]->vectorTo, NONE, "and the fifth city keeps no vector");
-    eq((int)game::vectoredTo(g, dest).size(), 4, "four cities send to the destination");
+    eq(static_cast<int>(game::vectoredTo(g, dest).size()), 4,
+       "four cities send to the destination");
     ok(game::vector(g, *senders[0], dest), "a city already sending there may be set again");
     ok(game::vector(g, *senders[0], senders[0]), "vectoring a city to itself lifts the vector");
     eq(senders[0]->vectorTo, NONE, "and leaves it with none");
@@ -466,7 +469,7 @@ static void testBuyProduction(const std::string& scenario) {
     for (auto* a : list) ok(a->price >= 0, a->name + " is for sale");
     eq(game::cannotBuy(g, *side, *city, *g.types.byId(city->slots[0].type)), "has it",
        "a type already built is greyed out");
-    int n0 = (int)city->slots.size();
+    int n0 = static_cast<int>(city->slots.size());
     eq(game::buySlot(*city), n0 < 4 ? n0 : 0, "the starting slot");
     const ArmyType* pick = nullptr;
     for (auto* a : list)
@@ -488,7 +491,7 @@ static void testBuyProduction(const std::string& scenario) {
     eq(slot.strength, pick->strength, "a bought type takes ARMYTYPE's strength unmodified");
     eq(slot.time, pick->time, "and its time");
     eq(slot.move, pick->move, "and its move");
-    eq(city->defence, rules::cityDefence((int)city->slots.size()),
+    eq(city->defence, rules::cityDefence(static_cast<int>(city->slots.size())),
        "defence follows the number of types");
     eq(city->producing, 0, "buying into a new slot leaves production alone");
     game::sortProduction(*city);
@@ -515,13 +518,13 @@ static void testReports(const std::string& scenario) {
     Game& g = *gp;
     Side* side = game::begin(g);
     auto f = report::figures(g, *side, report::CITY);
-    eq(f.result, (int)game::sideCities(g, *side).size(),
+    eq(f.result, static_cast<int>(game::sideCities(g, *side).size()),
        "the City report counts the side's cities");
     eq(f.max % 2, 0, "the top of the scale is even");
     int unused = 0;
     for (int i = 0; i < 8; i++)
         if (f.out[i]) unused++;
-    eq(unused, 8 - (int)g.sides.size(), "only the sides in the game get a bar");
+    eq(unused, 8 - static_cast<int>(g.sides.size()), "only the sides in the game get a bar");
     auto a = report::figures(g, *side, report::ARMY);
     int mine = 0;
     for (Army* army : g.armies)
@@ -548,8 +551,8 @@ static void testReports(const std::string& scenario) {
         eq(side->produced[0].city, city->index, "with the city that built it");
         eq(side->produced[0].kind, "built", "kept at home");
     }
-    eq(report::figures(g, *side, report::PRODUCTION).result, (int)side->produced.size(),
-       "the Production report counts what was built");
+    eq(report::figures(g, *side, report::PRODUCTION).result,
+       static_cast<int>(side->produced.size()), "the Production report counts what was built");
 }
 
 static void testDisband(const std::string& scenario) {
@@ -570,7 +573,7 @@ static void testDisband(const std::string& scenario) {
     Item* std = h->items[0];
     game::disband(g, *side, stack);
     eq(g.armies.size(), n - stack.size(), "the stack is gone");
-    eq((int)game::armiesAt(g, h->x, h->y).size(), 0, "from its tile");
+    eq(static_cast<int>(game::armiesAt(g, h->x, h->y).size()), 0, "from its tile");
     eq(std->status, 1, "the hero's standard lies on the ground");
     ok(!side->quest, "and the quest is lost with the hero");
     Sign* sg = game::signAt(g, 18, 12);
@@ -587,8 +590,8 @@ static void testDisband(const std::string& scenario) {
     eq(back->map->fightOrder[side->index][3], 26, "so does an edited fight order");
     int diplo = side->diploScore;
     game::resign(g, *side);
-    eq((int)game::sideCities(g, *side).size(), 0, "a side that resigns holds no city");
-    eq((int)game::sideArmies(g, *side).size(), 0, "and has no army");
+    eq(static_cast<int>(game::sideCities(g, *side).size()), 0, "a side that resigns holds no city");
+    eq(static_cast<int>(game::sideArmies(g, *side).size()), 0, "and has no army");
     ok(side->capital->razed, "its capital is ruins");
     eq(side->diploScore, diplo, "burning its own on resigning costs nothing");
 }
@@ -601,14 +604,14 @@ static void testHistory(const std::string& scenario) {
     history::deed(g, side, DeedType::FOUND, history::FOUND_SAGE, 0, "Hero");
     history::deed(g, side, DeedType::CITY_WON, side->index, 3, side->name);
     history::deed(g, side, DeedType::HERO_EMERGES, 1, 0, "Hero");
-    eq((int)g.deeds[side->index].size(), 2, "two deeds a side");
+    eq(static_cast<int>(g.deeds[side->index].size()), 2, "two deeds a side");
     std::vector<history::DeedType> types = {g.deeds[side->index][0].type,
                                             g.deeds[side->index][1].type};
     std::sort(types.begin(), types.end());
     eq(types[0], DeedType::HERO_EMERGES, "a lower type pushes out the higher");
     eq(types[1], DeedType::CITY_WON, "and the lower of the two stays");
     history::deed(g, side, DeedType::AT_PEACE, 0, 1, "");
-    eq((int)g.deeds[side->index].size(), 2, "a higher type does not get in");
+    eq(static_cast<int>(g.deeds[side->index].size()), 2, "a higher type does not get in");
     int guard = 0;
     while (g.turn < 3 && guard < 50) {
         endTurn(g);
@@ -660,7 +663,8 @@ static void testSetup() {
     auto back = save::decode(save::encode(g), DATA);
     ok(!back->map->sides[2].inUse && !back->map->sides[2].alive,
        "a side Off stays out once loaded");
-    eq((int)back->sides.size(), (int)g.sides.size(), "as many sides in play once loaded");
+    eq(static_cast<int>(back->sides.size()), static_cast<int>(g.sides.size()),
+       "as many sides in play once loaded");
     for (Side* s : back->sides) ok(s->index != 2, "the side Off not among them");
     eq(back->map->sides[0].name, std::string("Ozymandias"), "a retyped name kept once loaded");
     eq(back->map->sides[1].level, 2, "and a computer's level");
@@ -731,11 +735,12 @@ static void testSage(const std::string& scenario) {
         s.revealed = 0xff;
         s.searched = false;
     }
-    eq((int)site::sageList(g, *side, hx, hy).size(), 0, "no rich site unshown: nothing to tell");
+    eq(static_cast<int>(site::sageList(g, *side, hx, hy).size()), 0,
+       "no rich site unshown: nothing to tell");
     auto d2 = [&](const Site* s) { return (s->x - hx) * (s->x - hx) + (s->y - hy) * (s->y - hy); };
     std::vector<Site*> near;
     for (auto& s : g.map->sites)
-        if (std::sqrt((double)d2(&s)) < site::SAGE_RANGE) near.push_back(&s);
+        if (std::sqrt(static_cast<double>(d2(&s))) < site::SAGE_RANGE) near.push_back(&s);
     std::stable_sort(near.begin(), near.end(), [&](Site* a, Site* b) { return d2(a) < d2(b); });
     ok(near.size() >= 3, "three sites within reach");
     if (near.size() < 3) return;
@@ -751,7 +756,7 @@ static void testSage(const std::string& scenario) {
     isite->content = site::ITEM;
     isite->item = g.map->items[9].index;
     auto list = site::sageList(g, *side, hx, hy);
-    eq((int)list.size(), 2, "gold once however many, and the item");
+    eq(static_cast<int>(list.size()), 2, "gold once however many, and the item");
     const site::SageEntry* gold = nullptr;
     for (auto& e : list)
         if (e.kind == "gold") gold = &e;
@@ -762,7 +767,7 @@ static void testSage(const std::string& scenario) {
     ok(((g2->revealed >> side->index) & 1) == 1, "and marked shown to the side");
     eq(site::sageShow(g, *side, goldE, hx, hy), g1, "then the next one");
     auto items = site::sageList(g, *side, hx, hy);
-    eq((int)items.size(), 1, "only the item is left");
+    eq(static_cast<int>(items.size()), 1, "only the item is left");
     if (!items.empty()) eq(items[0].item, &g.map->items[9], "by its record");
     int before = side->gold;
     int n = site::sageGem(g, *side);
@@ -786,21 +791,21 @@ static void testHeroItems(const std::string& scenario) {
     eq(h->items[0], &g.map->items[side->index],
        "the first hero carries the side's own standard record");
     eq(h->items[0]->status, 3, "which is carried");
-    eq((int)hero::itemsHere(g, h).size(), 1, "nothing else is listed yet");
+    eq(static_cast<int>(hero::itemsHere(g, h).size()), 1, "nothing else is listed yet");
     Item* it = &g.map->items[8];
     it->status = 1;
     it->x = h->x;
     it->y = h->y;
     auto list = hero::itemsHere(g, h);
-    eq((int)list.size(), 2, "an item on the hero's tile is listed");
+    eq(static_cast<int>(list.size()), 2, "an item on the hero's tile is listed");
     if (list.size() > 1) eq(list[1], it, "after what the hero carries");
     hero::takeItem(g, h, it);
     eq(it->status, 3, "taking an item carries it");
-    eq((int)h->items.size(), 2, "the hero has it");
+    eq(static_cast<int>(h->items.size()), 2, "the hero has it");
     hero::dropItem(g, h, it);
     eq(it->status, 1, "dropping puts it on the ground");
     eq(it->x, h->x, "where the hero stands");
-    eq((int)h->items.size(), 1, "and the hero no longer has it");
+    eq(static_cast<int>(h->items.size()), 1, "and the hero no longer has it");
     ok(!game::plantFlag(g, *side, h), "no flag in a city");
     int fx = NONE, fy = NONE;
     for (int dy = -3; dy <= 4; dy++) {
@@ -959,11 +964,12 @@ static void testMovement(const std::string& scenario) {
             farX = std::min(g.map->width - 2, a->x + d);
             farY = a->y;
             route = movement::preview(g, {a}, farX, farY);
-            if (route && route->reach < (int)route->path.size()) break;
+            if (route && route->reach < static_cast<int>(route->path.size())) break;
         }
         if (route) {
             ok(!route->path.empty(), "a stack under orders has a route to draw");
-            ok(route->reach <= (int)route->path.size(), "it can walk no more of it than there is");
+            ok(route->reach <= static_cast<int>(route->path.size()),
+               "it can walk no more of it than there is");
             eq(route->path.back().x, farX, "the route ends where it was sent");
             eq(route->path.back().y, farY, "on that row");
             int px = a->x, py = a->y;
@@ -975,7 +981,7 @@ static void testMovement(const std::string& scenario) {
             }
             ok(straight, "and it is a chain of single steps");
             r = movement::moveTo(g, {a}, farX, farY);
-            eq((int)r.walked.size(), r.steps,
+            eq(static_cast<int>(r.walked.size()), r.steps,
                "a walk reports the tiles it covered, one per step taken");
             if (r.steps > 0) {
                 eq(r.walked.back().first, a->x, "ending where the stack now stands");
@@ -983,7 +989,7 @@ static void testMovement(const std::string& scenario) {
             }
             auto left = movement::preview(g, {a}, farX, farY);
             if (left)
-                ok(left->reach < (int)left->path.size(),
+                ok(left->reach < static_cast<int>(left->path.size()),
                    "what is left of it is out of reach this turn");
         }
         g.remove(a);
@@ -1005,7 +1011,7 @@ static void testStackLimit(const std::string& scenario) {
         Army* a = addArmy(g, tx, ty, side->index, army->type, 1, 10, 10);
         a->homeCity = army->homeCity;
     }
-    eq((int)game::armiesAt(g, tx, ty).size(), rules::MAX_STACK, "the tile is full");
+    eq(static_cast<int>(game::armiesAt(g, tx, ty).size()), rules::MAX_STACK, "the tile is full");
     army->moves = 99;
     auto r = movement::moveTo(g, {army}, tx, ty);
     eq(r.steps, 0, "a stack cannot stop on a full tile");
@@ -1044,7 +1050,7 @@ static void testCombat(const std::string& scenario) {
     const auto& row = g.map->fightOrder[0];
     std::set<int> used;
     for (int t = 0; t <= 28; t++) used.insert(row[t]);
-    eq((int)used.size(), 29, "fight order is a permutation of 29 ranks");
+    eq(static_cast<int>(used.size()), 29, "fight order is a permutation of 29 ranks");
     City* neutral = nullptr;
     for (auto& c : g.map->cities)
         if (!neutral && c.ownerIndex == NONE && c.defence == 2) neutral = &c;
@@ -1088,7 +1094,7 @@ static void testCombat(const std::string& scenario) {
     for (auto& c : g.map->cities)
         if (!enemy && c.ownerIndex != side->index) enemy = &c;
     auto l = combat::lines(g, {a1}, enemy->x, enemy->y);
-    eq((int)l.attackers.size(), 1, "the attacking line is the stack");
+    eq(static_cast<int>(l.attackers.size()), 1, "the attacking line is the stack");
     ok(!l.defenders.empty(), "the city has defenders");
     eq(l.city, enemy, "the battle names the city");
     for (Army* d : l.defenders) ok(d->owner != side->index, "no defender belongs to the attacker");
@@ -1138,7 +1144,7 @@ static void testCombat(const std::string& scenario) {
         for (int dx = 0; dx <= 1; dx++) {
             auto lCity = combat::lines(g, {a1}, enemy->x + dx, enemy->y + dy);
             eq(lCity.city, enemy, "combat lines identify the 2x2 city from any tile");
-            eq((int)lCity.defenders.size(), (int)l.defenders.size(),
+            eq(static_cast<int>(lCity.defenders.size()), static_cast<int>(l.defenders.size()),
                "defenders are gathered across all 4 tiles");
         }
     }
@@ -1184,7 +1190,7 @@ static void testCapture(const std::string& scenario) {
         eq(target->ownerIndex, NONE, "and the city is still the defender's");
         g.remove(far);
     }
-    int before = (int)game::sideCities(g, *side).size();
+    int before = static_cast<int>(game::sideCities(g, *side).size());
     // a city of the loser's vectoring here stops building (67cc:0a6b); the
     // target is neutral, so stand one in for the purpose
     City* sender = nullptr;
@@ -1205,7 +1211,7 @@ static void testCapture(const std::string& scenario) {
         eq(g.map->tiles[i], tile, "nor its castle repainted");
         eq(g.armies.size(), armies, "nor the dead removed");
         eq(stack[0]->x, from, "nor the survivors moved in");
-        eq(r.captured, (City*)nullptr, "and nothing is said to be captured");
+        eq(r.captured, static_cast<City*>(nullptr), "and nothing is said to be captured");
         game::applyAttack(g, r);
         ok(g.map->tiles[i] != tile, "applied, the castle is in the victor's colours");
         int owner = target->ownerIndex;
@@ -1227,7 +1233,8 @@ static void testCapture(const std::string& scenario) {
     eq(down, r.deadAttackers.size() + r.deadDefenders.size(),
        "the log has one entry per army that fell");
     eq(target->ownerIndex, side->index, "the city changed hands");
-    eq((int)game::sideCities(g, *side).size(), before + 1, "the side owns one more city");
+    eq(static_cast<int>(game::sideCities(g, *side).size()), before + 1,
+       "the side owns one more city");
     eq(target->producing, NONE, "a captured city is not building anything");
     for (Army* a : r.attackers) eq(a->x, target->x, "the survivors moved in");
     for (Army* dead : r.deadDefenders) ok(!g.alive(dead), "a dead defender is removed");
@@ -1264,12 +1271,12 @@ static void testTutorialHero() {
     }
     int deaths = 0;
     for (int i = 0; i < 50; i++)
-        deaths += (int)combat::resolve(g, {&h}, defenders, 0, 0).deadAttackers.size();
+        deaths += static_cast<int>(combat::resolve(g, {&h}, defenders, 0, 0).deadAttackers.size());
     eq(deaths, 0, "the tutorial hero never dies against neutrals");
     g.map->options.tutorial = 0;
     deaths = 0;
     for (int i = 0; i < 50; i++)
-        deaths += (int)combat::resolve(g, {&h}, defenders, 0, 0).deadAttackers.size();
+        deaths += static_cast<int>(combat::resolve(g, {&h}, defenders, 0, 0).deadAttackers.size());
     ok(deaths > 0, "without the tutorial flag the hero can die");
 }
 
@@ -1298,7 +1305,8 @@ static void testCityChoices(const std::string& scenario) {
         eq(got.gold, want, "pillage pays half the type's purchase price");
         eq(side->gold, gold0 + want, "the gold was paid");
         eq(city->slots.size(), n - 1, "pillage removed one type");
-        eq(city->defence, rules::cityDefence((int)city->slots.size()), "defence was recomputed");
+        eq(city->defence, rules::cityDefence(static_cast<int>(city->slots.size())),
+           "defence was recomputed");
         int d = side->diploScore - score0;
         ok(d >= 1 && d <= 5, "pillage costs 1d5 diplomatic score: " + std::to_string(d));
     }
@@ -1317,7 +1325,7 @@ static void testCityChoices(const std::string& scenario) {
         for (auto& l : got.lost) sum += l.second;
         eq(sum, want, "and what each was worth adds up to the gold");
         eq(side->gold, gold0 + want, "the gold was paid");
-        eq((int)city2->slots.size(), 1, "only the cheapest type is left");
+        eq(static_cast<int>(city2->slots.size()), 1, "only the cheapest type is left");
         ok(city2->slots[0] == cheapest, "and it is the cheapest one");
         eq(city2->defence, 1, "one type means defence 1");
         int d = side->diploScore - score0;
@@ -1325,7 +1333,7 @@ static void testCityChoices(const std::string& scenario) {
     }
     City* city3 = captured(1);
     if (city3) {
-        int before = (int)game::sideCities(g, *side).size();
+        int before = static_cast<int>(game::sideCities(g, *side).size());
         City* other = nullptr;
         for (auto& c : g.map->cities)
             if (!other && c.ownerIndex == side->index && &c != city3) other = &c;
@@ -1333,9 +1341,10 @@ static void testCityChoices(const std::string& scenario) {
         int score0 = side->diploScore;
         game::raze(g, *side, *city3, {});
         eq(city3->ownerIndex, NONE, "a razed city is neutral");
-        eq((int)city3->slots.size(), 0, "a razed city produces nothing");
+        eq(static_cast<int>(city3->slots.size()), 0, "a razed city produces nothing");
         eq(city3->income, 0, "a razed city earns nothing");
-        eq((int)game::sideCities(g, *side).size(), before - 1, "the side no longer owns it");
+        eq(static_cast<int>(game::sideCities(g, *side).size()), before - 1,
+           "the side no longer owns it");
         if (other) eq(other->vectorTo, NONE, "vectoring to it was cancelled");
         int d = side->diploScore - score0;
         ok(d >= 11 && d <= 25, "raze costs 1d15+10 diplomatic score: " + std::to_string(d));
@@ -1363,7 +1372,7 @@ static void testHeroes(const std::string& scenario) {
     eq(offer->price, 0, "the first hero is free");
     eq(offer->city, side->capital, "the first hero appears at the capital");
     const auto& names = hero::names(g, *side);
-    eq((int)names.size(), 100, "a side has a hundred candidate heroes");
+    eq(static_cast<int>(names.size()), 100, "a side has a hundred candidate heroes");
     ok(!offer->name.empty(), "the offer carries a name");
     bool known = false;
     for (auto& n : names)
@@ -1381,24 +1390,25 @@ static void testHeroes(const std::string& scenario) {
     eq(h->strength, 5, "a new hero has strength 5");
     eq(h->maxMoves, 14, "a new hero has 14 movement");
     eq(h->moves, 14, "a new hero joins with its moves already full");
-    eq((int)allies.size(), 0, "the first hero brings no allies");
-    eq((int)h->items.size(), 1, "the first hero carries one item");
+    eq(static_cast<int>(allies.size()), 0, "the first hero brings no allies");
+    eq(static_cast<int>(h->items.size()), 1, "the first hero carries one item");
     eq(h->items[0]->type, rules::ITEM_STANDARD, "and it is the side's standard");
     h->experience = 15;
     auto promoted = hero::checkPromotions(g, *side);
-    eq((int)promoted.size(), 1, "15 experience promotes a Hero");
+    eq(static_cast<int>(promoted.size()), 1, "15 experience promotes a Hero");
     eq(h->level, 2, "the hero is now level 2");
     eq(h->title, "Cavalier", "level 2 is a Cavalier");
     eq(h->strength, 6, "promotion adds a strength");
     eq(h->maxMoves, 16, "promotion adds 2 movement");
-    eq((int)hero::checkPromotions(g, *side).size(), 0,
+    eq(static_cast<int>(hero::checkPromotions(g, *side).size()), 0,
        "no second promotion on the same experience");
     h->experience = 60;
     hero::checkPromotions(g, *side);
     eq(h->level, 3, "60 experience promotes one step only");
     hero::checkPromotions(g, *side);
     eq(h->title, "Paladin", "the next check reaches Paladin");
-    eq((int)hero::checkPromotions(g, *side).size(), 0, "a Paladin is not promoted again");
+    eq(static_cast<int>(hero::checkPromotions(g, *side).size()), 0,
+       "a Paladin is not promoted again");
     hero::addExperience(g, h, 99);
     eq(h->experience, rules::MAX_HERO_XP, "experience is capped at 60");
     auto [type, n] = hero::allies(g);
@@ -1438,12 +1448,12 @@ static void testHeroes(const std::string& scenario) {
                 dy = y;
             }
     auto dropped = hero::dropItems(g, &carrier, dx, dy);
-    eq((int)dropped.size(), 1, "the item was dropped");
+    eq(static_cast<int>(dropped.size()), 1, "the item was dropped");
     if (!dropped.empty()) {
         eq(dropped[0]->status, 1, "a dropped item lies on the ground");
         eq(dropped[0]->x, dx, "it lies where the hero fell");
     }
-    eq((int)carrier.items.size(), 0, "the dead hero carries nothing");
+    eq(static_cast<int>(carrier.items.size()), 0, "the dead hero carries nothing");
     int wx = NONE, wy = NONE;
     for (int y = 0; y < g.map->height && wx == NONE; y++)
         for (int x = 0; x < g.map->width; x++)
@@ -1461,7 +1471,8 @@ static void testHeroes(const std::string& scenario) {
         drowner.type = armytype::HERO;
         drowner.owner = side->index;
         drowner.items = {&ice};
-        eq((int)hero::dropItems(g, &drowner, wx, wy).size(), 0, "nothing is dropped in water");
+        eq(static_cast<int>(hero::dropItems(g, &drowner, wx, wy).size()), 0,
+           "nothing is dropped in water");
         eq(ice.status, 0, "an item lost at sea is gone for good");
     }
 }
@@ -1512,7 +1523,8 @@ static void testAIGame(const std::string& scenario, int turns) {
     Game& g = *gp;
     Side* side = game::begin(g);
     std::map<int, int> ownedAtStart;
-    for (Side* s : g.sides) ownedAtStart[s->index] = (int)game::sideCities(g, *s).size();
+    for (Side* s : g.sides)
+        ownedAtStart[s->index] = static_cast<int>(game::sideCities(g, *s).size());
     while (side && g.turn <= turns) {
         playAI(g, *side);
         side = endTurn(g);
@@ -1546,15 +1558,15 @@ static void testAIGame(const std::string& scenario, int turns) {
     bool moved = false;
     int captures = 0;
     for (Side* s : g.sides) {
-        int now = (int)game::sideCities(g, *s).size();
+        int now = static_cast<int>(game::sideCities(g, *s).size());
         if (now != ownedAtStart[s->index]) moved = true;
         captures += std::max(0, now - ownedAtStart[s->index]);
     }
     ok(moved, "cities changed hands over " + std::to_string(turns) + " turns");
     ok(captures > 0, fmt("the computer players took %d cities", captures));
     ok(g.armies.size() > g.map->cities.size(),
-       fmt("armies were built: %d from %d cities", (int)g.armies.size(),
-           (int)g.map->cities.size()));
+       fmt("armies were built: %d from %d cities", static_cast<int>(g.armies.size()),
+           static_cast<int>(g.map->cities.size())));
 }
 
 static void testSlots() {
@@ -1593,7 +1605,7 @@ static void testSlots() {
         eq(s.mark[1], slots::CROSS, "the others are crossed");
         eq(slots::moves(s), 11, "and Group Move is that army's own");
         eq(slots::grouped(s), false, "so the Grp button is not green yet");
-        eq((int)slots::selected(s).size(), 1, "one army moves");
+        eq(static_cast<int>(slots::selected(s).size()), 1, "one army moves");
     }
     {
         auto st = stack(3);
@@ -1612,11 +1624,11 @@ static void testSlots() {
         auto st = stack(3);
         auto s = slots::build(st->g, st->a, 0);
         slots::all(s, st->g);
-        eq((int)slots::selected(s).size(), 3, "Grp takes the whole stack");
+        eq(static_cast<int>(slots::selected(s).size()), 3, "Grp takes the whole stack");
         eq(slots::grouped(s), true, "and turns the button green");
         eq(s.mark[1], slots::NOMARK, "one mark for the one group");
         slots::single(s, st->g);
-        eq((int)slots::selected(s).size(), 1, "and Grp again breaks it up");
+        eq(static_cast<int>(slots::selected(s).size()), 1, "and Grp again breaks it up");
         eq(slots::grouped(s), false, "leaving the button red");
         slots::pickGroup(s, st->g, 2);
         ok(s.inGroup[2] && !s.inGroup[0], "a mark picks out that group alone");
@@ -1641,7 +1653,8 @@ static void testSlots() {
         ok(id != slots::UNGROUPED && id == a[1]->group && id == a[2]->group,
            "a group of more than one is written back into its armies");
         auto again = slots::build(g, a, 0);
-        eq((int)slots::selected(again).size(), 3, "so picking it up again takes the whole group");
+        eq(static_cast<int>(slots::selected(again).size()), 3,
+           "so picking it up again takes the whole group");
         eq(slots::grouped(again), true, "with the Grp button still green");
         eq(again.group[0], again.group[2], "and all three in one group in the bar");
         slots::commit(again, g);
@@ -1649,13 +1662,14 @@ static void testSlots() {
         slots::toggle(again, g, 2);
         slots::commit(again, g);
         auto third = slots::build(g, a, 0);
-        eq((int)slots::selected(third).size(), 2, "dropping one out leaves the rest grouped");
+        eq(static_cast<int>(slots::selected(third).size()), 2,
+           "dropping one out leaves the rest grouped");
         eq(a[2]->group, slots::UNGROUPED, "and the one dropped out is on its own");
         eq(a[0]->group, id, "while the group keeps its id");
         slots::single(third, g);
         slots::commit(third, g);
         eq(a[0]->group, slots::UNGROUPED, "and breaking it up clears the grouping");
-        eq((int)slots::selected(slots::build(g, a, 0)).size(), 1,
+        eq(static_cast<int>(slots::selected(slots::build(g, a, 0)).size()), 1,
            "so a click picks up one army again");
     }
     {
@@ -1679,14 +1693,14 @@ static void testScreenLayout() {
     eq(ui.bitmaps[0], "startup.pck", "bitmap 0 is the startup screen");
     eq(ui.bitmaps[4], "button.pck", "bitmap 4 is the button sheet");
     eq(ui.bitmaps[78], "movebar7.pck", "there are 79 bitmaps, 0 to 78");
-    eq((int)ui.joins.size(), 36, "JOIN.DAT names 36 dialogs");
+    eq(static_cast<int>(ui.joins.size()), 36, "JOIN.DAT names 36 dialogs");
     eq(ui.joins[0].button, 0, "dialog 0 uses button group 0");
     eq(ui.joins[0].area, 2, "dialog 0 uses area screen 2");
     eq(ui.joins[9].button, 11, "dialog 9 takes button group 11");
     eq(ui.joins[12].button, 9, "and dialog 12 takes group 9");
     auto d = uidata::dialog(ui, uidata::MAIN_SCREEN);
-    eq((int)d.controls.size(), 43, "the main screen has 43 controls");
-    eq((int)d.regions.size(), 6, "and 6 regions");
+    eq(static_cast<int>(d.controls.size()), 43, "the main screen has 43 controls");
+    eq(static_cast<int>(d.regions.size()), 6, "and 6 regions");
     std::map<int, std::array<int, 4>> want = {{1, {400, 30, 224, 312}},
                                               {2, {16, 30, 360, 360}},
                                               {3, {0, 0, 640, 18}},
@@ -1899,7 +1913,7 @@ static void testSites(const std::string& scenario) {
         else if (s.content != site::TEMPLE)
             ok(s.guardian >= 1 && s.guardian <= 9, "a ruin has a guardian");
     }
-    eq(rich, (int)g.map->sites.size() * 3 / 10, "three in ten sites are rich");
+    eq(rich, static_cast<int>(g.map->sites.size()) * 3 / 10, "three in ten sites are rich");
     std::set<int> placed;
     for (auto& s : g.map->sites) {
         if (s.content == site::ITEM) {
@@ -2163,12 +2177,13 @@ static void testDiplomacy() {
     }
     auto g3p = newGame("ERYTHEA", seed(63));
     Game& g3 = *g3p;
-    for (size_t i = 0; i < g3.sides.size(); i++) g3.sides[i]->diploScore = (int)(i + 1) * 10;
+    for (size_t i = 0; i < g3.sides.size(); i++)
+        g3.sides[i]->diploScore = static_cast<int>(i + 1) * 10;
     auto r = d::ratings(g3);
     eq(r[g3.sides[0]->index], "Statesman", "the lowest score is the Statesman");
     eq(r[g3.sides.back()->index], "Running Dog", "the highest is the Running Dog");
     const auto& ranks = d::ratingRanks(2);
-    eq((int)ranks.size(), 2, "two sides take two titles");
+    eq(static_cast<int>(ranks.size()), 2, "two sides take two titles");
     eq(std::string(d::TITLES[ranks[0] - 1]), "Statesman", "best of two");
     eq(std::string(d::TITLES[ranks[1] - 1]), "Running Dog", "worst of two");
     auto g4p = newGame("ERYTHEA", seedWith(64, {{"diplomacy", 1}}));
@@ -2237,9 +2252,9 @@ static void testDiplomacy() {
     for (int i = 0; i < 8; i++)
         strike.push_back(addArmy(g4, ruin->x - 1, ruin->y, side->index, 11, 9, 20, 20));
     auto fight = game::resolveAttack(g4, strike, ruin->x, ruin->y);
-    eq(fight.lines.city, (City*)nullptr, "a fight on ruins is not for a city");
-    eq((int)fight.lines.defenders.size(), 1, "and only the tile fought for defends");
-    eq(fight.captured, (City*)nullptr, "nothing is captured");
+    eq(fight.lines.city, static_cast<City*>(nullptr), "a fight on ruins is not for a city");
+    eq(static_cast<int>(fight.lines.defenders.size()), 1, "and only the tile fought for defends");
+    eq(fight.captured, static_cast<City*>(nullptr), "nothing is captured");
     eq(ruin->ownerIndex, NONE, "the ruins belong to nobody");
 }
 
@@ -2281,7 +2296,7 @@ static void testQuests() {
     eq(counts[0], 1, "type 0 has one slot");
     eq(counts[4], 2, "type 4 has two");
     eq(counts[6], 2, "type 6 has two");
-    eq((int)quest::TYPE_TABLE.size(), 10, "the table is rolled with 1d10");
+    eq(static_cast<int>(quest::TYPE_TABLE.size()), 10, "the table is rolled with 1d10");
     auto C = [&](int i) { return &g.map->cities[i - 1]; };  // the Lua's cities[i]
     quest::Event ev;
     side->quest = cityQuest(quest::OCCUPY, h, C(2));
@@ -2461,7 +2476,7 @@ static void testEndGame() {
     ok(!game::checkEnd(*g2).over, "sides still in the game are players, cities or not");
     auto r2 = game::endRound(*g2);
     ok(r2.over, "with no cities owned the game is over at the round's end");
-    eq(r2.winner, (Side*)nullptr, "and nobody won");
+    eq(r2.winner, static_cast<Side*>(nullptr), "and nobody won");
     ok(contains(r2.message, "No more players"), "with the right message");
     eq(r2.fallen.size(), g2->sides.size(), "every side fell");
 
@@ -2481,7 +2496,7 @@ static void testEndGame() {
     ok(doomed->alive, "but it is not out before the round's end");
     while (g6.turn == 1) endTurn(g6);
     ok(!doomed->alive, "the round's end puts it out");
-    eq((int)game::sideArmies(g6, *doomed).size(), 0, "with all its armies");
+    eq(static_cast<int>(game::sideArmies(g6, *doomed).size()), 0, "with all its armies");
     eq(doomed->gold, 0, "and no gold");
     eq(diplomacy::state(g6, other->index, doomed->index), diplomacy::INTERMEDIATE,
        "others stand uneasy with it");
@@ -2514,7 +2529,7 @@ static void testEndGame() {
     for (Side* s : g3.sides) s->computer = false;
     Side* me = g3.sides[0];
     for (size_t i = 1; i < g3.sides.size(); i++) g3.sides[i]->alive = false;
-    int standing = (int)g3.map->cities.size(), given = 0;
+    int standing = static_cast<int>(g3.map->cities.size()), given = 0;
     for (auto& c : g3.map->cities) c.ownerIndex = NONE;
     for (auto& c : g3.map->cities)
         if (given < standing / 2) {
@@ -2539,7 +2554,7 @@ static void testEndGame() {
     for (size_t i = 1; i < g4.sides.size(); i++) g4.sides[i]->computer = true;
     for (auto& c : g4.map->cities) c.ownerIndex = NONE;
     Side* rival = g4.sides[1];
-    int n = (int)g4.map->cities.size();
+    int n = static_cast<int>(g4.map->cities.size());
     for (int i = 0; i < n; i++) {
         City& c = g4.map->cities[i];
         if (i + 1 <= n * 3 / 4)
@@ -2862,7 +2877,7 @@ static void testMapEval() {
         auto fair = scn::loadFromFiles(DATA + "/RANDOM", "RANDOM", fairFiles);
         std::set<City*> capitals;
         for (auto& sd : fair->sides) capitals.insert(sd.capital);
-        eq((int)capitals.size(), 8, "fair capitals: eight, one a side");
+        eq(static_cast<int>(capitals.size()), 8, "fair capitals: eight, one a side");
         auto fe = mapeval::evaluate(*fair, "fair#11");
         eq(fe.count("capital-gap"), 0, "fair capitals are never side by side");
         ok(fe.metric("remoteCityFrac") <= 0.05,
@@ -2885,7 +2900,7 @@ static void testMapEval() {
     auto files = randommap::generateNow(o);
     auto made = scn::loadFromFiles(DATA + "/RANDOM", "RANDOM", files);
     auto me = mapeval::evaluate(*made, "classic#1");
-    eq((int)me.metric("cities"), 80, "a generated world is evaluated");
+    eq(static_cast<int>(me.metric("cities")), 80, "a generated world is evaluated");
     ok(mapeval::toJson(me).dump().find("\"metrics\"") != std::string::npos,
        "the evaluation writes as JSON");
     // the scenario generator (warlords/scengen): every shape, a few seeds, and
@@ -2914,7 +2929,7 @@ static void testMapEval() {
                     break;
                 }
             ok(e.passed(), e.name + " keeps every hard rule" + first);
-            eq((int)e.metric("cities"), 80, e.name + " has the 80 cities asked for");
+            eq(static_cast<int>(e.metric("cities")), 80, e.name + " has the 80 cities asked for");
             ok(e.metric("cityRoadCoverage") >= 0.74,
                e.name + " puts its cities on roads, as the designers do");
             eq(world->options.militaryAdvisor, 1, e.name + " reads as an ordinary scenario");
@@ -2924,12 +2939,12 @@ static void testMapEval() {
     // Scenario's list draws them in, measured from the font's own metrics
     {
         std::string fin = *readFile(DATA + "/CHANCE17.FIN");
-        int count = (uint8_t)fin[0], firstChar = (uint8_t)fin[1];
+        int count = static_cast<uint8_t>(fin[0]), firstChar = static_cast<uint8_t>(fin[1]);
         auto width = [&](const std::string& t) {
             int n = 0;
             for (unsigned char c : t)
                 if (c >= firstChar && c < firstChar + count)
-                    n += (uint8_t)fin[11 + count + (c - firstChar)];
+                    n += static_cast<uint8_t>(fin[11 + count + (c - firstChar)]);
             return n;
         };
         int widest = 0;
@@ -2967,7 +2982,8 @@ static void testMapEval() {
         eq(*readFile((tmp / "DATA" / "SCENGEN.LST").string()), std::string("GEN7\nNOINFO\n"),
            "once each, sorted");
         auto list = scenarios::list(tmp.string());
-        eq((int)list.size(), 7, "SCENARIO.DAT's six and the one listed world with a NAME.INF");
+        eq(static_cast<int>(list.size()), 7,
+           "SCENARIO.DAT's six and the one listed world with a NAME.INF");
         eq(list[3].dir, std::string("Erythea"), "SCENARIO.DAT's own order first");
         eq(list.back().name, std::string("Continents 7"),
            "the generated world after them, by its NAME.INF");
@@ -3011,19 +3027,21 @@ static void testRandomMap() {
         ok(a.count(ext) && !a[ext].empty(), std::string("the generator writes RANDOM.") + ext);
         ok(a[ext] == b[ext], std::string("the same dice make the same RANDOM.") + ext);
     }
-    eq((int)a["SCN"].size(), 12001, "RANDOM.SCN is Erythea's .SCN rewritten (4fef:1001)");
-    eq((int)a["MAP"].size(), 2 * 112 * 156, "RANDOM.MAP is a word a tile");
+    eq(static_cast<int>(a["SCN"].size()), 12001,
+       "RANDOM.SCN is Erythea's .SCN rewritten (4fef:1001)");
+    eq(static_cast<int>(a["MAP"].size()), 2 * 112 * 156, "RANDOM.MAP is a word a tile");
     randommap::install(DATA, a);
     auto map = scn::load(DATA + "/RANDOM", "RANDOM");
-    eq((int)map->cities.size(), 80, "Cities at its third place gives RANDOM.DAT's 80 (4bed:0000)");
-    eq((int)map->sites.size(), 40, "forty sites (513d:003a)");
+    eq(static_cast<int>(map->cities.size()), 80,
+       "Cities at its third place gives RANDOM.DAT's 80 (4bed:0000)");
+    eq(static_cast<int>(map->sites.size()), 40, "forty sites (513d:003a)");
     ok(map->signs.size() >= 41 && map->signs.size() <= 70, "1d30+40 signposts (4fef:113d)");
     std::set<City*> capitals;
     for (auto& sd : map->sides) {
         ok(sd.capital && sd.capital->owner == &sd, sd.name + " holds its capital (513d:0689)");
         capitals.insert(sd.capital);
     }
-    eq((int)capitals.size(), 8, "eight capitals, one a side");
+    eq(static_cast<int>(capitals.size()), 8, "eight capitals, one a side");
     for (auto& c : map->cities) {
         eq(map->terrainType[scn::tileAt(*map, c.x, c.y) % 256], 10,
            c.name + " stands on a castle tile");
@@ -3053,10 +3071,10 @@ static void testRandomMap() {
     }
     ok(allies > 0, "with allies on, 2d3 cities may make them (513d:1b3f)");
     randommap::install(DATA, make(3, {{0, 0, 6, 0}}, false));
-    eq((int)scn::load(DATA + "/RANDOM", "RANDOM")->cities.size(), 100,
+    eq(static_cast<int>(scn::load(DATA + "/RANDOM", "RANDOM")->cities.size()), 100,
        "Cities at its last place: 80 + 20");
     randommap::install(DATA, make(3, {{6, 6, 0, 6}}, false));
-    eq((int)scn::load(DATA + "/RANDOM", "RANDOM")->cities.size(), 70,
+    eq(static_cast<int>(scn::load(DATA + "/RANDOM", "RANDOM")->cities.size()), 70,
        "Cities at its first place: 80 - 10");
     Rng r5(5);
     auto rolled = randommap::settle({{7, 7, 7, 7}}, r5);
@@ -3113,7 +3131,7 @@ static void testComputerPlayers() {
     eq(aicard::describe(DATA, 2, 1)->first, "Attila the Hun",
        "a card's name is the first line of its .DSC");
     auto lords = aicard::deck(DATA, 1);
-    eq((int)lords.size(), 9, "the setup screen lists a Lord's nine characters");
+    eq(static_cast<int>(lords.size()), 9, "the setup screen lists a Lord's nine characters");
     eq(lords[0], "Standard Lord", "the Standard one first");
     eq(lords[2], "Roland the Rabid", "each by its .DSC's first line");
     {
@@ -3203,7 +3221,7 @@ static void testComputerPlayers() {
     auto sel = core::select(g, {army});
     eq(core::odds(g, sel, 0, 0), 100, "nothing to fight is a sure thing");
     auto [nb, nd] = core::neighbours(g, g.map->cities[0]);
-    eq((int)nb.size(), 6, "a city has six neighbours");
+    eq(static_cast<int>(nb.size()), 6, "a city has six neighbours");
     for (int v : nd) ok(v < 100, "each within reach");
 
     eq(groups::pickEnemy(g, warlord), NONE, "no enemy is picked in the first turns");
@@ -3433,7 +3451,7 @@ static void testVerified() {
         g.remove(third);
         Army* a = mk(g, 0, 0, 0, 11);
         eq(a->slot, 2, "a new army takes the lowest free slot");
-        eq((int)(std::find(g.armies.begin(), g.armies.end(), a) - g.armies.begin()), 2,
+        eq(static_cast<int>(std::find(g.armies.begin(), g.armies.end(), a) - g.armies.begin()), 2,
            "and stands in slot order");
         eq(g.armies.size(), n, "the table is as long as before");
         Army* b = mk(g, 0, 0, 0, 11);
@@ -3485,7 +3503,8 @@ static void testVerified() {
         side->productionDue = true;
         game::humanProduction(g, *side);
         eq(g.armies.size(), n - 7, "set again, it builds");
-        eq((int)game::armiesAt(g, city->x + 1, city->y + 1).size(), 1, "on the tile with room");
+        eq(static_cast<int>(game::armiesAt(g, city->x + 1, city->y + 1).size()), 1,
+           "on the tile with room");
         eq(city->countdown, city->slots[0].time, "and starts the next (6f8c:06bd)");
         Army* built = game::armiesAt(g, city->x + 1, city->y + 1)[0];
         eq(built->moves, built->maxMoves, "a new army has its full move (6f8c:0dd7)");
@@ -3818,7 +3837,7 @@ static void testModernAi() {
             ok(!p.name.empty() && !p.archetype.empty() && !p.motto.empty(),
                "card profile has name, archetype, motto");
             for (float t : p.traits) {
-                ok(t >= -1.0f && t <= 1.0f, "trait in [-1, 1]");
+                ok(t >= -1.0F && t <= 1.0F, "trait in [-1, 1]");
             }
         }
     }
@@ -3898,7 +3917,7 @@ static void testModernAi() {
             std::vector<Army*> testStack = {myArmies[0]};
             auto est = ai::belief::estimateCombat(g, s0, testStack, b.visibleCities[0]->x,
                                                   b.visibleCities[0]->y);
-            ok(est.winProb >= 0.0f && est.winProb <= 1.0f,
+            ok(est.winProb >= 0.0F && est.winProb <= 1.0F,
                "estimateCombat returns probability in [0, 1]");
         }
         eq(g.rng.state, rngBefore, "estimateCombat never mutates Game::rng");
@@ -3914,11 +3933,11 @@ static void testModernAi() {
         ai::belief::update(g, s0);
         auto ctx = ai::ml::buildContext(g, s0);
         float v = net.evaluateValue(ctx, ai::ml::buildCriticFeatures(g, s0));
-        ok(std::isfinite(v) && std::abs(v) < 5.0f,
+        ok(std::isfinite(v) && std::abs(v) < 5.0F,
            "linear value head gives a finite, small estimate at random init");
 
         auto flat1 = net.flatten();
-        eq((int)flat1.size(), ai::ml::PolicyNetwork::TOTAL_PARAMS,
+        eq(static_cast<int>(flat1.size()), ai::ml::PolicyNetwork::TOTAL_PARAMS,
            "flattened parameter count matches TOTAL_PARAMS");
         std::filesystem::path tmpPath =
                 std::filesystem::temp_directory_path() / "w2_test_weights.json";
@@ -3927,11 +3946,11 @@ static void testModernAi() {
         ok(net2.loadJson(tmpPath), "loaded PolicyNetwork JSON");
         std::filesystem::remove(tmpPath);
         auto flat2 = net2.flatten();
-        float maxDiff = 0.0f;
+        float maxDiff = 0.0F;
         for (size_t i = 0; i < flat1.size(); i++) {
             maxDiff = std::max(maxDiff, std::abs(flat1[i] - flat2[i]));
         }
-        ok(maxDiff < 1e-4f, "PolicyNetwork JSON roundtrip preserves weights");
+        ok(maxDiff < 1e-4F, "PolicyNetwork JSON roundtrip preserves weights");
     }
 
     // 6. Multi-turn game execution with 100% Learnable AI on TUTORIA
@@ -3968,9 +3987,9 @@ static void testModernAi() {
     // frontiers
     {
         ai::ml::PolicyNetwork freshNet;
-        float maxSkip = 0.0f;
+        float maxSkip = 0.0F;
         for (float w : freshNet.missionNet.wSkip) maxSkip = std::max(maxSkip, std::abs(w));
-        ok(maxSkip <= 0.25f, "PolicyNetwork starts tabula rasa with zero hand-coded skip priors");
+        ok(maxSkip <= 0.25F, "PolicyNetwork starts tabula rasa with zero hand-coded skip priors");
 
         auto gp =
                 newGame("ERYTHEA",
@@ -4013,15 +4032,15 @@ static void testModernAi() {
         // With no rival cities or stacks visible to side 7, cityNearestEnemyDist should not treat
         // fog/neutrals as enemies
         const SideBelief& b7 = ai::belief::ensure(s7);
-        if (s7.capital && s7.capital->index < (int)b7.cityNearestEnemyDist.size()) {
-            ok(b7.cityNearestEnemyDist[s7.capital->index] > 50.0f,
+        if (s7.capital && s7.capital->index < static_cast<int>(b7.cityNearestEnemyDist.size())) {
+            ok(b7.cityNearestEnemyDist[s7.capital->index] > 50.0F,
                "cityNearestEnemyDist ignores neutral cities and fog frontiers when no rivals are "
                "visible");
         }
 
         // Reveal only side 7's home island land tiles (x < 27, y < 32) while surrounding sea
         // remains unseen
-        g.explored[7].assign(g.map->width * g.map->height, false);
+        g.explored[7].assign(static_cast<size_t>(g.map->width) * g.map->height, false);
         for (int y = 0; y < 32; y++) {
             for (int x = 0; x < 27; x++) {
                 int terr = scn::terrainAt(*g.map, x, y);
@@ -4042,9 +4061,9 @@ static void testModernAi() {
         // Analytical backpropagation finite-difference gradient check on ResidualMLP
         ai::ml::MissionInVec testIn{};
         for (size_t i = 0; i < testIn.size(); i++) {
-            testIn[i] = std::sin((float)(i + 1) * 0.37f);
+            testIn[i] = std::sin(static_cast<float>(i + 1) * 0.37F);
         }
-        std::array<float, ai::ml::MISSION_OUT_DIM> dOut = {0.75f, -0.45f};
+        std::array<float, ai::ml::MISSION_OUT_DIM> dOut = {0.75F, -0.45F};
         ai::ml::PolicyNetwork::MissionNet gradAnalytical{};
         gradAnalytical.zero();
         freshNet.missionNet.backward(testIn, dOut, gradAnalytical);
@@ -4053,8 +4072,8 @@ static void testModernAi() {
         std::vector<float> baseParams;
         freshNet.missionNet.toFlat(baseParams);
 
-        float maxGradErr = 0.0f;
-        constexpr float eps = 1e-3f;
+        float maxGradErr = 0.0F;
+        constexpr float eps = 1e-3F;
         for (size_t idx = 0; idx < baseParams.size(); idx += 17) {
             std::vector<float> plusP = baseParams;
             std::vector<float> minusP = baseParams;
@@ -4067,10 +4086,10 @@ static void testModernAi() {
             auto yMinus = netMinus.forward(testIn);
             float lossPlus = dOut[0] * yPlus[0] + dOut[1] * yPlus[1];
             float lossMinus = dOut[0] * yMinus[0] + dOut[1] * yMinus[1];
-            float numGrad = (lossPlus - lossMinus) / (2.0f * eps);
+            float numGrad = (lossPlus - lossMinus) / (2.0F * eps);
             maxGradErr = std::max(maxGradErr, std::abs(numGrad - flatGrad[idx]));
         }
-        ok(maxGradErr < 1e-3f,
+        ok(maxGradErr < 1e-3F,
            "ResidualMLP analytical backward matches finite-difference gradients");
 
         // Hidden-map potential shaping strictly rewards revealing unseen castles, while capture
@@ -4094,10 +4113,10 @@ static void testModernAi() {
 
             float discoveryGain = phiRevealed - phiHidden;
             float captureGain = phiCaptured - phiRevealed;
-            ok(discoveryGain > 0.0f,
+            ok(discoveryGain > 0.0F,
                "Hidden-map potential increases monotonically when fog exploration uncovers a "
                "castle");
-            ok(captureGain > 5.0f * discoveryGain,
+            ok(captureGain > 5.0F * discoveryGain,
                "Castle capture potential gain strictly dominates mere reconnaissance discovery");
         }
 
@@ -4117,12 +4136,12 @@ static void testModernAi() {
 
         // Multiplicity-balanced sampling gives equal family probability to 1 Hold vs 40 Fog options
         // at zero utility
-        std::vector<float> zeroLogits(41, 0.0f);
-        std::vector<float> testLogMult(41, std::log(40.0f));
-        testLogMult[0] = 0.0f;
+        std::vector<float> zeroLogits(41, 0.0F);
+        std::vector<float> testLogMult(41, std::log(40.0F));
+        testLogMult[0] = 0.0F;
         ai::ml::RolloutSampler multSampler;
-        multSampler.rngState = 12345u;
-        multSampler.temperature = 1.0f;
+        multSampler.rngState = 12345U;
+        multSampler.temperature = 1.0F;
         int holdPicks = 0;
         for (int trial = 0; trial < 2000; trial++) {
             if (ai::ml::selectFromLogits(zeroLogits, &multSampler, nullptr, &testLogMult) == 0) {
@@ -4140,10 +4159,10 @@ static void testModernAi() {
            "greedy selectFromLogits applies the multiplicity prior (argmax of u - logMult)");
         std::vector<float> fogFavoured = zeroLogits;
         fogFavoured[7] =
-                std::log(40.0f) + 0.1f;  // one fog option slightly above Hold in policy logits
+                std::log(40.0F) + 0.1F;  // one fog option slightly above Hold in policy logits
         eq(ai::ml::selectFromLogits(fogFavoured, nullptr, nullptr, &testLogMult), 7,
            "greedy selectFromLogits picks a fog option once its u - logMult exceeds Hold's");
-        multSampler.temperature = 0.35f;
+        multSampler.temperature = 0.35F;
         int fogSevenPicks = 0;
         for (int trial = 0; trial < 2000; trial++) {
             if (ai::ml::selectFromLogits(fogFavoured, &multSampler, nullptr, &testLogMult) == 7)
@@ -4158,13 +4177,13 @@ static void testModernAi() {
            "the sampled mode at low temperature agrees with the greedy choice");
 
         // Binary decisions: greedy returns the mode, sampling follows sigmoid(logit / T)
-        eq(ai::ml::selectBinary(0.3f, nullptr), true, "greedy selectBinary is logit > 0");
-        eq(ai::ml::selectBinary(-0.3f, nullptr), false,
+        eq(ai::ml::selectBinary(0.3F, nullptr), true, "greedy selectBinary is logit > 0");
+        eq(ai::ml::selectBinary(-0.3F, nullptr), false,
            "greedy selectBinary is false for logit < 0");
-        multSampler.temperature = 1.0f;
+        multSampler.temperature = 1.0F;
         int yes = 0;
         for (int trial = 0; trial < 2000; trial++)
-            yes += ai::ml::selectBinary(std::log(3.0f), &multSampler) ? 1 : 0;
+            yes += ai::ml::selectBinary(std::log(3.0F), &multSampler) ? 1 : 0;
         ok(yes >= 1400 && yes <= 1600,
            "sampled selectBinary with logit ln 3 says yes about 75% of the time");
 
@@ -4276,7 +4295,8 @@ static void testModernAi() {
             }
             auto gpSmall = game::newGame(DATA, "RANDOM", so);
             Game& gs = *gpSmall;
-            eq((int)gs.sides.size(), 2, "cropped 1v1 random map keeps exactly 2 active sides");
+            eq(static_cast<int>(gs.sides.size()), 2,
+               "cropped 1v1 random map keeps exactly 2 active sides");
             ok(gs.map->cities.size() >= 2 && gs.map->cities.size() < 45,
                "cropped 1v1 random map trims city count");
             bool citiesInBox = true;
@@ -4315,7 +4335,8 @@ static void testModernAi() {
             ml::PolicyNetwork net;
             ok(net.loadJson("cpp/ai_weights.json"), "installed cpp/ai_weights.json loads cleanly");
             std::vector<float> flat = net.flatten();
-            eq((int)flat.size(), 9700, "flattened parameter vector matches TOTAL_PARAMS");
+            eq(static_cast<int>(flat.size()), 9700,
+               "flattened parameter vector matches TOTAL_PARAMS");
 
             // Legacy flat vectors synthesised from a random v6 network by dropping
             // the input columns an older format did not have
@@ -4350,28 +4371,29 @@ static void testModernAi() {
             narrow(src.valueNet, criticDropped(ml::VALUE_IN_DIM), v4);
             size_t v3Size = v4.size();
             narrow(src.stackValueNet, criticDropped(ml::STACK_VALUE_IN_DIM), v4);
-            eq((int)v5.size(), 8866, "synthesised v5 vector has 8866 parameters");
-            eq((int)v4.size(), 8066, "synthesised v4 vector has 8066 parameters");
-            eq((int)v3Size, 6729, "synthesised v3 prefix has 6729 parameters");
+            eq(static_cast<int>(v5.size()), 8866, "synthesised v5 vector has 8866 parameters");
+            eq(static_cast<int>(v4.size()), 8066, "synthesised v4 vector has 8066 parameters");
+            eq(static_cast<int>(v3Size), 6729, "synthesised v3 prefix has 6729 parameters");
 
             // Inputs with the columns a format lacked set to zero: the migrated
             // network must compute exactly what the source network computes
             ml::ContextVec cx{};
             for (int i = 0; i < ml::CONTEXT_DIM; i++)
-                cx[i] = addedCtx(i) ? 0.0f : 0.1f * (float)(i % 7) - 0.3f;
+                cx[i] = addedCtx(i) ? 0.0F : 0.1F * static_cast<float>(i % 7) - 0.3F;
             ml::CriticVec someCrit{}, zeroCrit{};
-            for (int i = 0; i < ml::CRITIC_DIM; i++) someCrit[i] = 0.05f * (float)(i + 1);
+            for (int i = 0; i < ml::CRITIC_DIM; i++)
+                someCrit[i] = 0.05F * static_cast<float>(i + 1);
             ml::StackVec sv{};
-            sv[3] = 0.4f;
+            sv[3] = 0.4F;
             ml::TargetVec tv{};
-            tv[2] = 1.0f;
-            tv[10] = 0.6f;
+            tv[2] = 1.0F;
+            tv[10] = 0.6F;
             ml::EconVec ev{};
-            ev[1] = 1.0f;
-            ev[7] = 0.5f;
+            ev[1] = 1.0F;
+            ev[7] = 0.5F;
             ml::RivalVec rv{};
-            rv[0] = 0.3f;
-            auto close = [](float a, float b) { return std::abs(a - b) < 1e-5f; };
+            rv[0] = 0.3F;
+            auto close = [](float a, float b) { return std::abs(a - b) < 1e-5F; };
 
             ml::PolicyNetwork m5;
             m5.initRandomWeights(99);
@@ -4390,7 +4412,7 @@ static void testModernAi() {
                      src.evaluateStackValue(ml::packStackValueInput(cx, sv, someCrit))),
                "v5 StackValueNet migrates function-preserving");
             ml::ContextVec cxNew = cx;
-            cxNew[ml::LEGACY_GLOBAL_DIM] = 0.7f;
+            cxNew[ml::LEGACY_GLOBAL_DIM] = 0.7F;
             ok(close(m5.scoreMission(cxNew, sv, tv).utility, m5.scoreMission(cx, sv, tv).utility),
                "migrated network ignores the added context features until trained");
 
@@ -4405,22 +4427,22 @@ static void testModernAi() {
                "v4 StackValueNet ignores the privileged inputs until trained");
 
             // v3: no StackValueNet in the file -> zero-initialised
-            std::vector<float> v3(v4.begin(), v4.begin() + (long)v3Size);
+            std::vector<float> v3(v4.begin(), v4.begin() + static_cast<long>(v3Size));
             ml::PolicyNetwork m3;
             m3.initRandomWeights(99);
             m3.unflattenLegacy(v3);
             ml::StackValueInVec zeroSv{};
-            eq(m3.evaluateStackValue(zeroSv), 0.0f,
+            eq(m3.evaluateStackValue(zeroSv), 0.0F,
                "legacy v3 weights zero-initialize StackValueNet");
 
             // At T = 0.5 with equal utilities (0.0), a singleton family and a 20-item family
             // with logMult = ln(20) receive equal 50/50 probability mass (z_i = u_i/T - logMult_i)
-            std::vector<float> u(21, 0.0f);
-            std::vector<float> lm(21, std::log(20.0f));
-            lm[0] = 0.0f;
+            std::vector<float> u(21, 0.0F);
+            std::vector<float> lm(21, std::log(20.0F));
+            lm[0] = 0.0F;
             ai::ml::RolloutSampler samp;
-            samp.rngState = 1234567u;
-            samp.temperature = 0.5f;
+            samp.rngState = 1234567U;
+            samp.temperature = 0.5F;
             int picks0 = 0;
             for (int i = 0; i < 2000; i++) {
                 if (ai::ml::selectFromLogits(u, &samp, nullptr, &lm) == 0) picks0++;

@@ -60,7 +60,7 @@ const std::vector<std::pair<std::string, bool>>& names(Game& g, const Side& side
 std::pair<std::string, bool> rollName(Game& g, const Side& side) {
     const auto& list = names(g, side);
     int n = g.rng.dice(1, NAME_ROLL, 0);
-    if (n - 1 < (int)list.size()) return list[n - 1];
+    if (n - 1 < static_cast<int>(list.size())) return list[n - 1];
     if (list.empty()) return {"Hero", false};
     return list.back();
 }
@@ -90,14 +90,15 @@ std::shared_ptr<HeroOffer> offer(Game& g, Side& side) {
     auto [all, mine] = countHeroes(g, &side);
     if (all >= MAX_IN_GAME) return nullptr;
     auto cities = game::sideCities(g, side);
-    int limit = (int)cities.size() >= BIG_SIDE_CITIES ? MAX_PER_BIG_SIDE : MAX_PER_SIDE;
+    int limit =
+            static_cast<int>(cities.size()) >= BIG_SIDE_CITIES ? MAX_PER_BIG_SIDE : MAX_PER_SIDE;
     if (mine >= limit) return nullptr;
 
     int price = mine == 0 ? g.rng.dice(1, 400, 300) : g.rng.dice(1, 600, 1000);
     if (price > side.gold) return nullptr;
     if (g.rng.dice(1, 30, 0) >= 7) return nullptr;  // a 20% chance
 
-    City* city = g.rng.pick(cities, (City*)nullptr);
+    City* city = g.rng.pick(cities, static_cast<City*>(nullptr));
     if (!city) return nullptr;
     // a computer's hero appears where its AI wants one (ai_hero_city, 5db9:0919)
     if (side.computer) city = ai::heroCity(g, side, city);
@@ -110,8 +111,8 @@ const ArmyType* magicalType(Game& g) {
         const ArmyType* t = g.types.byId(id);
         if (t && t->bonus[48] != 0) ids.push_back(id);
     }
-    int n = g.rng.dice(1, (int)ids.size(), -1);
-    return g.types.byId(n >= 0 && n < (int)ids.size() ? ids[n] : 25);
+    int n = g.rng.dice(1, static_cast<int>(ids.size()), -1);
+    return g.types.byId(n >= 0 && n < static_cast<int>(ids.size()) ? ids[n] : 25);
 }
 
 std::pair<const ArmyType*, int> allies(Game& g) {
@@ -177,7 +178,7 @@ Recruited recruit(Game& g, Side& side, const HeroOffer& off) {
     h.experience = 0;
     if (off.first) {
         // Turn 1: the hero carries its side's standard, item number = side
-        if (side.index < (int)g.map->items.size()) {
+        if (side.index < static_cast<int>(g.map->items.size())) {
             Item* std = &g.map->items[side.index];
             std->status = 3;
             std->x = NONE;
@@ -208,7 +209,7 @@ void addExperience(Game& g, Army* h, int n) {
 
 std::vector<Promotion> checkPromotions(Game& g, const Side& side) {
     std::vector<Promotion> promoted;
-    for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
         if (a->type == armytype::HERO && a->owner == side.index) {
             int level = a->level ? a->level : 1;

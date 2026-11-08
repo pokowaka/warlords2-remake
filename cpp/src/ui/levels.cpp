@@ -36,7 +36,7 @@ struct Levels : kit::Modal {
         for (int k = 0; k < 4; k++) kit::centred(head, kit::text(S, k + 3), xs[k], 105);
         for (size_t i = 0; i < rows.size(); i++) {
             w2::Army* h = rows[i];
-            int y = 128 + 30 * (int)i;
+            int y = 128 + 30 * static_cast<int>(i);
             int level = h->level ? h->level : 1;
             kit::army(w2::armytype::HERO, side->index, 88, y, level == 4 ? side->index + 2 : 1);
             gfx::setColor(1, 1, 1);
@@ -48,7 +48,7 @@ struct Levels : kit::Modal {
             kit::centred(f, w2::fmt("%d", h->strength), 488, y + 6);
             kit::centred(f, w2::fmt("%d", h->maxMoves), 536, y + 6);
         }
-        for (int i = (int)rows.size(); i < 6; i++)
+        for (int i = static_cast<int>(rows.size()); i < 6; i++)
             kit::army(w2::NONE, side->index, 88, 128 + 30 * i, 1);
         kit::drawControls(v);
     }
@@ -68,7 +68,7 @@ void open() {
     d->view = &d->v;
     d->v.state[DONE] = w2::uidata::NORMAL;
     for (int level = 4; level >= 1; level--) {
-        for (int i = (int)G.g->armies.size() - 1; i >= 0; i--) {
+        for (int i = static_cast<int>(G.g->armies.size()) - 1; i >= 0; i--) {
             w2::Army* a = G.g->armies[i];
             if (a->hero() && a->owner == G.player->index && (a->level ? a->level : 1) == level)
                 d->rows.push_back(a);

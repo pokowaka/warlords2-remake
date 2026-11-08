@@ -35,7 +35,7 @@ struct Items : kit::Modal {
         // the kind's line carries over when an item is of no kind it knows
         int what = 0;
         for (size_t i = 0; i < list.size(); i++) {
-            int y = 90 + 20 * (int)i;
+            int y = 90 + 20 * static_cast<int>(i);
             auto w = WHAT.find(list[i]->type);
             if (w != WHAT.end()) what = w->second;
             kit::right(f, list[i]->name, 304, y);

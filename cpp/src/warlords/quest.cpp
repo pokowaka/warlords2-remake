@@ -28,7 +28,7 @@ const char* const TARGET_KIND[7] = {"army", "item", "armytype", "side", "city", 
 namespace {
 int dist(int x1, int y1, int x2, int y2) {
     double dx = x1 - x2, dy = y1 - y2;
-    return (int)std::floor(std::sqrt(dx * dx + dy * dy));
+    return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
 }
 
 // Pick a target for a quest of this type into q (quest_assign, 4976:0d7a);
@@ -38,12 +38,12 @@ bool pickTarget(Game& g, const Side& side, int type, Army* h, Quest& q, bool com
     if (type == SLAY_HERO) {
         // another side's hero, counted from the top of the army table down
         std::vector<Army*> heroes;
-        for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+        for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
             Army* a = g.armies[i];
             if (a->type == armytype::HERO && a->owner != side.index) heroes.push_back(a);
         }
         if (heroes.empty()) return false;
-        q.army = heroes[g.rng.dice(1, (int)heroes.size(), -1)];
+        q.army = heroes[g.rng.dice(1, static_cast<int>(heroes.size()), -1)];
         return true;
     } else if (type == RETRIEVE_ITEM) {
         // an ordinary item still hidden in a ruin, less than 50 (30) away each way
@@ -63,7 +63,7 @@ bool pickTarget(Game& g, const Side& side, int type, Army* h, Quest& q, bool com
             }
         }
         if (choices.empty()) return false;
-        auto& pick = choices[g.rng.dice(1, (int)choices.size(), -1)];
+        auto& pick = choices[g.rng.dice(1, static_cast<int>(choices.size()), -1)];
         // the priests show the side where it lies, uncovering round it as
         // 8611:1298 does: two tiles out when the searching stack flies (DS:1e9c)
         pick.second->revealed |= 1 << side.index;
@@ -74,7 +74,7 @@ bool pickTarget(Game& g, const Side& side, int type, Army* h, Quest& q, bool com
         // up to five magical types, one of which some other army on the map is
         for (int t = 0; t < 5; t++) {
             const ArmyType* want = hero::magicalType(g);
-            for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+            for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
                 Army* a = g.armies[i];
                 if (a->type == want->id && a->owner != side.index && !a->transit && a->x != NONE) {
                     q.armyType = want;
@@ -99,7 +99,7 @@ bool pickTarget(Game& g, const Side& side, int type, Army* h, Quest& q, bool com
         if (g.won) return false;
         int range = type == RAZE ? RAZE_RANGE : (computer ? AI_CITY_RANGE : CITY_RANGE);
         for (int t = 0; t < 200; t++) {
-            City* c = g.map->city(g.rng.dice(1, (int)g.map->cities.size(), -1));
+            City* c = g.map->city(g.rng.dice(1, static_cast<int>(g.map->cities.size()), -1));
             if (c && c->ownerIndex != side.index && !c->razed &&
                 (dist(h->x, h->y, c->x, c->y) <= range || t > 99)) {
                 q.city = c;
@@ -254,7 +254,7 @@ std::shared_ptr<QuestResult> event(Game& g, Side& side, const std::string& ev, c
 }
 
 std::shared_ptr<Reward> reward(Game& g, Side& side, const Quest* q) {
-    int cities = (int)game::sideCities(g, side).size();
+    int cities = static_cast<int>(game::sideCities(g, side).size());
 
     Army* h = q ? q->hero : nullptr;
 
@@ -298,7 +298,7 @@ std::shared_ptr<Reward> reward(Game& g, Side& side, const Quest* q) {
         if (s.rich && !site::shownTo(s, side) && s.content != site::EMPTY) unknown.push_back(&s);
     }
     if (!unused.empty() && g.rng.dice(1, 3, 0) == 1) {
-        Item* it = unused[g.rng.dice(1, (int)unused.size(), -1)];
+        Item* it = unused[g.rng.dice(1, static_cast<int>(unused.size()), -1)];
         if (h) {
             h->items.push_back(it);
             it->status = 3;

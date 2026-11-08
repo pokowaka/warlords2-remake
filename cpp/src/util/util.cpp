@@ -25,7 +25,7 @@ std::string fmt(const char* f, ...) {
     int n = vsnprintf(buf, sizeof buf, f, ap);
     va_end(ap);
     std::string out;
-    if (n < (int)sizeof buf) {
+    if (n < static_cast<int>(sizeof buf)) {
         out.assign(buf, n < 0 ? 0 : n);
     } else {
         out.resize(n + 1);
@@ -49,12 +49,14 @@ std::string sfmt(const std::string& f, const std::vector<FmtArg>& args) {
         std::string flags;
         while (j < f.size() && strchr("-+ 0#", f[j])) flags += f[j++];
         int width = 0;
-        while (j < f.size() && isdigit((unsigned char)f[j])) width = width * 10 + (f[j++] - '0');
+        while (j < f.size() && isdigit(static_cast<unsigned char>(f[j])))
+            width = width * 10 + (f[j++] - '0');
         int prec = -1;
         if (j < f.size() && f[j] == '.') {
             prec = 0;
             j++;
-            while (j < f.size() && isdigit((unsigned char)f[j])) prec = prec * 10 + (f[j++] - '0');
+            while (j < f.size() && isdigit(static_cast<unsigned char>(f[j])))
+                prec = prec * 10 + (f[j++] - '0');
         }
         while (j < f.size() && (f[j] == 'l' || f[j] == 'h')) j++;
         if (j >= f.size()) {
@@ -77,7 +79,7 @@ std::string sfmt(const std::string& f, const std::vector<FmtArg>& args) {
             long v = a.str ? (toInt(a.s) ? *toInt(a.s) : 0) : a.n;
             s = std::to_string(v < 0 ? -v : v);
             if (prec >= 0)
-                while ((int)s.size() < prec) s = "0" + s;
+                while (static_cast<int>(s.size()) < prec) s = "0" + s;
             if (v < 0)
                 s = "-" + s;
             else if (flags.find('+') != std::string::npos)
@@ -88,20 +90,20 @@ std::string sfmt(const std::string& f, const std::vector<FmtArg>& args) {
         case 'X': {
             char buf[32];
             snprintf(buf, sizeof buf, conv == 'x' ? "%lx" : "%lX",
-                     (unsigned long)(a.str ? 0 : a.n));
+                     static_cast<unsigned long>(a.str ? 0 : a.n));
             s = buf;
             break;
         }
         case 'c':
-            s = std::string(1, (char)(a.str ? (a.s.empty() ? ' ' : a.s[0]) : a.n));
+            s = std::string(1, static_cast<char>(a.str ? (a.s.empty() ? ' ' : a.s[0]) : a.n));
             break;
         case 's':
         default:
             s = a.str ? a.s : std::to_string(a.n);
-            if (prec >= 0 && (int)s.size() > prec) s = s.substr(0, prec);
+            if (prec >= 0 && static_cast<int>(s.size()) > prec) s = s.substr(0, prec);
             break;
         }
-        if ((int)s.size() < width) {
+        if (static_cast<int>(s.size()) < width) {
             if (flags.find('-') != std::string::npos)
                 s += std::string(width - s.size(), ' ');
             else if (flags.find('0') != std::string::npos && conv != 's') {
@@ -177,7 +179,7 @@ std::map<std::string, std::string>& madeFiles() {
 std::string madeKey(const std::string& path) {
     std::string k;
     for (char c : path) {
-        char d = c == '\\' ? '/' : (char)std::toupper((unsigned char)c);
+        char d = c == '\\' ? '/' : static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
         if (d == '/' && !k.empty() && k.back() == '/') continue;
         k += d;
     }
@@ -218,7 +220,7 @@ bool writeFile(const std::string& path, const std::string& bytes) {
     {
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
         if (!f) return false;
-        f.write(bytes.data(), (std::streamsize)bytes.size());
+        f.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
         if (!f) return false;
     }
     std::error_code ec;
@@ -242,21 +244,21 @@ bool removeFile(const std::string& path) {
 // ----------------------------------------------------------------- strings
 
 std::string upper(std::string s) {
-    for (auto& c : s) c = (char)std::toupper((unsigned char)c);
+    for (auto& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     return s;
 }
 std::string lower(std::string s) {
-    for (auto& c : s) c = (char)std::tolower((unsigned char)c);
+    for (auto& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
 }
 std::string trimRight(const std::string& s) {
     size_t e = s.size();
-    while (e > 0 && std::isspace((unsigned char)s[e - 1])) e--;
+    while (e > 0 && std::isspace(static_cast<unsigned char>(s[e - 1]))) e--;
     return s.substr(0, e);
 }
 std::string trim(const std::string& s) {
     size_t b = 0;
-    while (b < s.size() && std::isspace((unsigned char)s[b])) b++;
+    while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b]))) b++;
     return trimRight(s.substr(b));
 }
 std::vector<std::string> splitLines(const std::string& s) {
@@ -287,10 +289,10 @@ std::string latin1ToUtf8(const std::string& s) {
     std::string out;
     for (unsigned char c : s) {
         if (c < 0x80)
-            out += (char)c;
+            out += static_cast<char>(c);
         else {
-            out += (char)(0xc0 | (c >> 6));
-            out += (char)(0x80 | (c & 0x3f));
+            out += static_cast<char>(0xc0 | (c >> 6));
+            out += static_cast<char>(0x80 | (c & 0x3f));
         }
     }
     return out;
@@ -300,14 +302,14 @@ std::string utf8ToLatin1(const std::string& s) {
     for (size_t i = 0; i < s.size();) {
         unsigned char c = s[i];
         if (c < 0x80) {
-            out += (char)c;
+            out += static_cast<char>(c);
             i++;
             continue;
         }
         int n = c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : 2;
         unsigned cp = c & (0x3f >> (n - 1));
         for (int k = 1; k < n && i + k < s.size(); k++) cp = (cp << 6) | (s[i + k] & 0x3f);
-        out += cp < 256 ? (char)cp : '?';
+        out += cp < 256 ? static_cast<char>(cp) : '?';
         i += n;
     }
     return out;
@@ -324,7 +326,7 @@ std::optional<long> toInt(const std::string& s) {
     if (i >= t.size()) return std::nullopt;
     long v = 0;
     for (; i < t.size(); i++) {
-        if (!std::isdigit((unsigned char)t[i])) return std::nullopt;
+        if (!std::isdigit(static_cast<unsigned char>(t[i]))) return std::nullopt;
         v = v * 10 + (t[i] - '0');
     }
     return neg ? -v : v;

@@ -58,7 +58,7 @@ void set(const std::string& key, const std::string& value) {
 
 int getInt(const std::string& key, int dflt) {
     auto v = w2::toInt(get(key));
-    return v ? (int)*v : dflt;
+    return v ? static_cast<int>(*v) : dflt;
 }
 
 }  // namespace prefs

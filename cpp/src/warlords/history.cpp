@@ -21,7 +21,7 @@ void deed(Game& g, const Side* side, DeedType type, int v1, int v2, const std::s
 static void bump(Game& g, int side, int opp, Loss kind, int n = 1) {
     if (side < 0 || opp < 0 || side > 7 || opp > 7) return;
     auto& row = g.triumphs[side].try_emplace(opp, std::array<int, 5>{0, 0, 0, 0, 0}).first->second;
-    row[(int)kind] += n;
+    row[static_cast<int>(kind)] += n;
 }
 
 void tally(Game& g, const Army* army, int killer, bool boat) {
@@ -49,7 +49,7 @@ int triumph(const Game& g, int me, int opp, Loss kind) {
     if (a == g.triumphs.end()) return 0;
     auto b = a->second.find(opp);
     if (b == a->second.end()) return 0;
-    return b->second[(int)kind];
+    return b->second[static_cast<int>(kind)];
 }
 
 void record(Game& g) {
@@ -60,7 +60,7 @@ void record(Game& g) {
         Side* s = g.map->side(i);
         r.gold[i] = (s && s->inUse) ? s->gold : 0;
         r.score[i] = win.value[i];
-        r.cities[i] = s ? (int)game::sideCities(g, *s).size() : 0;
+        r.cities[i] = s ? static_cast<int>(game::sideCities(g, *s).size()) : 0;
     }
     for (auto& c : g.map->cities)
         r.owners.push_back(c.razed ? 0xff : (c.ownerIndex == NONE ? 8 : c.ownerIndex));

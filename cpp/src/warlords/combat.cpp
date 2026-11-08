@@ -59,7 +59,7 @@ void sortLine(const Game& g, std::vector<Army*>& line, int ownerIndex, const Arm
     const auto& row = g.map->fightOrder[ownerIndex == NONE ? 8 : ownerIndex];
     std::map<const Army*, std::pair<int, int>> key;
     for (size_t i = 0; i < line.size(); i++) {
-        key[line[i]] = {row[line[i]->type] + (line[i] == carrier ? 80 : 0), (int)i};
+        key[line[i]] = {row[line[i]->type] + (line[i] == carrier ? 80 : 0), static_cast<int>(i)};
     }
     luaSort(line, [&](Army* p, Army* q) {
         const auto& kp = key[p];
@@ -105,7 +105,7 @@ Lines lines(const Game& g, const std::vector<Army*>& stack, int x, int y) {
     int x1 = city ? city->x + 1 : x, y1 = city ? city->y + 1 : y;
     Lines out;
     bool any = false;
-    for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
         if (!a->transit && a->owner != attacker && a->x >= x0 && a->x <= x1 && a->y >= y0 &&
             a->y <= y1) {

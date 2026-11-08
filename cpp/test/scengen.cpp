@@ -80,8 +80,8 @@ void writeListing(const std::string& data, const std::string& dir, const std::st
     scenarios::Entry e;
     e.name = title;
     e.text = text;
-    e.cities = (int)map->cities.size();
-    e.ruins = (int)map->sites.size();
+    e.cities = static_cast<int>(map->cities.size());
+    e.ruins = static_cast<int>(map->sites.size());
     for (auto& sd : map->sides) e.players += sd.capital != nullptr;
     std::string base = data + "/" + dir + "/";
     std::filesystem::create_directories(base + "PICS");
@@ -180,7 +180,7 @@ int main(int argc, char** argv) {
     if (!dumpDir.empty()) {
         for (int k = 0; k < count; k++) {
             long s0 = seed + k;
-            Rng r((double)s0);
+            Rng r(static_cast<double>(s0));
             randommap::Options o;
             o.dataDir = data;
             o.rng = &r;
@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
         long first = seed + k, used = first;
         // a failed seed steps on by the count, so the worlds' seeds never collide
         for (int t = 0; t < tries; t++, used += count) {
-            Rng r((double)used);
+            Rng r(static_cast<double>(used));
             randommap::Options o;
             o.dataDir = data;
             o.rng = &r;

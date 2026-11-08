@@ -28,7 +28,7 @@ std::string findArt(const std::string& dataDir, const std::string& name, int ter
 
 void setPal(const Screen& s, int i) {
     const auto& c = s.palette[i];
-    gfx::setColor((float)c[0], (float)c[1], (float)c[2]);
+    gfx::setColor(static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]));
 }
 
 const int LIGHT = 2, DARK = 4;
@@ -48,7 +48,7 @@ void composedArt(Screen& s) {
     w2::pck::Pixels px;
     px.w = 640;
     px.h = 480;
-    px.px.assign(640 * 480, 0);
+    px.px.assign(640UZ * 480, 0);
     for (int i = 0; i < 4; i++) {
         auto& q = s.backgroundPx[i];
         int qx = (i % 2) * 320, qy = (i / 2) * 240;
@@ -62,7 +62,7 @@ void composedArt(Screen& s) {
     w2::pck::Pixels tile;
     tile.w = stonetile::W;
     tile.h = stonetile::H;
-    tile.px.assign(stonetile::W * stonetile::H, 0);
+    tile.px.assign(static_cast<size_t>(stonetile::W) * stonetile::H, 0);
     for (int r = 0; r < stonetile::COUNT; r++) {
         const int* t = stonetile::RECTS[r];
         int tx = t[0], ty = t[1], w = t[2], h = t[3], sx = t[4], sy = t[5];
@@ -170,7 +170,9 @@ std::unique_ptr<Screen> load(const std::string& dataDir, const w2::pal::Palette&
     // a colour per tile id for each of a tile's four pixels, a remap, and the
     // same four pixels for a tile with a road on it.
     if (auto d = w2::readFile(dataDir + "/TERRAIN" + std::to_string(terrain) + "/MAPCOLOR.DAT")) {
-        auto b = [&](size_t i) { return i < d->size() ? (int)(uint8_t)(*d)[i] : 0; };
+        auto b = [&](size_t i) {
+            return i < d->size() ? static_cast<int>(static_cast<uint8_t>((*d)[i])) : 0;
+        };
         for (int q = 0; q < 4; q++) {
             for (int i = 0; i < 256; i++) s->mapColour.tile[q][i] = b(q * 256 + i);
             for (int i = 0; i < 20; i++) s->mapColour.road[q][i] = b(1120 + q * 20 + i);
@@ -295,18 +297,19 @@ gfx::ImageP strategicImage(Screen& s, const w2::Game& g, int side) {
     long long seed = 12345;
     auto grey = [&]() {
         seed = (seed * 1103515245 + 12345) % 2147483648LL;
-        return 2 + (int)(seed / 65536) % 3;
+        return 2 + static_cast<int>(seed / 65536) % 3;
     };
     uint8_t rgb[16][3];
     for (int i = 0; i < 16; i++) {
         int k = mc.remap[i];
-        w2::pal::Colour c =
-                k >= 0 && k < (int)s.palette.size() ? s.palette[k] : w2::pal::Colour{0, 0, 0};
-        for (int j = 0; j < 3; j++) rgb[i][j] = (uint8_t)std::floor(c[j] * 255);
+        w2::pal::Colour c = k >= 0 && k < static_cast<int>(s.palette.size())
+                                    ? s.palette[k]
+                                    : w2::pal::Colour{0, 0, 0};
+        for (int j = 0; j < 3; j++) rgb[i][j] = static_cast<uint8_t>(std::floor(c[j] * 255));
     }
-    std::vector<uint8_t> out((size_t)w * 2 * h * 2 * 4, 0);
+    std::vector<uint8_t> out(static_cast<size_t>(w) * 2 * h * 2 * 4, 0);
     auto put = [&](int x, int y, int i) {
-        size_t o = ((size_t)y * w * 2 + x) * 4;
+        size_t o = (static_cast<size_t>(y) * w * 2 + x) * 4;
         out[o + 3] = 255;
         if (i < 0) return;
         i &= 15;
@@ -340,7 +343,7 @@ gfx::ImageP strategicImage(Screen& s, const w2::Game& g, int side) {
 
 const Region* regionAt(const Screen& s, int x, int y) {
     const auto& rs = s.dialog.regions;
-    for (int i = (int)rs.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(rs.size()) - 1; i >= 0; i--) {
         const Region& r = rs[i];
         if (r.w > 0 && r.h > 0 && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return &r;
     }

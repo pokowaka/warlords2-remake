@@ -25,7 +25,7 @@ struct Dialog : kit::Modal {
     screen::View v;
     int topRow = 0, cur = 0;
 
-    int n() const { return (int)names.size(); }
+    int n() const { return static_cast<int>(names.size()); }
 
     void refresh() {
         auto& st = v.state;

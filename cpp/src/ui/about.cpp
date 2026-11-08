@@ -20,7 +20,8 @@ struct About : kit::Modal {
         gfx::draw(bscroll, gfx::newQuad(0, 0, R.w, R.h), R.x, R.y);
         const Font& f = kit::font(2).colours(0, 7);
         for (size_t i = 0; i < lines.size(); i++)
-            if (!lines[i].empty()) kit::centred(f, lines[i], 328, 141 + 20 * (int)(i + 1));
+            if (!lines[i].empty())
+                kit::centred(f, lines[i], 328, 141 + 20 * static_cast<int>(i + 1));
     }
     void mousepressed(int, int, int) override { kit::pop(this); }
     void keypressed(const std::string&) override { kit::pop(this); }

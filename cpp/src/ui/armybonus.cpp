@@ -124,7 +124,7 @@ std::string bonusText(const w2::ArmyType& t, const w2::Army* army) {
 void open() {
     auto d = std::make_shared<Bonus>();
     const auto& row = G.g->map->fightOrder[G.player->index];
-    for (int t = 0; t <= 28 && t < (int)row.size(); t++) d->byRank[row[t]] = t;
+    for (int t = 0; t <= 28 && t < static_cast<int>(row.size()); t++) d->byRank[row[t]] = t;
     d->v = kit::view(DIALOG);
     d->view = &d->v;
     d->refresh();

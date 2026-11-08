@@ -70,22 +70,23 @@ struct HeroInfo : kit::Modal {
     // choose item i of the list, from 0 (or none)
     void choose(int i) {
         auto items = list();
-        item = (i != w2::NONE && i >= 0 && i < (int)items.size()) ? i : w2::NONE;
+        item = (i != w2::NONE && i >= 0 && i < static_cast<int>(items.size())) ? i : w2::NONE;
         ground = item != w2::NONE && items[item]->status == 1;
         auto& st = v.state;
         st[DONE] = w2::uidata::NORMAL;
         st[NEXT] = heroes.size() > 1 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
         st[PREV] = st[NEXT];
         st[UP] = (item != w2::NONE && item > 0) ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        st[DOWN] = (item != w2::NONE && item < (int)items.size() - 1) ? w2::uidata::NORMAL
-                                                                      : w2::uidata::DISABLED;
+        st[DOWN] = (item != w2::NONE && item < static_cast<int>(items.size()) - 1)
+                           ? w2::uidata::NORMAL
+                           : w2::uidata::DISABLED;
         st[DROP] = item != w2::NONE ? w2::uidata::NORMAL : w2::uidata::DISABLED;
         st[TAKE] = st[DROP];
         hidden = {ground ? DROP : TAKE};
     }
 
     void showHero(int i) {
-        int n = (int)heroes.size();
+        int n = static_cast<int>(heroes.size());
         cur = ((i % n) + n) % n;
         choose(!list().empty() ? 0 : w2::NONE);
     }
@@ -95,7 +96,7 @@ struct HeroInfo : kit::Modal {
         auto items = list();
         for (size_t i = 0; i < items.size(); i++)
             if (items[i]->status == status) {
-                choose((int)i);
+                choose(static_cast<int>(i));
                 return;
             }
     }
@@ -111,7 +112,7 @@ struct HeroInfo : kit::Modal {
         kit::popup(R);
         front::drawStrategicMap(MAP_X, MAP_Y, nullptr, true);
         for (size_t i = 0; i < heroes.size(); i++)
-            if ((int)i != cur)
+            if (static_cast<int>(i) != cur)
                 front::drawHeroFigure(MAP_X, MAP_Y, heroes[i]->x, heroes[i]->y, true);
         front::drawHeroFigure(MAP_X, MAP_Y, h->x, h->y);
         kit::setPal(0);
@@ -155,7 +156,7 @@ struct HeroInfo : kit::Modal {
         f.draw(w2::fmt("+%d", command), 392, 185);
         f.draw(w2::fmt("%d", h->level ? h->level : 1), 536, 165);
         f.draw(w2::fmt("%d", h->experience), 536, 185);
-        f.draw(w2::format(kit::text(S, 6), cur + 1, (int)heroes.size()), 312, 347);
+        f.draw(w2::format(kit::text(S, 6), cur + 1, static_cast<int>(heroes.size())), 312, 347);
         auto items = list();
         kit::setPal(3);
         gfx::rectangle(gfx::FILL, 367, 236, 184, 66);
@@ -166,7 +167,7 @@ struct HeroInfo : kit::Modal {
         if (item != w2::NONE) {
             for (int row = 0; row <= 2; row++) {
                 int i = item - 1 + row;
-                if (i >= 0 && i < (int)items.size())
+                if (i >= 0 && i < static_cast<int>(items.size()))
                     f.colours(itemColour(items[i]), 0).draw(items[i]->name, 376, 238 + 22 * row);
             }
             w2::Item* it = items[item];
@@ -202,10 +203,10 @@ struct HeroInfo : kit::Modal {
             w2::hero::dropItem(*G.g, heroes[cur], it);
             // 7563:0943: dropped at sea it is gone, with a splash
             if (it->status == 0) sound::effect("splash");
-            choose(std::min(item, (int)list().size() - 1));
+            choose(std::min(item, static_cast<int>(list().size()) - 1));
         } else if (c->id == TAKE && item != w2::NONE) {
             w2::hero::takeItem(*G.g, heroes[cur], items[item]);
-            choose(std::min(item, (int)list().size() - 1));
+            choose(std::min(item, static_cast<int>(list().size()) - 1));
         } else if (c->id == GROUND) {
             firstOf(1);
         } else if (c->id == CARRIED) {
@@ -221,7 +222,7 @@ struct HeroInfo : kit::Modal {
 
 void open() {
     auto d = std::make_shared<HeroInfo>();
-    for (int i = (int)G.g->armies.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(G.g->armies.size()) - 1; i >= 0; i--) {
         w2::Army* a = G.g->armies[i];
         if (a->hero() && a->owner == G.player->index && !a->transit && a->x != w2::NONE)
             d->heroes.push_back(a);
@@ -232,7 +233,7 @@ void open() {
     for (size_t i = 0; i < d->heroes.size(); i++) {
         int dd = std::max(std::abs(d->heroes[i]->x - cx), std::abs(d->heroes[i]->y - cy));
         if (best == w2::NONE || dd < best) {
-            cur = (int)i;
+            cur = static_cast<int>(i);
             best = dd;
         }
     }

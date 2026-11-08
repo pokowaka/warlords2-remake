@@ -47,7 +47,7 @@ constexpr int SAMPLE_RATE = 11000;
 // The chip's nine voices leave a lot of headroom: a song peaks around a
 // fifth of full scale, some 10 dB under the samples. Twice as loud brings
 // the two close (musicthread.lua).
-constexpr float FM_GAIN = 2.0f / 32768;
+constexpr float FM_GAIN = 2.0F / 32768;
 
 const std::map<std::string, char> PREFIX = {{"fm", 'S'}, {"mt32", 'M'}, {"sc55", 'R'}};
 
@@ -82,7 +82,7 @@ struct Stream {
     }
     // Decode more until at least `need` frames lie ahead of pos.
     void fill(size_t need) {
-        size_t at = (size_t)pos;
+        size_t at = static_cast<size_t>(pos);
         if (at > 0) {
             buf.erase(buf.begin(), buf.begin() + std::min(buf.size(), at * 2));
             frames -= std::min(frames, at);
@@ -150,7 +150,7 @@ State S;
 
 std::mt19937 dice{std::random_device{}()};
 int roll(int n) {
-    return (int)(dice() % (unsigned)std::max(1, n)) + 1;
+    return static_cast<int>(dice() % static_cast<unsigned>(std::max(1, n))) + 1;
 }
 
 struct Lock {
@@ -168,16 +168,16 @@ void mixSample(float* out, int n) {
     Mixer& m = S.mix;
     if (!m.sample || m.sampleEnded) return;
     const auto& p = *m.sample;
-    double step = (double)SAMPLE_RATE / m.rate;
+    double step = static_cast<double>(SAMPLE_RATE) / m.rate;
     for (int i = 0; i < n; i++) {
-        size_t k = (size_t)m.samplePos;
+        size_t k = static_cast<size_t>(m.samplePos);
         if (k >= p.size()) {
             m.sampleEnded = true;
             return;
         }
         double f = m.samplePos - k;
-        float v = (float)(p[k] * (1 - f) + (k + 1 < p.size() ? p[k + 1] : 0) * f);
-        out[i * 2] += v;
+        float v = static_cast<float>(p[k] * (1 - f) + (k + 1 < p.size() ? p[k + 1] : 0) * f);
+        out[static_cast<std::ptrdiff_t>(i) * 2] += v;
         out[i * 2 + 1] += v;
         m.samplePos += step;
     }
@@ -191,9 +191,9 @@ void mixFm(float* out, int n) {
         return;
     }
     double step = w2::Opl::RATE / m.rate;
-    size_t need = (size_t)std::ceil(m.fmPos + n * step) + 2;
+    size_t need = static_cast<size_t>(std::ceil(m.fmPos + n * step)) + 2;
     // keep what is still ahead, render the rest
-    size_t keep = (size_t)m.fmPos;
+    size_t keep = static_cast<size_t>(m.fmPos);
     if (keep > 0) {
         m.fmBuf.erase(m.fmBuf.begin(), m.fmBuf.begin() + std::min(keep, m.fmBuf.size()));
         m.fmPos -= keep;
@@ -202,14 +202,14 @@ void mixFm(float* out, int n) {
     if (m.fmBuf.size() < need) {
         size_t from = m.fmBuf.size();
         m.fmBuf.resize(need);
-        m.fm->render(m.fmBuf.data() + from, (int)(need - from));
+        m.fm->render(m.fmBuf.data() + from, static_cast<int>(need - from));
     }
     for (int i = 0; i < n; i++) {
-        size_t k = (size_t)m.fmPos;
+        size_t k = static_cast<size_t>(m.fmPos);
         double f = m.fmPos - k;
-        float v = (float)((m.fmBuf[k] * (1 - f) + m.fmBuf[k + 1] * f) * FM_GAIN);
-        v = std::clamp(v, -1.0f, 1.0f);
-        out[i * 2] += v;
+        float v = static_cast<float>((m.fmBuf[k] * (1 - f) + m.fmBuf[k + 1] * f) * FM_GAIN);
+        v = std::clamp(v, -1.0F, 1.0F);
+        out[static_cast<std::ptrdiff_t>(i) * 2] += v;
         out[i * 2 + 1] += v;
         m.fmPos += step;
     }
@@ -221,28 +221,29 @@ void mixFm(float* out, int n) {
 #ifdef W2_VORBIS
 void mixStream(Stream& s, float* out, int n, int rate) {
     if (s.done()) return;
-    s.fill((size_t)std::ceil(n * s.step) + 2);
+    s.fill(static_cast<size_t>(std::ceil(n * s.step)) + 2);
     for (int i = 0; i < n; i++) {
-        size_t k = (size_t)s.pos;
+        size_t k = static_cast<size_t>(s.pos);
         if (k + 1 >= s.frames) {
             if (s.eof) break;
-            s.fill((size_t)std::ceil((n - i) * s.step) + 2);
-            k = (size_t)s.pos;
+            s.fill(static_cast<size_t>(std::ceil((n - i) * s.step)) + 2);
+            k = static_cast<size_t>(s.pos);
             if (k + 1 >= s.frames) break;
         }
         double f = s.pos - k;
-        out[i * 2] += (float)(s.buf[k * 2] * (1 - f) + s.buf[k * 2 + 2] * f);
-        out[i * 2 + 1] += (float)(s.buf[k * 2 + 1] * (1 - f) + s.buf[k * 2 + 3] * f);
+        out[static_cast<std::ptrdiff_t>(i) * 2] +=
+                static_cast<float>(s.buf[k * 2] * (1 - f) + s.buf[k * 2 + 2] * f);
+        out[i * 2 + 1] += static_cast<float>(s.buf[k * 2 + 1] * (1 - f) + s.buf[k * 2 + 3] * f);
         s.pos += s.step;
     }
-    s.played += (double)n / rate;
+    s.played += static_cast<double>(n) / rate;
 }
 #endif
 
 void callback(void*, Uint8* stream, int len) {
-    float* out = (float*)stream;
-    int n = len / (int)(sizeof(float) * 2);
-    std::fill(out, out + n * 2, 0.0f);
+    float* out = reinterpret_cast<float*>(stream);
+    int n = len / static_cast<int>(sizeof(float) * 2);
+    std::fill(out, out + static_cast<std::ptrdiff_t>(n) * 2, 0.0F);
     mixFm(out, n);
 #ifdef W2_VORBIS
     Mixer& m = S.mix;
@@ -250,7 +251,7 @@ void callback(void*, Uint8* stream, int len) {
     for (auto& t : m.tails) mixStream(*t, out, n, m.rate);
 #endif
     mixSample(out, n);
-    for (int i = 0; i < n * 2; i++) out[i] = std::clamp(out[i], -1.0f, 1.0f);
+    for (int i = 0; i < n * 2; i++) out[i] = std::clamp(out[i], -1.0F, 1.0F);
 }
 
 // ------------------------------------------------------------- helpers
@@ -268,7 +269,8 @@ Pcm sampleData(const std::string& name) {
     Pcm p;
     if (auto bytes = w2::readFile(dataPath(name)); bytes && !bytes->empty()) {
         p = std::make_shared<std::vector<float>>(bytes->size());
-        for (size_t i = 0; i < bytes->size(); i++) (*p)[i] = ((uint8_t)(*bytes)[i] - 128) / 128.0f;
+        for (size_t i = 0; i < bytes->size(); i++)
+            (*p)[i] = (static_cast<uint8_t>((*bytes)[i]) - 128) / 128.0F;
     }
     S.samples[name] = p;
     return p;
@@ -297,7 +299,7 @@ std::unique_ptr<Stream> openStream(const std::string& path) {
     s->open = true;
     vorbis_info* vi = ov_info(&s->vf, -1);
     s->channels = vi->channels;
-    s->step = (double)vi->rate / S.mix.rate;
+    s->step = static_cast<double>(vi->rate) / S.mix.rate;
     return s;
 }
 
@@ -394,7 +396,7 @@ double enqueue(const std::string& name, std::function<void()> done) {
     }
     S.queue.push_back(Queued{p, std::move(done)});
     update();
-    return (double)p->size() / SAMPLE_RATE;
+    return static_cast<double>(p->size()) / SAMPLE_RATE;
 }
 
 }  // namespace
@@ -513,7 +515,9 @@ double effect(const std::string& what) {
     auto e = EFFECT.find(what);
     if (e == EFFECT.end()) return 0;
     auto [group, index] = e->second;
-    if (group >= (int)S.files.size() || index >= (int)S.files[group].size()) return 0;
+    if (group >= static_cast<int>(S.files.size()) ||
+        index >= static_cast<int>(S.files[group].size()))
+        return 0;
     const std::string& name = S.files[group][index];
     if (name.empty()) return 0;
     return enqueue(name, nullptr);
@@ -554,7 +558,7 @@ void update() {
     if (!S.playing && !S.queue.empty()) {
         Queued q = std::move(S.queue.front());
         S.queue.pop_front();
-        q.endsAt = w2::now() + (double)q.pcm->size() / SAMPLE_RATE + 0.25;
+        q.endsAt = w2::now() + static_cast<double>(q.pcm->size()) / SAMPLE_RATE + 0.25;
         {
             Lock lock;
             S.mix.sample = q.pcm;

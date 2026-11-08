@@ -174,13 +174,13 @@ Layout layout(const Font& font, int screenWidth, const std::vector<Menu>& menus)
 int titleAt(const Layout& lay, int x, int y) {
     if (y < 0 || y >= BAR_H) return -1;
     for (size_t i = 0; i < lay.size(); i++) {
-        if (x >= lay[i].x && x < lay[i].x + lay[i].w) return (int)i;
+        if (x >= lay[i].x && x < lay[i].x + lay[i].w) return static_cast<int>(i);
     }
     return -1;
 }
 
 const Row* rowAt(const Layout& lay, int index, int x, int y) {
-    if (index < 0 || index >= (int)lay.size()) return nullptr;
+    if (index < 0 || index >= static_cast<int>(lay.size())) return nullptr;
     for (const Row& r : lay[index].drop.rows) {
         if (r.label != "-" && x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) return &r;
     }

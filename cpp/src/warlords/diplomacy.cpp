@@ -324,12 +324,13 @@ std::map<int, std::string> ratings(const Game& g) {
     std::vector<E> order;
     // only the sides still in the game are ranked (484e:0aed)
     for (size_t i = 0; i < g.sides.size(); i++) {
-        if (g.sides[i]->alive) order.push_back(E{g.sides[i], g.sides[i]->diploScore, (int)i});
+        if (g.sides[i]->alive)
+            order.push_back(E{g.sides[i], g.sides[i]->diploScore, static_cast<int>(i)});
     }
     luaSort(order, [](const E& p, const E& q) {
         return p.score != q.score ? p.score < q.score : p.seq < q.seq;
     });
-    const std::vector<int>& ranks = ratingRanks((int)order.size());
+    const std::vector<int>& ranks = ratingRanks(static_cast<int>(order.size()));
     std::map<int, std::string> out;
     for (size_t i = 0; i < order.size(); i++) {
         int r = i < ranks.size() ? ranks[i] : 8;
@@ -382,9 +383,9 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
     };
 
     // Personality disposition baseline
-    int baseDisp = (int)std::round((prof.traits[ai::personality::HONOUR] -
-                                    prof.traits[ai::personality::AGGRESSION] * 0.6f) *
-                                   20.0f);
+    int baseDisp = static_cast<int>(std::round((prof.traits[ai::personality::HONOUR] -
+                                                prof.traits[ai::personality::AGGRESSION] * 0.6F) *
+                                               20.0F));
     pushFactor("Personality (" + prof.archetype + ")", baseDisp);
 
     // Relational trust & treaty history
@@ -406,22 +407,23 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
     }
     if (sharedWars > 0) {
         int bonus = sharedWars *
-                    (int)std::round(18.0f + 10.0f * prof.traits[ai::personality::COALITION_DRIVE]);
+                    static_cast<int>(std::round(
+                            18.0F + 10.0F * prof.traits[ai::personality::COALITION_DRIVE]));
         pushFactor(fmt("Fighting %d common %s", sharedWars, sharedWars == 1 ? "enemy" : "enemies"),
                    bonus);
     }
 
     // Border military pressure (from fair-info belief if available)
-    float theirBorderStr = 0.0f, myBorderStr = 0.0f;
+    float theirBorderStr = 0.0F, myBorderStr = 0.0F;
     if (me.belief) {
         theirBorderStr = me.belief->theirBorderStrength[targetSide];
         myBorderStr = me.belief->myBorderStrength[targetSide];
     }
-    if (theirBorderStr > 4.0f) {
-        int borderPen = -std::min(40, (int)std::round(theirBorderStr * 1.2f));
+    if (theirBorderStr > 4.0F) {
+        int borderPen = -std::min(40, static_cast<int>(std::round(theirBorderStr * 1.2F)));
         pushFactor("Your armies massed near our borders", borderPen);
-    } else if (myBorderStr > theirBorderStr + 12.0f &&
-               prof.traits[ai::personality::AGGRESSION] > 0.2f) {
+    } else if (myBorderStr > theirBorderStr + 12.0F &&
+               prof.traits[ai::personality::AGGRESSION] > 0.2F) {
         pushFactor("Our strike forces outmatch your border garrison", -18);
     }
 
@@ -442,23 +444,26 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
     }
 
     // Balance of power / anti-runaway coalition logic
-    float theirShare = (float)theirCities / (float)std::max(1, totalStandingCities);
-    if (leaderSide == targetSide && theirShare >= 0.30f) {
-        int hegemonyPen =
-                -(int)std::round((theirShare - 0.25f) * 120.0f *
-                                 (1.0f + 0.5f * prof.traits[ai::personality::COALITION_DRIVE]));
+    float theirShare =
+            static_cast<float>(theirCities) / static_cast<float>(std::max(1, totalStandingCities));
+    if (leaderSide == targetSide && theirShare >= 0.30F) {
+        int hegemonyPen = -static_cast<int>(
+                std::round((theirShare - 0.25F) * 120.0F *
+                           (1.0F + 0.5F * prof.traits[ai::personality::COALITION_DRIVE])));
         pushFactor(fmt("Fear of your growing hegemony (%d%% of cities)",
-                       (int)std::round(theirShare * 100.0f)),
+                       static_cast<int>(std::round(theirShare * 100.0F))),
                    hegemonyPen);
     } else if (leaderSide != NONE && leaderSide != aiSide && leaderSide != targetSide &&
-               (float)leaderCities / (float)std::max(1, totalStandingCities) >= 0.32f) {
+               static_cast<float>(leaderCities) /
+                               static_cast<float>(std::max(1, totalStandingCities)) >=
+                       0.32F) {
         pushFactor("Need for coalition against the runaway leader", 22);
     }
 
     // Diplomatic reputation / atrocities
     if (them.diploScore > 60) {
         int atrocityPen = -std::min(35, (them.diploScore - 40) / 4);
-        if (prof.traits[ai::personality::HONOUR] > 0.0f) {
+        if (prof.traits[ai::personality::HONOUR] > 0.0F) {
             pushFactor("Your reputation for razing and treachery", atrocityPen);
         }
     }
@@ -466,8 +471,9 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
     // Active tribute offer on the table
     int offeredToAi = goldOffer(g, targetSide, aiSide);
     if (offeredToAi > 0) {
-        int goldBonus = (int)std::round((float)offeredToAi / 8.0f *
-                                        (1.0f + 0.6f * prof.traits[ai::personality::AVARICE]));
+        int goldBonus =
+                static_cast<int>(std::round(static_cast<float>(offeredToAi) / 8.0F *
+                                            (1.0F + 0.6F * prof.traits[ai::personality::AVARICE])));
         pushFactor(fmt("Gold tribute offered (%d gold)", offeredToAi), goldBonus);
     }
 
@@ -486,7 +492,7 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
         out.peaceGoldNeeded = NONE;
         out.allyGoldNeeded = NONE;
     } else {
-        float greedMult = std::max(0.5f, 1.2f - 0.5f * prof.traits[ai::personality::AVARICE]);
+        float greedMult = std::max(0.5F, 1.2F - 0.5F * prof.traits[ai::personality::AVARICE]);
         if (out.totalScore >= 35) {
             out.stanceSummary = "Friendly, Cooperative";
             out.peaceGoldNeeded = 0;
@@ -496,21 +502,23 @@ AttitudeBreakdown computeAttitude(const Game& g, int aiSide, int targetSide) {
             out.stanceSummary = (curState == WAR) ? "Weary of War" : "Cautious, Pragmatic";
             out.peaceGoldNeeded = 0;
             out.allyGoldNeeded = std::max(
-                    50, (int)std::round((35 - out.totalScore) * 8.0f / greedMult) / 25 * 25);
+                    50, static_cast<int>(std::round((35 - out.totalScore) * 8.0F / greedMult)) /
+                                25 * 25);
             out.whatItTakes = fmt("Accepts Peace freely; Alliance for ~%d gold (or shared war).",
                                   out.allyGoldNeeded);
         } else if (out.totalScore >= -45) {
             out.stanceSummary = "Hostile, Distrustful";
             out.peaceGoldNeeded = std::max(
-                    50, (int)std::round((-out.totalScore + 10) * 6.0f / greedMult) / 25 * 25);
+                    50, static_cast<int>(std::round((-out.totalScore + 10) * 6.0F / greedMult)) /
+                                25 * 25);
             out.allyGoldNeeded = NONE;
             out.whatItTakes = fmt("Demands %d gold tribute (or border withdrawal) for Peace.",
                                   out.peaceGoldNeeded);
         } else {
             out.stanceSummary = "Implacable Warpath";
-            if (prof.traits[ai::personality::AVARICE] > 0.5f && out.totalScore > -75) {
-                out.peaceGoldNeeded =
-                        std::max(150, (int)std::round((-out.totalScore) * 8.0f) / 50 * 50);
+            if (prof.traits[ai::personality::AVARICE] > 0.5F && out.totalScore > -75) {
+                out.peaceGoldNeeded = std::max(
+                        150, static_cast<int>(std::round((-out.totalScore) * 8.0F)) / 50 * 50);
                 out.whatItTakes = fmt("Only a heavy tribute of %d gold will stay their hand!",
                                       out.peaceGoldNeeded);
             } else {

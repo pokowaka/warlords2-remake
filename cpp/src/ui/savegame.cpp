@@ -37,7 +37,7 @@ std::vector<std::string> readInfo() {
         } catch (...) {
         }
     }
-    while ((int)names.size() < SLOTS) names.push_back(UNUSED);
+    while (static_cast<int>(names.size()) < SLOTS) names.push_back(UNUSED);
     names.resize(SLOTS);
     return names;
 }
@@ -111,13 +111,14 @@ void load(std::function<void(std::unique_ptr<w2::Game>)> loaded) {
     if (list.empty()) return;
     int start = 0;
     for (size_t k = 0; k < slots.size(); k++)
-        if (slots[k] == last) start = (int)k;
+        if (slots[k] == last) start = static_cast<int>(k);
     choose::open(kit::text(0x2f, 0), list, start, [slots, loaded](int k) {
         if (k == w2::NONE) return;
         auto g = readSlot(slotKey(slots[k]));
         if (!g) return;
         last = slots[k];
-        std::string name = g->current < (int)g->sides.size() ? g->sides[g->current]->name : "";
+        std::string name =
+                g->current < static_cast<int>(g->sides.size()) ? g->sides[g->current]->name : "";
         loaded(std::move(g));
         search::say(w2::format(kit::text(0x2f, 1), name));
     });

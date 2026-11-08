@@ -33,11 +33,11 @@ std::optional<Entry> parseInfo(const std::string& text, const std::string& dir) 
         else if (key == "text")
             e.text = value.substr(0, LIST_TEXT_MAX);
         else if (key == "cities")
-            e.cities = (int)toInt(value).value_or(0);
+            e.cities = static_cast<int>(toInt(value).value_or(0));
         else if (key == "ruins")
-            e.ruins = (int)toInt(value).value_or(0);
+            e.ruins = static_cast<int>(toInt(value).value_or(0));
         else if (key == "players")
-            e.players = (int)toInt(value).value_or(0);
+            e.players = static_cast<int>(toInt(value).value_or(0));
     }
     if (e.name.empty()) return std::nullopt;
     return e;

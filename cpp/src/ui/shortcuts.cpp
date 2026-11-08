@@ -31,7 +31,7 @@ std::vector<Entry> readItems() {
     if (!s) return out;
     int n = w2::u16(*s, 0);
     for (int i = 0; i < n; i++) {
-        size_t o = 2 + 68 * (size_t)i;
+        size_t o = 2 + 68 * static_cast<size_t>(i);
         if (o + 68 > s->size()) break;
         out.push_back(Entry{w2::u16(*s, o), w2::cstr(*s, o + 2, 50), w2::u16(*s, o + 52),
                             w2::u16(*s, o + 54), w2::u16(*s, o + 56), w2::u16(*s, o + 58)});
@@ -45,7 +45,7 @@ struct Shortcuts : kit::Modal {
     int slot = 0;
     int itemIndex(int id) const {
         for (size_t i = 0; i < items.size(); i++)
-            if (items[i].id == id) return (int)i;
+            if (items[i].id == id) return static_cast<int>(i);
         return w2::NONE;
     }
     int shortcut(int s) const {
@@ -72,9 +72,9 @@ struct Shortcuts : kit::Modal {
         int current = itemIndex(shortcut(slot));
         for (size_t i = 0; i < items.size(); i++) {
             const Entry& it = items[i];
-            int x = 96 + 152 * ((int)i % 3);
-            int y = 100 + 30 * ((int)i / 3);
-            button(x, y, it.x + ((int)i == current ? it.w / 2 : 0), it.y);
+            int x = 96 + 152 * (static_cast<int>(i) % 3);
+            int y = 100 + 30 * (static_cast<int>(i) / 3);
+            button(x, y, it.x + (static_cast<int>(i) == current ? it.w / 2 : 0), it.y);
             gfx::setColor(1, 1, 1);
             f.draw(it.name, x + 40, y + 5);
         }
@@ -111,7 +111,7 @@ struct Shortcuts : kit::Modal {
             slot = c->id - SLOT;
         } else if (c->id >= ITEM && c->id < ITEM + 21) {
             int k = c->id - ITEM;
-            if (k < (int)items.size()) {
+            if (k < static_cast<int>(items.size())) {
                 ui.shortcuts[slot] = items[k].id;
                 if (!ui.shortcutNames.count(items[k].id))
                     ui.shortcutNames[items[k].id] = items[k].name;

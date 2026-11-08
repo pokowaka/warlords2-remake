@@ -103,26 +103,26 @@ struct Config {
     int reportSeeds = 32;
     int epochs = 4;
     int minibatches = 8;
-    float lrStart = 3.0e-3f;
-    float lrEnd = 3.0e-4f;
-    float tempStart = 1.0f;
+    float lrStart = 3.0e-3F;
+    float lrEnd = 3.0e-4F;
+    float tempStart = 1.0F;
     float tempEnd = ml::TRAIN_TEMPERATURE_END;
     float evalTemp = ml::DEPLOY_TEMPERATURE;  // --eval-temp: temperature evaluation games sample at
-    float clipEps = 0.2f;
-    float entCoef = 0.01f;
-    float valueCoef = 0.5f;
-    float gamma = 0.97f;
-    float gaeLambda = 0.95f;
-    float localWeight = 1.0f;
-    float targetKL = 0.03f;
-    float maxGradNorm = 0.5f;
-    float classicFrac = 0.0f;
-    float randomMapFrac = 0.0f;
+    float clipEps = 0.2F;
+    float entCoef = 0.01F;
+    float valueCoef = 0.5F;
+    float gamma = 0.97F;
+    float gaeLambda = 0.95F;
+    float localWeight = 1.0F;
+    float targetKL = 0.03F;
+    float maxGradNorm = 0.5F;
+    float classicFrac = 0.0F;
+    float randomMapFrac = 0.0F;
     int activeSides = 8;
     int cropMargin = 0;
     uint32_t seedOffset = 0;
-    float winReward = 1.0f;
-    float eliminationReward = -0.5f;
+    float winReward = 1.0F;
+    float eliminationReward = -0.5F;
     bool soloLearner = false;
     bool fromScratch = false;
     bool benchmarkOnly = false;
@@ -131,14 +131,14 @@ struct Config {
     int devSeeds = 0;         // --dev-seeds: benchmark/compare on the development set
     bool breakdown = false;
     int criticWarmup = 0;     // --critic-warmup: iterations where only the critics learn
-    float mixedFrac = 0.0f;   // --mixed-frac: solo-learner games played 4 vs 4 instead (all learner
+    float mixedFrac = 0.0F;   // --mixed-frac: solo-learner games played 4 vs 4 instead (all learner
                               // seats recorded)
     int saveEvery = 0;        // --save-every: also write <out>.iterN.json snapshots
-    float raiderFrac = 0.0f;  // --raider-frac: share of Classic training seats played by the Raider
+    float raiderFrac = 0.0F;  // --raider-frac: share of Classic training seats played by the Raider
     float departureWeight =
-            0.0f;             // --departure-weight: credit a city loss to the move that emptied it
+            0.0F;             // --departure-weight: credit a city loss to the move that emptied it
     std::string frozenPath;   // --frozen-opponent: fixed Modern checkpoint some opponent seats play
-    float frozenFrac = 0.0f;  // --frozen-frac: share of non-learner training seats played by it
+    float frozenFrac = 0.0F;  // --frozen-frac: share of non-learner training seats played by it
     int searchK = 0;  // --search-k: candidate turns per learner turn (0 = no search training)
     int searchR = 2;  // --search-r: rollouts (dice copies) per candidate
     int searchH = 2;  // --search-h: rounds played on after a candidate turn
@@ -147,7 +147,7 @@ struct Config {
 
 game::NewGameOptions gameOptions(const Config& cfg, const TrainingPreset& preset, uint32_t seed) {
     game::NewGameOptions opts;
-    opts.seed = (double)seed;
+    opts.seed = static_cast<double>(seed);
     opts.activeSides = cfg.activeSides;
     opts.cropMargin = cfg.cropMargin;
     opts.options = {
@@ -160,7 +160,7 @@ game::NewGameOptions gameOptions(const Config& cfg, const TrainingPreset& preset
     for (int i = 0; i < 8; i++) {
         opts.sides[i].computer = true;
         opts.sides[i].level = 2;
-        opts.sides[i].card = (int)((seed + i * 5) % 9);
+        opts.sides[i].card = static_cast<int>((seed + i * 5) % 9);
     }
     return opts;
 }
@@ -169,9 +169,10 @@ std::unique_ptr<Game> makeArenaGame(const Config& cfg, const std::string& scenar
                                     const TrainingPreset& preset, uint32_t seed,
                                     bool allowRandomMap) {
     auto opts = gameOptions(cfg, preset, seed);
-    float mapRoll = (float)(((seed * 1597334677u) ^ 0x9e3779b9u) >> 8) / (float)(1u << 24);
+    float mapRoll = static_cast<float>(((seed * 1597334677U) ^ 0x9e3779b9U) >> 8) /
+                    static_cast<float>(1U << 24);
     if ((allowRandomMap && mapRoll < cfg.randomMapFrac) || scenario == "RANDOM") {
-        Rng mapRng((double)(seed ^ 0x5bf03635u));
+        Rng mapRng(static_cast<double>(seed ^ 0x5bf03635U));
         randommap::Options ropts;
         ropts.dataDir = cfg.dataDir;
         ropts.rng = &mapRng;
@@ -190,10 +191,10 @@ std::unique_ptr<Game> makeArenaGame(const Config& cfg, const std::string& scenar
 struct SideEpisode {
     int sideIndex = 0;
     std::vector<ml::TurnStepRecord> turns;
-    float finalScore = 0.0f;      // S when the game ended or was cut off
+    float finalScore = 0.0F;      // S when the game ended or was cut off
     bool terminal = false;        // eliminated or game over: no bootstrap
-    float terminalReward = 0.0f;  // win / elimination bonus
-    float bootstrapValue = 0.0f;  // V(s) at the cut-off when not terminal
+    float terminalReward = 0.0F;  // win / elimination bonus
+    float bootstrapValue = 0.0F;  // V(s) at the cut-off when not terminal
     int finalCities = 0;
     bool searched = false;  // turns carry search-based advantages (no GAE)
 };
@@ -224,11 +225,13 @@ void markDepartures(const Game& g, int side, ml::TurnStepRecord& turn) {
         totalIncome += std::max(1, c.income);
     }
     for (auto& ms : turn.missionSteps) {
-        if (ms.vacatedCity == NONE || ms.vacatedCity >= (int)g.map->cities.size()) continue;
+        if (ms.vacatedCity == NONE || ms.vacatedCity >= static_cast<int>(g.map->cities.size()))
+            continue;
         const City& c = g.map->cities[ms.vacatedCity];
         if (!c.razed && c.ownerIndex == side) continue;
-        ms.vacatedLoss = 2.0f / (float)std::max(1, standing) +
-                         0.5f * (float)std::max(1, c.income) / (float)std::max(1, totalIncome);
+        ms.vacatedLoss = 2.0F / static_cast<float>(std::max(1, standing)) +
+                         0.5F * static_cast<float>(std::max(1, c.income)) /
+                                 static_cast<float>(std::max(1, totalIncome));
     }
 }
 
@@ -248,10 +251,12 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario,
     for (int s = 0; s < 8; s++) {
         if (g.map->sides[s].inUse) activeCount++;
     }
-    int soloSeat = activeCount > 0 ? (int)(seed % (uint32_t)activeCount) : 0;
+    int soloSeat =
+            activeCount > 0 ? static_cast<int>(seed % static_cast<uint32_t>(activeCount)) : 0;
     // --mixed-frac: some solo-learner games are played like the benchmark instead,
     // alternating learner and Classic seats, with every learner seat recorded.
-    float mixRoll = (float)(((seed * 2246822519u) ^ 0x85ebca6bu) >> 8) / (float)(1u << 24);
+    float mixRoll = static_cast<float>(((seed * 2246822519U) ^ 0x85ebca6bU) >> 8) /
+                    static_cast<float>(1U << 24);
     const bool solo = cfg.soloLearner && !(mixRoll < cfg.mixedFrac);
     const bool mixedVsClassic = cfg.soloLearner && !solo;
     int idx = 0;
@@ -267,11 +272,14 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario,
         classic[s] = (solo || mixedVsClassic) ? !learnerSide
                                               : ((mode == Opponent::Classic) && !learnerSide);
         side.classicAi = classic[s];
-        float raidRoll = (float)(((seed * 747796405u) ^ (uint32_t)((s + 1) * 2891336453u)) >> 8) /
-                         (float)(1u << 24);
-        float frozenRoll =
-                (float)(((seed * 2654435769u) ^ (uint32_t)((s + 1) * 3266489917u)) >> 8) /
-                (float)(1u << 24);
+        float raidRoll =
+                static_cast<float>(
+                        ((seed * 747796405U) ^ static_cast<uint32_t>((s + 1) * 2891336453U)) >> 8) /
+                static_cast<float>(1U << 24);
+        float frozenRoll = static_cast<float>(((seed * 2654435769U) ^
+                                               static_cast<uint32_t>((s + 1) * 3266489917U)) >>
+                                              8) /
+                           static_cast<float>(1U << 24);
         classicKind[s] =
                 raidRoll < cfg.raiderFrac ? opponents::Kind::Raider : opponents::Kind::Classic;
         if (classic[s] && g_frozen && frozenRoll < cfg.frozenFrac) {
@@ -279,7 +287,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario,
             side.classicAi = false;  // a Modern AI seat, just not a learning one
         }
         eps[s].sideIndex = s;
-        samplers[s].rngState = (seed * 2654435761u) ^ (uint32_t)((s + 1) * 2246822519u);
+        samplers[s].rngState = (seed * 2654435761U) ^ static_cast<uint32_t>((s + 1) * 2246822519U);
         samplers[s].temperature = temperature;
     }
 
@@ -299,7 +307,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario,
                 opponents::playTurn(g, *cur, classicKind[s], g_frozen);
             } else {
                 ml::RolloutSampler opp;
-                opp.rngState = samplers[s].rngState ^ (uint32_t)(g.turn * 374761393u);
+                opp.rngState = samplers[s].rngState ^ static_cast<uint32_t>(g.turn * 374761393U);
                 opp.temperature = temperature;
                 ai::modern::playTurn(g, *cur, nullptr, &snapshot, &opp);
             }
@@ -329,7 +337,7 @@ RolloutSummary runRollout(const Config& cfg, const std::string& scenario,
         } else if (g.over || g.won) {
             ep.terminal = true;
             bool wonGame = (g.ending.winner && g.ending.winner->index == s);
-            ep.terminalReward = wonGame ? cfg.winReward : 0.0f;
+            ep.terminalReward = wonGame ? cfg.winReward : 0.0F;
         } else {
             ai::belief::update(g, side);
             ep.bootstrapValue = learner.evaluateValue(ml::buildContext(g, side),
@@ -368,7 +376,8 @@ RolloutSummary runSearchRollout(const Config& cfg, const std::string& scenario,
     for (int s = 0; s < 8; s++) {
         if (gp->map->sides[s].inUse) activeCount++;
     }
-    const int soloSeat = activeCount > 0 ? (int)(seed % (uint32_t)activeCount) : 0;
+    const int soloSeat =
+            activeCount > 0 ? static_cast<int>(seed % static_cast<uint32_t>(activeCount)) : 0;
     int learnerSide = NONE;
     std::array<opponents::Kind, 8> kind{};
     int idx = 0;
@@ -378,11 +387,14 @@ RolloutSummary runSearchRollout(const Config& cfg, const std::string& scenario,
         const bool me = (idx++ == soloSeat);
         if (me) learnerSide = s;
         side.classicAi = !me;
-        float raidRoll = (float)(((seed * 747796405u) ^ (uint32_t)((s + 1) * 2891336453u)) >> 8) /
-                         (float)(1u << 24);
-        float frozenRoll =
-                (float)(((seed * 2654435769u) ^ (uint32_t)((s + 1) * 3266489917u)) >> 8) /
-                (float)(1u << 24);
+        float raidRoll =
+                static_cast<float>(
+                        ((seed * 747796405U) ^ static_cast<uint32_t>((s + 1) * 2891336453U)) >> 8) /
+                static_cast<float>(1U << 24);
+        float frozenRoll = static_cast<float>(((seed * 2654435769U) ^
+                                               static_cast<uint32_t>((s + 1) * 3266489917U)) >>
+                                              8) /
+                           static_cast<float>(1U << 24);
         kind[s] = raidRoll < cfg.raiderFrac ? opponents::Kind::Raider : opponents::Kind::Classic;
         if (!me && g_frozen && frozenRoll < cfg.frozenFrac) {
             kind[s] = opponents::Kind::Frozen;
@@ -425,14 +437,15 @@ RolloutSummary runSearchRollout(const Config& cfg, const std::string& scenario,
                 auto cand = copyGame(cfg, *gp);
                 ml::RolloutSampler sampler;
                 sampler.temperature = temperature;
-                sampler.rngState = (seed * 2654435761u) ^ (uint32_t)((gp->turn + 1) * 40503u) ^
-                                   (uint32_t)((k + 1) * 2246822519u);
+                sampler.rngState = (seed * 2654435761U) ^
+                                   static_cast<uint32_t>((gp->turn + 1) * 40503U) ^
+                                   static_cast<uint32_t>((k + 1) * 2246822519U);
                 sampler.currentTurn = &recs[k];
                 ai::modern::playTurn(*cand, *cand->map->side(s), nullptr, &learner, &sampler);
                 sampler.currentTurn = nullptr;
                 for (int r = 0; r < cfg.searchR; r++) {
                     auto copy = copyGame(cfg, *cand);
-                    copy->rng.state ^= (uint32_t)((r + 1) * 0x9e3779b9u);
+                    copy->rng.state ^= static_cast<uint32_t>((r + 1) * 0x9e3779b9U);
                     value[k] += rolloutValue(*copy);
                 }
                 value[k] /= cfg.searchR;
@@ -443,9 +456,9 @@ RolloutSummary runSearchRollout(const Config& cfg, const std::string& scenario,
             mean /= std::max(1, cfg.searchK);
             size_t best = 0;
             for (int k = 0; k < cfg.searchK; k++) {
-                if (value[k] > value[best]) best = (size_t)k;
+                if (value[k] > value[best]) best = static_cast<size_t>(k);
                 auto& tr = recs[k];
-                tr.advantage = (float)(value[k] - mean);
+                tr.advantage = static_cast<float>(value[k] - mean);
                 tr.returnTarget = std::numeric_limits<float>::quiet_NaN();  // no critic target
                 for (auto& ms : tr.missionSteps) {
                     ms.advantage = tr.advantage;
@@ -476,7 +489,7 @@ RolloutSummary runSearchRollout(const Config& cfg, const std::string& scenario,
 // credit tracked over non-recycled Game::pool Army* identities.
 void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda,
                        float localWeight, float departureWeight) {
-    constexpr float stackGamma = 0.90f;
+    constexpr float stackGamma = 0.90F;
     // Departure credit is centred over all moves that emptied a city: emptying
     // one that then fell scores below average, emptying one that held scores
     // above, so the signal teaches *when* to leave, not "never leave".
@@ -491,35 +504,35 @@ void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
             }
         }
     }
-    const float vacMean = vacCount > 0 ? (float)(vacSum / vacCount) : 0.0f;
+    const float vacMean = vacCount > 0 ? static_cast<float>(vacSum / vacCount) : 0.0F;
     for (auto& ep : episodes) {
         if (ep.searched) continue;  // advantages came from comparing candidate turns
-        const int T = (int)ep.turns.size();
-        float gae = 0.0f;
+        const int T = static_cast<int>(ep.turns.size());
+        float gae = 0.0F;
         std::unordered_map<std::uintptr_t, float> unitFutureLocal;
         for (int t = T - 1; t >= 0; t--) {
             auto& cur = ep.turns[t];
             bool last = (t == T - 1);
             float nextScore = last ? ep.finalScore : ep.turns[t + 1].startScore;
             float nextValue =
-                    last ? (ep.terminal ? 0.0f : ep.bootstrapValue) : ep.turns[t + 1].valuePred;
-            float reward = (nextScore - cur.startScore) + (last ? ep.terminalReward : 0.0f);
+                    last ? (ep.terminal ? 0.0F : ep.bootstrapValue) : ep.turns[t + 1].valuePred;
+            float reward = (nextScore - cur.startScore) + (last ? ep.terminalReward : 0.0F);
             float delta = reward + gamma * nextValue - cur.valuePred;
             gae = delta + gamma * lambda * gae;
             cur.advantage = gae;
             cur.returnTarget = gae + cur.valuePred;
 
             for (auto& [uid, val] : unitFutureLocal) val *= stackGamma;
-            for (int mi = (int)cur.missionSteps.size() - 1; mi >= 0; mi--) {
+            for (int mi = static_cast<int>(cur.missionSteps.size()) - 1; mi >= 0; mi--) {
                 auto& ms = cur.missionSteps[mi];
                 if (!ms.unitIds.empty()) {
-                    float perUnit = ms.immediateDeltaScore / (float)ms.unitIds.size();
+                    float perUnit = ms.immediateDeltaScore / static_cast<float>(ms.unitIds.size());
                     for (std::uintptr_t uid : ms.unitIds) {
                         unitFutureLocal[uid] += perUnit;
                     }
                 }
                 const auto& evalIds = ms.poolUnitIds.empty() ? ms.unitIds : ms.poolUnitIds;
-                float groupReturn = 0.0f;
+                float groupReturn = 0.0F;
                 for (std::uintptr_t uid : evalIds) {
                     auto it = unitFutureLocal.find(uid);
                     if (it != unitFutureLocal.end()) groupReturn += it->second;
@@ -535,16 +548,17 @@ void computeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
 }
 
 struct Normalizer {
-    float mean = 0.0f, invStd = 1.0f;
-    float operator()(float x) const { return std::clamp((x - mean) * invStd, -5.0f, 5.0f); }
+    float mean = 0.0F, invStd = 1.0F;
+    float operator()(float x) const { return std::clamp((x - mean) * invStd, -5.0F, 5.0F); }
     static Normalizer fit(const std::vector<float>& v) {
         Normalizer n;
         if (v.size() < 2) return n;
         double s = 0.0, sq = 0.0;
         for (float x : v) s += x;
-        n.mean = (float)(s / v.size());
-        for (float x : v) sq += ((double)x - n.mean) * ((double)x - n.mean);
-        n.invStd = 1.0f / std::max(1e-4f, (float)std::sqrt(sq / v.size()));
+        n.mean = static_cast<float>(s / v.size());
+        for (float x : v)
+            sq += (static_cast<double>(x) - n.mean) * (static_cast<double>(x) - n.mean);
+        n.invStd = 1.0F / std::max(1e-4F, static_cast<float>(std::sqrt(sq / v.size())));
         return n;
     }
 };
@@ -578,47 +592,47 @@ void categoricalPPO(const std::vector<float>& u, const std::vector<float>* logMu
                     float oldLogProb, float adv, float invT, const Config& cfg,
                     std::vector<float>& dU, HeadStats& st) {
     const size_t K = u.size();
-    dU.assign(K, 0.0f);
+    dU.assign(K, 0.0F);
     if (K <= 1) return;
-    auto lmOf = [&](size_t i) { return (logMult && i < logMult->size()) ? (*logMult)[i] : 0.0f; };
-    float maxZ = -1e30f;
+    auto lmOf = [&](size_t i) { return (logMult && i < logMult->size()) ? (*logMult)[i] : 0.0F; };
+    float maxZ = -1e30F;
     std::vector<float> z(K);
     for (size_t i = 0; i < K; i++) {
         z[i] = u[i] * invT - lmOf(i);
         maxZ = std::max(maxZ, z[i]);
     }
     std::vector<float> p(K);
-    float sum = 0.0f;
+    float sum = 0.0F;
     for (size_t i = 0; i < K; i++) {
-        p[i] = std::exp(std::max(-30.0f, z[i] - maxZ));
+        p[i] = std::exp(std::max(-30.0F, z[i] - maxZ));
         sum += p[i];
     }
     for (float& v : p) v /= sum;
 
-    float newLP = std::log(std::max(1e-12f, p[chosen]));
-    float logRatio = std::clamp(newLP - oldLogProb, -10.0f, 10.0f);
+    float newLP = std::log(std::max(1e-12F, p[chosen]));
+    float logRatio = std::clamp(newLP - oldLogProb, -10.0F, 10.0F);
     float ratio = std::exp(logRatio);
     st.policyLoss +=
-            -std::min(ratio * adv, std::clamp(ratio, 1.0f - cfg.clipEps, 1.0f + cfg.clipEps) * adv);
-    st.kl += (ratio - 1.0f) - logRatio;
+            -std::min(ratio * adv, std::clamp(ratio, 1.0F - cfg.clipEps, 1.0F + cfg.clipEps) * adv);
+    st.kl += (ratio - 1.0F) - logRatio;
     st.klSamples++;
-    bool clipped = (adv > 0.0f && ratio > 1.0f + cfg.clipEps) ||
-                   (adv < 0.0f && ratio < 1.0f - cfg.clipEps);
-    float dLossDLogP = clipped ? 0.0f : -ratio * adv;
+    bool clipped = (adv > 0.0F && ratio > 1.0F + cfg.clipEps) ||
+                   (adv < 0.0F && ratio < 1.0F - cfg.clipEps);
+    float dLossDLogP = clipped ? 0.0F : -ratio * adv;
 
-    float meanAdj = 0.0f, ent = 0.0f;
+    float meanAdj = 0.0F, ent = 0.0F;
     for (size_t j = 0; j < K; j++) {
-        float lp = std::log(std::max(1e-12f, p[j]));
+        float lp = std::log(std::max(1e-12F, p[j]));
         meanAdj += p[j] * (lp + lmOf(j));
         ent -= p[j] * lp;
     }
-    float normLogK = std::max(1.0f, std::log((float)K));
+    float normLogK = std::max(1.0F, std::log(static_cast<float>(K)));
     st.entropy += ent / normLogK;
     st.entSamples++;
     float klCoef = cfg.entCoef / normLogK;
     for (size_t j = 0; j < K; j++) {
-        float ind = ((int)j == chosen) ? 1.0f : 0.0f;
-        float lp = std::log(std::max(1e-12f, p[j]));
+        float ind = (static_cast<int>(j) == chosen) ? 1.0F : 0.0F;
+        float lp = std::log(std::max(1e-12F, p[j]));
         dU[j] = dLossDLogP * (ind - p[j]) * invT +
                 klCoef * p[j] * ((lp + lmOf(j)) - meanAdj) * invT;
     }
@@ -628,21 +642,21 @@ void categoricalPPO(const std::vector<float>& u, const std::vector<float>* logMu
 // (P(yes) = sigmoid(logit / T)), plus an entropy bonus. Returns dLoss/dlogit.
 float binaryPPO(float logit, bool chosen, float oldLogProb, float adv, float invT,
                 const Config& cfg, HeadStats& st) {
-    float z = std::clamp(logit * invT, -15.0f, 15.0f);
-    float p = 1.0f / (1.0f + std::exp(-z));
-    float newLP = std::log(std::max(1e-12f, chosen ? p : 1.0f - p));
-    float logRatio = std::clamp(newLP - oldLogProb, -10.0f, 10.0f);
+    float z = std::clamp(logit * invT, -15.0F, 15.0F);
+    float p = 1.0F / (1.0F + std::exp(-z));
+    float newLP = std::log(std::max(1e-12F, chosen ? p : 1.0F - p));
+    float logRatio = std::clamp(newLP - oldLogProb, -10.0F, 10.0F);
     float ratio = std::exp(logRatio);
     st.policyLoss +=
-            -std::min(ratio * adv, std::clamp(ratio, 1.0f - cfg.clipEps, 1.0f + cfg.clipEps) * adv);
-    st.kl += (ratio - 1.0f) - logRatio;
+            -std::min(ratio * adv, std::clamp(ratio, 1.0F - cfg.clipEps, 1.0F + cfg.clipEps) * adv);
+    st.kl += (ratio - 1.0F) - logRatio;
     st.klSamples++;
-    bool clipped = (adv > 0.0f && ratio > 1.0f + cfg.clipEps) ||
-                   (adv < 0.0f && ratio < 1.0f - cfg.clipEps);
-    float dLossDLogP = clipped ? 0.0f : -ratio * adv;
-    float y = chosen ? 1.0f : 0.0f;
+    bool clipped = (adv > 0.0F && ratio > 1.0F + cfg.clipEps) ||
+                   (adv < 0.0F && ratio < 1.0F - cfg.clipEps);
+    float dLossDLogP = clipped ? 0.0F : -ratio * adv;
+    float y = chosen ? 1.0F : 0.0F;
     // d(-H)/dz = p (1 - p) z for the Bernoulli entropy H
-    return dLossDLogP * (y - p) * invT + cfg.entCoef * p * (1.0f - p) * z * invT;
+    return dLossDLogP * (y - p) * invT + cfg.entCoef * p * (1.0F - p) * z * invT;
 }
 
 struct Normalizers {
@@ -680,15 +694,15 @@ void accumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& tr,
             for (size_t k = 0; k < K; k++) u[k] = net.missionNet.forward(ms.candidates[k])[0];
             categoricalPPO(u, &ms.logMult, ms.chosenIdx, ms.oldLogProb, adv, invT, cfg, dU, st);
             for (size_t k = 0; k < K; k++) {
-                if (dU[k] != 0.0f)
-                    net.missionNet.backward(ms.candidates[k], {dU[k], 0.0f}, grad.missionNet);
+                if (dU[k] != 0.0F)
+                    net.missionNet.backward(ms.candidates[k], {dU[k], 0.0F}, grad.missionNet);
             }
             st.mission++;
         }
-        if (ms.hasStageChoice && ms.chosenIdx < (int)K) {
+        if (ms.hasStageChoice && ms.chosenIdx < static_cast<int>(K)) {
             float s = net.missionNet.forward(ms.candidates[ms.chosenIdx])[1];
             float d = binaryPPO(s, ms.stageChosen, ms.oldStageLogProb, adv, invT, cfg, st);
-            net.missionNet.backward(ms.candidates[ms.chosenIdx], {0.0f, d}, grad.missionNet);
+            net.missionNet.backward(ms.candidates[ms.chosenIdx], {0.0F, d}, grad.missionNet);
             st.mission++;
         }
     }
@@ -701,7 +715,7 @@ void accumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& tr,
         for (size_t k = 0; k < K; k++) u[k] = net.econNet.forward(es.candidates[k])[0];
         categoricalPPO(u, &es.logMult, es.chosenIdx, es.oldLogProb, econAdv, invT, cfg, dU, st);
         for (size_t k = 0; k < K; k++) {
-            if (dU[k] != 0.0f) net.econNet.backward(es.candidates[k], {dU[k]}, grad.econNet);
+            if (dU[k] != 0.0F) net.econNet.backward(es.candidates[k], {dU[k]}, grad.econNet);
         }
         st.econ++;
     }
@@ -767,7 +781,7 @@ std::vector<EvalCase> evalCases(uint32_t seedBase, int seeds) {
             EvalCase c;
             c.scenario = SCENARIOS[(i + i / 4) % SCENARIOS.size()];
             c.preset = i % 4;
-            c.seed = seedBase + (uint32_t)i;
+            c.seed = seedBase + static_cast<uint32_t>(i);
             c.swap = swap;
             cases.push_back(c);
         }
@@ -785,10 +799,12 @@ void playEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     }
     // Solo: the Modern seat rotates with the seed; the swapped game takes the seat
     // half-way round the table so both games of a seed differ in position.
-    int soloSeat = activeCount > 0
-                           ? (int)((c.seed + (uint32_t)(c.swap * std::max(1, activeCount / 2))) %
-                                   (uint32_t)activeCount)
-                           : 0;
+    int soloSeat =
+            activeCount > 0
+                    ? static_cast<int>((c.seed + static_cast<uint32_t>(
+                                                         c.swap * std::max(1, activeCount / 2))) %
+                                       static_cast<uint32_t>(activeCount))
+                    : 0;
     std::array<bool, 8> modern{};
     int idx = 0;
     for (int s = 0; s < 8; s++) {
@@ -825,7 +841,7 @@ void playEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
             best = s;
         }
     }
-    c.share = (m + k) > 0 ? (double)m / (double)(m + k) : 0.5;
+    c.share = (m + k) > 0 ? static_cast<double>(m) / static_cast<double>(m + k) : 0.5;
     c.top = (best != NONE && modern[best]) ? 1 : 0;
     c.modern = m;
     c.classic = k;
@@ -842,7 +858,7 @@ std::vector<std::vector<EvalCase>> runEval(const Config& cfg,
     const size_t perPolicy = out[0].size();
     const size_t total = perPolicy * policies.size();
     std::atomic<size_t> next{0};
-    unsigned int workers = std::max(2u, std::thread::hardware_concurrency());
+    unsigned int workers = std::max(2U, std::thread::hardware_concurrency());
     std::vector<std::thread> pool;
     for (unsigned int w = 0; w < workers; w++) {
         pool.emplace_back([&]() {
@@ -858,14 +874,15 @@ std::vector<std::vector<EvalCase>> runEval(const Config& cfg,
 
 EvalResult summarize(std::vector<EvalCase> cases) {
     EvalResult r;
-    r.games = (int)cases.size();
+    r.games = static_cast<int>(cases.size());
     double parity = 0.0;
     for (const auto& c : cases) {
         r.meanShare += c.share;
         r.modernTop += c.top;
         r.modernCities += c.modern;
         r.classicCities += c.classic;
-        parity += c.sides > 0 ? (double)c.modernSides / (double)c.sides : 0.5;
+        parity += c.sides > 0 ? static_cast<double>(c.modernSides) / static_cast<double>(c.sides)
+                              : 0.5;
     }
     r.meanShare /= std::max(1, r.games);
     r.parity = parity / std::max(1, r.games);
@@ -971,25 +988,25 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
         else if (a == "--lr")
             cfg.lrStart = std::stof(next());
         else if (a == "--temp-start")
-            cfg.tempStart = std::max(0.1f, std::stof(next()));
+            cfg.tempStart = std::max(0.1F, std::stof(next()));
         else if (a == "--temp-end")
-            cfg.tempEnd = std::max(0.1f, std::stof(next()));
+            cfg.tempEnd = std::max(0.1F, std::stof(next()));
         else if (a == "--eval-temp")
-            cfg.evalTemp = std::max(0.01f, std::stof(next()));
+            cfg.evalTemp = std::max(0.01F, std::stof(next()));
         else if (a == "--seed-offset")
-            cfg.seedOffset = std::min<uint32_t>(500000u, (uint32_t)std::stoul(next()));
+            cfg.seedOffset = std::min<uint32_t>(500000U, static_cast<uint32_t>(std::stoul(next())));
         else if (a == "--classic-frac")
-            cfg.classicFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+            cfg.classicFrac = std::clamp(std::stof(next()), 0.0F, 1.0F);
         else if (a == "--random-map-frac")
-            cfg.randomMapFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+            cfg.randomMapFrac = std::clamp(std::stof(next()), 0.0F, 1.0F);
         else if (a == "--active-sides")
             cfg.activeSides = std::clamp(std::stoi(next()), 2, 8);
         else if (a == "--crop-margin")
             cfg.cropMargin = std::max(0, std::stoi(next()));
         else if (a == "--lambda")
-            cfg.gaeLambda = std::clamp(std::stof(next()), 0.0f, 1.0f);
+            cfg.gaeLambda = std::clamp(std::stof(next()), 0.0F, 1.0F);
         else if (a == "--local-weight")
-            cfg.localWeight = std::max(0.0f, std::stof(next()));
+            cfg.localWeight = std::max(0.0F, std::stof(next()));
         else if (a == "--out")
             cfg.outPath = next();
         else if (a == "--log")
@@ -1024,17 +1041,17 @@ bool parseArgs(int argc, char** argv, Config& cfg) {
         else if (a == "--critic-warmup")
             cfg.criticWarmup = std::max(0, std::stoi(next()));
         else if (a == "--mixed-frac")
-            cfg.mixedFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+            cfg.mixedFrac = std::clamp(std::stof(next()), 0.0F, 1.0F);
         else if (a == "--save-every")
             cfg.saveEvery = std::max(0, std::stoi(next()));
         else if (a == "--raider-frac")
-            cfg.raiderFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+            cfg.raiderFrac = std::clamp(std::stof(next()), 0.0F, 1.0F);
         else if (a == "--departure-weight")
-            cfg.departureWeight = std::max(0.0f, std::stof(next()));
+            cfg.departureWeight = std::max(0.0F, std::stof(next()));
         else if (a == "--frozen-opponent")
             cfg.frozenPath = next();
         else if (a == "--frozen-frac")
-            cfg.frozenFrac = std::clamp(std::stof(next()), 0.0f, 1.0f);
+            cfg.frozenFrac = std::clamp(std::stof(next()), 0.0F, 1.0F);
         else if (a == "--search-k")
             cfg.searchK = std::max(0, std::stoi(next()));
         else if (a == "--search-r")
@@ -1080,7 +1097,7 @@ int main(int argc, char** argv) {
                      cfg.dataDir.c_str());
         return 1;
     }
-    unsigned int threads = std::max(2u, std::thread::hardware_concurrency());
+    unsigned int threads = std::max(2U, std::thread::hardware_concurrency());
     ml::setDeployTemperature(cfg.evalTemp);
     ml::PolicyNetwork frozen;
     if (!cfg.frozenPath.empty()) {
@@ -1165,7 +1182,7 @@ int main(int argc, char** argv) {
     std::vector<ml::PolicyNetwork> hallOfFame = {learner};
     ml::PolicyNetwork best = learner;
     int bestIter = 0;
-    float bestShare = -1.0f;
+    float bestShare = -1.0F;
 
     const size_t D = ml::PolicyNetwork::TOTAL_PARAMS;
     const size_t offDiplo = 0;
@@ -1173,16 +1190,17 @@ int main(int argc, char** argv) {
     const size_t offEcon = offMission + ml::PolicyNetwork::MissionNet::PARAM_COUNT;
     const size_t offValue = offEcon + ml::PolicyNetwork::EconNet::PARAM_COUNT;
     const size_t offStackValue = offValue + ml::PolicyNetwork::ValueNet::PARAM_COUNT;
-    std::vector<float> params = learner.flatten(), adamM(D, 0.0f), adamV(D, 0.0f);
+    std::vector<float> params = learner.flatten(), adamM(D, 0.0F), adamV(D, 0.0F);
     int adamStep = 0;
     std::mt19937 shuffleRng(12345);
 
     for (int iter = 1; iter <= cfg.iterations; iter++) {
         auto t0 = std::chrono::steady_clock::now();
-        float progress = (float)(iter - 1) / (float)std::max(1, cfg.iterations - 1);
+        float progress =
+                static_cast<float>(iter - 1) / static_cast<float>(std::max(1, cfg.iterations - 1));
         float temperature = cfg.tempStart + (cfg.tempEnd - cfg.tempStart) * progress;
         float lr = cfg.lrStart + (cfg.lrEnd - cfg.lrStart) * progress;
-        float invT = 1.0f / temperature;
+        float invT = 1.0F / temperature;
 
         // ---- rollouts
         std::vector<RolloutSummary> games(cfg.gamesPerIter);
@@ -1191,10 +1209,12 @@ int main(int argc, char** argv) {
         for (unsigned int w = 0; w < std::min<unsigned int>(threads, cfg.gamesPerIter); w++) {
             pool.emplace_back([&]() {
                 for (int gi; (gi = nextGame.fetch_add(1)) < cfg.gamesPerIter;) {
-                    uint32_t seed = cfg.seedOffset + (uint32_t)(iter * 1009 + gi * 97 + 17);
+                    uint32_t seed =
+                            cfg.seedOffset + static_cast<uint32_t>(iter * 1009 + gi * 97 + 17);
                     const std::string& scen = SCENARIOS[(iter * 7 + gi) % SCENARIOS.size()];
                     const TrainingPreset& preset = PRESETS[(iter + gi) % 4];
-                    float roll = (float)((seed * 2654435761u) >> 8) / (float)(1u << 24);
+                    float roll = static_cast<float>((seed * 2654435761U) >> 8) /
+                                 static_cast<float>(1U << 24);
                     Opponent mode = roll < cfg.classicFrac ? Opponent::Classic
                                     : (gi % 2 == 0)        ? Opponent::Mirror
                                                            : Opponent::League;
@@ -1269,7 +1289,7 @@ int main(int argc, char** argv) {
                 missionMoves++;
                 if (ms.vacatedCity == NONE) continue;
                 vacated++;
-                if (ms.vacatedLoss > 0.0f) vacatedLost++;
+                if (ms.vacatedLoss > 0.0F) vacatedLost++;
             }
         }
         // Critic warm-up: only the critics learn for the first --critic-warmup iterations
@@ -1286,7 +1306,7 @@ int main(int argc, char** argv) {
                 size_t mb1 = std::min(turns.size(), mb0 + mbSize);
                 std::atomic<size_t> nextTurn{mb0};
                 unsigned int gw = std::min<unsigned int>(
-                        threads, (unsigned int)std::max<size_t>(1, mb1 - mb0));
+                        threads, static_cast<unsigned int>(std::max<size_t>(1, mb1 - mb0)));
                 std::vector<ml::PolicyNetwork> grads(gw);
                 std::vector<HeadStats> stats(gw);
                 std::vector<std::thread> gpool;
@@ -1303,7 +1323,7 @@ int main(int argc, char** argv) {
                 for (auto& t : gpool) t.join();
 
                 HeadStats mbStats;
-                std::vector<float> g(D, 0.0f);
+                std::vector<float> g(D, 0.0F);
                 for (unsigned int w = 0; w < gw; w++) {
                     auto fg = grads[w].flatten();
                     for (size_t d = 0; d < D; d++) g[d] += fg[d];
@@ -1313,24 +1333,24 @@ int main(int argc, char** argv) {
                 auto scale = [&](size_t a, size_t b, float s) {
                     for (size_t d = a; d < b; d++) g[d] *= s;
                 };
-                scale(offDiplo, offMission, warmup ? 0.0f : 1.0f / std::max(1, mbStats.diplo));
-                scale(offMission, offEcon, warmup ? 0.0f : 1.0f / std::max(1, mbStats.mission));
-                scale(offEcon, offValue, warmup ? 0.0f : 1.0f / std::max(1, mbStats.econ));
+                scale(offDiplo, offMission, warmup ? 0.0F : 1.0F / std::max(1, mbStats.diplo));
+                scale(offMission, offEcon, warmup ? 0.0F : 1.0F / std::max(1, mbStats.mission));
+                scale(offEcon, offValue, warmup ? 0.0F : 1.0F / std::max(1, mbStats.econ));
                 scale(offValue, offStackValue, cfg.valueCoef / std::max(1, mbStats.turns));
                 scale(offStackValue, D, cfg.valueCoef / std::max(1, mbStats.stackValues));
                 double norm = 0.0;
-                for (float x : g) norm += (double)x * x;
+                for (float x : g) norm += static_cast<double>(x) * x;
                 float clip = std::sqrt(norm) > cfg.maxGradNorm
-                                     ? cfg.maxGradNorm / (float)std::sqrt(norm)
-                                     : 1.0f;
+                                     ? cfg.maxGradNorm / static_cast<float>(std::sqrt(norm))
+                                     : 1.0F;
                 adamStep++;
-                float bc1 = 1.0f - std::pow(0.9f, (float)adamStep),
-                      bc2 = 1.0f - std::pow(0.999f, (float)adamStep);
+                float bc1 = 1.0F - std::pow(0.9F, static_cast<float>(adamStep)),
+                      bc2 = 1.0F - std::pow(0.999F, static_cast<float>(adamStep));
                 for (size_t d = 0; d < D; d++) {
                     float gd = g[d] * clip;
-                    adamM[d] = 0.9f * adamM[d] + 0.1f * gd;
-                    adamV[d] = 0.999f * adamV[d] + 0.001f * gd * gd;
-                    params[d] -= lr * (adamM[d] / bc1) / (std::sqrt(adamV[d] / bc2) + 1e-8f);
+                    adamM[d] = 0.9F * adamM[d] + 0.1F * gd;
+                    adamV[d] = 0.999F * adamV[d] + 0.001F * gd * gd;
+                    params[d] -= lr * (adamM[d] / bc1) / (std::sqrt(adamV[d] / bc2) + 1e-8F);
                 }
                 learner.unflatten(params);
                 epochStats.add(mbStats);
@@ -1346,8 +1366,8 @@ int main(int argc, char** argv) {
         double ent = lastEpoch.entropy / std::max(1, lastEpoch.entSamples);
         double vloss = lastEpoch.valueLoss / std::max(1, lastEpoch.turns);
         double kl = lastEpoch.kl / std::max(1, lastEpoch.klSamples);
-        float avgCities = (float)cities / (float)std::max(1, sides);
-        float avgNeutrals = (float)neutrals / (float)cfg.gamesPerIter;
+        float avgCities = static_cast<float>(cities) / static_cast<float>(std::max(1, sides));
+        float avgNeutrals = static_cast<float>(neutrals) / static_cast<float>(cfg.gamesPerIter);
         size_t decisions = mAdv.size() + eAdv.size() + dAdv.size();
         std::printf(
                 "[iter %3d] %.1fs T=%.2f lr=%.1e | cities/side %.2f | neutrals %.1f | ent %.3f | "
@@ -1362,7 +1382,7 @@ int main(int argc, char** argv) {
         if (cfg.saveEvery > 0 && iter % cfg.saveEvery == 0) {
             std::filesystem::path snap = cfg.outPath;
             snap.replace_extension(fmt(".iter%d.json", iter));
-            learner.saveJson(snap, iter, 0.0f);
+            learner.saveJson(snap, iter, 0.0F);
         }
         if (iter % 10 == 0) {
             if (hallOfFame.size() < 12)
@@ -1376,8 +1396,8 @@ int main(int argc, char** argv) {
             EvalResult sel = evaluateVsClassic(cfg, learner, SELECT_SEED_BASE, cfg.selectSeeds,
                                                cfg.evalTurns);
             printEval(("select @" + std::to_string(iter)).c_str(), sel);
-            selShare = (float)sel.meanShare;
-            selCi = (float)sel.ci95;
+            selShare = static_cast<float>(sel.meanShare);
+            selCi = static_cast<float>(sel.ci95);
             if (selShare > bestShare) {
                 bestShare = selShare;
                 best = learner;
@@ -1399,18 +1419,18 @@ int main(int argc, char** argv) {
     {
         std::filesystem::path fin = cfg.outPath;
         fin.replace_extension(".final.json");
-        learner.saveJson(fin, cfg.iterations, 0.0f);
+        learner.saveJson(fin, cfg.iterations, 0.0F);
     }
     if (cfg.reportSeeds > 0) {
         std::printf("Kept iteration %d (selection share %.1f%%) in %s. Held-out report:\n",
-                    bestIter, bestShare * 100.0f, cfg.outPath.c_str());
+                    bestIter, bestShare * 100.0F, cfg.outPath.c_str());
         printEval("report",
                   evaluateVsClassic(cfg, best, REPORT_SEED_BASE, cfg.reportSeeds, cfg.evalTurns));
     } else {
         std::printf(
                 "Kept iteration %d (selection share %.1f%%) in %s (report skipped: --report-seeds "
                 "0).\n",
-                bestIter, bestShare * 100.0f, cfg.outPath.c_str());
+                bestIter, bestShare * 100.0F, cfg.outPath.c_str());
     }
     return 0;
 }

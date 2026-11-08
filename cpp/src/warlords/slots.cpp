@@ -81,7 +81,7 @@ std::set<Army*> clicked(const Game& g, const std::vector<Army*>& armies, int sid
 Slots build(const Game& g, const std::vector<Army*>& armies, int side,
             const std::set<Army*>* selectedIn) {
     Slots s;
-    s.n = std::min((int)armies.size(), MAX);
+    s.n = std::min(static_cast<int>(armies.size()), MAX);
     s.side = side;
     std::vector<Army*> list(armies.begin(), armies.begin() + s.n);
     std::set<Army*> chosen = selectedIn ? *selectedIn : clicked(g, list, side);

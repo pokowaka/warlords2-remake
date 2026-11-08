@@ -53,7 +53,7 @@ std::vector<Slot> citySlots(const std::vector<int>& produceIds, const Types& typ
 int bestSlot(const std::vector<Slot>& slots, int purpose, const Types& types, bool sideBonus) {
     const Purpose& w = rules::purpose(purpose);
     int best = NONE, bestScore = 0;
-    for (int i = (int)slots.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(slots.size()) - 1; i >= 0; i--) {
         const Slot& slot = slots[i];
         const ArmyType* a = types.byId(slot.type);
         if (purpose != 4 || a->flies) {

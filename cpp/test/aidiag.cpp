@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
     }
     randommap::Files rfiles;
     if (scen == "RANDOM") {
-        Rng mapRng((double)(seed ^ 0x5bf03635u));
+        Rng mapRng(static_cast<double>(seed ^ 0x5bf03635U));
         randommap::Options ro;
         ro.dataDir = "original";
         ro.rng = &mapRng;
@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
                 }
                 for (auto& c : g.map->cities) {
                     if (c.ownerIndex == cur->index && c.producing != NONE &&
-                        c.producing < (int)c.slots.size()) {
+                        c.producing < static_cast<int>(c.slots.size())) {
                         built[c.slots[c.producing].name]++;
                     }
                 }

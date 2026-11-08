@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
         long sum = 0, peak = 0;
         for (int i = 0; i < N; i++) {
             sum = (sum * 31 + buf[i] + 65536) % 1000000007;
-            peak = std::max(peak, (long)std::abs(buf[i]));
+            peak = std::max(peak, static_cast<long>(std::abs(buf[i])));
         }
         printf("%d %ld %ld\n", s, sum, peak);
     }

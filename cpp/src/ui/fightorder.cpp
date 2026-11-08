@@ -27,7 +27,7 @@ struct Order : kit::Modal {
     std::vector<int>& row() { return G.g->map->fightOrder[G.player->index]; }
     int typeAt(int rank) {
         auto& r = row();
-        for (int t = 0; t <= 28 && t < (int)r.size(); t++)
+        for (int t = 0; t <= 28 && t < static_cast<int>(r.size()); t++)
             if (r[t] == rank) return t;
         return w2::NONE;
     }

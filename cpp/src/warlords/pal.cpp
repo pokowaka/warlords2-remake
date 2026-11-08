@@ -17,22 +17,22 @@ Palette load(const std::string& path) {
     size_t i = 0;
     while (i < s.size()) {
         // find three integers separated by whitespace
-        if (std::isdigit((unsigned char)s[i])) {
+        if (std::isdigit(static_cast<unsigned char>(s[i]))) {
             size_t j = i;
             long v[3];
             bool ok = true;
             for (int k = 0; k < 3; k++) {
-                if (j >= s.size() || !std::isdigit((unsigned char)s[j])) {
+                if (j >= s.size() || !std::isdigit(static_cast<unsigned char>(s[j]))) {
                     ok = false;
                     break;
                 }
                 long n = 0;
-                while (j < s.size() && std::isdigit((unsigned char)s[j]))
+                while (j < s.size() && std::isdigit(static_cast<unsigned char>(s[j])))
                     n = n * 10 + (s[j++] - '0');
                 v[k] = n;
                 if (k < 2) {
                     size_t w = j;
-                    while (j < s.size() && std::isspace((unsigned char)s[j])) j++;
+                    while (j < s.size() && std::isspace(static_cast<unsigned char>(s[j]))) j++;
                     if (j == w) {
                         ok = false;
                         break;
@@ -44,14 +44,14 @@ Palette load(const std::string& path) {
                 i = j;
                 continue;
             }
-            while (i < s.size() && std::isdigit((unsigned char)s[i])) i++;
+            while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) i++;
             continue;
         }
         i++;
     }
     if (out.size() != 16)
         throw std::runtime_error(
-                fmt("%s: expected 16 entries, got %d", path.c_str(), (int)out.size()));
+                fmt("%s: expected 16 entries, got %d", path.c_str(), static_cast<int>(out.size())));
     return out;
 }
 

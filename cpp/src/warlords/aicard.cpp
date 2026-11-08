@@ -13,7 +13,7 @@ std::string path(const std::string& dataDir, int level, int number, const std::s
 
 std::optional<Card> load(const std::string& dataDir, int level, int number) {
     auto f = readFile(path(dataDir, level, number, "CRD"));
-    if (!f || f->size() < (size_t)RECORD) return std::nullopt;
+    if (!f || f->size() < static_cast<size_t>(RECORD)) return std::nullopt;
     const std::string& s = *f;
     Card c;
     for (int t = 0; t <= 28; t++) c.fightOrder.push_back(u8(s, 0x0e + t));

@@ -86,7 +86,8 @@ void show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
         d->last = r.item ? r.item->name : "";
     } else if (r.kind == "allies") {
         d->grp = 0x1f;
-        d->last = format(kit::text(0x1f, 2), (int)r.armies.size(), r.type ? r.type->name : "");
+        d->last = format(kit::text(0x1f, 2), static_cast<int>(r.armies.size()),
+                         r.type ? r.type->name : "");
     } else {
         d->grp = 0x1f;
         d->last = format(kit::text(0x1f, 2), r.gold, "gold");  // 4125:00d9

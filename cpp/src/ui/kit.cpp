@@ -14,7 +14,7 @@ ModalP push(ModalP d) {
 }
 
 void pop(const Modal* d) {
-    for (int i = (int)G.modals.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(G.modals.size()) - 1; i >= 0; i--) {
         if (G.modals[i].get() == d) {
             G.modals.erase(G.modals.begin() + i);
             return;
@@ -30,8 +30,8 @@ ModalP topShared() {
 }
 
 void setPal(int i) {
-    const auto& c = i >= 0 && i < (int)G.palette.size() ? G.palette[i] : G.palette[0];
-    gfx::setColor((float)c[0], (float)c[1], (float)c[2]);
+    const auto& c = i >= 0 && i < static_cast<int>(G.palette.size()) ? G.palette[i] : G.palette[0];
+    gfx::setColor(static_cast<float>(c[0]), static_cast<float>(c[1]), static_cast<float>(c[2]));
 }
 
 void outline(double x, double y, double w, double h) {

@@ -82,15 +82,15 @@ std::optional<std::vector<PoolItem>> loadItemPool(const std::string& path) {
     if (!ls || ls->empty()) return std::nullopt;
     long count = leadingInt((*ls)[0]);
     std::vector<PoolItem> pool;
-    for (size_t i = 1; i < std::min(ls->size(), (size_t)count + 1); i++) {
+    for (size_t i = 1; i < std::min(ls->size(), static_cast<size_t>(count) + 1); i++) {
         const std::string& line = (*ls)[i];
         PoolItem p;
         std::string nm = line.substr(0, std::min<size_t>(20, line.size()));
         for (auto& c : nm)
             if (c == '_') c = ' ';
         p.name = trimRight(nm);
-        p.type = line.size() > 21 ? (int)leadingInt(line.substr(21, 1)) : 0;
-        p.value = line.size() > 23 ? (int)leadingInt(line.substr(23, 1)) : 0;
+        p.type = line.size() > 21 ? static_cast<int>(leadingInt(line.substr(21, 1))) : 0;
+        p.value = line.size() > 23 ? static_cast<int>(leadingInt(line.substr(23, 1))) : 0;
         pool.push_back(p);
     }
     return pool;
@@ -121,8 +121,8 @@ static std::map<int, std::array<std::string, 3>> parseDescriptions(
                 cur += c;
         }
         std::array<std::string, 3> d;
-        for (int k = 0; k < 3; k++) d[k] = k < (int)parts.size() ? parts[k] : "";
-        out[(int)n] = d;
+        for (int k = 0; k < 3; k++) d[k] = k < static_cast<int>(parts.size()) ? parts[k] : "";
+        out[static_cast<int>(n)] = d;
     }
     return out;
 }
@@ -170,7 +170,8 @@ std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& na
         return *v;
     };
     std::string s = getMust("SCN");
-    if (s.size() != 12001) throw std::runtime_error(fmt("unexpected .SCN size: %d", (int)s.size()));
+    if (s.size() != 12001)
+        throw std::runtime_error(fmt("unexpected .SCN size: %d", static_cast<int>(s.size())));
     auto m = std::make_unique<Map>();
     m->name = name;
 
@@ -200,8 +201,8 @@ std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& na
 
     int nCities = u16(s, CITIES_COUNT);
     m->cities.resize(nCities);
-    m->cityAt.assign(MAP_W * MAP_H, nullptr);
-    m->cityTile.assign(MAP_W * MAP_H, nullptr);
+    m->cityAt.assign(static_cast<size_t>(MAP_W) * MAP_H, nullptr);
+    m->cityTile.assign(static_cast<size_t>(MAP_W) * MAP_H, nullptr);
     for (int i = 0; i < nCities; i++) {
         int o = CITIES + CITY_STRIDE * i;
         City& c = m->cities[i];
@@ -278,15 +279,16 @@ std::unique_ptr<Map> loadFromFiles(const std::string& dir, const std::string& na
 
     // terrain grid + road overlay; bit 15 of a map word marks a crossing
     std::string mp = getMust("MAP");
-    m->tiles.resize(MAP_W * MAP_H);
-    m->crossing.resize(MAP_W * MAP_H);
+    m->tiles.resize(static_cast<size_t>(MAP_W) * MAP_H);
+    m->crossing.resize(static_cast<size_t>(MAP_W) * MAP_H);
     for (int i = 0; i < MAP_W * MAP_H; i++) {
-        int w = u16(mp, i * 2);
+        int w = u16(mp, static_cast<size_t>(i) * 2);
         m->tiles[i] = w % 0x8000;
         m->crossing[i] = w >= 0x8000;
     }
     m->roads = getMust("RD");
-    if ((int)m->roads.size() < MAP_W * MAP_H) m->roads.resize(MAP_W * MAP_H, '\0');
+    if (static_cast<int>(m->roads.size()) < MAP_W * MAP_H)
+        m->roads.resize(static_cast<size_t>(MAP_W) * MAP_H, '\0');
 
     m->itemPool = loadItemPool(base + ".ITM");
     if (auto cty = getOpt("CTY")) m->cityText = parseDescriptions(splitLines(*cty));

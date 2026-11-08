@@ -50,7 +50,7 @@ struct Preset {
 };
 const Preset kPresets[4] = {{0, 0, 0}, {0, 1, 1}, {1, 1, 2}, {1, 0, 1}};
 constexpr uint32_t kSeedBase = 600000;  // disjoint from evaluation seeds (700000+)
-constexpr float kBcTemperature = 0.5f;  // the training temperature PPO uses
+constexpr float kBcTemperature = 0.5F;  // the training temperature PPO uses
 
 enum Kind { HOLD = 0, NEUTRAL_CITY = 1, ENEMY_CITY = 2, REINFORCE = 7 };
 
@@ -103,7 +103,7 @@ int labelSnapshot(Game& g, int me, const ai::modern::MissionSnapshot& sn) {
         size_t best = matches[0];
         for (size_t i : matches)
             if (std::abs(sn.stackSize[i] - along) < std::abs(sn.stackSize[best] - along)) best = i;
-        return (int)best;
+        return static_cast<int>(best);
     };
 
     if (!mover) {
@@ -113,7 +113,7 @@ int labelSnapshot(Game& g, int me, const ai::modern::MissionSnapshot& sn) {
         for (size_t i = 0; i < n; i++)
             if (sn.kind[i] == HOLD && sn.cityIndex[i] == sn.startCity) holds.push_back(i);
         if (holds.empty()) return -1;
-        return pickSize(holds, (int)sn.group.size());
+        return pickSize(holds, static_cast<int>(sn.group.size()));
     }
 
     const int ex = mover->x, ey = mover->y;
@@ -170,7 +170,7 @@ int labelSnapshot(Game& g, int me, const ai::modern::MissionSnapshot& sn) {
 }
 
 std::unique_ptr<Game> newClassicGame(int gi, randommap::Files& files) {
-    uint32_t seed = kSeedBase + (uint32_t)gi * 13u;
+    uint32_t seed = kSeedBase + static_cast<uint32_t>(gi) * 13U;
     const Preset& p = kPresets[gi % 4];
     game::NewGameOptions o;
     o.seed = seed;
@@ -182,10 +182,10 @@ std::unique_ptr<Game> newClassicGame(int gi, randommap::Files& files) {
     for (int s = 0; s < 8; s++) {
         o.sides[s].computer = true;
         o.sides[s].level = 2;
-        o.sides[s].card = (int)((seed + s * 5) % 9);
+        o.sides[s].card = static_cast<int>((seed + s * 5) % 9);
     }
     if (gi % 5 == 4) {  // a fifth on random maps, as in training
-        Rng mapRng((double)(seed ^ 0x5bf03635u));
+        Rng mapRng(static_cast<double>(seed ^ 0x5bf03635U));
         randommap::Options ro;
         ro.dataDir = kData;
         ro.rng = &mapRng;
@@ -202,9 +202,9 @@ std::unique_ptr<Game> newClassicGame(int gi, randommap::Files& files) {
 double bcAccumulate(const ml::PolicyNetwork& net, const Example& ex, ml::PolicyNetwork& grad,
                     bool& correct) {
     const size_t K = ex.candidates.size();
-    const float invT = 1.0f / kBcTemperature;
+    const float invT = 1.0F / kBcTemperature;
     std::vector<float> u(K), z(K), p(K);
-    float maxZ = -1e30f;
+    float maxZ = -1e30F;
     int argmax = 0;
     for (size_t i = 0; i < K; i++) {
         u[i] = net.missionNet.forward(ex.candidates[i])[0];
@@ -212,9 +212,9 @@ double bcAccumulate(const ml::PolicyNetwork& net, const Example& ex, ml::PolicyN
         // utility alone, so the utilities themselves must put the label on top
         z[i] = u[i] * invT;
         if (z[i] > maxZ) maxZ = z[i];
-        if (u[i] > u[argmax]) argmax = (int)i;
+        if (u[i] > u[argmax]) argmax = static_cast<int>(i);
     }
-    float sum = 0.0f;
+    float sum = 0.0F;
     for (size_t i = 0; i < K; i++) {
         p[i] = std::exp(z[i] - maxZ);
         sum += p[i];
@@ -222,10 +222,10 @@ double bcAccumulate(const ml::PolicyNetwork& net, const Example& ex, ml::PolicyN
     for (float& v : p) v /= sum;
     correct = (argmax == ex.label);  // greedy play takes the highest utility
     for (size_t i = 0; i < K; i++) {
-        float d = invT * (p[i] - (i == (size_t)ex.label ? 1.0f : 0.0f));
-        if (d != 0.0f) net.missionNet.backward(ex.candidates[i], {d, 0.0f}, grad.missionNet);
+        float d = invT * (p[i] - (i == static_cast<size_t>(ex.label) ? 1.0F : 0.0F));
+        if (d != 0.0F) net.missionNet.backward(ex.candidates[i], {d, 0.0F}, grad.missionNet);
     }
-    return -std::log(std::max(1e-12f, p[ex.label]));
+    return -std::log(std::max(1e-12F, p[ex.label]));
 }
 
 }  // namespace
@@ -243,10 +243,10 @@ int main(int argc, char** argv) {
     const int games = argc > 3 ? std::atoi(argv[3]) : 144;
     const int turns = argc > 4 ? std::atoi(argv[4]) : 40;
     const int epochs = argc > 5 ? std::atoi(argv[5]) : 6;
-    const float lr = argc > 6 ? (float)std::atof(argv[6]) : 1e-3f;
-    const unsigned threads = std::max(2u, std::thread::hardware_concurrency());
+    const float lr = argc > 6 ? static_cast<float>(std::atof(argv[6])) : 1e-3F;
+    const unsigned threads = std::max(2U, std::thread::hardware_concurrency());
     if (games == 0) {  // just rewrite the weights in the current format
-        return net.saveJson(argv[2], 0, 0.0f) ? 0 : 1;
+        return net.saveJson(argv[2], 0, 0.0F) ? 0 : 1;
     }
 
     // ---- data: Classic games, two recorded sides each
@@ -268,8 +268,8 @@ int main(int argc, char** argv) {
                     g.map->sides[s].classicAi = true;
                 }
                 if (inUse.empty()) continue;
-                const int recA = inUse[(size_t)gi % inUse.size()],
-                          recB = inUse[(size_t)(gi + 3) % inUse.size()];
+                const int recA = inUse[static_cast<size_t>(gi) % inUse.size()],
+                          recB = inUse[static_cast<size_t>(gi + 3) % inUse.size()];
                 const bool validation = (gi % 10 == 9);
                 std::vector<Example> local;
                 long localSnaps = 0;
@@ -299,7 +299,7 @@ int main(int argc, char** argv) {
                 }
                 std::lock_guard<std::mutex> lock(mu);
                 snapshots += localSnaps;
-                labelled += (long)local.size();
+                labelled += static_cast<long>(local.size());
                 for (auto& e : local) data.push_back(std::move(e));
             }
         });
@@ -350,12 +350,12 @@ int main(int argc, char** argv) {
             const Example& ex = data[i];
             classic[ex.kind[ex.label]]++;
             int am = 0;
-            float best = -1e30f;
+            float best = -1e30F;
             for (size_t k = 0; k < ex.candidates.size(); k++) {
                 float u = net.missionNet.forward(ex.candidates[k])[0];
                 if (u > best) {
                     best = u;
-                    am = (int)k;
+                    am = static_cast<int>(k);
                 }
             }
             modern[ex.kind[am]]++;
@@ -373,7 +373,7 @@ int main(int argc, char** argv) {
 
     std::vector<float> params = net.flatten();
     const size_t D = params.size();
-    std::vector<float> m(D, 0.0f), v(D, 0.0f);
+    std::vector<float> m(D, 0.0F), v(D, 0.0F);
     int step = 0;
     std::mt19937 rng(7);
     const size_t batch = 512;
@@ -396,21 +396,21 @@ int main(int argc, char** argv) {
                 });
             }
             for (auto& t : ps) t.join();
-            std::vector<float> g(D, 0.0f);
+            std::vector<float> g(D, 0.0F);
             for (unsigned w = 0; w < threads; w++) {
                 auto fg = grads[w].flatten();
                 for (size_t d = 0; d < D; d++) g[d] += fg[d];
                 trainLoss += l[w];
             }
-            const float scale = 1.0f / (float)(b1 - b0);
+            const float scale = 1.0F / static_cast<float>(b1 - b0);
             step++;
-            float bc1 = 1.0f - std::pow(0.9f, (float)step),
-                  bc2 = 1.0f - std::pow(0.999f, (float)step);
+            float bc1 = 1.0F - std::pow(0.9F, static_cast<float>(step)),
+                  bc2 = 1.0F - std::pow(0.999F, static_cast<float>(step));
             for (size_t d = 0; d < D; d++) {
                 float gd = g[d] * scale;
-                m[d] = 0.9f * m[d] + 0.1f * gd;
-                v[d] = 0.999f * v[d] + 0.001f * gd * gd;
-                params[d] -= lr * (m[d] / bc1) / (std::sqrt(v[d] / bc2) + 1e-8f);
+                m[d] = 0.9F * m[d] + 0.1F * gd;
+                v[d] = 0.999F * v[d] + 0.001F * gd * gd;
+                params[d] -= lr * (m[d] / bc1) / (std::sqrt(v[d] / bc2) + 1e-8F);
             }
             net.unflatten(params);
         }
@@ -419,7 +419,7 @@ int main(int argc, char** argv) {
                     ep, trainLoss / std::max<size_t>(1, train.size()), vl, 100.0 * va);
         std::fflush(stdout);
         std::string path = std::string(argv[2]);
-        net.saveJson(path, ep, 0.0f);
+        net.saveJson(path, ep, 0.0F);
     }
     kindHistogram("after");
     return 0;

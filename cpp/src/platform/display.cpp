@@ -61,9 +61,9 @@ SDL_Window* open(const char* title, bool windowed, int sizeW, int sizeH) {
         int ww, wh, pw, ph;
         SDL_GetWindowSize(win, &ww, &wh);
         SDL_GetWindowSizeInPixels(win, &pw, &ph);
-        double k = ww > 0 ? (double)pw / ww : 1;
-        w = (int)std::lround(sizeW / k);
-        h = (int)std::lround(sizeH / k);
+        double k = ww > 0 ? static_cast<double>(pw) / ww : 1;
+        w = static_cast<int>(std::lround(sizeW / k));
+        h = static_cast<int>(std::lround(sizeH / k));
         SDL_SetWindowMinimumSize(win, std::min(W, w), std::min(H, h));
         SDL_SetWindowSize(win, w, h);
         SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
@@ -85,22 +85,25 @@ void measure() {
     // the window's own pixels, not the renderer's output: with the canvas set
     // as the target, SDL2 gives the canvas's size for that
     if (win) SDL_GetWindowSizeInPixels(win, &rw, &rh);
-    double fit = std::min((double)rw / W, (double)rh / H);
-    d.maxScale = std::max(1, (int)fit);
+    double fit = std::min(static_cast<double>(rw) / W, static_cast<double>(rh) / H);
+    d.maxScale = std::max(1, static_cast<int>(fit));
     // the smooth view, the next scale up drawn whole and shrunk to fit, when
     // the biggest whole one leaves a quarter over
     d.smoothScale = !noCanvas && fit > 1 && d.maxScale / fit < 0.75 ? fit : 0;
     // a scale too big for 480 rows: only the main screen, which gives up the
     // strategic map's foot for them, fits
-    d.maxShort = std::max(d.maxScale, (int)std::min((double)rw / W, (double)rh / SHORT_H));
-    int fits = std::max(d.maxScale, (int)std::min((double)rw / W, (double)rh / d.minH));
+    d.maxShort =
+            std::max(d.maxScale, static_cast<int>(std::min(static_cast<double>(rw) / W,
+                                                           static_cast<double>(rh) / SHORT_H)));
+    int fits = std::max(d.maxScale, static_cast<int>(std::min(static_cast<double>(rw) / W,
+                                                              static_cast<double>(rh) / d.minH)));
     int pick = d.chosen > d.maxScale && d.chosen > fits ? 0 : d.chosen;
     d.smooth = d.smoothScale > 0 && (pick == SMOOTH || pick == 0);
     d.scale = d.smooth ? d.maxScale + 1 : std::min(pick > 0 ? pick : d.maxScale, fits);
     d.shrink = d.smooth ? fit / d.scale : 1;
-    d.pw = d.shrink < 1 ? std::max(W * d.scale, (int)std::lround(rw / d.shrink)) : rw;
-    d.ph = d.shrink < 1 ? std::max(H * d.scale, (int)std::lround(rh / d.shrink)) : rh;
-    d.dpi = ww > 0 ? (double)d.pw / ww : 1;
+    d.pw = d.shrink < 1 ? std::max(W * d.scale, static_cast<int>(std::lround(rw / d.shrink))) : rw;
+    d.ph = d.shrink < 1 ? std::max(H * d.scale, static_cast<int>(std::lround(rh / d.shrink))) : rh;
+    d.dpi = ww > 0 ? static_cast<double>(d.pw) / ww : 1;
 }
 
 void beginFrame() {
@@ -188,8 +191,8 @@ void pushMap(int x, int y, int camX, int camY, int zoom) {
 std::pair<int, int> toUI(double x, double y) {
     double px = x * d.dpi, py = y * d.dpi;
     if (tube()) std::tie(px, py) = crt::unwarp(px, py);
-    int ux = (int)std::floor((px - d.ox) / d.scale);
-    int uy = (int)std::floor((py - d.oy) / d.scale);
+    int ux = static_cast<int>(std::floor((px - d.ox) / d.scale));
+    int uy = static_cast<int>(std::floor((py - d.oy) / d.scale));
     return {std::clamp(ux, 0, d.w - 1), std::clamp(uy, 0, d.h - 1)};
 }
 
@@ -213,8 +216,8 @@ std::optional<std::pair<int, int>> offFrame(double x, double y) {
     double px = x * d.dpi, py = y * d.dpi;
     if (px >= d.ox && py >= d.oy && px < d.ox + d.w * d.scale && py < d.oy + d.h * d.scale)
         return std::nullopt;
-    return std::make_pair((int)std::floor((px - d.ox) / d.scale),
-                          (int)std::floor((py - d.oy) / d.scale));
+    return std::make_pair(static_cast<int>(std::floor((px - d.ox) / d.scale)),
+                          static_cast<int>(std::floor((py - d.oy) / d.scale)));
 }
 
 void setWindowed(bool on) {

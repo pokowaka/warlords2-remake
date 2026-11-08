@@ -12,7 +12,9 @@ std::shared_ptr<Font> Font::load(const std::string& dataDir, const std::string& 
     auto s = w2::readFile(dataDir + "/" + name + ".FIN");
     if (!s) throw std::runtime_error("cannot open font metrics: " + name);
     auto m = std::make_shared<Metrics>();
-    auto b = [&](size_t i) { return i < s->size() ? (int)(uint8_t)(*s)[i] : 0; };
+    auto b = [&](size_t i) {
+        return i < s->size() ? static_cast<int>(static_cast<uint8_t>((*s)[i])) : 0;
+    };
     m->count = b(0);
     m->first = b(1);
     m->sheetWidth = b(2) * 256 + b(3);  // big-endian, unlike everything else
@@ -60,7 +62,7 @@ int Font::draw(const std::string& text, double x0, double y0) const {
         if (q != quad_->end()) gfx::draw(image_, q->second, cx, y0);
         cx += m_->width[c];
     }
-    return (int)(cx - x0);
+    return static_cast<int>(cx - x0);
 }
 
 void Font::drawCentred(const std::string& text, double rx, double ry, double rw, double rh) const {

@@ -31,7 +31,7 @@ std::string hex(const std::string& b) {
 std::string unhex(const std::string& h) {
     std::string out;
     for (size_t i = 0; i + 1 < h.size(); i += 2)
-        out += (char)std::stoi(h.substr(i, 2), nullptr, 16);
+        out += static_cast<char>(std::stoi(h.substr(i, 2), nullptr, 16));
     return out;
 }
 
@@ -42,24 +42,24 @@ Json intMap(const std::map<int, int>& m) {
 }
 std::map<int, int> readIntMap(const Json& j) {
     std::map<int, int> m;
-    for (auto& [k, v] : j.entries()) m[std::stoi(k)] = (int)v.integer();
+    for (auto& [k, v] : j.entries()) m[std::stoi(k)] = static_cast<int>(v.integer());
     return m;
 }
 template <typename T, size_t N>
 Json intArray(const std::array<T, N>& a) {
     Json o = Json::array();
-    for (T v : a) o.push((int)v);
+    for (T v : a) o.push(static_cast<int>(v));
     return o;
 }
 template <typename T, size_t N>
 void readIntArray(const Json& j, std::array<T, N>& a) {
-    for (size_t i = 0; i < N && i < j.size(); i++) a[i] = (T)j[i].integer();
+    for (size_t i = 0; i < N && i < j.size(); i++) a[i] = static_cast<T>(j[i].integer());
 }
 Json optInt(int v) {
     return v == NONE ? Json() : Json(v);
 }
 int readOpt(const Json& j) {
-    return j.isNull() ? NONE : (int)j.integer();
+    return j.isNull() ? NONE : static_cast<int>(j.integer());
 }
 
 // the hidden map, a side's mask as runs of seen and unseen tiles
@@ -84,7 +84,7 @@ std::vector<uint8_t> unpackMask(const Json& runs, size_t size) {
     size_t i = 0;
     int v = 0;
     for (auto& n : runs.items()) {
-        for (long k = 0; k < n.integer() && i < size; k++) mask[i++] = (uint8_t)v;
+        for (long k = 0; k < n.integer() && i < size; k++) mask[i++] = static_cast<uint8_t>(v);
         v = 1 - v;
     }
     return mask;
@@ -176,7 +176,7 @@ Json saveAI(const AIData& d, const std::map<const Army*, int>& ids) {
 
 void loadAI(AIData& d, const Json& o, const std::vector<Army*>& armies) {
     auto I = [&](const char* k, int& v) {
-        if (o.has(k)) v = (int)o[k].integer();
+        if (o.has(k)) v = static_cast<int>(o[k].integer());
     };
     I("turns", d.turns);
     I("own", d.own);
@@ -229,7 +229,8 @@ void loadAI(AIData& d, const Json& o, const std::vector<Army*>& armies) {
     readIntArray(o["cityBattles"], d.cityBattles);
     readIntArray(o["citiesLost"], d.citiesLost);
     if (o["cursor"].isArray())
-        d.cursor = std::make_pair((int)o["cursor"][0].integer(), (int)o["cursor"][1].integer());
+        d.cursor = std::make_pair(static_cast<int>(o["cursor"][0].integer()),
+                                  static_cast<int>(o["cursor"][1].integer()));
     else
         d.cursor.reset();
     const Json& groups = o["groups"];
@@ -237,7 +238,7 @@ void loadAI(AIData& d, const Json& o, const std::vector<Army*>& armies) {
         auto grp = ai::core::emptyGroup();
         const Json& gr = groups[gi - 1];
         if (gr.isObject()) {
-            grp->active = (int)gr["active"].integer();
+            grp->active = static_cast<int>(gr["active"].integer());
             grp->target = readOpt(gr["target"]);
             grp->rally = readOpt(gr["rally"]);
             grp->members = readIntMap(gr["members"]);
@@ -247,10 +248,11 @@ void loadAI(AIData& d, const Json& o, const std::vector<Army*>& armies) {
             grp->taken = readIntMap(gr["taken"]);
             for (auto& [k, v] : gr["staged"].entries()) {
                 long id = v.integer();
-                if (id >= 0 && id < (long)armies.size()) grp->staged[std::stoi(k)] = armies[id];
+                if (id >= 0 && id < static_cast<long>(armies.size()))
+                    grp->staged[std::stoi(k)] = armies[id];
             }
-            grp->size = (int)gr["size"].integer();
-            grp->flags = (int)gr["flags"].integer();
+            grp->size = static_cast<int>(gr["size"].integer());
+            grp->flags = static_cast<int>(gr["flags"].integer());
         }
         d.groups[gi] = grp;
     }
@@ -268,15 +270,16 @@ Json slotJson(const Slot& s) {
     return o;
 }
 Slot readSlot(const Json& o) {
-    return Slot{(int)o["type"].integer(), o["name"].str(),          (int)o["strength"].integer(),
-                (int)o["time"].integer(), (int)o["cost"].integer(), (int)o["move"].integer(),
-                (int)o["price"].integer()};
+    return Slot{static_cast<int>(o["type"].integer()),     o["name"].str(),
+                static_cast<int>(o["strength"].integer()), static_cast<int>(o["time"].integer()),
+                static_cast<int>(o["cost"].integer()),     static_cast<int>(o["move"].integer()),
+                static_cast<int>(o["price"].integer())};
 }
 }  // namespace
 
 std::string encode(const Game& g) {
     std::map<const Army*, int> ids;
-    for (size_t i = 0; i < g.armies.size(); i++) ids[g.armies[i]] = (int)i;
+    for (size_t i = 0; i < g.armies.size(); i++) ids[g.armies[i]] = static_cast<int>(i);
     auto idOf = [&](const Army* a) -> Json {
         auto it = ids.find(a);
         return it == ids.end() ? Json() : Json(it->second);
@@ -487,7 +490,7 @@ std::string encode(const Game& g) {
     auto deedJson = [](const Deed& e) {
         Json o = Json::object();
         o.set("side", e.side);
-        o.set("type", (int)e.type);
+        o.set("type", static_cast<int>(e.type));
         o.set("v1", e.v1);
         o.set("v2", e.v2);
         o.set("name", e.name);
@@ -528,7 +531,7 @@ std::string encode(const Game& g) {
     out.set("scenario", g.map->name);
     out.set("turn", g.turn);
     out.set("current", g.current);
-    out.set("seed", (double)g.rng.state);
+    out.set("seed", static_cast<double>(g.rng.state));
     {
         Json order = Json::array();
         for (int v : g.turnOrder) order.push(v);
@@ -590,40 +593,43 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     }
 
     game::NewGameOptions opts;
-    for (auto& [k, v] : state["options"].entries()) opts.options.emplace_back(k, (int)v.integer());
+    for (auto& [k, v] : state["options"].entries())
+        opts.options.emplace_back(k, static_cast<int>(v.integer()));
     // the setup the game began with: who plays each side, its name, and the
     // sides turned Off, which are the ones the save leaves out -- as the
     // original's save keeps the .SCN image it was set up in (0x137, in play)
     for (int i = 0; i < 8; i++) opts.sides[i].off = true;
     for (auto& saved : state["sides"].items()) {
-        game::SideSetup& o = opts.sides[(int)saved["index"].integer()];
+        game::SideSetup& o = opts.sides[static_cast<int>(saved["index"].integer())];
         o.off = false;
         o.name = saved["name"].str("");
         o.computer = saved["computer"].boolean();
-        o.level = (int)saved["level"].integer();
-        o.card = (int)saved["card"].integer();
+        o.level = static_cast<int>(saved["level"].integer());
+        o.card = static_cast<int>(saved["card"].integer());
     }
     auto gp = game::newGame(dataDir, state["scenario"].str(), opts);
     Game& g = *gp;
     g.armies.clear();
-    g.turn = (int)state["turn"].integer();
-    g.current = (int)state["current"].integer();
+    g.turn = static_cast<int>(state["turn"].integer());
+    g.current = static_cast<int>(state["current"].integer());
     if (state["turnOrder"].isArray()) {
         for (size_t i = 0; i < 8 && i < state["turnOrder"].size(); i++)
-            g.turnOrder[i] = (int)state["turnOrder"][i].integer();
+            g.turnOrder[i] = static_cast<int>(state["turnOrder"][i].integer());
     }
     if (state["aiNeighbours"].isObject()) {
         auto nb = std::make_shared<Neighbours>();
         nb->byCity.resize(g.map->cities.size());
         for (auto& [k, e] : state["aiNeighbours"].entries()) {
-            size_t i = (size_t)std::stoi(k);
+            size_t i = static_cast<size_t>(std::stoi(k));
             if (i >= nb->byCity.size()) continue;
-            for (auto& v : e["cities"].items()) nb->byCity[i].cities.push_back((int)v.integer());
-            for (auto& v : e["dist"].items()) nb->byCity[i].dist.push_back((int)v.integer());
+            for (auto& v : e["cities"].items())
+                nb->byCity[i].cities.push_back(static_cast<int>(v.integer()));
+            for (auto& v : e["dist"].items())
+                nb->byCity[i].dist.push_back(static_cast<int>(v.integer()));
         }
         g.aiNeighbours = nb;
     }
-    g.rng.state = (uint32_t)state["seed"].number();
+    g.rng.state = static_cast<uint32_t>(state["seed"].number());
     g.won = state["won"].boolean();
     g.over = state["over"].boolean();
     g.surrenderOffered = state["surrenderOffered"].boolean();
@@ -654,9 +660,9 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         for (auto& it : g.map->items) {
             if (it.index == saved["index"].integer()) {
                 it.name = saved["name"].str();
-                it.type = (int)saved["type"].integer();
-                it.value = (int)saved["value"].integer();
-                it.status = (int)saved["status"].integer();
+                it.type = static_cast<int>(saved["type"].integer());
+                it.value = static_cast<int>(saved["value"].integer());
+                it.status = static_cast<int>(saved["status"].integer());
                 it.x = readOpt(saved["x"]);
                 it.y = readOpt(saved["y"]);
                 it.planted = saved["planted"].boolean();
@@ -667,20 +673,20 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     }
 
     for (auto& saved : state["cities"].items()) {
-        City* c = g.map->city((int)saved["index"].integer());
+        City* c = g.map->city(static_cast<int>(saved["index"].integer()));
         if (!c) continue;
         c->ownerIndex = readOpt(saved["ownerIndex"]);
         c->producing = readOpt(saved["producing"]);
-        c->countdown = (int)saved["countdown"].integer();
-        c->vectorTo = saved.has("vectorTo") ? (int)saved["vectorTo"].integer() : NONE;
+        c->countdown = static_cast<int>(saved["countdown"].integer());
+        c->vectorTo = saved.has("vectorTo") ? static_cast<int>(saved["vectorTo"].integer()) : NONE;
         c->razed = saved["razed"].boolean();
-        c->defence = (int)saved["defence"].integer();
-        c->income = (int)saved["income"].integer();
+        c->defence = static_cast<int>(saved["defence"].integer());
+        c->income = static_cast<int>(saved["income"].integer());
         c->slots.clear();
         for (auto& s : saved["slots"].items()) c->slots.push_back(readSlot(s));
-        if (!saved["claim"].isNull()) c->claim = (int)saved["claim"].integer();
+        if (!saved["claim"].isNull()) c->claim = static_cast<int>(saved["claim"].integer());
         c->razedBy = readOpt(saved["razedBy"]);
-        c->attacked = (int)saved["attacked"].integer();
+        c->attacked = static_cast<int>(saved["attacked"].integer());
         if (!saved["name"].str().empty()) c->name = saved["name"].str();
         // ruins belong to nobody; older saves can have them won in a fight
         if (c->razed) c->ownerIndex = NONE;
@@ -688,15 +694,15 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     scn::refreshCityTiles(*g.map);
 
     for (auto& saved : state["sites"].items()) {
-        int i = (int)saved["index"].integer();
-        if (i < 0 || i >= (int)g.map->sites.size()) continue;
+        int i = static_cast<int>(saved["index"].integer());
+        if (i < 0 || i >= static_cast<int>(g.map->sites.size())) continue;
         Site& s = g.map->sites[i];
-        s.content = (int)saved["content"].integer();
+        s.content = static_cast<int>(saved["content"].integer());
         s.item = readOpt(saved["item"]);
         s.guardian = readOpt(saved["guardian"]);
         s.allyType = readOpt(saved["allyType"]);
         s.rich = saved["rich"].boolean();
-        s.revealed = (int)saved["revealed"].integer();
+        s.revealed = static_cast<int>(saved["revealed"].integer());
         s.searched = saved["searched"].boolean();
         s.band = saved["band"].str();
         s.templeIndex = readOpt(saved["templeIndex"]);
@@ -705,21 +711,22 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         g.map->fightOrder.clear();
         for (auto& row : state["fightOrder"].items()) {
             std::vector<int> r;
-            for (auto& v : row.items()) r.push_back((int)v.integer());
+            for (auto& v : row.items()) r.push_back(static_cast<int>(v.integer()));
             g.map->fightOrder.push_back(r);
         }
     }
     g.history.clear();
     auto readDeed = [](const Json& o) {
-        return Deed{(int)o["side"].integer(), (DeedType)o["type"].integer(), (int)o["v1"].integer(),
-                    (int)o["v2"].integer(), o["name"].str()};
+        return Deed{static_cast<int>(o["side"].integer()),
+                    static_cast<DeedType>(o["type"].integer()), static_cast<int>(o["v1"].integer()),
+                    static_cast<int>(o["v2"].integer()), o["name"].str()};
     };
     for (auto& r : state["history"].items()) {
         HistoryRecord rec;
         readIntArray(r["gold"], rec.gold);
         readIntArray(r["score"], rec.score);
         readIntArray(r["cities"], rec.cities);
-        for (auto& v : r["owners"].items()) rec.owners.push_back((int)v.integer());
+        for (auto& v : r["owners"].items()) rec.owners.push_back(static_cast<int>(v.integer()));
         for (auto& e : r["events"].items()) rec.events.push_back(readDeed(e));
         g.history.push_back(rec);
     }
@@ -733,14 +740,15 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
     g.tutorialSeen.clear();
     for (auto& m : state["tutorialSeen"].items()) g.tutorialSeen.insert(m.str());
     g.towers.clear();
-    for (auto& k : state["towers"].items()) g.towers.insert((int)k.integer());
+    for (auto& k : state["towers"].items()) g.towers.insert(static_cast<int>(k.integer()));
     const Json& signs = state["signs"];
     for (size_t i = 0; i < g.map->signs.size() && i < signs.size(); i++) {
         g.map->signs[i].lines = {signs[i][0].str(), signs[i][1].str()};
     }
     g.explored.clear();
     for (auto& [k, runs] : state["explored"].entries())
-        g.explored[std::stoi(k)] = unpackMask(runs, (size_t)g.map->width * g.map->height);
+        g.explored[std::stoi(k)] =
+                unpackMask(runs, static_cast<size_t>(g.map->width) * g.map->height);
 
     std::vector<Army*> armies;
     for (auto& saved : state["armies"].items()) {
@@ -748,42 +756,44 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         a.x = readOpt(saved["x"]);
         a.y = readOpt(saved["y"]);
         a.owner = readOpt(saved["owner"]);
-        a.type = (int)saved["type"].integer();
+        a.type = static_cast<int>(saved["type"].integer());
         a.name = saved["name"].str();
         a.female = saved["female"].boolean();
-        a.medals = (int)saved["medals"].integer();
-        a.strength = (int)saved["strength"].integer();
-        a.moves = (int)saved["moves"].integer();
-        a.maxMoves = (int)saved["maxMoves"].integer();
-        a.upkeep = (int)saved["upkeep"].integer();
+        a.medals = static_cast<int>(saved["medals"].integer());
+        a.strength = static_cast<int>(saved["strength"].integer());
+        a.moves = static_cast<int>(saved["moves"].integer());
+        a.maxMoves = static_cast<int>(saved["maxMoves"].integer());
+        a.upkeep = static_cast<int>(saved["upkeep"].integer());
         a.homeCity = readOpt(saved["homeCity"]);
         a.atSea = saved["atSea"].boolean();
-        a.group = (int)saved["group"].integer();
+        a.group = static_cast<int>(saved["group"].integer());
         if (saved["target"].isArray())
-            a.target = std::make_pair((int)saved["target"][0].integer(),
-                                      (int)saved["target"][1].integer());
+            a.target = std::make_pair(static_cast<int>(saved["target"][0].integer()),
+                                      static_cast<int>(saved["target"][1].integer()));
         a.fortified = saved["fortified"].boolean();
-        a.level = (int)saved["level"].integer();
-        a.experience = (int)saved["experience"].integer();
+        a.level = static_cast<int>(saved["level"].integer());
+        a.experience = static_cast<int>(saved["experience"].integer());
         a.title = saved["title"].str("");
         for (auto& idx : saved["items"].items()) {
-            auto it = itemByIndex.find((int)idx.integer());
+            auto it = itemByIndex.find(static_cast<int>(idx.integer()));
             if (it != itemByIndex.end()) a.items.push_back(it->second);
         }
-        for (auto& t : saved["blessings"].items()) a.blessings.insert((int)t.integer());
+        for (auto& t : saved["blessings"].items())
+            a.blessings.insert(static_cast<int>(t.integer()));
         if (saved["transit"].isObject())
-            a.transit = Transit{(int)saved["transit"]["turns"].integer(),
-                                (int)saved["transit"]["dest"].integer()};
+            a.transit = Transit{static_cast<int>(saved["transit"]["turns"].integer()),
+                                static_cast<int>(saved["transit"]["dest"].integer())};
         a.returning = saved["returning"].boolean();
-        a.aiOrder = (int)saved["aiOrder"].integer();
-        a.aiDest = saved.has("aiDest") ? (int)saved["aiDest"].integer() : NONE;
-        a.aiGroup = (int)saved["aiGroup"].integer();
+        a.aiOrder = static_cast<int>(saved["aiOrder"].integer());
+        a.aiDest = saved.has("aiDest") ? static_cast<int>(saved["aiDest"].integer()) : NONE;
+        a.aiGroup = static_cast<int>(saved["aiGroup"].integer());
         a.aiExplore = saved["aiExplore"].boolean();
         a.aiNeutral = saved["aiNeutral"].boolean();
         a.aiParty = saved["aiParty"].boolean();
         // the army table in slot order; older saves had none, and their order
-        a.slot = saved.has("slot") && !saved["slot"].isNull() ? (int)saved["slot"].integer()
-                                                              : (int)armies.size();
+        a.slot = saved.has("slot") && !saved["slot"].isNull()
+                         ? static_cast<int>(saved["slot"].integer())
+                         : static_cast<int>(armies.size());
         armies.push_back(g.make(a));
     }
     g.armies = armies;
@@ -791,28 +801,28 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
                      [](Army* p, Army* q) { return p->slot < q->slot; });
 
     for (auto& saved : state["sides"].items()) {
-        Side* s = g.map->side((int)saved["index"].integer());
+        Side* s = g.map->side(static_cast<int>(saved["index"].integer()));
         if (!s) continue;
-        s->gold = (int)saved["gold"].integer();
+        s->gold = static_cast<int>(saved["gold"].integer());
         s->alive = saved["alive"].boolean();
         s->computer = saved["computer"].boolean();
-        s->level = (int)saved["level"].integer();
+        s->level = static_cast<int>(saved["level"].integer());
         s->enhanced = saved["enhanced"].boolean();
-        s->diploScore = (int)saved["diploScore"].integer();
+        s->diploScore = static_cast<int>(saved["diploScore"].integer());
         s->observe = saved["observe"].boolean();
         if (saved["capNow"].isObject()) {
-            s->capNowX = (int)saved["capNow"]["x"].integer();
-            s->capNowY = (int)saved["capNow"]["y"].integer();
+            s->capNowX = static_cast<int>(saved["capNow"]["x"].integer());
+            s->capNowY = static_cast<int>(saved["capNow"]["y"].integer());
         }
         s->productionDue = saved["productionDue"].boolean();
-        s->income = (int)saved["income"].integer();
-        s->upkeepTotal = (int)saved["upkeepTotal"].integer();
-        s->aiSolidarity = (int)saved["aiSolidarity"].integer();
-        s->card = (int)saved["card"].integer();
+        s->income = static_cast<int>(saved["income"].integer());
+        s->upkeepTotal = static_cast<int>(saved["upkeepTotal"].integer());
+        s->aiSolidarity = static_cast<int>(saved["aiSolidarity"].integer());
+        s->card = static_cast<int>(saved["card"].integer());
         s->classicAi = saved.has("classicAi") ? saved["classicAi"].boolean(true) : true;
         ai::belief::ensure(*s);
-        s->advisor.dir = (int)saved["advisor"]["dir"].integer();
-        s->advisor.mark = (int)saved["advisor"]["mark"].integer();
+        s->advisor.dir = static_cast<int>(saved["advisor"]["dir"].integer());
+        s->advisor.mark = static_cast<int>(saved["advisor"]["mark"].integer());
         if (saved["ai"].isObject()) {
             s->ai = std::make_shared<AIData>(ai::core::newData());
             loadAI(*s->ai, saved["ai"], armies);
@@ -821,13 +831,13 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         if (saved["quest"].isObject()) {
             const Json& qs = saved["quest"];
             auto q = std::make_shared<Quest>();
-            q->type = (int)qs["type"].integer();
-            q->done = (int)qs["done"].integer();
+            q->type = static_cast<int>(qs["type"].integer());
+            q->done = static_cast<int>(qs["done"].integer());
             q->required = readOpt(qs["required"]);
             long hero = qs["hero"].integer(-1);
-            q->hero = hero >= 0 && hero < (long)armies.size() ? armies[hero] : nullptr;
+            q->hero = hero >= 0 && hero < static_cast<long>(armies.size()) ? armies[hero] : nullptr;
             q->targetKind = qs["targetKind"].str();
-            int ref = (int)qs["target"].integer(-1);
+            int ref = static_cast<int>(qs["target"].integer(-1));
             if (q->targetKind == "city")
                 q->city = g.map->city(ref);
             else if (q->targetKind == "side")
@@ -837,7 +847,7 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
             else if (q->targetKind == "armytype")
                 q->armyType = g.types.byId(ref);
             else if (q->targetKind == "army")
-                q->army = ref >= 0 && ref < (int)armies.size() ? armies[ref] : nullptr;
+                q->army = ref >= 0 && ref < static_cast<int>(armies.size()) ? armies[ref] : nullptr;
             if (q->hero && q->hasTarget()) s->quest = q;
         }
     }
@@ -864,11 +874,11 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
         }
     }
 
-    g.side = g.current < (int)g.sides.size() ? g.sides[g.current] : nullptr;
+    g.side = g.current < static_cast<int>(g.sides.size()) ? g.sides[g.current] : nullptr;
     // where the side to play stands in the turn order; older saves: the order
     // as it is
     if (state.has("orderAt") && !state["orderAt"].isNull()) {
-        g.orderAt = (int)state["orderAt"].integer();
+        g.orderAt = static_cast<int>(state["orderAt"].integer());
     } else {
         int me = g.side ? g.side->index : 0;
         g.orderAt = -1;

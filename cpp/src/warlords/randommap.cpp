@@ -94,7 +94,7 @@ int reach(int x1, int y1, int x2, int y2) {
 /** map_distance (1a8b:0acc): the straight line, rounded down. */
 int distance(int x1, int y1, int x2, int y2) {
     double dx = x1 - x2, dy = y1 - y2;
-    return (int)std::floor(std::sqrt(dx * dx + dy * dy));
+    return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
 }
 
 /** 4c49:0dd0: the step from one tile towards another, one of 8 compass
@@ -102,7 +102,7 @@ int distance(int x1, int y1, int x2, int y2) {
 P step(int x1, int y1, int x2, int y2) {
     if (x2 == x1) return P{0, y2 == y1 ? 0 : (y2 < y1 ? -1 : 1)};
     if (y2 == y1) return P{x2 < x1 ? -1 : 1, 0};
-    double s = (double)(y2 - y1) / (double)(x2 - x1);
+    double s = static_cast<double>(y2 - y1) / static_cast<double>(x2 - x1);
     if (x2 < x1) {
         if (s >= 2.414) return P{0, -1};
         if (s >= 0.414) return P{-1, -1};
@@ -145,17 +145,17 @@ int i8(int b) {
 }
 
 int getI16(const std::vector<uint8_t>& t, int o) {
-    return (int16_t)(t[o] | (t[o + 1] << 8));
+    return static_cast<int16_t>(t[o] | (t[o + 1] << 8));
 }
 void setI16(std::vector<uint8_t>& t, int o, int v) {
-    t[o] = (uint8_t)(v & 0xff);
-    t[o + 1] = (uint8_t)((v >> 8) & 0xff);
+    t[o] = static_cast<uint8_t>(v & 0xff);
+    t[o + 1] = static_cast<uint8_t>((v >> 8) & 0xff);
 }
 std::string cstrOf(const std::vector<uint8_t>& t, int o, int n) {
     std::string s;
-    for (int i = o; i < o + n && i < (int)t.size(); i++) {
+    for (int i = o; i < o + n && i < static_cast<int>(t.size()); i++) {
         if (t[i] == 0) break;
-        s += (char)t[i];
+        s += static_cast<char>(t[i]);
     }
     return s;
 }
@@ -200,7 +200,7 @@ class Generator {
     int s16(int o) const { return getI16(scn, o); }
     void ws16(int o, int v) { setI16(scn, o, v); }
     void wstr(int o, const std::string& s) {  // strcpy into the scenario image
-        for (size_t i = 0; i < s.size(); i++) scn[o + i] = (uint8_t)s[i];
+        for (size_t i = 0; i < s.size(); i++) scn[o + i] = static_cast<uint8_t>(s[i]);
         scn[o + s.size()] = 0;
     }
 
@@ -212,7 +212,7 @@ class Generator {
     }
     void put(int x, int y, int t) {
         int i = y * W + x;
-        if (i >= 0 && i < W * H) m[GRID + i] = (uint8_t)t;
+        if (i >= 0 && i < W * H) m[GRID + i] = static_cast<uint8_t>(t);
     }
     int nx(int i) const { return r16(NB + 4 * i); }
     int ny(int i) const { return r16(NB + 4 * i + 2); }
@@ -231,7 +231,7 @@ class Generator {
     void setTile(int x, int y, int t) {
         if (x < 0 || y < 0 || x >= W || y >= H) return;
         uint16_t& v = tiles[y * W + x];
-        v = (uint16_t)((v & 0xff00) | (t & 0xff));
+        v = static_cast<uint16_t>((v & 0xff00) | (t & 0xff));
     }
     int road(int x, int y) const {
         return x >= 0 && y >= 0 && x < W && y < H ? rd[y * W + x] & 0x1f : 0;
@@ -239,7 +239,7 @@ class Generator {
     void setRoad(int x, int y, int r) {
         if (x < 0 || y < 0 || x >= W || y >= H) return;
         uint8_t& v = rd[y * W + x];
-        v = (uint8_t)((v & 0xe0) | (r & 0x1f));
+        v = static_cast<uint8_t>((v & 0xe0) | (r & 0x1f));
     }
     int terrainOf(int t) const { return scn[S_TERRAIN + t]; }
     /** Variant `v` of terrain type `t` from RANDOM.DAT's tile table, the
@@ -327,7 +327,8 @@ class Generator {
         for (int i = 0; i < 4; i++) {
             int j = (i + 1) % 4;
             P e = pt(EDGE_END + 4 * i), s = pt(EDGE_START + 4 * j);
-            if ((double)(56 - e.x) / (double)(78 - e.y) < (double)(56 - s.x) / (double)(78 - s.y)) {
+            if (static_cast<double>(56 - e.x) / static_cast<double>(78 - e.y) <
+                static_cast<double>(56 - s.x) / static_cast<double>(78 - s.y)) {
                 setPt(EDGE_END + 4 * i, s);
                 setPt(EDGE_START + 4 * j, e);
             }
@@ -1399,9 +1400,11 @@ class Generator {
         }
     }
 
-    bool isServed(int c) const { return c >= 0 && c < (int)served.size() ? served[c] != 0 : false; }
+    bool isServed(int c) const {
+        return c >= 0 && c < static_cast<int>(served.size()) ? served[c] != 0 : false;
+    }
     void serve(int c) {
-        if (c >= 0 && c < (int)served.size()) served[c] = 1;
+        if (c >= 0 && c < static_cast<int>(served.size())) served[c] = 1;
     }
 
     /** 5311:0e22: a pair of cities to join -- a random one not yet served, and
@@ -1582,7 +1585,7 @@ class Generator {
                 ws16(o, x);
                 ws16(o + 2, y);
                 scn[o + 21] = 15;
-                scn[o + 20] = (uint8_t)dice(1, 3, 2);
+                scn[o + 20] = static_cast<uint8_t>(dice(1, 3, 2));
                 n++;
             }
         }
@@ -1656,7 +1659,7 @@ class Generator {
             int x = s16(sideRec(s) + 6), y = s16(sideRec(s) + 8);
             for (int c = 0; c < cityCount(); c++) {
                 if (cx(c) == x && cy(c) == y) {
-                    scn[crec(c) + 21] = (uint8_t)s;
+                    scn[crec(c) + 21] = static_cast<uint8_t>(s);
                     break;
                 }
             }
@@ -1693,9 +1696,9 @@ class Generator {
         travel::Ground g;
         g.w = W;
         g.h = H;
-        g.terrain.resize(W * H);
-        g.road.resize(W * H);
-        g.crossing.resize(W * H);
+        g.terrain.resize(static_cast<size_t>(W) * H);
+        g.road.resize(static_cast<size_t>(W) * H);
+        g.crossing.resize(static_cast<size_t>(W) * H);
         for (int y = 0; y < H; y++)
             for (int x = 0; x < W; x++) {
                 int i = y * W + x, t = terrainOf(tile(x, y));
@@ -1732,7 +1735,7 @@ class Generator {
             double gap = 1e9;
             for (int a = 0; a < SIDES; a++)
                 for (int b = a + 1; b < SIDES; b++)
-                    gap = std::min(gap, (double)d[caps[a]][caps[b]]);
+                    gap = std::min(gap, static_cast<double>(d[caps[a]][caps[b]]));
             if (gap >= travel::UNREACHED) return 1e12;  // a capital cut off from another
             gap /= travel::TURN;
             std::array<int, SIDES> share{};
@@ -1751,7 +1754,7 @@ class Generator {
                     continue;
                 }
                 share[who]++;
-                reach += (double)best / travel::TURN;
+                reach += static_cast<double>(best) / travel::TURN;
                 if (best > REMOTE * travel::TURN) remote++;
             }
             auto [lo, hi] = std::minmax_element(share.begin(), share.end());
@@ -1937,11 +1940,11 @@ class Generator {
     void setSlot(int c, int k, int e) {
         int o = crec(c);
         const ArmyType* a = types.byId(e);
-        scn[o + 22 + k] = (uint8_t)e;
-        scn[o + 26 + k] = (uint8_t)(a ? a->time : 0);
-        scn[o + 30 + k] = (uint8_t)(a ? a->strength : 0);
-        scn[o + 34 + k] = (uint8_t)(a ? a->move : 0);
-        scn[o + 38 + k] = (uint8_t)(a ? a->cost : 0);
+        scn[o + 22 + k] = static_cast<uint8_t>(e);
+        scn[o + 26 + k] = static_cast<uint8_t>(a ? a->time : 0);
+        scn[o + 30 + k] = static_cast<uint8_t>(a ? a->strength : 0);
+        scn[o + 34 + k] = static_cast<uint8_t>(a ? a->move : 0);
+        scn[o + 38 + k] = static_cast<uint8_t>(a ? a->cost : 0);
     }
 
     /** 513d:161d: what a city can make. value / 2 + 1d4 - 1 slots, one more
@@ -2051,7 +2054,7 @@ class Generator {
                 }
             }
             // one found on the fortieth draw is dropped, as the original has it
-            if (pick >= 0 && draws < 40) scn[o + 22 + k] = (uint8_t)pick;
+            if (pick >= 0 && draws < 40) scn[o + 22 + k] = static_cast<uint8_t>(pick);
         }
     }
 
@@ -2075,7 +2078,7 @@ class Generator {
         std::vector<uint8_t> out(2 + 104 * n, 0);
         setI16(out, 0, n);
         auto putStr = [&](int o, const std::string& s) {
-            for (size_t i = 0; i < s.size() && i < 49; i++) out[o + i] = (uint8_t)s[i];
+            for (size_t i = 0; i < s.size() && i < 49; i++) out[o + i] = static_cast<uint8_t>(s[i]);
         };
         int fixed = 0;
         for (int i = 0; i < n; i++) {
@@ -2119,13 +2122,13 @@ class Generator {
     /** The world as files: the scenario image, the tile map and the roads, the
      *  signposts and the descriptions. */
     void writeFiles(Files& files) {
-        std::string map(2 * W * H, '\0');
+        std::string map(2UZ * W * H, '\0');
         for (int i = 0; i < W * H; i++) {
-            map[2 * i] = (char)(tiles[i] & 0xff);
-            map[2 * i + 1] = (char)(tiles[i] >> 8);
+            map[2UZ * i] = static_cast<char>(tiles[i] & 0xff);
+            map[2 * i + 1] = static_cast<char>(tiles[i] >> 8);
         }
-        std::string road(W * H, '\0');
-        for (int i = 0; i < W * H; i++) road[i] = (char)(rd[i] & 0x1f);
+        std::string road(static_cast<size_t>(W) * H, '\0');
+        for (int i = 0; i < W * H; i++) road[i] = static_cast<char>(rd[i] & 0x1f);
         files["SCN"] = std::string(scn.begin(), scn.end());
         files["MAP"] = map;
         files["RD"] = road;
@@ -2138,7 +2141,7 @@ class Generator {
 
     /** The terrain grid as the planners take it. */
     std::vector<uint8_t> grid() const {
-        std::vector<uint8_t> t(W * H);
+        std::vector<uint8_t> t(static_cast<size_t>(W) * H);
         for (int i = 0; i < W * H; i++) t[i] = m[GRID + i];
         return t;
     }
@@ -2209,7 +2212,7 @@ class Generator {
             int t = at(x, y);
             return t == WATER || t == SHORE;
         };
-        std::vector<int> part(W * H, -1);
+        std::vector<int> part(static_cast<size_t>(W) * H, -1);
         int parts = 0;
         for (int s0 = 0; s0 < W * H; s0++) {
             if (part[s0] >= 0 || sea(s0 % W, s0 / W)) continue;
@@ -2274,7 +2277,7 @@ class Generator {
         // the piece for each N 1, E 2, S 4, W 8 combination
         static const int PIECE[16] = {0, 15, 14, 10, 13, 2, 11, 7, 12, 9, 1, 6, 8, 5, 4, 3};
         const int dx[4] = {0, 1, 0, -1}, dy[4] = {-1, 0, 1, 0};
-        std::vector<int> shape(W * H, 0);
+        std::vector<int> shape(static_cast<size_t>(W) * H, 0);
         for (int y = 0; y < H; y++)
             for (int x = 0; x < W; x++) {
                 if (road(x, y) == 0) continue;
@@ -2288,7 +2291,7 @@ class Generator {
                         city = d;
                 }
                 // a road's end runs into the city beside it
-                if (city >= 0 && std::popcount((unsigned)mk) <= 1) mk |= 1 << city;
+                if (city >= 0 && std::popcount(static_cast<unsigned>(mk)) <= 1) mk |= 1 << city;
                 if (mk == 0) {
                     setRoad(x, y, 0);
                     continue;
@@ -2316,7 +2319,7 @@ class Generator {
      *  to the nearest city, a few with RANDOM.DAT's own words. */
     std::string modernSigns() {
         std::vector<P> spots;
-        for (int tries = 0; tries < 20000 && (int)spots.size() < 60; tries++) {
+        for (int tries = 0; tries < 20000 && static_cast<int>(spots.size()) < 60; tries++) {
             int x = dice(1, W - 6, 2), y = dice(1, H - 6, 2);
             if (at(x, y) != PLAIN || road(x, y) != 0 || tile(x, y) == 0) continue;
             bool byRoad = false, clear = true;
@@ -2332,11 +2335,11 @@ class Generator {
                 if (reach(p.x, p.y, x, y) < 7) clear = false;
             if (byRoad && clear) spots.push_back(P{x, y});
         }
-        int n = (int)spots.size();
+        int n = static_cast<int>(spots.size());
         std::vector<uint8_t> out(2 + 104 * n, 0);
         setI16(out, 0, n);
         auto putStr = [&](int o, const std::string& s) {
-            for (size_t i = 0; i < s.size() && i < 49; i++) out[o + i] = (uint8_t)s[i];
+            for (size_t i = 0; i < s.size() && i < 49; i++) out[o + i] = static_cast<uint8_t>(s[i]);
         };
         int fixed = 0;
         for (int i = 0; i < n; i++) {
@@ -2389,7 +2392,7 @@ class Generator {
                 setCityCount(c + 1);
             }
             sitesBegin();
-            for (int i = 0; i < N_SITES && i < (int)plan.sites.size(); i++)
+            for (int i = 0; i < N_SITES && i < static_cast<int>(plan.sites.size()); i++)
                 siteAt(i, P{plan.sites[i].first, plan.sites[i].second});
             return 60;
         }
@@ -2527,7 +2530,7 @@ std::vector<uint8_t> params(const std::string& dataDir, const std::array<int, 4>
     auto s = readFile(dataDir + "/RANDOM/RANDOM.DAT");
     if (!s) throw std::runtime_error("Random data not found");
     std::vector<uint8_t> m(s->begin(), s->end());
-    if (m.size() < (size_t)DAT_SIZE) m.resize(DAT_SIZE, 0);
+    if (m.size() < static_cast<size_t>(DAT_SIZE)) m.resize(DAT_SIZE, 0);
     auto add = [&](int o, int t, int i) { setI16(m, o, getI16(m, o) + getI16(m, t + 2 * i)); };
     int water = sliders[0], hills = sliders[1], cities = sliders[2], forest = sliders[3];
     add(P_CITIES, SLIDER_CITIES, cities);
@@ -2557,9 +2560,9 @@ Run::Run(const Options& opts) {
     g.fair = opts.fairCapitals;
     g.modern = opts.scenario;
     g.world = opts.world;
-    g.tiles.assign(W * H, 0);
-    g.rd.assign(W * H, 0);
-    g.scn[S_TERRAIN_SET] = (uint8_t)opts.terrainSet;
+    g.tiles.assign(static_cast<size_t>(W) * H, 0);
+    g.rd.assign(static_cast<size_t>(W) * H, 0);
+    g.scn[S_TERRAIN_SET] = static_cast<uint8_t>(opts.terrainSet);
 }
 
 Run::~Run() = default;

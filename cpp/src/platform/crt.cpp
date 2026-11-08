@@ -56,8 +56,8 @@ void fill(Tex& x, const std::vector<Uint32>& px) {
 }
 
 Uint32 grey(double v) {
-    Uint32 c = (Uint32)std::clamp((int)std::lround(v * 255), 0, 255);
-    return 0xff000000u | c << 16 | c << 8 | c;
+    Uint32 c = static_cast<Uint32>(std::clamp(static_cast<int>(std::lround(v * 255)), 0, 255));
+    return 0xff000000U | c << 16 | c << 8 | c;
 }
 
 // Where a canvas point shows on the glass: the bow's inverse, in the frame's
@@ -75,7 +75,7 @@ std::pair<double, double> bow(double cx, double cy) {
 // lights the row's top k - 1 texels and leaves the last the darkest, so at
 // two pixels a row it is one bright and one dark, as on the glass.
 void makeLines(int rows, int k, double s) {
-    std::vector<Uint32> px((size_t)rows * k);
+    std::vector<Uint32> px(static_cast<size_t>(rows) * k);
     double mid = 0.5 - 0.5 / k;
     for (size_t i = 0; i < px.size(); i++) {
         double t = (i % k + 0.5) / k - mid;
@@ -88,18 +88,18 @@ void makeLines(int rows, int k, double s) {
 // The aperture grille: red, green and blue stripes, each `sw` pixels wide.
 void makeStripes(int sw) {
     std::vector<Uint32> px(stripes.w);
-    Uint32 off = (Uint32)std::lround(255 * (1 - MASK));
+    Uint32 off = static_cast<Uint32>(std::lround(255 * (1 - MASK)));
     for (int x = 0; x < stripes.w; x++) {
         int c = x / sw % 3;
         Uint32 r = c == 0 ? 255 : off, g = c == 1 ? 255 : off, b = c == 2 ? 255 : off;
-        px[x] = 0xff000000u | r << 16 | g << 8 | b;
+        px[x] = 0xff000000U | r << 16 | g << 8 | b;
     }
     fill(stripes, px);
 }
 
 // Dark at the glass's rounded rim, and a little towards it everywhere.
 void makeShade(double aspect) {
-    std::vector<Uint32> px((size_t)shade.w * shade.h);
+    std::vector<Uint32> px(static_cast<size_t>(shade.w) * shade.h);
     for (int y = 0; y < shade.h; y++) {
         for (int x = 0; x < shade.w; x++) {
             double u = (x + 0.5) / shade.w, v = (y + 0.5) / shade.h;
@@ -111,7 +111,7 @@ void makeShade(double aspect) {
             double rim = std::clamp(-out / EDGE, 0.0, 1.0);
             rim = rim * rim * (3 - 2 * rim);
             double vig = std::pow(std::max(0.0, 16 * u * (1 - u) * v * (1 - v)), 0.12);
-            px[(size_t)y * shade.w + x] = grey(rim * vig);
+            px[static_cast<size_t>(y) * shade.w + x] = grey(rim * vig);
         }
     }
     fill(shade, px);
@@ -241,7 +241,7 @@ void main() {
 
 template <class F>
 bool load(F& f, const char* name) {
-    f = (F)SDL_GL_GetProcAddress(name);
+    f = reinterpret_cast<F>(SDL_GL_GetProcAddress(name));
     return f != nullptr;
 }
 
@@ -319,7 +319,7 @@ GLuint name(SDL_Texture* t) {
     GLint n = 0;
     gl.GetIntegerv(GL_TEXTURE_BINDING_2D, &n);
     SDL_GL_UnbindTexture(t);
-    return tw == 1 && th == 1 ? (GLuint)n : 0;
+    return tw == 1 && th == 1 ? static_cast<GLuint>(n) : 0;
 }
 
 struct Look {
@@ -369,15 +369,15 @@ bool throughShader(SDL_Renderer* r, SDL_Texture* canvas, const Look& k) {
         gl.Uniform1i(at.screen, 0);
         gl.Uniform1i(at.nearer, 1);
         gl.Uniform1i(at.farther, 2);
-        gl.Uniform1f(at.height, (float)k.oh);
-        gl.Uniform2f(at.k, (float)k.kx, (float)k.ky);
-        gl.Uniform2f(at.size, (float)d.pw, (float)d.ph);
-        gl.Uniform4f(at.frame, (float)d.ox, (float)d.oy, (float)(d.w * d.scale),
-                     (float)(d.h * d.scale));
-        gl.Uniform1f(at.rows, (float)d.h);
-        gl.Uniform1f(at.rowPx, (float)k.rowPx);
-        gl.Uniform1f(at.scan, (float)k.strength);
-        gl.Uniform1f(at.stripe, (float)k.stripe);
+        gl.Uniform1f(at.height, static_cast<float>(k.oh));
+        gl.Uniform2f(at.k, static_cast<float>(k.kx), static_cast<float>(k.ky));
+        gl.Uniform2f(at.size, static_cast<float>(d.pw), static_cast<float>(d.ph));
+        gl.Uniform4f(at.frame, static_cast<float>(d.ox), static_cast<float>(d.oy),
+                     static_cast<float>(d.w * d.scale), static_cast<float>(d.h * d.scale));
+        gl.Uniform1f(at.rows, static_cast<float>(d.h));
+        gl.Uniform1f(at.rowPx, static_cast<float>(k.rowPx));
+        gl.Uniform1f(at.scan, static_cast<float>(k.strength));
+        gl.Uniform1f(at.stripe, static_cast<float>(k.stripe));
         gl.Viewport(0, 0, k.ow, k.oh);
         gl.Disable(GL_BLEND);
         gl.Disable(GL_SCISSOR_TEST);
@@ -442,23 +442,27 @@ void present(SDL_Renderer* r, SDL_Texture* canvas) {
     SDL_RenderSetClipRect(r, nullptr);
     int ow = 0, oh = 0;
     SDL_GetRendererOutputSize(r, &ow, &oh);
-    double kx = (double)ow / d.pw, ky = (double)oh / d.ph;  // window pixels to a device pixel
-    double rowPx = d.scale * ky;                            // window pixels to a UI row
+    double kx = static_cast<double>(ow) / d.pw,
+           ky = static_cast<double>(oh) / d.ph;  // window pixels to a device pixel
+    double rowPx = d.scale * ky;                 // window pixels to a UI row
     // scanlines: on whole pixels at any scale, else fading out where a row is
     // too few pixels to show one without beating against them
     bool whole = rowPx >= 2 && std::abs(rowPx - std::round(rowPx)) < 0.01;
     double strength = SCANLINE * (whole ? 1 : std::clamp((rowPx - 1.5) / 1.5, 0.0, 1.0));
     // the mask, a stripe to a pixel of the screen (more on a dense one)
-    int sw = std::max(1, (int)std::lround(d.dpi * d.shrink));
-    if (glow && throughShader(r, canvas, {ow, oh, kx, ky, rowPx, strength, (double)sw})) return;
+    int sw = std::max(1, static_cast<int>(std::lround(d.dpi * d.shrink)));
+    if (glow &&
+        throughShader(r, canvas, {ow, oh, kx, ky, rowPx, strength, static_cast<double>(sw)}))
+        return;
 
     // off the frame there is only black, and the pointer when it is there
     SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
     SDL_RenderClear(r);
     SDL_RenderCopy(r, canvas, nullptr, nullptr);
-    SDL_Rect onWindow{(int)std::floor(fx * kx), (int)std::floor(fy * ky),
-                      (int)std::ceil(fw * kx) + 1, (int)std::ceil(fh * ky) + 1};
+    SDL_Rect onWindow{static_cast<int>(std::floor(fx * kx)), static_cast<int>(std::floor(fy * ky)),
+                      static_cast<int>(std::ceil(fw * kx)) + 1,
+                      static_cast<int>(std::ceil(fh * ky)) + 1};
     SDL_RenderFillRect(r, &onWindow);
 
     // the mesh: a grid on the canvas, each point where the glass shows it
@@ -469,22 +473,23 @@ void present(SDL_Renderer* r, SDL_Texture* canvas) {
         SDL_RendererInfo info{};
         SDL_GetRendererInfo(r, &info);
         int maxH = info.max_texture_height > 0 ? info.max_texture_height : 8192;
-        rowTexels = std::clamp((int)std::lround(rowPx), 2, 8);
+        rowTexels = std::clamp(static_cast<int>(std::lround(rowPx)), 2, 8);
         rowTexels = std::max(2, std::min(rowTexels, maxH / std::max(1, d.h)));
     }
     for (int j = 0; j <= GRID_Y; j++) {
         for (int i = 0; i <= GRID_X; i++) {
-            double u = (double)i / GRID_X, v = (double)j / GRID_Y;
+            double u = static_cast<double>(i) / GRID_X, v = static_cast<double>(j) / GRID_Y;
             auto [sx, sy] = bow(u * 2 - 1, v * 2 - 1);
             SDL_Vertex vx{};
-            vx.position = {(float)((fx + (sx + 1) / 2 * fw) * kx),
-                           (float)((fy + (sy + 1) / 2 * fh) * ky)};
+            vx.position = {static_cast<float>((fx + (sx + 1) / 2 * fw) * kx),
+                           static_cast<float>((fy + (sy + 1) / 2 * fh) * ky)};
             vx.color = {255, 255, 255, 255};
-            vx.tex_coord = {(float)((fx + u * fw) / d.pw), (float)((fy + v * fh) / d.ph)};
+            vx.tex_coord = {static_cast<float>((fx + u * fw) / d.pw),
+                            static_cast<float>((fy + v * fh) / d.ph)};
             onCanvas.push_back(vx);
-            vx.tex_coord = {(float)u, (float)v};
+            vx.tex_coord = {static_cast<float>(u), static_cast<float>(v)};
             onFrame.push_back(vx);
-            vx.tex_coord = {0.5f, (float)v};
+            vx.tex_coord = {0.5F, static_cast<float>(v)};
             onLines.push_back(vx);
         }
     }
@@ -499,7 +504,8 @@ void present(SDL_Renderer* r, SDL_Texture* canvas) {
         if (!t) return;
         for (SDL_Vertex& vx : vs) vx.color = {tint, tint, tint, 255};
         SDL_SetTextureBlendMode(t, mode);
-        SDL_RenderGeometry(r, t, vs.data(), (int)vs.size(), idx.data(), (int)idx.size());
+        SDL_RenderGeometry(r, t, vs.data(), static_cast<int>(vs.size()), idx.data(),
+                           static_cast<int>(idx.size()));
     };
 
     draw(canvas, onCanvas, SDL_BLENDMODE_NONE);
@@ -524,8 +530,8 @@ void present(SDL_Renderer* r, SDL_Texture* canvas) {
         draw(eighth.t, onFrame, SDL_BLENDMODE_ADD, GLOW_FAR);
     }
 
-    double aspect = fh > 0 ? (double)fw / fh : 4.0 / 3;
-    if (need(r, shade, 256, std::clamp((int)std::lround(256 / aspect), 64, 512),
+    double aspect = fh > 0 ? static_cast<double>(fw) / fh : 4.0 / 3;
+    if (need(r, shade, 256, std::clamp(static_cast<int>(std::lround(256 / aspect)), 64, 512),
              SDL_TEXTUREACCESS_STATIC, aspect))
         makeShade(aspect);
     draw(shade.t, onFrame, SDL_BLENDMODE_MOD);

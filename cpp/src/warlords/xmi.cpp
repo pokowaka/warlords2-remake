@@ -7,8 +7,10 @@ namespace w2::xmi {
 namespace {
 
 uint32_t u32be(const std::string& s, size_t i) {
-    return ((uint32_t)(uint8_t)s[i] << 24) | ((uint32_t)(uint8_t)s[i + 1] << 16) |
-           ((uint32_t)(uint8_t)s[i + 2] << 8) | (uint8_t)s[i + 3];
+    return (static_cast<uint32_t>(static_cast<uint8_t>(s[i])) << 24) |
+           (static_cast<uint32_t>(static_cast<uint8_t>(s[i + 1])) << 16) |
+           (static_cast<uint32_t>(static_cast<uint8_t>(s[i + 2])) << 8) |
+           static_cast<uint8_t>(s[i + 3]);
 }
 
 // the EVNT chunk of the first sequence: {start, length}
@@ -44,7 +46,7 @@ std::optional<Sequence> parse(const std::string& s) {
     std::vector<Raw> raw;
     size_t p = start;
     int t = 0, order = 0, finish = 0;
-    auto byte = [&](size_t i) -> uint8_t { return i < s.size() ? (uint8_t)s[i] : 0; };
+    auto byte = [&](size_t i) -> uint8_t { return i < s.size() ? static_cast<uint8_t>(s[i]) : 0; };
     auto varlen = [&]() {
         int v = 0;
         uint8_t c;
@@ -76,7 +78,7 @@ std::optional<Sequence> parse(const std::string& s) {
             int dur = varlen();
             raw.push_back({t, ++order, c, key, vel, 0});
             // the note's end sorts before anything else at its tick
-            raw.push_back({t + dur, -1, (uint8_t)(0x80 | (c & 15)), key, 0, 0});
+            raw.push_back({t + dur, -1, static_cast<uint8_t>(0x80 | (c & 15)), key, 0, 0});
             finish = std::max(finish, t + dur);
         } else if (hi == 0xc0 || hi == 0xd0) {
             raw.push_back({t, ++order, c, byte(p), 0, 0});

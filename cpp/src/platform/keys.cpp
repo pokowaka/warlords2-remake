@@ -120,8 +120,8 @@ std::string loveName(int k) {
     }
     if (k >= SDLK_F1 && k <= SDLK_F12) return "f" + std::to_string(k - SDLK_F1 + 1);
     if (k >= 32 && k < 127) {
-        char c = (char)k;
-        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        char c = static_cast<char>(k);
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
         return std::string(1, c);
     }
     return "";

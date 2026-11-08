@@ -88,7 +88,7 @@ w2::Site* nearest(int x, int y) {
         if (viewer == w2::NONE ||
             (w2::site::shownTo(s, *G.player) && w2::game::seen(*G.g, viewer, s.x, s.y))) {
             double dx = s.x - x, dy = s.y - y;
-            int dd = (int)std::floor(std::sqrt(dx * dx + dy * dy));
+            int dd = static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
             if (bestD == w2::NONE || dd < bestD) {
                 best = &s;
                 bestD = dd;

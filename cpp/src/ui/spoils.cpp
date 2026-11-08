@@ -31,8 +31,9 @@ struct Spoils : kit::Modal {
         const Font& f = kit::font(2);
         kit::centred(f, format(kit::text(LINE, which), city->name), 320, 115);
         kit::centred(f, format(kit::text(GOLD, 0), gold), 320, 135);
-        kit::centred(f, format(kit::text(LOST, lost.size() == 1 ? 0 : 1), (int)lost.size()), 320,
-                     165);
+        kit::centred(
+                f, format(kit::text(LOST, lost.size() == 1 ? 0 : 1), static_cast<int>(lost.size())),
+                320, 165);
         kit::centred(f, format(kit::text(LEFT, left == 1 ? 0 : 1), left), 320, 185);
         kit::bevel(184, 220, 272, 130, 4, 2);
         kit::bevel(185, 221, 270, 128, 2, 4);
@@ -41,7 +42,7 @@ struct Spoils : kit::Modal {
         f.draw(kit::text(TITLE, 3), 368, 230);
         for (int i = 0; i <= 2; i++) {
             int y = 250 + 30 * i;
-            bool have = i < (int)lost.size();
+            bool have = i < static_cast<int>(lost.size());
             kit::army(have ? lost[i].first : w2::NONE, G.player->index, 208, y, 1);
             if (have) {
                 gfx::setColor(1, 1, 1);

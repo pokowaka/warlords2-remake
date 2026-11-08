@@ -45,13 +45,13 @@ thread_local const ScopedTileIndex* activeIndex = nullptr;
 }
 
 ScopedTileIndex::ScopedTileIndex(const Game& g) : g_(g), prev_(activeIndex) {
-    byTile_.resize((size_t)g.map->width * g.map->height);
+    byTile_.resize(static_cast<size_t>(g.map->width) * g.map->height);
     // newest army first, as game::armiesAt lists them
-    for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
         if (a->transit || a->x < 0 || a->y < 0 || a->x >= g.map->width || a->y >= g.map->height)
             continue;
-        byTile_[(size_t)a->y * g.map->width + a->x].push_back(a);
+        byTile_[static_cast<size_t>(a->y) * g.map->width + a->x].push_back(a);
     }
     activeIndex = this;
 }
@@ -63,7 +63,7 @@ ScopedTileIndex::~ScopedTileIndex() {
 const std::vector<Army*>& ScopedTileIndex::at(int x, int y) const {
     static const std::vector<Army*> none;
     if (x < 0 || y < 0 || x >= g_.map->width || y >= g_.map->height) return none;
-    return byTile_[(size_t)y * g_.map->width + x];
+    return byTile_[static_cast<size_t>(y) * g_.map->width + x];
 }
 
 std::vector<Army*> armiesAt(const Game& g, int x, int y) {
@@ -96,19 +96,19 @@ void recordBattleObservation(Game& g, int observerSide, int x, int y) {
         obs.x = tx;
         obs.y = ty;
         obs.owner = armies[0]->owner;
-        obs.visibleCount = (int)armies.size();
+        obs.visibleCount = static_cast<int>(armies.size());
         obs.topType = armies[0]->type;
         obs.lastInspectedTurn = g.turn;
-        float sumStr = 0.0f;
+        float sumStr = 0.0F;
         for (Army* a : armies) {
             obs.knownTypes.push_back(a->type);
             obs.knownStrengths.push_back(a->strength);
-            sumStr += (float)a->strength;
+            sumStr += static_cast<float>(a->strength);
         }
         if (obs.owner >= 0 && obs.owner < 8 && !armies.empty()) {
-            float avg = sumStr / (float)armies.size();
+            float avg = sumStr / static_cast<float>(armies.size());
             b.seenEnemyAvgStrength[obs.owner] =
-                    0.7f * b.seenEnemyAvgStrength[obs.owner] + 0.3f * avg;
+                    0.7F * b.seenEnemyAvgStrength[obs.owner] + 0.3F * avg;
         }
         b.stacksByTile[key] = std::move(obs);
     }
@@ -126,8 +126,8 @@ void update(Game& g, Side& side) {
     b.visibleGroundItems.clear();
     b.fogFrontiers.clear();
     b.visibleCitiesBySide.fill(0);
-    b.myBorderStrength.fill(0.0f);
-    b.theirBorderStrength.fill(0.0f);
+    b.myBorderStrength.fill(0.0F);
+    b.theirBorderStrength.fill(0.0F);
 
     // Clean stale tile observations and scan visible enemy stacks
     std::map<int, ObservedStack> refreshed;
@@ -151,12 +151,13 @@ void update(Game& g, Side& side) {
                 obs.y = y;
                 obs.owner = owner;
                 obs.topType = armies[0]->type;
-                obs.visibleCount = (tower && !fullView) ? 4 : (int)armies.size();
+                obs.visibleCount = (tower && !fullView) ? 4 : static_cast<int>(armies.size());
 
                 const ArmyType* topAt = g.types.byId(obs.topType);
                 if (topAt && owner >= 0 && owner < 8) {
-                    b.seenEnemyAvgStrength[owner] = 0.9f * b.seenEnemyAvgStrength[owner] +
-                                                    0.1f * (float)std::max(2, topAt->strength);
+                    b.seenEnemyAvgStrength[owner] =
+                            0.9F * b.seenEnemyAvgStrength[owner] +
+                            0.1F * static_cast<float>(std::max(2, topAt->strength));
                 }
 
                 auto prevIt = b.stacksByTile.find(key);
@@ -167,7 +168,7 @@ void update(Game& g, Side& side) {
                         obs.knownStrengths.push_back(a->strength);
                     }
                 } else if (prevIt != b.stacksByTile.end() && prevIt->second.owner == owner &&
-                           prevIt->second.visibleCount == (int)armies.size() &&
+                           prevIt->second.visibleCount == static_cast<int>(armies.size()) &&
                            g.turn - prevIt->second.lastInspectedTurn <= 2) {
                     obs.lastInspectedTurn = prevIt->second.lastInspectedTurn;
                     obs.knownTypes = prevIt->second.knownTypes;
@@ -203,7 +204,8 @@ void update(Game& g, Side& side) {
     b.stacksByTile = std::move(refreshed);
     int activeArea = std::max(
             1, (g.map->activeX1 - g.map->activeX0 + 1) * (g.map->activeY1 - g.map->activeY0 + 1));
-    b.frontierRatio = std::min(1.0f, (float)unseenTotal / (float)activeArea);
+    b.frontierRatio =
+            std::min(1.0F, static_cast<float>(unseenTotal) / static_cast<float>(activeArea));
 
     // Sort rawFrontiers by proximity to our own cities/armies (preferring road tiles
     // that connect cities) so local expansion frontiers are represented in top clusters.
@@ -277,28 +279,28 @@ void update(Game& g, Side& side) {
 
     // Compute per-city threat and nearest visible rival distance using fair-information state only
     size_t nCities = g.map->cities.size();
-    b.cityThreat1Turn.assign(nCities, 0.0f);
-    b.cityThreat2Turn.assign(nCities, 0.0f);
-    b.cityNearestEnemyDist.assign(nCities, 200.0f);
+    b.cityThreat1Turn.assign(nCities, 0.0F);
+    b.cityThreat2Turn.assign(nCities, 0.0F);
+    b.cityNearestEnemyDist.assign(nCities, 200.0F);
 
     for (City* c : b.visibleCities) {
-        float minDist = 200.0f;
+        float minDist = 200.0F;
         for (City* other : b.visibleCities) {
             if (other->ownerIndex >= 0 && other->ownerIndex != me && !other->razed &&
                 !diplomacy::isAllied(g, me, other->ownerIndex)) {
-                float d = (float)move::distance(c->x, c->y, other->x, other->y);
+                float d = static_cast<float>(move::distance(c->x, c->y, other->x, other->y));
                 if (d < minDist) minDist = d;
             }
         }
         for (const auto& [tileKey, obs] : b.stacksByTile) {
             if (obs.owner >= 0 && obs.owner != me && !diplomacy::isAllied(g, me, obs.owner)) {
-                float d = (float)move::distance(c->x, c->y, obs.x, obs.y);
+                float d = static_cast<float>(move::distance(c->x, c->y, obs.x, obs.y));
                 if (d < minDist) minDist = d;
             }
         }
         b.cityNearestEnemyDist[c->index] = minDist;
 
-        float t1 = 0.0f, t2 = 0.0f;
+        float t1 = 0.0F, t2 = 0.0F;
         for (const auto& [tileKey, obs] : b.stacksByTile) {
             if (obs.owner == me || obs.owner == NONE || diplomacy::isAllied(g, me, obs.owner))
                 continue;
@@ -307,15 +309,15 @@ void update(Game& g, Side& side) {
             int estMove = topAt ? std::max(10, topAt->move) : 12;
             int reach1 = std::max(8, (estMove * 3) / 4);
             int reach2 = reach1 * 2;
-            float estStr = 0.0f;
+            float estStr = 0.0F;
             if (!obs.knownStrengths.empty()) {
-                for (int s : obs.knownStrengths) estStr += (float)s;
+                for (int s : obs.knownStrengths) estStr += static_cast<float>(s);
             } else {
-                float topStr = topAt ? (float)topAt->strength : 4.0f;
+                float topStr = topAt ? static_cast<float>(topAt->strength) : 4.0F;
                 float restStr = (obs.owner >= 0 && obs.owner < 8)
                                         ? b.seenEnemyAvgStrength[obs.owner]
-                                        : 4.0f;
-                estStr = topStr + (float)std::max(0, obs.visibleCount - 1) * restStr;
+                                        : 4.0F;
+                estStr = topStr + static_cast<float>(std::max(0, obs.visibleCount - 1)) * restStr;
             }
             if (d <= reach1) t1 += estStr;
             if (d <= reach2) t2 += estStr;
@@ -334,7 +336,7 @@ void update(Game& g, Side& side) {
         for (City* c : b.visibleCities) {
             if (c->ownerIndex >= 0 && c->ownerIndex < 8 && c->ownerIndex != me) {
                 if (move::distance(a->x, a->y, c->x, c->y) <= 18) {
-                    b.myBorderStrength[c->ownerIndex] += (float)a->strength;
+                    b.myBorderStrength[c->ownerIndex] += static_cast<float>(a->strength);
                 }
             }
         }
@@ -345,15 +347,15 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
                               int tx, int ty, float cautionBias) {
     CombatEstimate est;
     if (attackers.empty()) {
-        est.winProb = 0.0f;
+        est.winProb = 0.0F;
         return est;
     }
     int me = side.index;
     City* city = game::cityAt(g, tx, ty);
     bool targetVisible = city ? isCityVisible(g, me, *city) : isTileVisible(g, me, tx, ty);
     if (!targetVisible) {
-        est.winProb = 0.85f;
-        est.expectedSurvivors = (float)attackers.size() * 0.85f;
+        est.winProb = 0.85F;
+        est.expectedSurvivors = static_cast<float>(attackers.size()) * 0.85F;
         return est;
     }
 
@@ -384,9 +386,9 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
         if (fullView) {
             for (Army* a : actual) {
                 defenders.push_back(a);
-                est.estimatedDefenderStrength += (float)a->strength;
+                est.estimatedDefenderStrength += static_cast<float>(a->strength);
             }
-            est.estimatedDefenderCount += (int)actual.size();
+            est.estimatedDefenderCount += static_cast<int>(actual.size());
             continue;
         }
 
@@ -394,7 +396,7 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
         int owner = actual[0]->owner;
         int topType = actual[0]->type;
         bool tower = game::towerAt(g, dx, dy);
-        int count = tower ? 4 : (int)actual.size();
+        int count = tower ? 4 : static_cast<int>(actual.size());
         if (it != b.stacksByTile.end() && !it->second.knownTypes.empty()) {
             for (size_t i = 0; i < it->second.knownTypes.size(); i++) {
                 Army syn;
@@ -405,12 +407,12 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
                 syn.strength = it->second.knownStrengths[i];
                 synthPool.push_back(syn);
                 defenders.push_back(&synthPool.back());
-                est.estimatedDefenderStrength += (float)syn.strength;
+                est.estimatedDefenderStrength += static_cast<float>(syn.strength);
             }
-            est.estimatedDefenderCount += (int)it->second.knownTypes.size();
+            est.estimatedDefenderCount += static_cast<int>(it->second.knownTypes.size());
         } else {
-            float avgStr = (owner >= 0 && owner < 8) ? b.seenEnemyAvgStrength[owner] : 3.5f;
-            int estUnderStr = std::clamp((int)std::round(avgStr + cautionBias), 2, 8);
+            float avgStr = (owner >= 0 && owner < 8) ? b.seenEnemyAvgStrength[owner] : 3.5F;
+            int estUnderStr = std::clamp(static_cast<int>(std::round(avgStr + cautionBias)), 2, 8);
             for (int i = 0; i < count; i++) {
                 Army syn;
                 syn.owner = owner;
@@ -426,13 +428,15 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
                 }
                 synthPool.push_back(syn);
                 defenders.push_back(&synthPool.back());
-                est.estimatedDefenderStrength += (float)syn.strength;
+                est.estimatedDefenderStrength += static_cast<float>(syn.strength);
             }
             est.estimatedDefenderCount += count;
         }
     }
 
-    est.seenTileFraction = defTiles.empty() ? 1.0f : (float)seenTiles / (float)defTiles.size();
+    est.seenTileFraction =
+            defTiles.empty() ? 1.0F
+                             : static_cast<float>(seenTiles) / static_cast<float>(defTiles.size());
 
     // Calibrated partial-visibility belief when some tiles of a 2x2 city remain in fog
     // and no defenders were observed on the visible tiles:
@@ -452,7 +456,7 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
                 synthPool.push_back(syn);
                 defenders.push_back(&synthPool.back());
                 est.estimatedDefenderCount = 1;
-                est.estimatedDefenderStrength = (float)syn.strength;
+                est.estimatedDefenderStrength = static_cast<float>(syn.strength);
             }
         } else {
             // Enemy city with unseen corner(s): sample unseen garrison occupancy proportionally
@@ -460,8 +464,8 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
             // guaranteed 3-stack
             unseenEnemyTiles = 4 - seenTiles;
             int owner = city->ownerIndex;
-            float avgStr = (owner >= 0 && owner < 8) ? b.seenEnemyAvgStrength[owner] : 4.0f;
-            int estStr = std::clamp((int)std::round(avgStr + cautionBias), 2, 7);
+            float avgStr = (owner >= 0 && owner < 8) ? b.seenEnemyAvgStrength[owner] : 4.0F;
+            int estStr = std::clamp(static_cast<int>(std::round(avgStr + cautionBias)), 2, 7);
             for (int i = 0; i < 2; i++) {
                 Army syn;
                 syn.owner = owner;
@@ -472,22 +476,22 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
                 synthPool.push_back(syn);
                 unseenFallbackDefenders.push_back(&synthPool.back());
             }
-            float unseenFrac = (float)unseenEnemyTiles / 4.0f;
-            est.estimatedDefenderCount = (int)std::round(2.0f * unseenFrac);
-            est.estimatedDefenderStrength = 2.0f * (float)estStr * unseenFrac;
+            float unseenFrac = static_cast<float>(unseenEnemyTiles) / 4.0F;
+            est.estimatedDefenderCount = static_cast<int>(std::round(2.0F * unseenFrac));
+            est.estimatedDefenderStrength = 2.0F * static_cast<float>(estStr) * unseenFrac;
         }
     }
 
     if (defenders.empty() && unseenFallbackDefenders.empty()) {
-        est.winProb = 1.0f;
-        est.expectedSurvivors = (float)attackers.size();
+        est.winProb = 1.0F;
+        est.expectedSurvivors = static_cast<float>(attackers.size());
         return est;
     }
 
     // Save RNG state so combat estimation is 100% side-effect free
     uint32_t savedRng = g.rng.state;
-    g.rng.state =
-            savedRng ^ (uint32_t)(tx * 73856093 ^ ty * 19349663 ^ (int)attackers.size() * 83492791);
+    g.rng.state = savedRng ^ static_cast<uint32_t>(tx * 73856093 ^ ty * 19349663 ^
+                                                   static_cast<int>(attackers.size()) * 83492791);
     if (g.rng.state == 0) g.rng.state = 1;
 
     constexpr int SIMS = 8;
@@ -501,19 +505,19 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
                         : ((i * 4 < unseenEnemyTiles * SIMS) ? unseenFallbackDefenders : defenders);
         if (simDefs.empty()) {
             wins++;
-            totalSurv += (int)attackers.size();
+            totalSurv += static_cast<int>(attackers.size());
             continue;
         }
         Battle res = combat::resolve(g, attackers, simDefs, tx, ty);
         if (res.won) wins++;
-        totalSurv += (int)res.attackers.size();
-        totalEnemyDead += (int)res.deadDefenders.size();
+        totalSurv += static_cast<int>(res.attackers.size());
+        totalEnemyDead += static_cast<int>(res.deadDefenders.size());
     }
 
     g.rng.state = savedRng;
-    est.winProb = (float)wins / (float)SIMS;
-    est.expectedSurvivors = (float)totalSurv / (float)SIMS;
-    est.expectedEnemyLosses = (float)totalEnemyDead / (float)SIMS;
+    est.winProb = static_cast<float>(wins) / static_cast<float>(SIMS);
+    est.expectedSurvivors = static_cast<float>(totalSurv) / static_cast<float>(SIMS);
+    est.expectedEnemyLosses = static_cast<float>(totalEnemyDead) / static_cast<float>(SIMS);
     return est;
 }
 

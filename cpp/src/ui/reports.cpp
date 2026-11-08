@@ -102,7 +102,7 @@ struct Reports : kit::Modal {
         st[DONE] = w2::uidata::NORMAL;
         hidden.clear();
         if (n == report::PRODUCTION) {
-            int count = (int)G.player->produced.size();
+            int count = static_cast<int>(G.player->produced.size());
             st[UP] = topRow > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
             st[PAGE_UP] = st[UP];
             st[DOWN] = topRow + ROWS < count ? w2::uidata::NORMAL : w2::uidata::DISABLED;
@@ -112,7 +112,7 @@ struct Reports : kit::Modal {
         }
     }
     void scroll(int by) {
-        int count = (int)G.player->produced.size();
+        int count = static_cast<int>(G.player->produced.size());
         topRow = std::max(0, std::min(std::max(0, count - ROWS), topRow + by));
         refresh();
     }
@@ -120,7 +120,7 @@ struct Reports : kit::Modal {
         const auto& list = G.player->produced;
         const Font& font = kit::font(2);
         for (int i = 0; i < ROWS; i++) {
-            if (topRow + i >= (int)list.size()) break;
+            if (topRow + i >= static_cast<int>(list.size())) break;
             const w2::Produced& e = list[topRow + i];
             int y = 176 + 30 * i;
             gfx::setColor(1, 1, 1);

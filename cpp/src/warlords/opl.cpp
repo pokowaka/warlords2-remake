@@ -12,9 +12,9 @@ struct Roms {
     int logsin[256], exp[256];
     Roms() {
         for (int i = 0; i < 256; i++) {
-            logsin[i] = (int)std::floor(
-                    -std::log(std::sin((i + 0.5) * M_PI / 512)) / std::log(2.0) * 256 + 0.5);
-            exp[i] = (int)std::floor(std::pow(2.0, (255 - i) / 256.0) * 1024 + 0.5);
+            logsin[i] = static_cast<int>(std::floor(
+                    -std::log(std::sin((i + 0.5) * M_PI / 512)) / std::log(2.0) * 256 + 0.5));
+            exp[i] = static_cast<int>(std::floor(std::pow(2.0, (255 - i) / 256.0) * 1024 + 0.5));
         }
     }
 };
@@ -177,7 +177,7 @@ void Opl::envelope(Slot& s, const Channel& c) {
         if (s.rout == 0)
             s.gen = DECAY;
         else if (s.key && shift > 0 && rateHi != 15)
-            inc = (int)std::floor((-s.rout - 1) / std::pow(2.0, 4 - shift));
+            inc = static_cast<int>(std::floor((-s.rout - 1) / std::pow(2.0, 4 - shift)));
     } else if (s.gen == DECAY) {
         if ((s.rout >> 4) == s.sl)
             s.gen = SUSTAIN;
@@ -205,8 +205,8 @@ void Opl::phaseGen(Slot& s, const Channel& c) {
         if (vp & 4) range = -range;
         f += range;
     }
-    uint32_t base = ((uint32_t)(f << c.block) & 0xffffffff) >> 1;
-    s.phaseOut = (int)(s.phase >> 9);
+    uint32_t base = (static_cast<uint32_t>(f << c.block) & 0xffffffff) >> 1;
+    s.phaseOut = static_cast<int>(s.phase >> 9);
     if (s.reset) s.phase = 0;
     s.phase = (s.phase + ((base * MT[s.mult]) >> 1)) & 0x7ffff;
 }
@@ -229,7 +229,8 @@ void Opl::generate(int16_t* out, int n) {
                 continue;
             // modulator, with feedback from its last two outputs
             int fbmod = 0;
-            if (c.fb != 0) fbmod = (int)std::floor((m.prout + m.out) / std::pow(2.0, 9 - c.fb));
+            if (c.fb != 0)
+                fbmod = static_cast<int>(std::floor((m.prout + m.out) / std::pow(2.0, 9 - c.fb)));
             m.prout = m.out;
             envelope(m, c);
             phaseGen(m, c);
@@ -250,7 +251,7 @@ void Opl::generate(int16_t* out, int n) {
             acc = 32767;
         else if (acc < -32768)
             acc = -32768;
-        out[i] = (int16_t)acc;
+        out[i] = static_cast<int16_t>(acc);
 
         // the chip's counters: tremolo every 64 samples, vibrato every 1024
         uint32_t t = timer_;
@@ -267,7 +268,7 @@ void Opl::generate(int16_t* out, int n) {
             int sh = 0;
             while (sh < 13 && ((et >> sh) & 1) == 0) sh++;
             egAdd_ = sh > 12 ? 0 : sh + 1;
-            egTimerLo_ = (int)(et & 3);
+            egTimerLo_ = static_cast<int>(et & 3);
             egTimer_ = (et + 1) & 0xfffffff;
         }
         egState_ = 1 - egState_;

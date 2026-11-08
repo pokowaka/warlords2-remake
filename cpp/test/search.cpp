@@ -71,8 +71,8 @@ struct Settings {
     int candidates = 4;     // K sampled turns besides the greedy one
     int rollouts = 4;       // R copies per candidate
     int horizon = 2;        // H rounds played on after the candidate turn
-    float candTemp = 0.5f;  // temperature the sampled candidates are drawn at
-    float switchZ = 0.0f;   // only leave the greedy turn when a candidate beats it by switchZ
+    float candTemp = 0.5F;  // temperature the sampled candidates are drawn at
+    float switchZ = 0.0F;   // only leave the greedy turn when a candidate beats it by switchZ
                             // standard errors
 };
 
@@ -106,7 +106,7 @@ void playCandidate(Game& g, int sideIndex, int k, uint32_t baseSeed, const Setti
     }
     ml::RolloutSampler sampler;
     sampler.temperature = st.candTemp;
-    sampler.rngState = baseSeed ^ (uint32_t)(k * 2246822519u);
+    sampler.rngState = baseSeed ^ static_cast<uint32_t>(k * 2246822519U);
     ai::modern::playTurn(g, side, nullptr, st.policy, &sampler);
 }
 
@@ -142,7 +142,8 @@ struct CandidateResult {
 // Builds and scores the K+1 candidates for `side` in `g` (its turn is next).
 std::vector<CandidateResult> scoreCandidates(const Game& g, int sideIndex, const Settings& st) {
     std::vector<CandidateResult> out;
-    const uint32_t baseSeed = (uint32_t)(g.rng.state * 2654435761u) ^ (uint32_t)(g.turn * 40503u);
+    const uint32_t baseSeed = static_cast<uint32_t>(g.rng.state * 2654435761U) ^
+                              static_cast<uint32_t>(g.turn * 40503U);
     for (int k = 0; k <= st.candidates; k++) {
         CandidateResult c;
         std::vector<double> v;
@@ -151,15 +152,14 @@ std::vector<CandidateResult> scoreCandidates(const Game& g, int sideIndex, const
             playCandidate(*c.after, sideIndex, k, baseSeed, st);
             for (int r = 0; r < st.rollouts; r++) {
                 auto copy = copyGame(*c.after);
-                copy->rng.state ^= (uint32_t)((r + 1) * 0x9e3779b9u);
+                copy->rng.state ^= static_cast<uint32_t>((r + 1) * 0x9e3779b9U);
                 v.push_back(rollout(*copy, sideIndex, st.horizon, *st.policy));
             }
         } else {
             for (int r = 0; r < st.rollouts; r++) {
                 auto copy = copyGame(g);
-                copy->rng.state ^=
-                        (uint32_t)((r + 1) *
-                                   0x9e3779b9u);  // fresh dice, also for the candidate turn
+                copy->rng.state ^= static_cast<uint32_t>(
+                        (r + 1) * 0x9e3779b9U);  // fresh dice, also for the candidate turn
                 if (st.judge == Judge::Fair) restrictToView(*copy, sideIndex);
                 playCandidate(*copy, sideIndex, k, baseSeed, st);
                 v.push_back(rollout(*copy, sideIndex, st.horizon, *st.policy));
@@ -192,7 +192,7 @@ std::unique_ptr<Game> newBenchmarkGame(int caseIndex, uint32_t seed, int& preset
     for (int s = 0; s < 8; s++) {
         o.sides[s].computer = true;
         o.sides[s].level = 2;
-        o.sides[s].card = (int)((seed + s * 5) % 9);
+        o.sides[s].card = static_cast<int>((seed + s * 5) % 9);
     }
     return game::newGame(kData, scenOut, o);
 }
@@ -217,7 +217,7 @@ double modernShare(const Game& g, const std::array<bool, 8>& modern) {
         if (c.razed || c.ownerIndex < 0 || c.ownerIndex >= 8) continue;
         (modern[c.ownerIndex] ? m : k)++;
     }
-    return (m + k) > 0 ? (double)m / (m + k) : 0.5;
+    return (m + k) > 0 ? static_cast<double>(m) / (m + k) : 0.5;
 }
 
 }  // namespace
@@ -245,9 +245,9 @@ int main(int argc, char** argv) {
     int turns = argc > 7 ? std::atoi(argv[7]) : 40;
     std::string judge = argc > 8 ? argv[8] : "honest";
     st.judge = judge == "peek" ? Judge::Peek : judge == "fair" ? Judge::Fair : Judge::Honest;
-    st.candTemp = argc > 9 ? (float)std::atof(argv[9]) : 0.5f;
-    st.switchZ = argc > 10 ? (float)std::atof(argv[10]) : 0.0f;
-    const uint32_t seedOffset = argc > 11 ? (uint32_t)std::atoi(argv[11]) : 0u;
+    st.candTemp = argc > 9 ? static_cast<float>(std::atof(argv[9])) : 0.5F;
+    st.switchZ = argc > 10 ? static_cast<float>(std::atof(argv[10])) : 0.0F;
+    const uint32_t seedOffset = argc > 11 ? static_cast<uint32_t>(std::atoi(argv[11])) : 0U;
     const bool play = (mode == "play");
 
     const int cases = seeds * 2;
@@ -259,14 +259,15 @@ int main(int argc, char** argv) {
     std::atomic<int> next{0};
     auto t0 = std::chrono::steady_clock::now();
     std::vector<std::thread> pool;
-    unsigned workers = std::max(2u, std::thread::hardware_concurrency());
+    unsigned workers = std::max(2U, std::thread::hardware_concurrency());
     for (unsigned w = 0; w < workers; w++) {
         pool.emplace_back([&]() {
             for (int ci; (ci = next.fetch_add(1)) < cases;) {
                 int preset = 0;
                 std::string scen;
-                uint32_t seed = kSeedBase + seedOffset + (uint32_t)(ci / 2);
-                auto gp = newBenchmarkGame(ci + 2 * (int)seedOffset, seed, preset, scen);
+                uint32_t seed = kSeedBase + seedOffset + static_cast<uint32_t>(ci / 2);
+                auto gp =
+                        newBenchmarkGame(ci + 2 * static_cast<int>(seedOffset), seed, preset, scen);
                 auto modern = assignSeats(*gp, ci % 2);
                 Side* cur = game::begin(*gp);
                 int safety = 0;
@@ -281,7 +282,7 @@ int main(int argc, char** argv) {
                         size_t best = 0;
                         for (size_t k = 1; k < cands.size(); k++)
                             if (cands[k].mean > cands[best].mean) best = k;
-                        if (best != 0 && st.switchZ > 0.0f) {
+                        if (best != 0 && st.switchZ > 0.0F) {
                             // Conservative switching: noise alone must not pull us off the greedy
                             // turn
                             double se = std::sqrt(

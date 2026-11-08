@@ -50,7 +50,7 @@ struct Dialog : kit::Modal {
         kit::popup(R);
         gfx::setColor(1, 1, 1);
         kit::centred(kit::font(1), opts.title, 320, TITLE_Y);
-        int n = (int)opts.lines.size() + (opts.confirm ? 0 : 2);
+        int n = static_cast<int>(opts.lines.size()) + (opts.confirm ? 0 : 2);
         auto ys = ROWS.find(n);
         if (ys != ROWS.end())
             for (size_t i = 0; i < opts.lines.size() && i < ys->second.size(); i++)
@@ -117,15 +117,15 @@ std::string Editor::key(const std::string& k) {
 
 void Editor::input(const std::string& t) {
     for (unsigned char b : t) {
-        if (b >= 0x20 && b < 0x7b && (int)text.size() < maxChars - 1 &&
+        if (b >= 0x20 && b < 0x7b && static_cast<int>(text.size()) < maxChars - 1 &&
             kit::font(2).width(text) < maxWidth)
-            text += (char)b;
+            text += static_cast<char>(b);
     }
 }
 
 void Editor::drawCursor(double x, double y) const {
     const Font& f = kit::font(2);
-    if ((long)std::floor(kit::now() / BLINK) % 2 == 0)
+    if (static_cast<long>(std::floor(kit::now() / BLINK)) % 2 == 0)
         kit::setPal(9);
     else
         gfx::setColor(1, 1, 1);

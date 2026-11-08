@@ -97,8 +97,8 @@ void recallOptions() {
 void keepOptions() {
     std::string b;
     for (int i = 0; i <= 9; i++) {
-        b += (char)(OPTIONS[i] & 255);
-        b += (char)((OPTIONS[i] >> 8) & 255);
+        b += static_cast<char>(OPTIONS[i] & 255);
+        b += static_cast<char>((OPTIONS[i] >> 8) & 255);
     }
     w2::writeFile(G.dataDir + "/DATA/OPTIONS.DAT", b);
 }
@@ -324,7 +324,7 @@ struct SideDialog : kit::Modal {
     int descCard = -1;
 
     SideSetup& side() { return st->sides[index]; }
-    int n() const { return (int)deck.size(); }
+    int n() const { return static_cast<int>(deck.size()); }
 
     void start() {
         SideSetup& s = side();
@@ -429,7 +429,7 @@ struct SideDialog : kit::Modal {
                     if (auto dd = w2::aicard::describe(G.dataDir, s.level, s.card))
                         desc = dd->second;
             }
-            for (int k = 0; k < 6 && k < (int)desc.size(); k++)
+            for (int k = 0; k < 6 && k < static_cast<int>(desc.size()); k++)
                 if (!desc[k].empty()) ink.draw(desc[k], 384, 224 + 20 * k);
         }
         kit::drawControls(v);
@@ -680,8 +680,9 @@ struct SetupScreen : kit::Modal {
             static std::mt19937 dice{std::random_device{}()};
             for (auto& s : st->sides) {
                 if (s.inUse && s.computer && s.level >= 0 && s.level < 3) {
-                    int n = (int)w2::aicard::deck(G.dataDir, s.level).size();
-                    s.card = n > 1 ? 1 + (int)(dice() % (unsigned)(n - 1)) : 0;
+                    int n = static_cast<int>(w2::aicard::deck(G.dataDir, s.level).size());
+                    s.card =
+                            n > 1 ? 1 + static_cast<int>(dice() % static_cast<unsigned>(n - 1)) : 0;
                 }
             }
         }
@@ -701,7 +702,7 @@ void openSetup(std::shared_ptr<Setup> st, std::function<void(std::shared_ptr<Set
     d->menuBar = true;  // the menu bar stays live over it (7bab:0034)
     // picked once as the screen is drawn whole; Edit Options draws over it
     static std::mt19937 dice{std::random_device{}()};
-    d->lines = quote([](int n) { return 1 + (int)(dice() % (unsigned)n); });
+    d->lines = quote([](int n) { return 1 + static_cast<int>(dice() % static_cast<unsigned>(n)); });
     d->refresh();
     kit::push(d);
 }
@@ -715,7 +716,8 @@ struct Chooser : kit::Modal {
         auto& s = v.state;
         for (auto& c : v.dialog.controls) s[c.id] = w2::uidata::NORMAL;
         int up = topRow > 0 ? w2::uidata::NORMAL : w2::uidata::DISABLED;
-        int down = topRow + 7 < (int)list.size() ? w2::uidata::NORMAL : w2::uidata::DISABLED;
+        int down = topRow + 7 < static_cast<int>(list.size()) ? w2::uidata::NORMAL
+                                                              : w2::uidata::DISABLED;
         s[470] = up;
         s[472] = up;
         s[471] = down;
@@ -732,10 +734,10 @@ struct Chooser : kit::Modal {
         gfx::setColor(1, 1, 1);
         const Font& f = kit::font(2);
         for (int i = 0; i <= 6; i++) {
-            if (topRow + i < (int)list.size())
+            if (topRow + i < static_cast<int>(list.size()))
                 f.colours(i == cur ? 15 : 5, 0).draw(list[topRow + i].name, 112, 153 + 20 * i);
         }
-        if (topRow + cur < (int)list.size()) {
+        if (topRow + cur < static_cast<int>(list.size())) {
             const Scenario& e = list[topRow + cur];
             const Font& g5 = f.colours(5, 0);
             kit::centred(g5, e.name, 416, 101);
@@ -760,11 +762,12 @@ struct Chooser : kit::Modal {
         if (id == 474) return take(true);
         if (id == 475) return take(false);
         if (id >= 476 && id <= 482) {
-            if (topRow + id - 476 < (int)list.size()) cur = id - 476;
+            if (topRow + id - 476 < static_cast<int>(list.size())) cur = id - 476;
         } else if (id == 470 || id == 472) {
             topRow = std::max(0, topRow - (id == 472 ? 7 : 1));
         } else if (id == 471 || id == 473) {
-            topRow = std::min(std::max(0, (int)list.size() - 7), topRow + (id == 473 ? 7 : 1));
+            topRow = std::min(std::max(0, static_cast<int>(list.size()) - 7),
+                              topRow + (id == 473 ? 7 : 1));
         }
         refresh();
     }
@@ -852,7 +855,7 @@ struct MakeWorld : kit::Modal {
 
 void makeWorld(kit::Done after) {
     auto d = std::make_shared<MakeWorld>();
-    d->rng = w2::Rng((double)(time(nullptr) % 1000000007));
+    d->rng = w2::Rng(static_cast<double>(time(nullptr) % 1000000007));
     w2::randommap::Options o;
     o.dataDir = G.dataDir;
     o.rng = &d->rng;
@@ -895,7 +898,7 @@ struct Menu : kit::Modal {
             auto img = image(G.dataDir + "/PICS/STARTUP" + std::to_string(q) + ".PCK");
             if (img) gfx::draw(img, (q % 2) * 320, (q / 2) * 240);
         }
-        bool have = cur < (int)list.size();
+        bool have = cur < static_cast<int>(list.size());
         if (world.on) {
             drawWorld();
         } else if (have) {
@@ -995,7 +998,7 @@ struct Menu : kit::Modal {
                     me->setUp(sc);
                 });
             });
-        } else if (id == 103 && cur < (int)list.size()) {
+        } else if (id == 103 && cur < static_cast<int>(list.size())) {
             auto keep = shared_from_this();
             kit::pop(this);
             setUp(list[cur]);
@@ -1011,7 +1014,7 @@ void open(std::function<void(const std::string& dir, const w2::game::NewGameOpti
     auto d = std::make_shared<Menu>();
     d->list = scenarios();
     for (size_t i = 0; i < d->list.size(); i++)
-        if (d->list[i].dir == "Erythea") d->cur = (int)i;  // 4125:2a6e
+        if (d->list[i].dir == "Erythea") d->cur = static_cast<int>(i);  // 4125:2a6e
     d->beginGame = begin;
     d->loaded = loaded;
     // back from a random world, the menu is still on one (7f77:0000)

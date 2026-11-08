@@ -140,7 +140,8 @@ struct History : kit::Modal {
             int x = tx(t);
             const auto& val = values(rec(t), mode);
             for (int s = 0; s < 8; s++) {
-                int y = GY + GH - 1 - (int)std::floor((double)val[s] / top * GH);
+                int y = GY + GH - 1 -
+                        static_cast<int>(std::floor(static_cast<double>(val[s]) / top * GH));
                 kit::line(G.g->map->sides[s].colour, px[s], py[s], x, y);
                 px[s] = x;
                 py[s] = y;
@@ -169,7 +170,7 @@ struct History : kit::Modal {
         const auto& events = rec(turn).events;
         for (size_t i = 0; i < events.size(); i++) {
             const w2::Deed& e = events[i];
-            int y = 149 + 17 * (int)i;
+            int y = 149 + 17 * static_cast<int>(i);
             shield(e.side, 264, y + 1);
             std::string text = eventText(e);
             gfx::setColor(1, 1, 1);
@@ -204,7 +205,7 @@ struct History : kit::Modal {
         kit::drawControls(v);
     }
     void pick(int x, int x0, int w) {
-        int t = (int)std::floor((double)(x - x0) / w * n) + 1;
+        int t = static_cast<int>(std::floor(static_cast<double>(x - x0) / w * n)) + 1;
         turn = std::max(1, std::min(n, t));
     }
     void mousepressed(int x, int y, int) override {
@@ -272,7 +273,7 @@ struct Triumphs : kit::Modal {
         for (int k = 0; k <= 4; k++) {
             int y = 168 + 35 * k;
             kit::army(KINDS[k], opp, 104, y, 1);
-            int cnt = history::triumph(*G.g, me, opp, (history::Loss)k);
+            int cnt = history::triumph(*G.g, me, opp, static_cast<history::Loss>(k));
             if (cnt > 0) {
                 gfx::setColor(1, 1, 1);
                 f.draw(format(kit::text(base + k, cnt == 1 ? 0 : 1), cnt), 144, y + 9);
@@ -301,7 +302,7 @@ struct Triumphs : kit::Modal {
 }  // namespace
 
 void open(int which) {
-    int n = std::min((int)G.g->history.size(), history::LAST_RECORDED_TURN);
+    int n = std::min(static_cast<int>(G.g->history.size()), history::LAST_RECORDED_TURN);
     if (n < 1) {
         search::message(kit::text(0x5d, 0), kit::text(0x5d, 1));
         return;

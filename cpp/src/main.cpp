@@ -84,11 +84,11 @@ namespace slotsMod = w2::slots;
 static const int TILE = screen::TILE;
 static const double CURS_RATE = 18.2 / 4;  // CURS.PCK frames a second (177b:011f)
 
-static std::mt19937 looseDice((unsigned)time(nullptr));
+static std::mt19937 looseDice(static_cast<unsigned>(time(nullptr)));
 
 namespace front {
 int roll(int n) {
-    return n <= 0 ? 1 : (int)(looseDice() % (unsigned)n) + 1;
+    return n <= 0 ? 1 : static_cast<int>(looseDice() % static_cast<unsigned>(n)) + 1;
 }
 void say(const std::string& s) {
     G.status = s;
@@ -184,7 +184,7 @@ static void loadArt() {
         if (!sc.empty()) {
             auto j = w2::Json::parse(sc);
             for (size_t i = 0; i < j.size(); i++)
-                G.screen->ui.shortcuts[(int)i] = (int)j[i].integer();
+                G.screen->ui.shortcuts[static_cast<int>(i)] = static_cast<int>(j[i].integer());
         }
     } catch (...) {
     }
@@ -207,14 +207,15 @@ static void loadArt() {
 // slides smoothly: G.cx, G.cy is the tile at its top-left corner.
 
 static std::pair<double, double> viewSize() {
-    double k = (double)display::d.scale / (TILE * G.zoom);
+    double k = static_cast<double>(display::d.scale) / (TILE * G.zoom);
     return {G.mapRect.w * k, G.mapRect.h * k};
 }
 
 // The camera in device pixels, rounded to one.
 static std::pair<int, int> camDev() {
     double z = TILE * G.zoom;
-    return {(int)std::floor(G.cx * z + 0.5), (int)std::floor(G.cy * z + 0.5)};
+    return {static_cast<int>(std::floor(G.cx * z + 0.5)),
+            static_cast<int>(std::floor(G.cy * z + 0.5))};
 }
 
 static std::pair<double, double> uiToMap(double x, double y) {
@@ -233,15 +234,17 @@ std::pair<double, double> front::mapToUI(double tx, double ty) {
 
 std::pair<int, int> front::viewCentre() {
     auto [vw, vh] = viewSize();
-    return {(int)std::floor(G.cx + vw / 2), (int)std::floor(G.cy + vh / 2)};
+    return {static_cast<int>(std::floor(G.cx + vw / 2)),
+            static_cast<int>(std::floor(G.cy + vh / 2))};
 }
 
 static std::array<int, 4> viewTiles() {
     auto [vw, vh] = viewSize();
     int mw = G.g->map->width, mh = G.g->map->height;
-    return {std::max(0, (int)std::floor(G.cx)), std::max(0, (int)std::floor(G.cy)),
-            std::min(mw - 1, (int)std::ceil(G.cx + vw) - 1),
-            std::min(mh - 1, (int)std::ceil(G.cy + vh) - 1)};
+    return {std::max(0, static_cast<int>(std::floor(G.cx))),
+            std::max(0, static_cast<int>(std::floor(G.cy))),
+            std::min(mw - 1, static_cast<int>(std::ceil(G.cx + vw)) - 1),
+            std::min(mh - 1, static_cast<int>(std::ceil(G.cy + vh)) - 1)};
 }
 
 static bool shown(int x, int y) {
@@ -287,7 +290,7 @@ static void setZoomAt(int z, double x, double y, bool centre) {
     }
     auto [tx, ty] = uiToMap(x, y);
     G.zoom = z;
-    double k = (double)display::d.scale / (TILE * z);
+    double k = static_cast<double>(display::d.scale) / (TILE * z);
     G.cx = tx - (x - r.x) * k;
     G.cy = ty - (y - r.y) * k;
     clampCamera();
@@ -552,7 +555,7 @@ static void drawRoute() {
                 gfx::draw(G.shadowImg, kit::armyQuad(ghost->type), sx + WALK_GHOST_AT[0],
                           sy + WALK_GHOST_AT[1]);
         } else {
-            const int* src = (int)i <= route.reach ? WALK_RING : WALK_CROSSED;
+            const int* src = static_cast<int>(i) <= route.reach ? WALK_RING : WALK_CROSSED;
             gfx::draw(G.shadowImg, gfx::newQuad(src[0], src[1], WALK_RING_W, WALK_RING_H),
                       sx + WALK_RING_AT[0], sy + WALK_RING_AT[1]);
         }
@@ -564,7 +567,7 @@ static std::optional<std::pair<int, int>> tileAtPoint(int sx, int sy) {
     const auto& r = G.mapRect;
     if (sx < r.x || sy < r.y || sx >= r.x + r.w || sy >= r.y + r.h) return std::nullopt;
     auto [tx, ty] = uiToMap(sx, sy);
-    return std::make_pair((int)std::floor(tx), (int)std::floor(ty));
+    return std::make_pair(static_cast<int>(std::floor(tx)), static_cast<int>(std::floor(ty)));
 }
 
 // ------------------------------------------------------------------ selection
@@ -572,7 +575,8 @@ static std::optional<std::pair<int, int>> tileAtPoint(int sx, int sy) {
 static std::vector<Army*> selectableAt(int x, int y) {
     std::vector<Army*> out;
     for (Army* a : game::armiesAt(*G.g, x, y))
-        if (a->owner == G.player->index && (int)out.size() < w2::rules::MAX_STACK) out.push_back(a);
+        if (a->owner == G.player->index && static_cast<int>(out.size()) < w2::rules::MAX_STACK)
+            out.push_back(a);
     return out;
 }
 
@@ -1509,7 +1513,7 @@ static void drawMap() {
     }
     // one item a tile: the last in item order (8611:2d7c walks them from the end)
     std::map<int, w2::Item*> itemsOnTile;
-    for (int i = (int)G.g->map->items.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(G.g->map->items.size()) - 1; i >= 0; i--) {
         w2::Item& it = G.g->map->items[i];
         if (it.status == 1 && it.x != NONE && !itemsOnTile.count(it.x + it.y * 1000))
             itemsOnTile[it.x + it.y * 1000] = &it;
@@ -1573,7 +1577,7 @@ static void drawMap() {
             a = lead;
             figure = lead->atSea ? NAVY : lead->type;
         }
-        drawStack(ownerOr8(a->owner), figure, (int)s.stack.size(), s.sx, s.sy);
+        drawStack(ownerOr8(a->owner), figure, static_cast<int>(s.stack.size()), s.sx, s.sy);
     }
     drawFog();
     drawRoute();
@@ -1585,8 +1589,8 @@ static void drawMap() {
             std::vector<Army*> walking(G.walk->armies.begin(), G.walk->armies.end());
             Army* top = topArmy(walking);
             int figure = G.walk->seaBefore ? NAVY : (top ? top->type : NONE);
-            drawStack(ownerOr8(a->owner), figure, (int)walking.size(), at->first * TILE,
-                      at->second * TILE);
+            drawStack(ownerOr8(a->owner), figure, static_cast<int>(walking.size()),
+                      at->first * TILE, at->second * TILE);
         }
     }
     // the selection box, which follows the walk
@@ -1595,7 +1599,7 @@ static void drawMap() {
         if (shown(x, y)) {
             gfx::setColor(1, 1, 1);
             int base = G.selection->stack.size() > 1 ? 4 : 0;
-            int frame = base + (int)std::floor(w2::now() * CURS_RATE) % 4;
+            int frame = base + static_cast<int>(std::floor(w2::now() * CURS_RATE)) % 4;
             gfx::draw(G.cursImg, gfx::newQuad((frame % 4) * 64, (frame / 4) * 40, 40, 40), x * TILE,
                       y * TILE);
         }
@@ -1700,7 +1704,7 @@ static void followView() {
     int full = G.g->map->height * 2;
     auto [vw, vh] = viewSize();
     // a whole tile at a time
-    int s = (int)std::lround(G.cy + vh / 2 - r.h / 4.0) * 2;
+    int s = static_cast<int>(std::lround(G.cy + vh / 2 - r.h / 4.0)) * 2;
     stratScroll = std::clamp(s, 0, std::max(0, full - r.h));
 }
 
@@ -1760,7 +1764,7 @@ static void drawTurnStrip() {
     std::vector<Side*> alive;
     for (Side* s : G.g->sides)
         if (s->alive) alive.push_back(s);
-    int n = (int)alive.size();
+    int n = static_cast<int>(alive.size());
     std::string turn = w2::fmt("Turn %d", G.g->turn);
     const Font& f = G.bigFont->colours(0, 15);
     f.draw(turn, (8 - n) * 16 + 508 - f.width(turn), 0);
@@ -1787,7 +1791,7 @@ static void drawMenuBar() {
     gfx::rectangle(gfx::FILL, 0, 0, G.layout.w, menu::BAR_H);
     for (size_t i = 0; i < G.menuLayout.size(); i++) {
         const auto& m = G.menuLayout[i];
-        bool lit = (int)i == G.openMenu;
+        bool lit = static_cast<int>(i) == G.openMenu;
         if (lit) {
             palColour(8);
             gfx::rectangle(gfx::FILL, m.x, 0, m.w, menu::BAR_H);
@@ -1801,7 +1805,7 @@ static void drawMenuBar() {
         drawTurnStrip();
         gfx::pop();
     }
-    if (G.openMenu < 0 || G.openMenu >= (int)G.menuLayout.size()) return;
+    if (G.openMenu < 0 || G.openMenu >= static_cast<int>(G.menuLayout.size())) return;
     const auto& d = G.menuLayout[G.openMenu].drop;
     palColour(15);
     gfx::rectangle(gfx::FILL, d.x, d.y, d.w - 1, d.h - 1);
@@ -1861,7 +1865,7 @@ static void drawAbits(int sx, int sy, int w, int h, int x, int y) {
 static void drawDigits(int n, int x, int y) {
     std::string text = w2::fmt("%02d", std::max(0, std::min(99, n)));
     for (size_t i = 0; i < text.size(); i++)
-        drawAbits(64 + (text[i] - '0') * 8, 30, 8, 8, x + (int)i * 8, y);
+        drawAbits(64 + (text[i] - '0') * 8, 30, 8, 8, x + static_cast<int>(i) * 8, y);
 }
 
 // The ring a slot's army sits in: each group a colour of its own, counted
@@ -1942,7 +1946,7 @@ static const int STATUS_Y = 425;
 static int statusValue(int k) {
     switch (k) {
     case 0:
-        return (int)game::sideCities(*G.g, *G.player).size();
+        return static_cast<int>(game::sideCities(*G.g, *G.player).size());
     case 1:
         return G.player->gold;
     case 2:
@@ -2103,7 +2107,7 @@ void front::drawVectorMap(int x, int y, City* city, int filter, bool seeAll) {
         gfx::rectangle(gfx::FILL, bx + 11, by, 1, 11);
     } else if (city) {
         for (City* c : mine) {
-            int n = (int)game::vectoredTo(*G.g, c).size();
+            int n = static_cast<int>(game::vectoredTo(*G.g, c).size());
             bool full = (filter == -1 && n + 1 > game::MAX_VECTORED_TO) ||
                         (filter >= 0 && filter != NONE && n + filter > game::MAX_VECTORED_TO);
             if (c == city || !full) {
@@ -2331,8 +2335,8 @@ static void startAssault(int x, int y, const w2::Battle& result) {
     a.result = result;
     a.def = lines.defenders;
     a.atk = lines.attackers;
-    a.defSlots = lineSlots((int)lines.defenders.size(), AS_ROWS);
-    a.atkSlots = lineSlots((int)lines.attackers.size(), {AS_ATK_ROW});
+    a.defSlots = lineSlots(static_cast<int>(lines.defenders.size()), AS_ROWS);
+    a.atkSlots = lineSlots(static_cast<int>(lines.attackers.size()), {AS_ATK_ROW});
     a.defSide = lines.defenders.empty() ? 8 : ownerOr8(lines.defenders[0]->owner);
     a.atkSide = lines.attackers.empty() ? 8 : ownerOr8(lines.attackers[0]->owner);
     a.phase = "cloud";
@@ -2395,10 +2399,10 @@ static void advanceAssault() {
         a.step++;
         Fell fell{a.at, a.fast ? AS_BLAST_FAST : AS_BLAST_TIME};
         if (log[a.step - 1] == 1) {
-            if (a.atkDown < (int)a.atkFell.size()) a.atkFell[a.atkDown] = fell;
+            if (a.atkDown < static_cast<int>(a.atkFell.size())) a.atkFell[a.atkDown] = fell;
             a.atkDown++;
         } else {
-            if (a.defDown < (int)a.defFell.size()) a.defFell[a.defDown] = fell;
+            if (a.defDown < static_cast<int>(a.defFell.size())) a.defFell[a.defDown] = fell;
             a.defDown++;
         }
         // 7dda:0181: a blow for each, until Space hurries the fight on
@@ -2459,7 +2463,7 @@ static void drawBattleLine(const std::vector<Army*>& armies,
     if (side < 0 || side > 8) side = 8;
     double t = w2::now();
     for (size_t i = 0; i < armies.size() && i < slots.size(); i++) {
-        bool gone = (int)i < down && i < fell.size() && t >= fell[i].at + fell[i].burn;
+        bool gone = static_cast<int>(i) < down && i < fell.size() && t >= fell[i].at + fell[i].burn;
         if (gone) continue;
         auto at = slots[i];
         gfx::setColor(1, 1, 1);
@@ -2467,7 +2471,7 @@ static void drawBattleLine(const std::vector<Army*>& armies,
             gfx::draw(G.warPic, gfx::newQuad(AS_SEA[0], AS_SEA[1], AS_SEA[2], AS_SEA[3]), at.first,
                       at.second + AS_SEA_DROP);
         gfx::draw(G.armyImg[side], kit::armyQuad(armies[i]->type), at.first, at.second);
-        if ((int)i < down)
+        if (static_cast<int>(i) < down)
             gfx::draw(G.atransShields, gfx::newQuad(32, 0, 32, 29), at.first, at.second);
     }
 }
@@ -2584,7 +2588,7 @@ static void takeCity(int what) {
         auto spoils = sacked ? game::sack(*G.g, *G.player, *c, stack)
                              : game::pillage(*G.g, *G.player, *c, stack);
         G.victoryUnder = v;
-        spoils::open(sacked, c, spoils.gold, spoils.lost, (int)c->slots.size(), done);
+        spoils::open(sacked, c, spoils.gold, spoils.lost, static_cast<int>(c->slots.size()), done);
     } else if (what == AS_RAZE) {
         G.victoryUnder = v;
         search::say(c->name + " is in ruins!", [c, stack, done]() {  // 4125:0a56
@@ -3138,7 +3142,9 @@ static void refreshControls() {
             st[id] = NORMAL;
     };
     const Selection* sel = G.selection ? &*G.selection : nullptr;
-    bool walkOn = sel && G.route && (int)G.route->path.size() > (G.walk ? (int)G.walk->i + 1 : 0);
+    bool walkOn =
+            sel && G.route &&
+            static_cast<int>(G.route->path.size()) > (G.walk ? static_cast<int>(G.walk->i) + 1 : 0);
     set(173, walkOn);
     bool more = false;
     for (Army* a : G.g->armies)
@@ -3176,7 +3182,7 @@ static void mousemoved(double dx, double dy) {
     if (!G.drag) return;
     G.drag->dx += dx;
     G.drag->dy += dy;
-    double k = (double)display::d.scale / (TILE * G.zoom);
+    double k = static_cast<double>(display::d.scale) / (TILE * G.zoom);
     G.cx = G.drag->cx - G.drag->dx * k;
     G.cy = G.drag->cy - G.drag->dy * k;
     clampCamera();
@@ -3425,7 +3431,7 @@ static bool menuEnabled(const std::string& k) {
         if (!selected()) return false;
         Army* lead = G.selection->stack[0];
         if (!lead->hero()) return false;
-        if (G.player->index >= (int)g.map->items.size()) return false;
+        if (G.player->index >= static_cast<int>(g.map->items.size())) return false;
         w2::Item* std = &g.map->items[G.player->index];
         if (std::find(lead->items.begin(), lead->items.end(), std) == lead->items.end())
             return false;
@@ -3627,17 +3633,17 @@ static void pointTo(double x, double y) {
     display::d.mouseInside = true;
     display::d.off.reset();
     mousemoved(dx, dy);
-    if ((int)x == G.mouseX && (int)y == G.mouseY) return;
-    G.mouseX = (int)x;
-    G.mouseY = (int)y;
+    if (static_cast<int>(x) == G.mouseX && static_cast<int>(y) == G.mouseY) return;
+    G.mouseX = static_cast<int>(x);
+    G.mouseY = static_cast<int>(y);
     SDL_Window* win = display::window();
     if (win && SDL_GetKeyboardFocus() == win) {
         auto [wx, wy] = display::fromUI(G.mouseX + 0.5, G.mouseY + 0.5);
         lastX = std::round(wx);
         lastY = std::round(wy);
         if (warps.size() >= 16) warps.erase(warps.begin());
-        warps.push_back({(int)lastX, (int)lastY});
-        SDL_WarpMouseInWindow(win, (int)lastX, (int)lastY);
+        warps.push_back({static_cast<int>(lastX), static_cast<int>(lastY)});
+        SDL_WarpMouseInWindow(win, static_cast<int>(lastX), static_cast<int>(lastY));
     }
 }
 
@@ -3721,7 +3727,7 @@ static void padLetGo() {
 static void padUpdate() {
     static Uint64 then = SDL_GetPerformanceCounter();
     Uint64 now = SDL_GetPerformanceCounter();
-    double dt = std::min(0.1, (double)(now - then) / SDL_GetPerformanceFrequency());
+    double dt = std::min(0.1, static_cast<double>(now - then) / SDL_GetPerformanceFrequency());
     then = now;
     int b;
     bool down;
@@ -3730,7 +3736,7 @@ static void padUpdate() {
     auto s = pad::sticks();
     if (s.rx != 0 || s.ry != 0) {
         // the mouse or a touch moved it since
-        if ((int)padX != G.mouseX || (int)padY != G.mouseY) {
+        if (static_cast<int>(padX) != G.mouseX || static_cast<int>(padY) != G.mouseY) {
             padX = G.mouseX + 0.5;
             padY = G.mouseY + 0.5;
         }
@@ -3803,7 +3809,7 @@ void front::openStart() {
                     G.haveLayout = false;
                     G.scenario = dir;
                     w2::game::NewGameOptions o = opts;
-                    o.seed = (double)(time(nullptr) % 1000000007);
+                    o.seed = static_cast<double>(time(nullptr) % 1000000007);
                     G.seed = o.seed;
                     if (optMilitaryAdvisor >= 0) {
                         for (auto& [k, v] : o.options)
@@ -3934,8 +3940,10 @@ static void stepScript() {
             printf("turn=%d player=%s modals=%d banner=%d offer=%d ai=%d over=%d walk=%d "
                    "assault=%d status=%s\n",
                    G.g ? G.g->turn : 0, G.player ? G.player->name.c_str() : "-",
-                   (int)G.modals.size(), (bool)G.banner, (bool)G.offer, (bool)G.aiRun, G.over,
-                   (bool)G.walk, (bool)G.assault, G.aiStatus ? G.aiStatus->text.c_str() : "");
+                   static_cast<int>(G.modals.size()), static_cast<bool>(G.banner),
+                   static_cast<bool>(G.offer), static_cast<bool>(G.aiRun), G.over,
+                   static_cast<bool>(G.walk), static_cast<bool>(G.assault),
+                   G.aiStatus ? G.aiStatus->text.c_str() : "");
             if (G.g && G.g->map)
                 printf("  options: milAdv=%d diplo=%d hidden=%d viewEn=%d\n",
                        G.g->map->options.militaryAdvisor, G.g->map->options.diplomacy,
@@ -3972,8 +3980,10 @@ static void stepScript() {
         } else if (cmd == "tileptr") {
             int tx, ty;
             in >> tx >> ty;
-            int px = G.mapRect.x + (int)((tx + 0.5 - G.cx) * TILE * G.zoom / display::d.scale);
-            int py = G.mapRect.y + (int)((ty + 0.5 - G.cy) * TILE * G.zoom / display::d.scale);
+            int px = G.mapRect.x +
+                     static_cast<int>((tx + 0.5 - G.cx) * TILE * G.zoom / display::d.scale);
+            int py = G.mapRect.y +
+                     static_cast<int>((ty + 0.5 - G.cy) * TILE * G.zoom / display::d.scale);
             printf("tileptr(%d,%d)=%d\n", tx, ty, pointerKind(px, py));
             fflush(stdout);
         } else if (cmd == "spawn" && G.g) {
@@ -4022,7 +4032,7 @@ static void stepScript() {
             int ux, uy;
             in >> ux >> uy;
             auto [wx, wy] = display::fromUI(ux, uy);
-            int x = (int)wx, y = (int)wy;
+            int x = static_cast<int>(wx), y = static_cast<int>(wy);
             for (Uint32 type : {SDL_MOUSEBUTTONDOWN, SDL_MOUSEBUTTONUP}) {
                 SDL_Event ev{};
                 ev.type = type;
@@ -4173,7 +4183,7 @@ int main(int argc, char** argv) {
             G.starting = false;
             G.scenario = scenario;
             game::NewGameOptions o;
-            o.seed = seed != 0 ? seed : (double)(time(nullptr) % 1000000007);
+            o.seed = seed != 0 ? seed : static_cast<double>(time(nullptr) % 1000000007);
             static const char* const OPTION_KEYS[10] = {
                 "neutralCities",  "diplomacy",     "quests",     "hiddenMap",       "viewEnemies",
                 "viewProduction", "intenseCombat", "quickStart", "militaryAdvisor", "randomTurns"};
@@ -4353,7 +4363,7 @@ int main(int argc, char** argv) {
             SDL_GetWindowSize(win, &ww, &wh);
             int mx = gx - wx, my = gy - wy;
             if (mx >= 0 && my >= 0 && mx < ww && my < wh &&
-                (mx != (int)lastX || my != (int)lastY)) {
+                (mx != static_cast<int>(lastX) || my != static_cast<int>(lastY))) {
                 auto [x, y] = display::toUI(mx, my);
                 G.mouseX = x;
                 G.mouseY = y;

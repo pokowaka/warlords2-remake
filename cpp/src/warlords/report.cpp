@@ -21,7 +21,7 @@ Figures figures(const Game& g, const Side& side, int n) {
         r.value[i] = 0;
     }
     if (n == PRODUCTION) {
-        r.result = (int)side.produced.size();
+        r.result = static_cast<int>(side.produced.size());
         return r;
     }
     if (n == ARMY) {
@@ -29,7 +29,8 @@ Figures figures(const Game& g, const Side& side, int n) {
             if (a->owner >= 0 && a->owner < 8) r.value[a->owner]++;
         }
     } else if (n == CITY) {
-        for (int i = 0; i < 8; i++) r.value[i] = (int)game::sideCities(g, g.map->sides[i]).size();
+        for (int i = 0; i < 8; i++)
+            r.value[i] = static_cast<int>(game::sideCities(g, g.map->sides[i]).size());
     } else if (n == GOLD) {
         for (int i = 0; i < 8; i++) r.value[i] = g.map->sides[i].gold;
     } else if (n == WINNING) {

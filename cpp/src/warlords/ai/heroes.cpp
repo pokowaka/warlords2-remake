@@ -106,7 +106,7 @@ void items(Game& g, Side& side, size_t k, Info& info) {
     int range = h->aiOrder == ORDER_CITY ? 5 : 15;
     Item* best = nullptr;
     int bestD = 100;
-    for (int i = (int)g.map->items.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->items.size()) - 1; i >= 0; i--) {
         Item& it = g.map->items[i];
         if (lying(g, side, it)) {
             bool taken = false;
@@ -139,7 +139,7 @@ void enemy(Game& g, Side& side, size_t k, Info& info) {
     Sel sel = select(g, list);
     int need = list.size() < 3 ? 95 : 75;
     int bestOdds = 0;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (standing(c) && !cflag(d, c, CF_UNSEEN) && c.ownerIndex != NONE &&
             state(g, side.index, c.ownerIndex) == 2) {
@@ -201,14 +201,14 @@ int go(Game& g, Side& side, size_t k, int kind, Info& info) {
         index = info.item->index;
     }
     auto list = collectOrdered(g, side.index, h->x, h->y, h->aiGroup, h->aiOrder, 12);
-    int n = (int)list.size();
+    int n = static_cast<int>(list.size());
     if (n == 0) return 0;
     City* c = info.city[k];
     int near = 100;
     if (c) {
         near = cities::nearestArmy(g, side, h->x, h->y);
         Army* flier = nullptr;
-        for (int i = (int)list.size() - 1; i >= 0; i--)
+        for (int i = static_cast<int>(list.size()) - 1; i >= 0; i--)
             if (flies(g, list[i])) flier = list[i];
         if (!flier) {
             if (near >= 15) {
@@ -243,7 +243,7 @@ int attack(Game& g, Side& side, size_t k, Info& info) {
     auto list = collectOrdered(g, side.index, h->x, h->y, h->aiGroup, h->aiOrder, 12);
     if (list.empty()) return 0;
     City* c = info.city[k];
-    if (c && get(d.garrison, c->index) == (int)list.size()) {
+    if (c && get(d.garrison, c->index) == static_cast<int>(list.size())) {
         int near = cities::nearestArmy(g, side, h->x, h->y);
         if (near < (g.turn < 6 ? 10 : 15)) return 0;
     }
@@ -262,7 +262,7 @@ bool questGo(Game& g, Side& side, size_t k, Info& info) {
     if (!c || cflag(d, *c, CF_UNSEEN)) return false;
     int need = (c->ownerIndex == NONE || g.turn < 8) ? 1 : 2;
     auto list = collect(g, side.index, h->x, h->y, 8);
-    if ((int)list.size() < need) return false;
+    if (static_cast<int>(list.size()) < need) return false;
     if (!(h->aiOrder == ORDER_CITY && h->aiDest == c->index)) {
         Sel sel = select(g, list);
         if (odds(g, sel, c->x, c->y) < 75) return false;
@@ -282,7 +282,7 @@ void phase(Game& g, Side& side) {
         d.questCity = q->city->index;
     }
     Info info = survey(g, side);
-    for (int k = (int)info.heroes.size() - 1; k >= 0; k--) {
+    for (int k = static_cast<int>(info.heroes.size()) - 1; k >= 0; k--) {
         Army* h = info.heroes[k];
         if (h && alive(g, h) && h->owner == side.index && isHero(h)) {
             if (info.city[k]) cities::garrison(g, side, *info.city[k], true);
@@ -290,7 +290,7 @@ void phase(Game& g, Side& side) {
                         questGo(g, side, k, info);
             if (!skip && alive(g, h)) {
                 if (h->aiOrder == ORDER_SITE) {
-                    Site* s = h->aiDest >= 0 && h->aiDest < (int)g.map->sites.size()
+                    Site* s = h->aiDest >= 0 && h->aiDest < static_cast<int>(g.map->sites.size())
                                       ? &g.map->sites[h->aiDest]
                                       : nullptr;
                     if (!s || !worth(g, side, *s, h)) {

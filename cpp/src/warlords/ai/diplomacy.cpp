@@ -44,7 +44,7 @@ static void claim(Game& g, Side& side) {
     if (!cap) return;
     City* best = nullptr;
     int bestD = NONE;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         int cl = c.claim != NONE ? c.claim : NEUTRAL;
         if (standing(c) && cl != side.index && (cl == NEUTRAL || !inPlay(g, cl))) {
@@ -76,7 +76,7 @@ void phase(Game& g, Side& side) {
             theyPeace[b] = 1;
     }
     int tiles = 0;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (standing(c)) tiles++;
         int o = c.ownerIndex;

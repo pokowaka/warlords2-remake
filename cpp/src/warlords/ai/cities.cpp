@@ -27,7 +27,7 @@ static const std::set<int> QUICK_ROLES = {5, 8, 6, 4, 14, 7};
 
 std::vector<City*> own(const Game& g, const Side& side) {
     std::vector<City*> out;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (c.ownerIndex == side.index) out.push_back(&c);
     }
@@ -42,7 +42,7 @@ std::vector<NeutralNeighbour> neutralNeighbours(Game& g, Side& side, const City&
         City* n = nb[j];
         if (n->index != d.questCity && standing(*n) && n->ownerIndex == NONE &&
             (out.empty() || j < 2 || nd[j] < 20)) {
-            out.push_back(NeutralNeighbour{n, nd[j], (int)j + 1});
+            out.push_back(NeutralNeighbour{n, nd[j], static_cast<int>(j) + 1});
         }
     }
     return out;
@@ -50,7 +50,7 @@ std::vector<NeutralNeighbour> neutralNeighbours(Game& g, Side& side, const City&
 
 int nearestArmy(const Game& g, const Side& side, int x, int y, int of) {
     int best = 1000;
-    for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
         if (a->owner != NONE && !a->transit) {
             bool ok = of == NONE ? a->owner != side.index : a->owner == of;
@@ -81,12 +81,13 @@ std::pair<bool, int> buildsWell(Game& g, Side& side, const City& c) {
 // The slot to buy over (623c:1ae9), from 0: the first empty one, else the
 // weakest under 10. NONE when all four are full of strong types.
 static int slotToReplace(const Game& g, const City& c) {
-    if ((int)c.slots.size() < rules::PRODUCTION_SLOTS) return (int)c.slots.size();
+    if (static_cast<int>(c.slots.size()) < rules::PRODUCTION_SLOTS)
+        return static_cast<int>(c.slots.size());
     int best = NONE, least = 10;
     for (size_t i = 0; i < c.slots.size(); i++) {
         int s = slotStrength(g, c.slots[i]);
         if (s < least) {
-            best = (int)i;
+            best = static_cast<int>(i);
             least = s;
         }
     }
@@ -95,7 +96,7 @@ static int slotToReplace(const Game& g, const City& c) {
 
 bool building(const City& c) {
     if (c.producing == NONE) return false;
-    if (c.producing >= (int)c.slots.size()) return false;
+    if (c.producing >= static_cast<int>(c.slots.size())) return false;
     const Slot& slot = c.slots[c.producing];
     return c.countdown != 0 && c.countdown != slot.time;
 }
@@ -103,7 +104,7 @@ bool building(const City& c) {
 // set_city_production (623c:0e5a): refused after turn 5 when the side has
 // less than the type's cost + 30 in gold.
 static bool setProduction(Game& g, Side& side, City& c, int slot) {
-    if (slot < 0 || slot >= (int)c.slots.size()) return false;
+    if (slot < 0 || slot >= static_cast<int>(c.slots.size())) return false;
     if (side.gold < c.slots[slot].cost + 30 && g.turn > 5) return false;
     game::setProduction(g, c, slot);
     return true;
@@ -195,7 +196,7 @@ void evaluate(Game& g, Side& side, int who) {
     d.enemy = 0;
     d.neutral = 0;
     d.unseen = 0;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (standing(c)) {
             if (c.ownerIndex == who) {
@@ -217,7 +218,7 @@ void evaluate(Game& g, Side& side, int who) {
         }
     }
     if (d.own != 0) {
-        for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+        for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
             City& c = g.map->cities[i];
             if (role(d, c) == STOP && d.unseen != 0 && d.explorers < 5 && cflag(d, c, CF_FLIER)) {
                 setRole(d, c, EXPLORER2);
@@ -233,7 +234,7 @@ void evaluate(Game& g, Side& side, int who) {
 int wanted(Game& g, const Side& side, const City& c) {
     auto nb = neighbours(g, c).first;
     int foreign = 0, war = 0;
-    for (int j = (int)nb.size() - 1; j >= 0; j--) {
+    for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
         City* n = nb[j];
         if (n->ownerIndex != NONE && n->ownerIndex != side.index && standing(*n)) {
             foreign++;
@@ -251,7 +252,7 @@ int wanted(Game& g, const Side& side, const City& c) {
 static std::pair<std::vector<Army*>, int> arrange(Game& g, Side& side, const City& c,
                                                   const std::vector<Army*>& list) {
     AIData& d = data(g, side);
-    int n = (int)list.size();
+    int n = static_cast<int>(list.size());
     int keepWanted = n < 13 ? KEEP[n] : 8;
     int mask = 0, minMax = 0, keep = 0;
     bool attack = false;
@@ -290,7 +291,7 @@ static std::pair<std::vector<Army*>, int> arrange(Game& g, Side& side, const Cit
             Army* a = pool[i];
             if (a) {
                 int score = a->strength;
-                if ((int)out.size() < keepWanted) {
+                if (static_cast<int>(out.size()) < keepWanted) {
                     int ab = ability(g, a);
                     if (!has(mask, 1) && isHero(a)) {
                         score += 1000;
@@ -405,7 +406,7 @@ static void shareItems(Game& g, AIData& d, const std::vector<Army*>& heroes) {
     for (size_t i = 0; i < heroes.size(); i++) {
         for (Item* it : heroes[i]->items)
             if (fightT.count(it->type)) start[i].push_back(it);
-        ownN[i] = (int)start[i].size();
+        ownN[i] = static_cast<int>(start[i].size());
     }
     bool moved = true;
     while (moved) {
@@ -417,7 +418,7 @@ static void shareItems(Game& g, AIData& d, const std::vector<Army*>& heroes) {
                 for (size_t j = 0; j < heroes.size(); j++) {
                     if (j != i && ownN[j] < least) {
                         least = ownN[j];
-                        to = (int)j;
+                        to = static_cast<int>(j);
                     }
                 }
                 if (to != NONE) {
@@ -445,8 +446,8 @@ bool garrison(Game& g, Side& side, City& c, bool force) {
     std::vector<Army*> list, heroes;
     int ordered = 0, fliers = 0, magic = 0;
     Army* lastHero = nullptr;
-    for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
-        if (i >= (int)g.armies.size()) continue;
+    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
+        if (i >= static_cast<int>(g.armies.size())) continue;
         Army* a = g.armies[i];
         if (a && !a->transit && a->x != NONE && a->x >= cx && a->x <= cx + 1 && a->y >= cy &&
             a->y <= cy + 1) {
@@ -497,17 +498,17 @@ bool garrison(Game& g, Side& side, City& c, bool force) {
         int want = wanted(g, side, c);
         if (list.size() < 2)
             setRole(d, c, WEAK);
-        else if ((int)list.size() < want)
+        else if (static_cast<int>(list.size()) < want)
             setRole(d, c, BUILDING);
         else
             setRole(d, c, STOP);
     }
     auto [sorted, keepN] = arrange(g, side, c, list);
-    int n = (int)sorted.size();
+    int n = static_cast<int>(sorted.size());
     if (!force && side.gold < 300 && side.income < side.upkeepTotal * 2) {
         if (role(d, c) != RALLY && get(d.held, c.index) > 10 &&
-            (int)heroes.size() + magic + 4 < n && nearestArmy(g, side, cx, cy) > 10) {
-            for (int i = (int)heroes.size() + magic + 4; i < n; i++) {
+            static_cast<int>(heroes.size()) + magic + 4 < n && nearestArmy(g, side, cx, cy) > 10) {
+            for (int i = static_cast<int>(heroes.size()) + magic + 4; i < n; i++) {
                 if (sorted[i]) {
                     disband(g, side, sorted[i]);
                     sorted[i] = nullptr;
@@ -597,7 +598,7 @@ static void takeNeutrals(Game& g, Side& side, City& c, int count, std::map<int, 
         if (nb.empty()) return;
         City* best = nullptr;
         int bestScore = 1000;
-        for (int j = (int)nb.size() - 1; j >= 0; j--) {
+        for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
             const NeutralNeighbour& e = nb[j];
             City* n = e.city;
             if (!cflag(d, *n, CF_UNSEEN) && get(heading, n->index) < 3) {
@@ -674,7 +675,7 @@ static bool attackNeutrals(Game& g, Side& side, City& c, std::map<int, int>& hea
         if (extra + lost == 0 && g.map->options.hiddenMap != 0 &&
             nearestArmy(g, side, c.x, c.y) < 15)
             break;
-        takeNeutrals(g, side, c, (int)stack.size(), heading, stack);
+        takeNeutrals(g, side, c, static_cast<int>(stack.size()), heading, stack);
     }
     return g.map->options.hiddenMap != 0;
 }
@@ -702,7 +703,7 @@ static void sendExplorers(Game& g, Side& side, City& c, bool fliersOnly) {
 
 City* openNeutral(Game& g, Side& side, const City& c, std::map<int, int>& heading) {
     auto nb = neutralNeighbours(g, side, c);
-    for (int j = (int)nb.size() - 1; j >= 0; j--) {
+    for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
         City* n = nb[j].city;
         if (get(heading, n->index) <= 2) return n;
     }
@@ -744,7 +745,7 @@ void neutral(Game& g, Side& side) {
     std::map<int, int> heading;
     for (Army* a : armies(g, side.index)) {
         if (a->aiOrder == ORDER_CITY && a->aiDest != NONE &&
-            a->aiDest < (int)g.map->cities.size()) {
+            a->aiDest < static_cast<int>(g.map->cities.size())) {
             heading[a->aiDest] = get(heading, a->aiDest) + 1;
         }
     }
@@ -763,7 +764,7 @@ static void quickStrike(Game& g, Side& side, City& c) {
     if (!(rl != RALLY || get(d.garrison, c.index) > 11)) return;
     int need = (side.gold < 40 && side.income < side.upkeepTotal) ? 65 : 85;
     auto list = collect(g, side.index, x, y, 8);
-    int n = (int)list.size();
+    int n = static_cast<int>(list.size());
     if (n == 0) return;
     if (n < 4 && (rl == MEMBER || rl == RALLY)) return;
     Sel sel = select(g, list);
@@ -771,7 +772,7 @@ static void quickStrike(Game& g, Side& side, City& c) {
     bool danger = false;
     City* best = nullptr;
     int bestOdds = 0, bestTurns = 100;
-    for (int j = (int)nb.size() - 1; j >= 0; j--) {
+    for (int j = static_cast<int>(nb.size()) - 1; j >= 0; j--) {
         City* t = nb[j];
         if (!cflag(d, *t, CF_UNSEEN) && t->ownerIndex != side.index && standing(*t) &&
             t->index != d.questCity &&
@@ -809,7 +810,7 @@ void quickAttack(Game& g, Side& side) {
 void updateHide(Game& g, Side& side) {
     AIData& d = data(g, side);
     clearUnseen(g, side);
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         City& c = g.map->cities[i];
         if (role(d, c) == TAKING_NEUTRAL) {
             for (auto& e : neutralNeighbours(g, side, c)) {
@@ -862,7 +863,10 @@ static City* cityForType(Game& g, Side& side) {
 
 void rebuild(Game& g, Side& side) {
     AIData& d = data(g, side);
-    int limit = std::max(5, (int)floorDiv((long)d.rebuildLimit * (long)g.map->cities.size(), 80));
+    int limit =
+            std::max(5, static_cast<int>(floorDiv(static_cast<long>(d.rebuildLimit) *
+                                                          static_cast<long>(g.map->cities.size()),
+                                                  80)));
     if ((d.heroes > 4 || d.own <= limit * d.heroes) && side.gold > 499) {
         int t = side.gold < 2001 ? d.rebuildType : d.rebuildTypeRich;
         City* c = cityForType(g, side);

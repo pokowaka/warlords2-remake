@@ -49,7 +49,7 @@ bool Coroutine::resume() {
         started_ = true;
         // the AI recurses a little and keeps its working state on the heap; 16MB
         // is far more than it needs
-        thread_ = SDL_CreateThreadWithStackSize(run, "computer", 16 * 1024 * 1024, this);
+        thread_ = SDL_CreateThreadWithStackSize(run, "computer", 16UZ * 1024 * 1024, this);
     }
     SDL_LockMutex(lock_);
     bodyTurn_ = true;

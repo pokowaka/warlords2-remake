@@ -21,7 +21,7 @@ namespace w2::ai::core {
 
 int dist(int x1, int y1, int x2, int y2) {
     double dx = x1 - x2, dy = y1 - y2;
-    return (int)std::floor(std::sqrt(dx * dx + dy * dy));
+    return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
 }
 
 bool inPlay(const Game& g, int index) {
@@ -99,7 +99,7 @@ bool hills(const Game& g, const Army* a) {
 
 std::vector<Army*> armies(const Game& g, int sideIndex) {
     std::vector<Army*> out;
-    for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
         if (a->owner == sideIndex) out.push_back(a);
     }
@@ -108,7 +108,7 @@ std::vector<Army*> armies(const Game& g, int sideIndex) {
 
 std::vector<Army*> onTile(const Game& g, int sideIndex, int x, int y) {
     std::vector<Army*> out;
-    for (int i = (int)g.armies.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
         Army* a = g.armies[i];
         if (a->owner == sideIndex && !a->transit && a->x == x && a->y == y) out.push_back(a);
     }
@@ -139,7 +139,7 @@ AIData& data(Game& g, int sideIndex) {
 std::pair<std::vector<City*>, std::vector<int>> neighbours(Game& g, const City& c) {
     if (!g.aiNeighbours) g.aiNeighbours = buildNeighbours(g);
     std::pair<std::vector<City*>, std::vector<int>> out;
-    if (c.index >= 0 && c.index < (int)g.aiNeighbours->byCity.size()) {
+    if (c.index >= 0 && c.index < static_cast<int>(g.aiNeighbours->byCity.size())) {
         const auto& e = g.aiNeighbours->byCity[c.index];
         for (int i : e.cities) out.first.push_back(&g.map->cities[i]);
         out.second = e.dist;
@@ -161,7 +161,7 @@ int pickNeighbours(Game& g, const City& c, const Flood& flood, std::vector<int>&
         slotDist[k] = 0;
     }
     int found = 0;
-    for (int i = (int)g.map->cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(g.map->cities.size()) - 1; i >= 0; i--) {
         if (i == c.index) continue;
         auto [d, px, py] = cityDistance(g, flood, g.map->cities[i]);
         (void)py;
@@ -251,7 +251,7 @@ Sel select(Game& g, const std::vector<Army*>& list) {
 
 static int fightRank(const Game& g, const Army* a) {
     const auto& row = g.map->fightOrder[a->owner == NONE ? 8 : a->owner];
-    return a->type < (int)row.size() ? row[a->type] : 0;
+    return a->type < static_cast<int>(row.size()) ? row[a->type] : 0;
 }
 
 int newGroup(const Game& g, int sideIndex) {
@@ -306,7 +306,7 @@ void setTarget(Game& g, Army* a, int ord, int dest) {
             }
         }
     } else if (ord == ORDER_ITEM && dest != NONE) {
-        if (dest >= 0 && dest < (int)g.map->items.size()) {
+        if (dest >= 0 && dest < static_cast<int>(g.map->items.size())) {
             const Item& it = g.map->items[dest];
             if (it.x != NONE) {
                 x = it.x;
@@ -314,7 +314,7 @@ void setTarget(Game& g, Army* a, int ord, int dest) {
             }
         }
     } else if (ord == ORDER_SITE && dest != NONE) {
-        if (dest >= 0 && dest < (int)g.map->sites.size()) {
+        if (dest >= 0 && dest < static_cast<int>(g.map->sites.size())) {
             const Site& s = g.map->sites[dest];
             x = s.x;
             y = s.y;
@@ -342,7 +342,7 @@ Sel selectStackOf(Game& g, Army* a) {
 std::vector<Army*> collect(const Game& g, int sideIndex, int x, int y, int minMoves) {
     std::vector<Army*> out;
     for (Army* a : onTile(g, sideIndex, x, y)) {
-        if ((int)out.size() >= rules::MAX_STACK) break;
+        if (static_cast<int>(out.size()) >= rules::MAX_STACK) break;
         if (!minMoves || a->moves >= minMoves) out.push_back(a);
     }
     return out;
@@ -352,7 +352,7 @@ std::vector<Army*> collectOrdered(const Game& g, int sideIndex, int x, int y, in
                                   int minMax) {
     std::vector<Army*> out;
     for (Army* a : onTile(g, sideIndex, x, y)) {
-        if ((int)out.size() >= rules::MAX_STACK) break;
+        if (static_cast<int>(out.size()) >= rules::MAX_STACK) break;
         if (a->aiGroup == grp && a->aiOrder == ord && (!minMax || a->maxMoves >= minMax))
             out.push_back(a);
     }
@@ -471,7 +471,7 @@ StepResult step(Game& g, Sel& sel, int tx, int ty) {
     if (r.stopped == "attack") {
         return {r.attack->city ? 5 : 3, r.attack->x, r.attack->y};
     } else if (r.stopped == "at peace") {
-        if (r.steps < (int)path->size()) {
+        if (r.steps < static_cast<int>(path->size())) {
             const move::Step& ahead = (*path)[r.steps];
             if (cityAt(g, ahead.x, ahead.y)) return {5, ahead.x, ahead.y};
         }
@@ -606,7 +606,7 @@ City* bestCity(Game& g, const Sel& sel, const Flood& flood, bool skipOwn) {
     City* best = nullptr;
     int bestScore = -1;
     auto& cities = g.map->cities;
-    for (int i = (int)cities.size() - 1; i >= 0; i--) {
+    for (int i = static_cast<int>(cities.size()) - 1; i >= 0; i--) {
         City& c = cities[i];
         int own = owner(c);
         if (!(skipOwn && own == me) && standing(c) && d.questCity != c.index &&

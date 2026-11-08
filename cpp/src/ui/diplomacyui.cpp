@@ -98,7 +98,7 @@ struct ClassicReport : kit::Modal {
         gfx::setColor(1, 1, 1);
         kit::centred(f, kit::text(0x6d, 0), 472, 116);
         for (size_t i = 0; i < order.size(); i++) {
-            int y = 146 + 29 * (int)i;
+            int y = 146 + 29 * static_cast<int>(i);
             smallShield(order[i]->index, 400, y);
             gfx::setColor(1, 1, 1);
             f.draw(titles[order[i]->index], 432, y);
@@ -154,7 +154,7 @@ struct ClassicAction : kit::Modal {
         for (int i = 0; i < 7; i++) f.draw(kit::text(0x6e, i), 104, ys[i]);
         for (size_t col = 0; col < others.size(); col++) {
             int other = others[col];
-            int x = 272 + 40 * (int)col;
+            int x = 272 + 40 * static_cast<int>(col);
             kit::shield(other, x, 111);
             if (!playing(g, other)) {
                 for (int y : {151, 191, 245, 285, 325}) blank(x, y);
@@ -191,7 +191,8 @@ struct ClassicAction : kit::Modal {
         int me = activeViewerIndex(*G.g);
         for (int k = 0; k <= 2; k++) {
             int i = c->id - OFFER[k];
-            if (i >= 0 && i < 7 && i < (int)others.size()) dip::propose(*G.g, me, others[i], k);
+            if (i >= 0 && i < 7 && i < static_cast<int>(others.size()))
+                dip::propose(*G.g, me, others[i], k);
         }
     }
     void keypressed(const std::string& key) override {
@@ -217,10 +218,10 @@ std::string cleanText(const std::string& raw, bool smallFont = true) {
     std::string out;
     out.reserve(raw.size() + 8);
     for (size_t i = 0; i < raw.size(); i++) {
-        unsigned char c = (unsigned char)raw[i];
+        unsigned char c = static_cast<unsigned char>(raw[i]);
         // UTF-8 em-dash / en-dash (E2 80 93 / E2 80 94) and curly quotes
-        if (c == 0xe2 && i + 2 < raw.size() && (unsigned char)raw[i + 1] == 0x80) {
-            unsigned char c2 = (unsigned char)raw[i + 2];
+        if (c == 0xe2 && i + 2 < raw.size() && static_cast<unsigned char>(raw[i + 1]) == 0x80) {
+            unsigned char c2 = static_cast<unsigned char>(raw[i + 2]);
             if (c2 == 0x93 || c2 == 0x94) {
                 out += '-';
                 i += 2;
@@ -250,7 +251,7 @@ std::string cleanText(const std::string& raw, bool smallFont = true) {
             out += '\'';
             continue;
         }
-        out += (char)c;
+        out += static_cast<char>(c);
     }
     return out;
 }
@@ -398,7 +399,7 @@ struct Report : kit::Modal {
         kit::setPal(0);
         gfx::rectangle(gfx::FILL, 394, 138, 156, 1);
         for (size_t i = 0; i < order.size(); i++) {
-            int y = 146 + 29 * (int)i;
+            int y = 146 + 29 * static_cast<int>(i);
             smallShield(order[i]->index, 400, y);
             gfx::setColor(1, 1, 1);
             std::string rTitle = fitText(f, titles[order[i]->index], 120, false);
@@ -425,7 +426,7 @@ struct Report : kit::Modal {
         for (size_t i = 0; i < order.size(); i++) {
             int sIdx = order[i]->index;
             if (sIdx == me) continue;
-            kit::Rect rateRow{394, 142 + 29 * (int)i, 156, 26};
+            kit::Rect rateRow{394, 142 + 29 * static_cast<int>(i), 156, 26};
             if (rateRow.contains(x, y)) {
                 kit::pop(this);
                 openParley(sIdx, false);
@@ -484,7 +485,7 @@ struct Action : kit::Modal {
         for (int i = 0; i < 7; i++) f.draw(kit::text(0x6e, i), 104, ys[i]);
         for (size_t col = 0; col < others.size(); col++) {
             int other = others[col];
-            int x = 272 + 40 * (int)col;
+            int x = 272 + 40 * static_cast<int>(col);
             kit::shield(other, x, 111);
             if (!playing(g, other)) {
                 for (int y : {151, 191, 245, 285, 325}) blank(x, y);
@@ -547,7 +548,7 @@ struct Action : kit::Modal {
         for (size_t col = 0; col < others.size(); col++) {
             int other = others[col];
             if (!playing(g, other)) continue;
-            kit::Rect shRect{272 + 40 * (int)col, 108, 40, 43};
+            kit::Rect shRect{272 + 40 * static_cast<int>(col), 108, 40, 43};
             if (shRect.contains(x, y)) {
                 kit::pop(this);
                 openParley(other, true);
@@ -567,7 +568,7 @@ struct Action : kit::Modal {
         }
         for (int k = 0; k <= 2; k++) {
             int i = c->id - OFFER[k];
-            if (i >= 0 && i < 7 && i < (int)others.size()) {
+            if (i >= 0 && i < 7 && i < static_cast<int>(others.size())) {
                 int other = others[i];
                 if (k == dip::PEACE && dip::proposal(g, me, other) == dip::PEACE) {
                     bool nextAlly = !dip::proposalAllied(g, me, other);
@@ -643,10 +644,10 @@ struct ParleyModal : kit::Modal {
         fBig.colours(7, 0).draw("DIPLOMATIC PARLEY", 74, 50);
 
         auto rivals = rivalList(g, me);
-        int shStartX = 568 - (int)rivals.size() * 24;
+        int shStartX = 568 - static_cast<int>(rivals.size()) * 24;
         for (size_t idx = 0; idx < rivals.size(); idx++) {
             int rSide = rivals[idx];
-            int sx = shStartX + (int)idx * 24;
+            int sx = shStartX + static_cast<int>(idx) * 24;
             if (rSide == other) {
                 kit::setPal(7);
                 gfx::rectangle(gfx::FILL, sx - 2, 49, 20, 20);
@@ -796,9 +797,9 @@ struct ParleyModal : kit::Modal {
         w2::Game& g = *G.g;
         int me = activeViewerIndex(g);
         auto rivals = rivalList(g, me);
-        int shStartX = 568 - (int)rivals.size() * 24;
+        int shStartX = 568 - static_cast<int>(rivals.size()) * 24;
         for (size_t idx = 0; idx < rivals.size(); idx++) {
-            kit::Rect sh{shStartX + (int)idx * 24 - 2, 49, 20, 20};
+            kit::Rect sh{shStartX + static_cast<int>(idx) * 24 - 2, 49, 20, 20};
             if (sh.contains(x, y)) {
                 other = rivals[idx];
                 return;
@@ -853,8 +854,8 @@ struct ParleyModal : kit::Modal {
             auto rivals = rivalList(g, me);
             if (!rivals.empty()) {
                 auto it = std::find(rivals.begin(), rivals.end(), other);
-                int idx = (it == rivals.end()) ? 0 : (int)(it - rivals.begin());
-                int n = (int)rivals.size();
+                int idx = (it == rivals.end()) ? 0 : static_cast<int>(it - rivals.begin());
+                int n = static_cast<int>(rivals.size());
                 other = rivals[(idx + (key == "right" ? 1 : n - 1)) % n];
             }
             return;
@@ -1058,11 +1059,11 @@ struct BrainInspectorModal : kit::Modal {
         }
         fSm.colours(5, 0).draw(fitText(fSm, "\"" + prof.motto + "\"", 464), 112, 91);
 
-        int exploredPct = (int)std::round((1.0f - b.frontierRatio) * 100.0f);
-        std::string evalStr =
-                w2::fmt("[%s]  V(s):%+.2f  Expl:%d%%  Cit:%d  Gold:%d gp", prof.archetype.c_str(),
-                        s.lastBoardValue, exploredPct, (int)b.visibleCities.size(), s.gold);
-        int valPal = s.lastBoardValue >= 0.05f ? 10 : (s.lastBoardValue <= -0.05f ? 8 : 7);
+        int exploredPct = static_cast<int>(std::round((1.0F - b.frontierRatio) * 100.0F));
+        std::string evalStr = w2::fmt("[%s]  V(s):%+.2f  Expl:%d%%  Cit:%d  Gold:%d gp",
+                                      prof.archetype.c_str(), s.lastBoardValue, exploredPct,
+                                      static_cast<int>(b.visibleCities.size()), s.gold);
+        int valPal = s.lastBoardValue >= 0.05F ? 10 : (s.lastBoardValue <= -0.05F ? 8 : 7);
         fSm.colours(valPal, 0).draw(fitText(fSm, evalStr, 464), 112, 106);
 
         drawButton(btnToggleEngine.x, btnToggleEngine.y, btnToggleEngine.w, btnToggleEngine.h,
@@ -1081,8 +1082,8 @@ struct BrainInspectorModal : kit::Modal {
             kit::setPal(3);
             gfx::rectangle(gfx::FILL, barX, ty + 3, barW, 8);
             kit::bevel(barX, ty + 3, barW, 8, 0, 2);
-            float val = std::clamp(prof.traits[t], -1.0f, 1.0f);
-            int fillW = (int)std::round(std::abs(val) * (barW / 2 - 2));
+            float val = std::clamp(prof.traits[t], -1.0F, 1.0F);
+            int fillW = static_cast<int>(std::round(std::abs(val) * (barW / 2 - 2)));
             kit::setPal(val >= 0 ? 10 : 8);
             if (fillW > 0) {
                 if (val >= 0)
@@ -1095,10 +1096,10 @@ struct BrainInspectorModal : kit::Modal {
         }
 
         // Right Panel: Fair-Information Belief Summary (276, 130, 308 x 165)
-        drawSunkenPanel(
-                276, 130, 308, 165, "BELIEF MEMORY",
-                w2::fmt("Fog:%d Stacks:%d", (int)b.fogFrontiers.size(), (int)b.stacksByTile.size()),
-                5);
+        drawSunkenPanel(276, 130, 308, 165, "BELIEF MEMORY",
+                        w2::fmt("Fog:%d Stacks:%d", static_cast<int>(b.fogFrontiers.size()),
+                                static_cast<int>(b.stacksByTile.size())),
+                        5);
         gfx::setScissor(278, 150, 304, 143);
         fSm.colours(1, 0).draw("Rival", 284, 151);
         kit::right(fSm.colours(1, 0), "Cit", 434, 151);

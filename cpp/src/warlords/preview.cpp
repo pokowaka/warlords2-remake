@@ -26,11 +26,11 @@ constexpr int ROAD_SHAPE[18] = {0, 10, 5, 15, 14, 13, 11, 7, 12, 9, 3, 6, 8, 4, 
 struct Canvas {
     int w, h;
     std::vector<uint8_t> px;
-    Canvas(int w_, int h_) : w(w_), h(h_), px((size_t)w_ * h_, BACK) {}
+    Canvas(int w_, int h_) : w(w_), h(h_), px(static_cast<size_t>(w_) * h_, BACK) {}
     void rect(int x, int y, int rw, int rh, uint8_t c) {
         for (int yy = std::max(0, y); yy < std::min(h, y + rh); yy++)
             for (int xx = std::max(0, x); xx < std::min(w, x + rw); xx++)
-                px[(size_t)yy * w + xx] = c;
+                px[static_cast<size_t>(yy) * w + xx] = c;
     }
     void outline(int x, int y, int rw, int rh, uint8_t c) {
         rect(x, y, rw, 1, c);
@@ -45,22 +45,22 @@ uint32_t crc32(const std::string& s) {
         std::array<uint32_t, 256> t{};
         for (uint32_t i = 0; i < 256; i++) {
             uint32_t c = i;
-            for (int k = 0; k < 8; k++) c = c & 1 ? 0xedb88320u ^ (c >> 1) : c >> 1;
+            for (int k = 0; k < 8; k++) c = c & 1 ? 0xedb88320U ^ (c >> 1) : c >> 1;
             t[i] = c;
         }
         return t;
     }();
-    uint32_t c = 0xffffffffu;
+    uint32_t c = 0xffffffffU;
     for (unsigned char b : s) c = table[(c ^ b) & 0xff] ^ (c >> 8);
-    return c ^ 0xffffffffu;
+    return c ^ 0xffffffffU;
 }
 
 void be32(std::string& out, uint32_t v) {
-    for (int k = 3; k >= 0; k--) out += (char)((v >> (8 * k)) & 0xff);
+    for (int k = 3; k >= 0; k--) out += static_cast<char>((v >> (8 * k)) & 0xff);
 }
 
 void chunk(std::string& out, const char* tag, const std::string& data) {
-    be32(out, (uint32_t)data.size());
+    be32(out, static_cast<uint32_t>(data.size()));
     std::string body = std::string(tag, 4) + data;
     out += body;
     be32(out, crc32(body));
@@ -78,11 +78,11 @@ std::string zstore(const std::string& raw) {
     do {
         size_t n = std::min<size_t>(65535, raw.size() - at);
         bool last = at + n == raw.size();
-        out += (char)(last ? 1 : 0);
-        out += (char)(n & 0xff);
-        out += (char)(n >> 8);
-        out += (char)(~n & 0xff);
-        out += (char)((~n >> 8) & 0xff);
+        out += static_cast<char>(last ? 1 : 0);
+        out += static_cast<char>(n & 0xff);
+        out += static_cast<char>(n >> 8);
+        out += static_cast<char>(~n & 0xff);
+        out += static_cast<char>((~n >> 8) & 0xff);
         out.append(raw, at, n);
         at += n;
     } while (at < raw.size());
@@ -92,10 +92,10 @@ std::string zstore(const std::string& raw) {
 
 std::string encode(const Canvas& cv, const std::vector<std::array<uint8_t, 3>>& palette) {
     std::string raw;
-    raw.reserve((size_t)(cv.w + 1) * cv.h);
+    raw.reserve(static_cast<size_t>(cv.w + 1) * cv.h);
     for (int y = 0; y < cv.h; y++) {
         raw += '\0';
-        raw.append((const char*)&cv.px[(size_t)y * cv.w], cv.w);
+        raw.append(reinterpret_cast<const char*>(&cv.px[static_cast<size_t>(y) * cv.w]), cv.w);
     }
     std::string out = "\x89PNG\r\n\x1a\n";
     std::string ihdr;
@@ -104,7 +104,7 @@ std::string encode(const Canvas& cv, const std::vector<std::array<uint8_t, 3>>& 
     ihdr += std::string("\x08\x03\x00\x00\x00", 5);  // 8-bit, palette
     chunk(out, "IHDR", ihdr);
     std::string plte;
-    for (auto& c : palette) plte += std::string((const char*)c.data(), 3);
+    for (auto& c : palette) plte += std::string(reinterpret_cast<const char*>(c.data()), 3);
     chunk(out, "PLTE", plte);
     chunk(out, "IDAT", zstore(raw));
     chunk(out, "IEND", "");
@@ -119,8 +119,9 @@ std::string png(const Map& map, const std::string& dataDir, int scale) {
     Canvas cv = draw(map, dataDir, scale);
     std::vector<std::array<uint8_t, 3>> palette;
     for (auto& c : pal::load(dataDir + "/TERRAIN0/WAR2.PAL"))
-        palette.push_back({(uint8_t)(c[0] * 255 + 0.5), (uint8_t)(c[1] * 255 + 0.5),
-                           (uint8_t)(c[2] * 255 + 0.5)});
+        palette.push_back({static_cast<uint8_t>(c[0] * 255 + 0.5),
+                           static_cast<uint8_t>(c[1] * 255 + 0.5),
+                           static_cast<uint8_t>(c[2] * 255 + 0.5)});
     palette.resize(16, {0, 0, 0});
     palette.push_back({110, 60, 20});  // ROAD
     palette.push_back({32, 32, 32});   // BACK
@@ -134,16 +135,17 @@ pck::Pixels menuPicture(const Map& map, const std::string& dataDir) {
     pck::Pixels out;
     out.w = MW;
     out.h = MH;
-    out.px.assign((size_t)MW * MH, SEA);
-    double k = (double)big.h / MH;
-    int w = std::min(MW, (int)(big.w / k)), x0 = (MW - w) / 2;
+    out.px.assign(static_cast<size_t>(MW) * MH, SEA);
+    double k = static_cast<double>(big.h) / MH;
+    int w = std::min(MW, static_cast<int>(big.w / k)), x0 = (MW - w) / 2;
     for (int y = 0; y < MH; y++)
         for (int x = 0; x < w; x++) {
-            int sx = std::min(big.w - 1, (int)(x * k)), sy = std::min(big.h - 1, (int)(y * k));
-            uint8_t c = big.px[(size_t)sy * big.w + sx];
+            int sx = std::min(big.w - 1, static_cast<int>(x * k)),
+                sy = std::min(big.h - 1, static_cast<int>(y * k));
+            uint8_t c = big.px[static_cast<size_t>(sy) * big.w + sx];
             if (c == ROAD) c = DARK_ROAD;
             if (c == BACK) c = SEA;
-            out.px[(size_t)y * MW + x0 + x] = c;
+            out.px[static_cast<size_t>(y) * MW + x0 + x] = c;
         }
     return out;
 }
@@ -176,7 +178,8 @@ Canvas draw(const Map& map, const std::string& dataDir, int scale) {
                         uint8_t r = roads->at(rx + px, ry + py);
                         if (r != key) c = r;
                     }
-                    cv.px[(size_t)(ty * scale + y) * cv.w + tx * scale + x] = c;
+                    cv.px[static_cast<size_t>(ty * scale + y) * cv.w +
+                          static_cast<size_t>(tx) * scale + x] = c;
                 }
         }
     // bold over the tiles: roads, sites, cities, capitals
@@ -205,7 +208,7 @@ Canvas draw(const Map& map, const std::string& dataDir, int scale) {
             cv.outline(c.x * s, c.y * s, 2 * s, 2 * s, BLACK);
         } else {
             cv.rect(c.x * s - 2, c.y * s - 2, 2 * s + 4, 2 * s + 4, BLACK);
-            cv.rect(c.x * s, c.y * s, 2 * s, 2 * s, (uint8_t)(owner->colour & 15));
+            cv.rect(c.x * s, c.y * s, 2 * s, 2 * s, static_cast<uint8_t>(owner->colour & 15));
             cv.outline(c.x * s - 2, c.y * s - 2, 2 * s + 4, 2 * s + 4, WHITE);
         }
     }

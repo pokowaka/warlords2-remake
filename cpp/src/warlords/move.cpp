@@ -72,7 +72,7 @@ std::vector<int>& grid(Game& g, int sideIndex) {
 
     const Map& m = *g.map;
     int W = m.width, H = m.height;
-    std::vector<int> out(W * H);
+    std::vector<int> out(static_cast<size_t>(W) * H);
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             int i = y * W + x;
@@ -183,7 +183,7 @@ std::optional<Preview> preview(Game& g, const Stack& stack, int x, int y) {
         const Step& step = (*path)[i];
         if (step.cost > left) break;
         left -= step.cost;
-        reach = (int)i + 1;
+        reach = static_cast<int>(i) + 1;
     }
     return Preview{*path, reach};
 }
@@ -218,7 +218,7 @@ int direction(int x1, int y1, int x2, int y2) {
 
 int distance(int x1, int y1, int x2, int y2) {
     double ax = x1 - x2, ay = y1 - y2;
-    return (int)std::floor(std::sqrt(ax * ax + ay * ay));
+    return static_cast<int>(std::floor(std::sqrt(ax * ax + ay * ay)));
 }
 
 std::vector<int> prepare(Game& g, const std::vector<int>& grid, int sideIndex, int mode, int dx,
@@ -235,7 +235,7 @@ std::vector<int> prepare(Game& g, const std::vector<int>& grid, int sideIndex, i
                 if (game::seen(g, sideIndex, destCity->x + ox, destCity->y + oy))
                     destCitySeen = true;
     }
-    std::vector<int> dist(W * H);
+    std::vector<int> dist(static_cast<size_t>(W) * H);
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             int k = y * W + x;
@@ -429,7 +429,7 @@ std::optional<std::vector<std::pair<int, int>>> roadRoute(const RoadGround& m, c
                                                           int W, int H, int sx, int sy, int dx,
                                                           int dy) {
     if (dx < 0 || dy < 0 || dx >= W || dy >= H) return std::nullopt;
-    std::vector<int> grd(W * H);
+    std::vector<int> grd(static_cast<size_t>(W) * H);
     for (int y = 0; y < H; y++) {
         for (int x = 0; x < W; x++) {
             int t = m.terrain(x, y);
@@ -460,7 +460,7 @@ std::optional<std::vector<std::pair<int, int>>> roadRoute(const RoadGround& m, c
     q.mode = LAND;
     q.woods = q.hills = false;
     q.penalty = to == WATER || to == SHORE ? WATER_PENALTY_TO : WATER_PENALTY;
-    q.dist.resize(W * H);
+    q.dist.resize(static_cast<size_t>(W) * H);
     for (int k = 0; k < W * H; k++) q.dist[k] = grd[k] % 8 == 0 ? SHUT : UNREACHED;
     q.roads = true;
     q.isBridge = [&m](int x, int y) { return m.terrain(x, y) == BRIDGE; };
@@ -729,7 +729,7 @@ bool outOfMoves(const Stack& stack, const Path& path, int landed, const std::str
     int m = stackMoves(stack);
     if (m < 2) return true;
     if (landed == 0 || stopped == "attack" || stopped == "at peace") return false;
-    if (landed >= (int)path.size()) return false;
+    if (landed >= static_cast<int>(path.size())) return false;
     int total = 0;
     for (int i = 0; i <= landed; i++) total += path[i].cost;
     if (total >= 255) return false;
@@ -747,7 +747,7 @@ WalkResult walkPath(Game& g, const Stack& stack, const Path& path) {
     int lastOk = 0, cumulative = 0;
     std::map<int, int> costTo;
 
-    for (int i = 1; i <= (int)path.size(); i++) {
+    for (int i = 1; i <= static_cast<int>(path.size()); i++) {
         const Step& step = path[i - 1];
         // a step is taken while what the walk has cost so far fits in the moves
         // left (1555:18be): there is no floor, so one move still buys a road
@@ -777,7 +777,7 @@ WalkResult walkPath(Game& g, const Stack& stack, const Path& path) {
         // the stack may only stop on a tile of its own where it fits; other
         // steps -- a side at peace's stack among them -- are passed over
         // (1a8b:07f9)
-        if (!theirs && (int)(here.size() + stack.size()) <= rules::MAX_STACK) {
+        if (!theirs && static_cast<int>(here.size() + stack.size()) <= rules::MAX_STACK) {
             lastOk = i;
             costTo[i] = cumulative;
         }
@@ -810,7 +810,7 @@ WalkResult walkPath(Game& g, const Stack& stack, const Path& path) {
     if (g.map->options.hiddenMap != 0 && side != NONE) {
         bool flying = modeOf(g, stack) == FLYING;
         int found = 0;
-        for (int i = 0; i < (int)path.size(); i++) {
+        for (int i = 0; i < static_cast<int>(path.size()); i++) {
             if (i == lastOk - 1) break;
             found += game::reveal(g, side, path[i].x, path[i].y, flying);
         }
@@ -821,7 +821,8 @@ WalkResult walkPath(Game& g, const Stack& stack, const Path& path) {
     result.steps = lastOk;
     result.spent = cost;
     for (int i = 0; i < lastOk; i++) result.walked.emplace_back(path[i].x, path[i].y);
-    if (lastOk < (int)path.size() && result.stopped == "arrived") result.stopped = "blocked";
+    if (lastOk < static_cast<int>(path.size()) && result.stopped == "arrived")
+        result.stopped = "blocked";
     // going to sea or coming ashore ends the move as running out does
     result.outOfMoves = !change.empty() || outOfMoves(stack, path, lastOk, result.stopped);
     return result;

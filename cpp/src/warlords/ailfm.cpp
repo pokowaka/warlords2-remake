@@ -19,7 +19,7 @@ constexpr size_t ADV_PROGRAMS = 0x2203;  // the program each channel 1..8 starts
 const int OPREG[9] = {0, 1, 2, 8, 9, 10, 16, 17, 18};
 
 int byteAt(const std::string& s, size_t i) {
-    return i < s.size() ? (uint8_t)s[i] : 0;
+    return i < s.size() ? static_cast<uint8_t>(s[i]) : 0;
 }
 int u16(const std::string& s, size_t i) {
     return byteAt(s, i) + byteAt(s, i + 1) * 256;
@@ -39,13 +39,13 @@ int scale(int a, int b) {
 }
 
 inline int floorDiv(int a, int b) {
-    return (int)std::floor((double)a / b);
+    return static_cast<int>(std::floor(static_cast<double>(a) / b));
 }
 
 }  // namespace
 
 AilFm::AilFm(const std::string& adv, const std::string& ad) {
-    for (int i = 0; i < 192; i++) freq_[i] = s16(adv, ADV_FREQ + i * 2);
+    for (int i = 0; i < 192; i++) freq_[i] = s16(adv, ADV_FREQ + static_cast<size_t>(i) * 2);
     for (int i = 0; i < 96; i++) {
         octave_[i] = byteAt(adv, ADV_OCTAVE + i);
         halftone_[i] = byteAt(adv, ADV_HALFTONE + i);
@@ -59,10 +59,11 @@ AilFm::AilFm(const std::string& adv, const std::string& ad) {
     for (size_t p = 0; p + 6 <= ad.size(); p += 6) {
         int patch = byteAt(ad, p), bank = byteAt(ad, p + 1);
         if (bank == 0xff) break;
-        size_t off = (size_t)u16(ad, p + 2) + (size_t)u16(ad, p + 4) * 65536;
+        size_t off =
+                static_cast<size_t>(u16(ad, p + 2)) + static_cast<size_t>(u16(ad, p + 4)) * 65536;
         int len = u16(ad, off);
         Timbre t;
-        for (int i = 2; i < len; i++) t.push_back((uint8_t)byteAt(ad, off + i));
+        for (int i = 2; i < len; i++) t.push_back(static_cast<uint8_t>(byteAt(ad, off + i)));
         lib_[bank * 128 + patch] = t;
     }
     for (int r = 1; r <= 0xf5; r++) chip_.write(r, reset_[r]);
@@ -424,7 +425,7 @@ void AilFm::render(int16_t* out, int n) {
             interval();
             untilTick_ += per;
         }
-        int k = std::min(n - i, (int)std::ceil(untilTick_));
+        int k = std::min(n - i, static_cast<int>(std::ceil(untilTick_)));
         chip_.generate(out + i, k);
         i += k;
         untilTick_ -= k;

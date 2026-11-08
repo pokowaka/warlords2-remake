@@ -19,17 +19,21 @@ bool clipped = false;
 SDL_Rect clip{};
 
 inline int dev(double v) {
-    return (int)std::floor(v + 0.5);
+    return static_cast<int>(std::floor(v + 0.5));
 }
 
 void applyColor(SDL_Texture* tex) {
-    auto c8 = [](float v) { return (Uint8)std::clamp((int)std::lround(v * 255), 0, 255); };
+    auto c8 = [](float v) {
+        return static_cast<Uint8>(std::clamp(static_cast<int>(std::lround(v * 255)), 0, 255));
+    };
     SDL_SetTextureColorMod(tex, c8(color.r), c8(color.g), c8(color.b));
     SDL_SetTextureAlphaMod(tex, c8(color.a));
 }
 
 void setDrawColor() {
-    auto c8 = [](float v) { return (Uint8)std::clamp((int)std::lround(v * 255), 0, 255); };
+    auto c8 = [](float v) {
+        return static_cast<Uint8>(std::clamp(static_cast<int>(std::lround(v * 255)), 0, 255));
+    };
     SDL_SetRenderDrawColor(R, c8(color.r), c8(color.g), c8(color.b), c8(color.a));
     SDL_SetRenderDrawBlendMode(R, color.a < 1 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
 }
@@ -95,7 +99,8 @@ void begin() {
 void clear(float r, float g, float b) {
     SDL_RenderSetClipRect(R, nullptr);
     SDL_SetRenderDrawBlendMode(R, SDL_BLENDMODE_NONE);
-    SDL_SetRenderDrawColor(R, (Uint8)(r * 255), (Uint8)(g * 255), (Uint8)(b * 255), 255);
+    SDL_SetRenderDrawColor(R, static_cast<Uint8>(r * 255), static_cast<Uint8>(g * 255),
+                           static_cast<Uint8>(b * 255), 255);
     SDL_RenderClear(R);
     if (clipped) SDL_RenderSetClipRect(R, &clip);
 }
@@ -191,7 +196,8 @@ void draw(const Image* img, double x, double y) {
 void draw(const Image* img, const Quad& q, double x, double y) {
     if (!img || !img->tex) return;
     applyColor(img->tex);
-    int qx = (int)q.x, qy = (int)q.y, qw = (int)q.w, qh = (int)q.h;
+    int qx = static_cast<int>(q.x), qy = static_cast<int>(q.y), qw = static_cast<int>(q.w),
+        qh = static_cast<int>(q.h);
     if (img->wrap && (qx + qw > img->w || qy + qh > img->h)) {
         // a repeating image, as LÖVE draws one with a quad bigger than it
         for (int yy = 0; yy < qh; yy += img->h) {
@@ -213,7 +219,7 @@ std::vector<uint8_t> readPixels(int& w, int& h) {
         SDL_QueryTexture(target, nullptr, nullptr, &w, &h);
     else
         SDL_GetRendererOutputSize(R, &w, &h);
-    std::vector<uint8_t> px((size_t)w * h * 4);
+    std::vector<uint8_t> px(static_cast<size_t>(w) * h * 4);
     SDL_RenderSetClipRect(R, nullptr);
     SDL_RenderReadPixels(R, nullptr, SDL_PIXELFORMAT_ABGR8888, px.data(), w * 4);
     if (clipped) SDL_RenderSetClipRect(R, &clip);
