@@ -1,13 +1,16 @@
-// The random map generator, "A Random World": random_map_setup (7bab:10e8)
-// and random_map_generate (4bed:011c), phase for phase. docs/re/random_map.md.
-//
-// A port of the web port's web/src/warlords/randommap.js, line for line: the
-// engines' dice are the same, so a seed makes the same world in all three.
-// The result is a scenario like any other -- RANDOM.SCN (Erythea's,
-// rewritten), .MAP, .RD, .SGN, .CTY and .SPC -- installed in memory
-// (w2::installFile), where scn::load reads it as it reads the shipped ones.
-// The shipped RANDOM folder holds the last world the original made, and is
-// left alone.
+/**
+ * @file
+ * @brief The random map generator, "A Random World": setup and phased map
+ *        generation (docs/re/random_map.md).
+ *
+ * A port of the web port's web/src/warlords/randommap.js, line for line: the
+ * engines' dice are the same, so a seed makes the same world in all three.
+ * The result is a scenario like any other -- RANDOM.SCN (Erythea's,
+ * rewritten), .MAP, .RD, .SGN, .CTY and .SPC -- installed in memory
+ * (w2::InstallFile), where scn::Load reads it as it reads the shipped ones.
+ * The shipped RANDOM folder holds the last world the original made, and is
+ * left alone.
+ */
 #pragma once
 
 #include <array>
@@ -20,67 +23,80 @@
 
 namespace w2::randommap {
 
+/** @brief Directory and base name of the generated random scenario. */
 constexpr const char* kDir = "RANDOM";
-extern const char* const kFiles[6];  // what it makes, by extension
+/** @brief File extensions produced by the random map generator. */
+extern const char* const kFiles[6];
+/** @brief Generated scenario file contents keyed by extension. */
 using Files = std::map<std::string, std::string>;
 
-// what the start menu shows beside each slider (4125:28e0, formats 4125:2918)
+/** @brief Values shown beside each slider in the random map setup menu. */
 extern const int kSliderShows[4][7];
+/** @brief Printf format strings for each slider's value display. */
 extern const char* const kSliderFormats[4];
-constexpr int kRandomSlider = 7;  // a slider of 7 is rolled: 1d7-1
+/** @brief Slider value meaning "Random" (rolled as 1d7-1). */
+constexpr int kRandomSlider = 7;
 
+/** @brief Configuration options for generating a random world. */
 struct Options {
-    std::string data_dir;
-    Rng* rng = nullptr;
-    std::array<int, 4> sliders{{3, 3, 2, 3}};  // Water, Hills, Cities, Forest, 0-7
-    bool allies = false;
-    int terrain_set = 0;
-    /** Not the original's: choose the eight capitals for a fair start (far
-     *  apart, every city near some capital, each side as much room to grow as
-     *  the next) instead of 513d:0689's random picks. Off, the world is the
-     *  original's, byte for byte. See docs/mapeval.md. */
+    std::string data_dir;                      ///< Path to the game data directory.
+    Rng* rng = nullptr;                        ///< Random number generator to draw from.
+    std::array<int, 4> sliders{{3, 3, 2, 3}};  ///< Water, Hills, Cities, Forest sliders (0-7).
+    bool allies = false;                       ///< Whether cities may produce magical ally armies.
+    int terrain_set = 0;                       ///< Terrain graphics set index.
+    /**
+     * @brief Not the original's: choose the eight capitals for a fair start
+     *        (far apart, every city near some capital, each side as much room
+     *        to grow as the next) instead of the classic generator's random
+     *        picks. Off, the world is the original's, byte for byte. See
+     *        docs/mapeval.md.
+     */
     bool fair_capitals = false;
-    /** Not the original's: make the world with the scenario generator
-     *  (warlords/scengen) instead, shaped by `world`; its capitals are always
-     *  the fair ones, its city names never repeat, and its .SCN reads as an
-     *  ordinary scenario, not a random one. */
+    /**
+     * @brief Not the original's: make the world with the scenario generator
+     *        (warlords/scengen) instead, shaped by `world`; its capitals are
+     *        always the fair ones, its city names never repeat, and its .SCN
+     *        reads as an ordinary scenario, not a random one.
+     */
     bool scenario = false;
-    scengen::Settings world;
+    scengen::Settings world;  ///< Scenario generator parameters when `scenario` is true.
 };
 
-/** The sliders as random_map_setup (7bab:10e8) takes them: 7 rolled as 1d7-1. */
+/** @brief Resolves random sliders: any slider set to 7 is rolled as 1d7-1. */
 std::array<int, 4> Settle(std::array<int, 4> sliders, Rng& rng);
 
 class Generator;
 
-/** A world being made, a phase at a time, so the progress bar can move as
- *  the original's does. */
+/**
+ * @brief A world being made, a phase at a time, so the progress bar can move
+ *        as the original's does.
+ */
 class Run {
   public:
     explicit Run(const Options& opts);
     ~Run();
-    /** Do the next phase; false once the world is made. */
+    /** @brief Executes the next generation phase; returns false once the world is made. */
     bool Step();
-    /** How far along it is, 0-100, as the original's bar shows it. */
+    /** @brief How far along generation is, 0-100, as the original's progress bar shows it. */
     int Progress() const { return pct_; }
-    /** The world's files, keyed by extension, once step() has said false. */
+    /** @brief The world's files, keyed by extension, once Step() has returned false. */
     const Files& GetFiles() const { return files_; }
 
   private:
-    std::unique_ptr<Generator> gen_;
-    int pct_ = 0;
-    Files files_;
+    std::unique_ptr<Generator> gen_;  ///< Underlying generator state machine.
+    int pct_ = 0;                     ///< Progress percentage (0-100).
+    Files files_;                     ///< Output scenario files once complete.
 };
 
-/** Make a random world through to its end. */
+/** @brief Makes a random world through to its end. */
 Files GenerateNow(const Options& opts);
-/** Put a random world's files where scn::load will find them. */
+/** @brief Installs a random world's files in memory where scn::Load will find them. */
 void Install(const std::string& data_dir, const Files& files);
-/** The installed world's files, for a save to carry. */
+/** @brief Reads the installed random world's files, for a save to carry. */
 Files Installed(const std::string& data_dir);
-/** The terrain set's name, as the start menu shows it (DATA\TERRAIN.DAT). */
+/** @brief Returns the terrain set's name, as the start menu shows it (DATA/TERRAIN.DAT). */
 std::string TerrainSetName(const std::string& data_dir, int set);
-/** How many terrain sets there are. */
+/** @brief Returns how many terrain sets there are in DATA/TERRAIN.DAT. */
 int TerrainSets(const std::string& data_dir);
 
 }  // namespace w2::randommap
