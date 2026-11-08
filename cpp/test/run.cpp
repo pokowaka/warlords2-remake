@@ -2559,8 +2559,12 @@ static void testMapEval() {
     writeFile((tmp / "GEN7" / "GEN7.INF").string(), scenarios::info(made));
     writeFile((tmp / "GEN7" / "GEN7.SCN").string(), "");
     writeFile((tmp / "NOINFO" / "NOINFO.SCN").string(), "");
+    ok(scenarios::remember(tmp.string(), "NOINFO") && scenarios::remember(tmp.string(), "GEN7") &&
+           scenarios::remember(tmp.string(), "GEN7"),
+       "SCENGEN.LST remembers the generated folders");
+    eq(*readFile((tmp / "DATA" / "SCENGEN.LST").string()), std::string("GEN7\nNOINFO\n"), "once each, sorted");
     auto list = scenarios::list(tmp.string());
-    eq((int)list.size(), 7, "SCENARIO.DAT's six and the one generated world with a NAME.INF");
+    eq((int)list.size(), 7, "SCENARIO.DAT's six and the one listed world with a NAME.INF");
     eq(list[3].dir, std::string("Erythea"), "SCENARIO.DAT's own order first");
     eq(list.back().name, std::string("Continents 7"), "the generated world after them, by its NAME.INF");
     eq(list.back().cities, 80, "with its cities");

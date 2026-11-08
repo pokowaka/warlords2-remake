@@ -3,8 +3,9 @@
 //
 // A generated scenario lives in its own folder, DATA/NAME/NAME.*, like the
 // shipped ones, but is not written into SCENARIO.DAT, so the original's file
-// stays as it shipped. Instead the folder holds NAME.INF, a few lines of
-// "key=value" the list reads:
+// stays as it shipped. Instead DATA/DATA/SCENGEN.LST names the generated
+// folders, one a line (w2scengen keeps it), and each folder holds NAME.INF,
+// a few lines of "key=value" the list reads:
 //
 //     name=Continents 11        the name in the list, at most 20 characters
 //     text=A new world, seed 11 the line under it, at most 30
@@ -13,7 +14,9 @@
 //     players=8
 //
 // and PICS/SCENARIO.PCK, the picture the start menu shows, as the shipped
-// scenarios have.
+// scenarios have. A folder named in SCENGEN.LST without its NAME.INF (taken
+// away since) is left out. The JavaScript and Lua games read the same files
+// the same way (web/src/ui/start.js, love2d/ui/start.lua).
 #pragma once
 
 #include <optional>
@@ -28,9 +31,12 @@ struct Entry {
   bool generated = false;
 };
 
-/** SCENARIO.DAT's records in order, then every generated scenario in the
- *  data folder, by folder name. */
+/** SCENARIO.DAT's records in order, then the generated scenarios SCENGEN.LST
+ *  names, in its order. */
 std::vector<Entry> list(const std::string& dataDir);
+
+/** Add a folder to SCENGEN.LST, once, keeping the list sorted. */
+bool remember(const std::string& dataDir, const std::string& dir);
 
 /** An entry as NAME.INF holds it. */
 std::string info(const Entry& e);

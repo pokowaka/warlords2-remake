@@ -46,6 +46,15 @@ struct Settings {
   int rivers = 5;
 };
 
+/** A world's name for New Scenario's list (at most 20 characters) and its
+ *  line of description (at most 30), drawn from the seed alone -- "The
+ *  Shattered Isles", "Kingdoms of Ravenmere" -- so the same seed always gets
+ *  the same name, and naming never changes the world. */
+struct Title {
+  std::string name, text;
+};
+Title title(Shape shape, long seed);
+
 /** Parse "continents", "pangaea" or "islands"; false if it is none. */
 bool parseShape(const std::string& s, Shape& out);
 const char* shapeName(Shape s);

@@ -37,19 +37,19 @@ no image library needed).
 ## In the game's scenario list
 
 Every world `w2scengen` makes appears in the game's **New Scenario** list,
-after the shipped scenarios, as "Continents 11", "Pangaea 21" and so on (or
-under its `--name`). Choosing it shows its name, cities, ruins and players
+after the shipped scenarios, under its name (see Names below, or its `--name`). Choosing it shows its name, cities, ruins and players
 on the crystal ball. Back on the start menu, its map stands where the
 shipped scenarios show their artwork. **Begin** sets it up like any other
 scenario.
 
-`SCENARIO.DAT` is left as shipped. The list reads it first, then every folder
-in the data directory that holds `NAME/NAME.SCN` together with `NAME/NAME.INF`
+`SCENARIO.DAT` is left as shipped. The list reads it first, then the folders
+named in `DATA/SCENGEN.LST` (one a line; `w2scengen` keeps it), each holding
+`NAME/NAME.SCN` together with `NAME/NAME.INF`
 (`cpp/src/warlords/scenarios.{hpp,cpp}`). `NAME.INF` is a few `key=value` lines:
 
 ```
-name=Continents 11
-text=A new world, seed 11
+name=Saltmarch Realms
+text=Eight warlords, one throne
 cities=80
 ruins=40
 players=8
@@ -58,8 +58,25 @@ players=8
 The start menu's picture is `NAME/PICS/SCENARIO.PCK`, as the shipped
 scenarios have it: the map at 264 × 225 in the game's 16 colours, centred on
 the sea (`preview::menuPicture`, written with `pck::encode`). To take a world
-out of the list, delete its folder. Only the C++ game reads generated
-scenarios. The web and Lua versions list the shipped ones only.
+out of the list, delete its folder. The web game sees the worlds that were in
+`original/` when `tools/web_assets.py` last ran.
+
+## The same in all three games
+
+The C++, JavaScript and Lua games make the same world from the same seed and
+shape, byte for byte, as the classic random map generator does (`scengen`
+keeps to arithmetic IEEE doubles give alike everywhere: no `pow`, `hypot` or
+`lerp`, sorts without ties, queues ordered by cost then tile). All three list
+generated worlds in New Scenario the same way. `sh cpp/test/scengen_compare.sh`
+checks the three against each other.
+
+## Names
+
+Each world gets a name and a line of description drawn from its seed alone
+(`scengen::title`): "Saltmarch Realms", "The Drowned Expanse", "Emberspire
+Isles"; "Eight warlords, one throne", "Here be monsters (and loot)". The
+nouns suit the shape (Kingdoms and Marches, Realm and Expanse, Isles and
+Shoals). `--name` gives your own name instead.
 
 ## How a world is made
 

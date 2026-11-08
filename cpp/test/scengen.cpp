@@ -18,12 +18,17 @@
 //   --open          open the preview pictures in the system's image viewer
 //   --preview NAME  only draw DATA/NAME/NAME.png for an existing scenario, any
 //                   scenario (ERYTHEA too), and make nothing
+//   --dump DIR      write exactly the seeds asked for, failures too, as
+//                   DIR/<shape>-<seed>/RANDOM.*, and nothing else: what the
+//                   JavaScript and Lua ports are checked against, byte for
+//                   byte (cpp/test/scengen_compare.sh)
 //
 // Every world gets DATA/NAME/NAME.png: the map in the game's own tiles, with
 // roads, cities, capitals (in their sides' colours) and sites drawn over it.
-// It also gets NAME.INF and PICS/SCENARIO.PCK, which put it in the game's
-// New Scenario list, after the shipped scenarios, with its picture on the
-// start menu (warlords/scenarios). Or play it straight away:
+// It also gets NAME.INF and PICS/SCENARIO.PCK, and is named in
+// DATA/DATA/SCENGEN.LST, which put it in the game's New Scenario list (all
+// three games), after the shipped scenarios, with its picture on the start
+// menu (warlords/scenarios). Or play it straight away:
 //   cpp/build/warlords2 --window --scenario NAME
 
 #include <cstdio>
@@ -78,20 +83,17 @@ void writeListing(const std::string& data, const std::string& dir, const std::st
   std::string base = data + "/" + dir + "/";
   std::filesystem::create_directories(base + "PICS");
   if (!writeFile(base + dir + ".INF", scenarios::info(e)) ||
-      !writeFile(base + "PICS/SCENARIO.PCK", pck::encode(preview::menuPicture(*map, data))))
+      !writeFile(base + "PICS/SCENARIO.PCK", pck::encode(preview::menuPicture(*map, data))) ||
+      !scenarios::remember(data, dir))
     throw std::runtime_error("could not write the listing in " + base);
 }
 
-/** "continents" -> "Continents". */
-std::string titled(std::string s) {
-  if (!s.empty()) s[0] = (char)std::toupper((unsigned char)s[0]);
-  return s;
-}
+
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string data = "original", name, previewOnly;
+  std::string data = "original", name, previewOnly, dumpDir;
   long seed = 1;
   int tries = 20, count = 1;
   bool keepFailures = false, quiet = false, open = false;
@@ -119,6 +121,7 @@ int main(int argc, char** argv) {
     else if (a == "--open") open = true;
     else if (a == "--quiet") quiet = true;
     else if (a == "--preview") previewOnly = upper(next());
+    else if (a == "--dump") dumpDir = next();
     else {
       fprintf(stderr, "unknown argument: %s (see the top of cpp/test/scengen.cpp)\n", a.c_str());
       return 2;
@@ -151,6 +154,24 @@ int main(int argc, char** argv) {
     fprintf(stderr, "cannot find '%s/RANDOM/RANDOM.DAT': run from the repository root, or pass --data DIR\n",
             data.c_str());
     return 1;
+  }
+  if (!dumpDir.empty()) {
+    for (int k = 0; k < count; k++) {
+      long s0 = seed + k;
+      Rng r((double)s0);
+      randommap::Options o;
+      o.dataDir = data;
+      o.rng = &r;
+      o.scenario = true;
+      o.world = world;
+      auto files = randommap::generateNow(o);
+      std::string dir = dumpDir + "/" + scengen::shapeName(world.shape) + "-" + std::to_string(s0);
+      std::filesystem::create_directories(dir);
+      for (auto& [ext, bytes] : files) writeFile(dir + "/" + randommap::DIR + "." + ext, bytes);
+      auto t = scengen::title(world.shape, s0);
+      writeFile(dir + "/TITLE.TXT", t.name + "\n" + t.text + "\n");
+    }
+    return 0;
   }
   std::vector<std::string> pictures;
   for (int k = 0; k < count; k++) {
@@ -201,13 +222,14 @@ int main(int argc, char** argv) {
     try {
       picture = writePreview(data, n);
       pictures.push_back(picture);
-      std::string title = name.empty() ? titled(scengen::shapeName(world.shape)) + " " + std::to_string(used) : n;
-      writeListing(data, n, title, "A new world, seed " + std::to_string(used));
+      auto fun = scengen::title(world.shape, used);
+      writeListing(data, n, name.empty() ? fun.name : n, fun.text);
     } catch (const std::exception& ex) {
       fprintf(stderr, "%s: no preview or listing: %s\n", n.c_str(), ex.what());
     }
     if (!quiet) {
-      printf("%s: seed %ld, %s, %s the hard rules\n", dir.c_str(), used, scengen::shapeName(world.shape),
+      printf("%s: \"%s\" (seed %ld, %s), %s the hard rules\n", dir.c_str(),
+             (name.empty() ? scengen::title(world.shape, used).name : n).c_str(), used, scengen::shapeName(world.shape),
              eval.passed() ? "passes" : "FAILS");
       if (count == 1)
         for (const char* key : {"cities", "landFrac", "clarkEvansR", "cityRoadCoverage", "capitalGapMinTurns",

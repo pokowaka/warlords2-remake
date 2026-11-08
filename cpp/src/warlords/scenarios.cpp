@@ -1,8 +1,6 @@
 #include "warlords/scenarios.hpp"
 
 #include <algorithm>
-#include <filesystem>
-#include <system_error>
 
 #include "util/util.hpp"
 #include "warlords/bytes.hpp"
@@ -51,20 +49,33 @@ std::vector<Entry> list(const std::string& dataDir) {
       out.push_back(e);
     }
   }
-  std::vector<Entry> made;
-  std::error_code ec;
-  for (auto& item : std::filesystem::directory_iterator(dataDir, ec)) {
-    if (!item.is_directory(ec)) continue;
-    std::string dir = item.path().filename().string();
-    if (std::find(listed.begin(), listed.end(), upper(dir)) != listed.end()) continue;
-    std::string base = dataDir + "/" + dir + "/" + dir;
-    auto text = readFile(base + ".INF");
-    if (!text || !fileExists(base + ".SCN")) continue;
-    if (auto e = parseInfo(*text, dir)) made.push_back(*e);
+  if (auto lst = readFile(dataDir + "/DATA/SCENGEN.LST")) {
+    for (const std::string& raw : splitLines(*lst)) {
+      std::string dir = trim(raw);
+      if (dir.empty() || std::find(listed.begin(), listed.end(), upper(dir)) != listed.end()) continue;
+      std::string base = dataDir + "/" + dir + "/" + dir;
+      auto text = readFile(base + ".INF");
+      if (!text || !fileExists(base + ".SCN")) continue;
+      if (auto e = parseInfo(*text, dir)) {
+        listed.push_back(upper(dir));
+        out.push_back(*e);
+      }
+    }
   }
-  std::sort(made.begin(), made.end(), [](const Entry& a, const Entry& b) { return a.dir < b.dir; });
-  out.insert(out.end(), made.begin(), made.end());
   return out;
+}
+
+bool remember(const std::string& dataDir, const std::string& dir) {
+  std::string path = dataDir + "/DATA/SCENGEN.LST";
+  std::vector<std::string> dirs;
+  if (auto lst = readFile(path))
+    for (const std::string& raw : splitLines(*lst))
+      if (!trim(raw).empty()) dirs.push_back(trim(raw));
+  if (std::find(dirs.begin(), dirs.end(), dir) == dirs.end()) dirs.push_back(dir);
+  std::sort(dirs.begin(), dirs.end());
+  std::string text;
+  for (auto& d : dirs) text += d + "\n";
+  return writeFile(path, text);
 }
 
 }  // namespace w2::scenarios

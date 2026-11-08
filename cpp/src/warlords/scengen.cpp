@@ -18,7 +18,15 @@ using namespace w2::move;   // terrain type ids
 
 constexpr int DX4[4] = {0, 1, 0, -1}, DY4[4] = {-1, 0, 1, 0};
 
+// The JavaScript and Lua ports make the same worlds from the same seed, byte
+// for byte, so everything here keeps to arithmetic IEEE doubles give alike
+// in all three: + - * / sqrt floor, no pow, hypot or lerp (whose last bits
+// differ between libraries), sorts with no ties, and queues ordered by
+// (cost, tile), so any heap pops them in the same order.
+
 double uniform(Rng& rng) { return rng.below(65536) / 65536.0; }
+double mix(double a, double b, double t) { return a + t * (b - a); }
+double dist(double dx, double dy) { return std::sqrt(dx * dx + dy * dy); }
 
 /** Perlin's gradient noise, its permutation drawn from the dice. */
 class Noise {
@@ -50,9 +58,9 @@ class Noise {
     double u = fade(xf), v = fade(yf);
     int aa = perm_[perm_[X] + Y], ab = perm_[perm_[X] + Y + 1];
     int ba = perm_[perm_[X + 1] + Y], bb = perm_[perm_[X + 1] + Y + 1];
-    double x1 = std::lerp(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
-    double x2 = std::lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
-    return std::lerp(x1, x2, v);
+    double x1 = mix(grad(aa, xf, yf), grad(ba, xf - 1, yf), u);
+    double x2 = mix(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
+    return mix(x1, x2, v);
   }
   /** Fractal Brownian motion: octaves of the noise, each twice as fine. */
   double fbm(double x, double y, int octaves = 5) const {
@@ -258,7 +266,8 @@ void relief(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t,
     for (int i : mass) onMass[i] = 1;
     auto pockets = g.parts([&](int i) { return onMass[i] && t[i] != MOUNTAINS; });
     if (pockets.size() < 2) continue;
-    std::sort(pockets.begin(), pockets.end(), [](auto& a, auto& b) { return a.size() > b.size(); });
+    std::sort(pockets.begin(), pockets.end(),
+              [](auto& a, auto& b) { return a.size() != b.size() ? a.size() > b.size() : a[0] < b[0]; });
     // 0-1 search from the largest: a mountain tile costs 1, open ground 0
     std::vector<int> cost(n, 1 << 30), from(n, -1);
     std::deque<int> q;
@@ -308,12 +317,15 @@ void rivers(const Settings& s, Rng& rng, const Grid& g, std::vector<uint8_t>& t)
   // the way down: the cheapest path to the sea, a tile costing more where
   // the noise is high, so the river follows the noise's valleys and winds
   std::vector<double> cost(n);
-  for (int i = 0; i < n; i++) cost[i] = 1 + 14 * std::pow(0.5 + 0.5 * wander.fbm((i % w) / 12.0 + 3.3, (i / w) / 12.0 + 1.1, 3), 2);
+  for (int i = 0; i < n; i++) {
+    double v = 0.5 + 0.5 * wander.fbm((i % w) / 12.0 + 3.3, (i / w) / 12.0 + 1.1, 3);
+    cost[i] = 1 + 14 * v * v;
+  }
   for (int src : sources) {
     if ((int)started.size() >= want) break;
     bool apart = true;
     for (int o : started)
-      if (std::hypot(o % w - src % w, o / w - src / w) < 22) apart = false;
+      if (dist(o % w - src % w, o / w - src / w) < 22) apart = false;
     if (!apart) continue;
     std::vector<double> best(n, 1e18);
     std::vector<int> from(n, -1);
@@ -409,8 +421,8 @@ std::vector<std::pair<int, int>> spread(Rng& rng, const std::vector<int>& spots,
   if (spots.empty()) return out;
   auto nearest = [&](int x, int y) {
     double best = 1e9;
-    for (auto& [ax, ay] : out) best = std::min(best, std::hypot(ax - x, ay - y));
-    for (auto& [ax, ay] : avoid) best = std::min(best, std::hypot(ax - x, ay - y));
+    for (auto& [ax, ay] : out) best = std::min(best, dist(ax - x, ay - y));
+    for (auto& [ax, ay] : avoid) best = std::min(best, dist(ax - x, ay - y));
     return best;
   };
   for (int k = 0; k < count; k++) {
@@ -433,7 +445,51 @@ std::vector<std::pair<int, int>> spread(Rng& rng, const std::vector<int>& spots,
   return out;
 }
 
+// the words a world's name is made of
+const char* const ADJECTIVES[] = {"Shattered", "Sundered", "Burning",   "Frozen", "Whispering", "Forgotten",
+                                  "Gilded",    "Crimson",  "Iron",      "Silver", "Hollow",     "Endless",
+                                  "Drowned",   "Ashen",    "Emerald",   "Howling", "Sunken",    "Twilight",
+                                  "Broken",    "Haunted",  "Golden",    "Bitter",  "Wild",      "Lost"};
+const char* const FIRST[] = {"Thorn", "Dusk",  "Ember", "Raven",  "Storm", "Frost", "Gold",  "Wolf",
+                             "Mist",  "Drake", "Shade", "Iron",   "Bright", "Grim", "Moon",  "Star",
+                             "Oak",   "Black", "Red",   "Winter", "Wyrm",  "Ash",   "Salt",  "Hawk"};
+const char* const SECOND[] = {"mere", "hold", "vale",  "fell",  "wick",  "haven", "march", "moor",
+                              "crest", "reach", "gard", "shire", "fall", "wood", "spire", "ford"};
+const char* const NOUNS[3][8] = {
+    {"Kingdoms", "Marches", "Dominions", "Realms", "Baronies", "Lands", "Reaches", "Shires"},      // continents
+    {"Realm", "Expanse", "Heartland", "Empire", "Dominion", "Wilds", "Steppe", "Highlands"},       // pangaea
+    {"Isles", "Archipelago", "Atolls", "Shoals", "Skerries", "Islands", "Straits", "Sea Lords"}};  // islands
+const char* const LINES[] = {"Eight warlords, one throne",    "Where empires rise and fall",
+                             "Dragons stir beyond the hills", "Gold, steel and treachery",
+                             "A land waiting for a king",     "Fortune favours the bold",
+                             "Old ruins, older magic",        "Heroes wanted. Apply within",
+                             "The war begins at dawn",        "Every road leads to war",
+                             "Crowns are won, not given",     "Banners over every hill",
+                             "Beware the dark between towns", "Here be monsters (and loot)",
+                             "Many cities, one Warlord",      "Sharpen your swords"};
+
+template <class T, size_t N>
+const char* pickWord(Rng& rng, const T (&list)[N]) { return list[rng.below((int)N)]; }
+
 }  // namespace
+
+Title title(Shape shape, long seed) {
+  Rng rng((double)seed + 1000003.0);   // its own dice: naming never touches the world's
+  const auto& nouns = NOUNS[shape == Shape::Pangaea ? 1 : shape == Shape::Islands ? 2 : 0];
+  Title t;
+  for (int tries = 0; tries < 50; tries++) {
+    std::string place = std::string(pickWord(rng, FIRST)) + pickWord(rng, SECOND);
+    std::string noun = pickWord(rng, nouns), adj = pickWord(rng, ADJECTIVES);
+    int form = rng.below(3);
+    if (form == 0) t.name = "The " + adj + " " + noun;
+    else if (form == 1) t.name = noun + " of " + place;
+    else t.name = place + " " + noun;
+    if (t.name.size() <= 20) break;
+  }
+  if (t.name.size() > 20) t.name = t.name.substr(0, 20);
+  t.text = pickWord(rng, LINES);
+  return t;
+}
 
 bool parseShape(const std::string& s, Shape& out) {
   if (s == "continents") out = Shape::Continents;
@@ -562,7 +618,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h, const std::ve
     auto guess = [&](int i) { return 0.5 * (std::abs(i % w - bx) + std::abs(i / w - by)); };
     // a little extra the further a tile is off the straight line, so a road
     // runs as a staircase along it rather than as one long L
-    double lx = bx - ax0, ly = by - ay0, len = std::max(1.0, std::hypot(lx, ly));
+    double lx = bx - ax0, ly = by - ay0, len = std::max(1.0, dist(lx, ly));
     auto off = [&](int i) { return 0.08 * std::abs((i % w - ax0) * ly - (i / w - ay0) * lx) / len; };
     std::vector<double> cost(n, 1e18);
     std::vector<int> from(n, -1), via(n, -1);
@@ -613,7 +669,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h, const std::ve
   for (int a = 0; a < m; a++) {
     std::vector<std::pair<double, int>> near;
     for (int b = 0; b < m; b++)
-      if (b != a) near.push_back({std::hypot(cities[a].first - cities[b].first, cities[a].second - cities[b].second), b});
+      if (b != a) near.push_back({dist(cities[a].first - cities[b].first, cities[a].second - cities[b].second), b});
     std::sort(near.begin(), near.end());
     for (int k = 0; k < 4 && k < (int)near.size(); k++) {
       int b = near[k].second;
@@ -622,7 +678,11 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h, const std::ve
       if (c > 0) links.push_back({c, a, b});
     }
   }
-  std::sort(links.begin(), links.end(), [](auto& p, auto& q) { return p.cost < q.cost; });
+  auto cheaper = [](const Link& p, const Link& q) {
+    if (p.cost != q.cost) return p.cost < q.cost;
+    return p.a != q.a ? p.a < q.a : p.b < q.b;
+  };
+  std::sort(links.begin(), links.end(), cheaper);
   // the minimum spanning tree (Kruskal), then a few links where the tree
   // would send a traveller the long way round
   std::vector<int> root(m);
@@ -659,7 +719,7 @@ Roads planRoads(const std::vector<uint8_t>& terrain, int w, int h, const std::ve
     }
   }
   // lay them, cheapest first, each joining what is there already
-  std::sort(chosen.begin(), chosen.end(), [](auto& p, auto& q) { return p.cost < q.cost; });
+  std::sort(chosen.begin(), chosen.end(), cheaper);
   std::vector<uint8_t> bridged(spans.size(), 0);
   for (auto& l : chosen) {
     std::vector<int> tiles, used;
