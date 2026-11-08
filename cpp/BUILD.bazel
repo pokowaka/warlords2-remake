@@ -175,3 +175,39 @@ sh_binary(
     ],
     data = GOLDEN_TOOLS + DATA,
 )
+
+# The front end's safety net: the same screens for the same clicks
+# (cpp/test/ui_test.sh).
+sh_test(
+    name = "ui_test",
+    size = "medium",
+    srcs = ["test/ui_test.sh"],
+    args = [
+        "$(rootpath :warlords2)",
+        "cpp/test/ui/dialogs.txt",
+        "cpp/test/golden/ui.sha256",
+    ],
+    data = [
+        ":warlords2",
+        "ai_weights.json",
+        "test/ui/dialogs.txt",
+        "test/golden/ui.sha256",
+    ] + DATA,
+)
+
+# Records the screens anew: bazel run //cpp:ui_update [-- DIR].
+sh_binary(
+    name = "ui_update",
+    srcs = ["test/ui_test.sh"],
+    args = [
+        "$(rootpath :warlords2)",
+        "cpp/test/ui/dialogs.txt",
+        "cpp/test/golden/ui.sha256",
+        "--update",
+    ],
+    data = [
+        ":warlords2",
+        "ai_weights.json",
+        "test/ui/dialogs.txt",
+    ] + DATA,
+)

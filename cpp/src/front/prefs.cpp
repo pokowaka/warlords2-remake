@@ -1,5 +1,6 @@
 #include "front/prefs.hpp"
 
+#include <cstdlib>
 #include <map>
 
 #include <SDL.h>
@@ -13,6 +14,12 @@ static const char* file_name = "w2-prefs.json";
 
 std::string UserFile(const std::string& name) {
     static std::string dir = []() {
+        // W2_USER_DIR keeps scripted runs and tests away from the player's
+        // own settings and saved games
+        if (const char* override_dir = std::getenv("W2_USER_DIR")) {
+            std::string d = override_dir;
+            return d.empty() || d.back() == '/' ? d : d + '/';
+        }
         char* p = SDL_GetPrefPath("", "Warlords II Remake");
         std::string d = p ? p : "";
         SDL_free(p);
