@@ -25,13 +25,6 @@ const char* const kAdvice[10] = {
     "as simple as butchering sleeping cattle!",
 };
 
-// Offsets into an army type's bonus fields (see docs/formats/armytype.md).
-// The two terrain bonuses are per class: add 2 * class.
-static const int kBonusSelf = 32;   ///< The army's own +n strength on a terrain class.
-static const int kBonusStack = 40;  ///< The +n the army gives its whole line on a class.
-static const int kSubtract = 50;    ///< The -n the army takes off every enemy army.
-static const int kAbility = 52;     ///< The ability enum: kSiege, kNegateHero, kNegateOther.
-
 int TerrainClass(const Game& game, int x, int y) {
     if (game::TowerAt(game, x, y)) return kCity;
     int terrain = scn::TerrainAt(*game.map, x, y);
@@ -95,22 +88,21 @@ int ItemTotal(const Army& army, int item_type) {
 /** @brief Whether any army in the line has the given ability (kSiege, ...). */
 bool LineHas(const Game& game, const std::vector<Army*>& line, int ability) {
     for (Army* army : line)
-        if (game.types.ById(army->type)->bonus[kAbility] == ability) return true;
+        if (game.types.ById(army->type)->Ability() == ability) return true;
     return false;
 }
 
 /** @brief The best stack bonus any army in the line gives on the terrain class. */
 int StackBonus(const Game& game, const std::vector<Army*>& line, int cls) {
     int best = 0;
-    for (Army* army : line)
-        best = std::max(best, game.types.ById(army->type)->bonus[kBonusStack + 2 * cls]);
+    for (Army* army : line) best = std::max(best, game.types.ById(army->type)->StackBonus(cls));
     return best;
 }
 
 /** @brief The largest penalty (most negative subtract) the line puts on its enemies. */
 int Subtract(const Game& game, const std::vector<Army*>& line) {
     int least = 0;
-    for (Army* army : line) least = std::min(least, game.types.ById(army->type)->bonus[kSubtract]);
+    for (Army* army : line) least = std::min(least, game.types.ById(army->type)->Subtract());
     return least;
 }
 }  // namespace
@@ -196,8 +188,8 @@ std::pair<int, int> Modifiers(const Game& game, const std::vector<Army*>& attack
 
 int Strength(const Game& game, const Army& army, int mod, int cls, int terrain) {
     if (army.at_sea && (terrain == move::kWater || terrain == move::kShore)) return 4;
-    int strength = army.strength + mod + BattleItems(army) +
-                   game.types.ById(army.type)->bonus[kBonusSelf + 2 * cls];
+    int strength =
+            army.strength + mod + BattleItems(army) + game.types.ById(army.type)->SelfBonus(cls);
     return std::min(kMaxStrength, strength);
 }
 
@@ -211,7 +203,7 @@ std::map<const Army*, int> StackStrengths(const Game& game, const std::vector<Ar
                 int hero_strength = std::min(9, army->strength + BattleItems(*army));
                 total += kHeroTable[std::max(0, hero_strength)] + CommandItems(*army);
             } else {
-                int stack_bonus = game.types.ById(army->type)->bonus[kBonusStack + 2 * cls];
+                int stack_bonus = game.types.ById(army->type)->StackBonus(cls);
                 if (stack_bonus > best_stack_bonus) {
                     total = total + stack_bonus - best_stack_bonus;
                     best_stack_bonus = stack_bonus;
@@ -228,7 +220,7 @@ std::map<const Army*, int> StackStrengths(const Game& game, const std::vector<Ar
         else if (army->type == armytype::kHero)
             strength = army->strength + BattleItems(*army);
         else
-            strength = army->strength + game.types.ById(army->type)->bonus[kBonusSelf + 2 * cls];
+            strength = army->strength + game.types.ById(army->type)->SelfBonus(cls);
         strengths[army] = std::min(9, strength) + total;
     }
     return strengths;

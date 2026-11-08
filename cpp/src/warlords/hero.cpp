@@ -116,8 +116,7 @@ const ArmyType* MagicalType(Game& game) {
     std::vector<int> ids;
     for (int id = 0; id <= 27; id++) {
         const ArmyType* type = game.types.ById(id);
-        // bonus field 48 is the magical flag (see docs/formats/armytype.md)
-        if (type && type->bonus[48] != 0) ids.push_back(id);
+        if (type && type->IsMagical()) ids.push_back(id);
     }
     int pick = game.rng.Dice(1, static_cast<int>(ids.size()), -1);
     return game.types.ById(pick >= 0 && pick < static_cast<int>(ids.size()) ? ids[pick] : 25);

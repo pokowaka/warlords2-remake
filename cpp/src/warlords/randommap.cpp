@@ -2059,12 +2059,12 @@ class Generator {
     /** @brief True if army type `type_id` has the flying flag (ARMYTYPE +54). */
     bool Flies(int type_id) const {
         const ArmyType* army_type = types.ById(type_id);
-        return army_type && army_type->bonus[54] != 0;
+        return army_type && army_type->flies;
     }
     /** @brief True if army type `type_id` is magical / an ally (ARMYTYPE +48). */
     bool Magical(int type_id) const {
         const ArmyType* army_type = types.ById(type_id);
-        return army_type && army_type->bonus[48] != 0;
+        return army_type && army_type->IsMagical();
     }
 
     /** @brief Populates production slot `slot_idx` of city `city_idx` with army type `type_id`. */

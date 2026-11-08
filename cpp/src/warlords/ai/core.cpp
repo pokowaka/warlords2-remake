@@ -88,10 +88,10 @@ bool Flies(const Game& game, const Army* army) {
     return game.types.ById(army->type)->flies;
 }
 bool Magical(const Game& game, const Army* army) {
-    return game.types.ById(army->type)->bonus[48] != 0;
+    return game.types.ById(army->type)->IsMagical();
 }
 int Ability(const Game& game, const Army* army) {
-    return game.types.ById(army->type)->bonus[52];
+    return game.types.ById(army->type)->Ability();
 }
 bool Woods(const Game& game, const Army* army) {
     return game.types.ById(army->type)->woods_move;

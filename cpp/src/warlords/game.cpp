@@ -1189,7 +1189,7 @@ Battle& ApplyAttack(Game& game, Battle& result) {
 
 /** @brief Returns whether `army` is an ordinary army (not a hero or magical creature). */
 static bool Ordinary(const Game& game, const Army* army) {
-    return army->type != armytype::kHero && game.types.ById(army->type)->bonus[48] == 0;
+    return army->type != armytype::kHero && !game.types.ById(army->type)->IsMagical();
 }
 
 /**

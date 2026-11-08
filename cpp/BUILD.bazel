@@ -5,23 +5,190 @@ load(":copts.bzl", "W2_COPTS")
 
 package(default_visibility = ["//visibility:private"])
 
-# The rules core and the computer player: no SDL, so the tests and the AI
-# trainer link it alone.
+# Layer 1: Low-level utilities, JSON, RNG, and binary readers.
+cc_library(
+    name = "util",
+    copts = W2_COPTS,
+    srcs = glob(["src/util/*.cpp"]),
+    hdrs = glob(["src/util/*.hpp"]) + [
+        "src/warlords/bytes.hpp",
+        "src/warlords/rng.hpp",
+    ],
+    includes = ["src"],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 2: Domain model headers (ArmyType, City, Side, Army, Map, Game, ...).
+cc_library(
+    name = "model",
+    copts = W2_COPTS,
+    hdrs = glob(["src/warlords/model/*.hpp"]) + ["src/warlords/types.hpp"],
+    includes = ["src"],
+    deps = [":util"],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 3: Original Warlords II binary/text file formats (.SCN, .PCK, .XMI, ...).
+cc_library(
+    name = "formats",
+    copts = W2_COPTS,
+    srcs = [
+        "src/warlords/aicard.cpp",
+        "src/warlords/ailfm.cpp",
+        "src/warlords/armytype.cpp",
+        "src/warlords/cues.cpp",
+        "src/warlords/opl.cpp",
+        "src/warlords/pal.cpp",
+        "src/warlords/pck.cpp",
+        "src/warlords/preview.cpp",
+        "src/warlords/scenarios.cpp",
+        "src/warlords/scn.cpp",
+        "src/warlords/uidata.cpp",
+        "src/warlords/xmi.cpp",
+    ],
+    hdrs = [
+        "src/warlords/aicard.hpp",
+        "src/warlords/ailfm.hpp",
+        "src/warlords/armytype.hpp",
+        "src/warlords/cues.hpp",
+        "src/warlords/opl.hpp",
+        "src/warlords/pal.hpp",
+        "src/warlords/pck.hpp",
+        "src/warlords/preview.hpp",
+        "src/warlords/scenarios.hpp",
+        "src/warlords/scn.hpp",
+        "src/warlords/scn_format.hpp",
+        "src/warlords/uidata.hpp",
+        "src/warlords/xmi.hpp",
+    ],
+    includes = ["src"],
+    deps = [
+        ":model",
+        ":util",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 4: Core game rules, movement, combat, diplomacy, and AI controllers.
+cc_library(
+    name = "rules",
+    copts = W2_COPTS,
+    srcs = [
+        "src/warlords/ai.cpp",
+        "src/warlords/combat.cpp",
+        "src/warlords/diplomacy.cpp",
+        "src/warlords/game.cpp",
+        "src/warlords/hero.cpp",
+        "src/warlords/history.cpp",
+        "src/warlords/move.cpp",
+        "src/warlords/quest.cpp",
+        "src/warlords/report.cpp",
+        "src/warlords/rules.cpp",
+        "src/warlords/site.cpp",
+        "src/warlords/slots.cpp",
+        "src/warlords/travel.cpp",
+    ] + glob(["src/warlords/ai/*.cpp"]),
+    hdrs = [
+        "src/warlords/ai.hpp",
+        "src/warlords/combat.hpp",
+        "src/warlords/diplomacy.hpp",
+        "src/warlords/game.hpp",
+        "src/warlords/hero.hpp",
+        "src/warlords/history.hpp",
+        "src/warlords/move.hpp",
+        "src/warlords/quest.hpp",
+        "src/warlords/report.hpp",
+        "src/warlords/rules.hpp",
+        "src/warlords/site.hpp",
+        "src/warlords/slots.hpp",
+        "src/warlords/travel.hpp",
+    ] + glob(["src/warlords/ai/*.hpp"]),
+    includes = ["src"],
+    deps = [
+        ":formats",
+        ":model",
+        ":util",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 5: World generation (classic RANDOM.DAT generator, modern scengen, map evaluator).
+cc_library(
+    name = "worldgen",
+    copts = W2_COPTS,
+    srcs = [
+        "src/warlords/mapeval.cpp",
+        "src/warlords/randommap.cpp",
+        "src/warlords/scengen.cpp",
+    ],
+    hdrs = [
+        "src/warlords/mapeval.hpp",
+        "src/warlords/randommap.hpp",
+        "src/warlords/scengen.hpp",
+    ],
+    includes = ["src"],
+    deps = [
+        ":formats",
+        ":model",
+        ":rules",
+        ":util",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 6: Persistence (save game serialization).
+cc_library(
+    name = "persistence",
+    copts = W2_COPTS,
+    srcs = [
+        "src/warlords/save.cpp",
+    ],
+    hdrs = [
+        "src/warlords/save.hpp",
+    ],
+    includes = ["src"],
+    deps = [
+        ":formats",
+        ":model",
+        ":rules",
+        ":util",
+        ":worldgen",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Umbrella target for headless tools and tests.
 cc_library(
     name = "w2core",
     copts = W2_COPTS,
-    srcs = glob([
-        "src/util/*.cpp",
-        "src/warlords/*.cpp",
-        "src/warlords/ai/*.cpp",
-    ]),
-    hdrs = glob([
-        "src/util/*.hpp",
-        "src/warlords/*.hpp",
-        "src/warlords/ai/*.hpp",
-    ]),
     includes = ["src"],
     linkopts = ["-lpthread"],
+    deps = [
+        ":formats",
+        ":model",
+        ":persistence",
+        ":rules",
+        ":util",
+        ":worldgen",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 7: Platform abstraction over SDL2, Vorbis audio, and user preferences.
+cc_library(
+    name = "platform",
+    copts = W2_COPTS,
+    srcs = glob(["src/platform/*.cpp"]) + ["src/front/prefs.cpp"],
+    hdrs = glob(["src/platform/*.hpp"]) + ["src/front/prefs.hpp"],
+    defines = ["W2_VORBIS=1"],
+    includes = ["src"],
+    deps = [
+        ":formats",
+        ":util",
+        "@sdl2",
+        "@sdl2//:sdl2_headers_flat",
+        "@vorbis//:vorbisfile",
+    ],
     visibility = ["//cpp:__subpackages__"],
 )
 
@@ -29,21 +196,25 @@ cc_library(
 cc_binary(
     name = "warlords2",
     copts = W2_COPTS,
-    srcs = glob([
-        "src/platform/*.cpp",
-        "src/platform/*.hpp",
-        "src/ui/*.cpp",
-        "src/ui/*.hpp",
-        "src/front/*.cpp",
-        "src/front/*.hpp",
-    ]) + ["src/main.cpp"],
+    srcs = glob(
+        [
+            "src/ui/*.cpp",
+            "src/ui/*.hpp",
+            "src/front/*.cpp",
+            "src/front/*.hpp",
+        ],
+        exclude = [
+            "src/front/prefs.cpp",
+            "src/front/prefs.hpp",
+        ],
+    ) + ["src/main.cpp"],
     defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
+        ":platform",
         ":w2core",
         "@sdl2",
-        "@sdl2//:sdl2_headers_flat",   # <SDL.h>, as SDL's own sdl2-config gives it
-        "@vorbis//:vorbisfile",
+        "@sdl2//:sdl2_headers_flat",
     ],
 )
 

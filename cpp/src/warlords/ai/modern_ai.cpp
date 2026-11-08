@@ -95,7 +95,7 @@ ml::StackVec BuildStackFeatures(const Game& game, const std::vector<Army*>& stac
             else
                 all_fly = false;
             if (army_type->siege) has_siege = true;
-            if (army_type->bonus[48] != 0 || army_type->bonus[52] != 0) has_special = true;
+            if (army_type->IsMagical() || army_type->Ability() != 0) has_special = true;
         } else {
             all_fly = false;
         }
@@ -1633,7 +1633,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             econ_vec[10] = static_cast<float>(army->upkeep) / 15.0F;
             econ_vec[11] = (army_type && army_type->flies) ? 1.0F : 0.0F;
             econ_vec[12] =
-                    (army_type && (army_type->siege || army_type->bonus[48] != 0)) ? 1.0F : 0.0F;
+                    (army_type && (army_type->siege || army_type->IsMagical())) ? 1.0F : 0.0F;
             econ_vec[13] =
                     (army->max_moves >= 14 && (!army_type || !army_type->flies)) ? 1.0F : 0.0F;
             econ_vec[14] = std::tanh(threat / 25.0F);
@@ -1706,7 +1706,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 econ_vec[10] = static_cast<float>(price) /
                                std::max(100.0F, static_cast<float>(side.gold - 80));
                 econ_vec[11] = army_type->flies ? 1.0F : 0.0F;
-                econ_vec[12] = (army_type->siege || army_type->bonus[48] != 0) ? 1.0F : 0.0F;
+                econ_vec[12] = (army_type->siege || army_type->IsMagical()) ? 1.0F : 0.0F;
                 econ_vec[13] = (army_type->move >= 14 && !army_type->flies) ? 1.0F : 0.0F;
                 econ_vec[14] = std::tanh(threat / 25.0F);
                 econ_vec[15] = std::tanh(dist_e / 60.0F);
@@ -1791,8 +1791,8 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             const Slot& slot = city->slots[si];
             const ArmyType* army_type = game.types.ById(slot.type);
             bool is_flier = army_type && army_type->flies;
-            bool is_siege_or_spec = army_type && (army_type->siege || army_type->bonus[48] != 0 ||
-                                                  army_type->bonus[52] != 0);
+            bool is_siege_or_spec = army_type && (army_type->siege || army_type->IsMagical() ||
+                                                  army_type->Ability() != 0);
             bool is_cav = slot.move >= 14 && !is_flier;
 
             ml::EconVec econ_vec{};

@@ -34,7 +34,7 @@ void Tally(Game& game, const Army* army, int killer, bool boat) {
     Loss kind;
     if (army->type == armytype::kHero)
         kind = Loss::kHeroes;
-    else if (game.types.ById(army->type)->bonus[48] != 0)
+    else if (game.types.ById(army->type)->IsMagical())
         kind = Loss::kCreatures;
     else
         kind = Loss::kArmies;

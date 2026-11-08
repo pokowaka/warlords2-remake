@@ -4,6 +4,7 @@
 
 #include "util/util.hpp"
 #include "warlords/bytes.hpp"
+#include "warlords/scn_format.hpp"
 
 namespace w2 {
 
@@ -33,21 +34,7 @@ int* Options::Field(const std::string& name) {
 namespace scn {
 
 namespace {
-// Where things are in a .SCN file (docs/formats/scenario.md).
-const int kSideNames = 0, kSideStride = 20;
-// 0xa0 is the side's own colour, 0xb0 the colour it outlines things in.
-const int kSideColours = 0xa0, kSideEdges = 0xb0;
-const int kSideRecs = 387, kSideRecStride = 20;
-const int kLevels = 0xc0, kControllers = 0xd0, kEnhanced = 0xf0;
-const int kObserve = 0x147, kCards = 0xe0;
-const int kMonsterStrength = 0x1007;
-const int kFightOrder = 0x60b, kFightRows = 9, kFightTypes = 29;
-const int kCombatCap = 0x112, kDiploScore = 0x10e3;
-const int kTerrainTable = 0x710, kTerrainCount = 255;
-const int kSitesCount = 0x80f, kSites = 0x811, kSiteStride = 31;
-const int kItems = 3305, kItemStride = 29, kNItems = 22;
-const int kMonsters = 3943, kMonsterStride = 16, kNMonsters = 10;
-const int kCitiesCount = 5499, kCities = 5501, kCityStride = 65;
+using namespace scn_format;
 
 /// The option words. They are NOT in menu order; see docs/rules.md > Game setup.
 const std::pair<const char*, int> kOptions[] = {
@@ -198,21 +185,21 @@ std::unique_ptr<Map> LoadFromFiles(const std::string& dir, const std::string& na
     }
 
     for (int i = 0; i < 8; i++) {
-        int record = kSideRecs + kSideRecStride * i;
+        SideRecordView rec(scn_bytes, i);
         Side& side = map->sides[i];
         side.index = i;
-        side.name = Cstr(scn_bytes, kSideNames + kSideStride * i, kSideStride);
-        side.colour = U16(scn_bytes, kSideColours + 2 * i);
-        side.edge = U16(scn_bytes, kSideEdges + 2 * i);
-        side.gold = U16(scn_bytes, record + 2);
-        side.cap_x = U16(scn_bytes, record + 6);
-        side.cap_y = U16(scn_bytes, record + 8);
-        side.computer = U16(scn_bytes, kControllers + 2 * i) != 0;
-        side.level = U16(scn_bytes, kLevels + 2 * i);
-        side.enhanced = U16(scn_bytes, kEnhanced + 2 * i) != 0;
-        side.observe = U16(scn_bytes, kObserve + 2 * i) != 0;
-        side.diplo_score = U16(scn_bytes, kDiploScore + 2 * i);
-        side.card = U16(scn_bytes, kCards + 2 * i);
+        side.name = rec.Name();
+        side.colour = rec.Colour();
+        side.edge = rec.Edge();
+        side.gold = rec.Gold();
+        side.cap_x = rec.CapX();
+        side.cap_y = rec.CapY();
+        side.computer = rec.Computer();
+        side.level = rec.Level();
+        side.enhanced = rec.Enhanced();
+        side.observe = rec.Observe();
+        side.diplo_score = rec.DiploScore();
+        side.card = rec.Card();
     }
 
     int n_cities = U16(scn_bytes, kCitiesCount);
@@ -220,17 +207,17 @@ std::unique_ptr<Map> LoadFromFiles(const std::string& dir, const std::string& na
     map->city_at.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
     map->city_tile.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
     for (int i = 0; i < n_cities; i++) {
-        int record = kCities + kCityStride * i;
+        CityRecordView rec(scn_bytes, i);
         City& city = map->cities[i];
         city.index = i;
-        city.x = U16(scn_bytes, record);
-        city.y = U16(scn_bytes, record + 2);
-        city.name = Cstr(scn_bytes, record + 4, 16);
-        city.income = U8(scn_bytes, record + 42);
+        city.x = rec.X();
+        city.y = rec.Y();
+        city.name = rec.Name();
+        city.income = rec.Income();
         for (int slot = 0; slot < 4; slot++) {
-            int army_type = U8(scn_bytes, record + 22 + slot);
+            int army_type = rec.SlotType(slot);
             // the game removes Navy (type 5) from every city at start
-            if (army_type != 255 && army_type != 5) city.produces.push_back(army_type);
+            if (army_type != kEmptySlot && army_type != 5) city.produces.push_back(army_type);
         }
         city.defence = city.produces.size() >= 3 ? 2 : 1;
         map->city_at[city.y * kMapW + city.x] = &city;
@@ -261,25 +248,25 @@ std::unique_ptr<Map> LoadFromFiles(const std::string& dir, const std::string& na
 
     int n_sites = U16(scn_bytes, kSitesCount);
     for (int i = 0; i < n_sites; i++) {
-        int record = kSites + kSiteStride * i;
+        SiteRecordView rec(scn_bytes, i);
         Site site;
         site.index = i;
-        site.x = U16(scn_bytes, record);
-        site.y = U16(scn_bytes, record + 2);
-        site.name = Cstr(scn_bytes, record + 4, 20);
-        site.type = U16(scn_bytes, record + 24);
+        site.x = rec.X();
+        site.y = rec.Y();
+        site.name = rec.Name();
+        site.type = rec.Type();
         map->sites.push_back(site);
     }
 
     for (int i = 0; i < kNItems; i++) {
-        int record = kItems + kItemStride * i;
-        std::string item_name = Cstr(scn_bytes, record, 20);
+        ItemRecordView rec(scn_bytes, i);
+        std::string item_name = rec.Name();
         if (!item_name.empty()) {
             Item item;
             item.index = i;
             item.name = item_name;
-            item.type = U8(scn_bytes, record + 20);
-            item.value = U8(scn_bytes, record + 21);
+            item.type = rec.Type();
+            item.value = rec.Value();
             map->items.push_back(item);
         }
     }

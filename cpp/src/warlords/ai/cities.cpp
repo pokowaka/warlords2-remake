@@ -166,7 +166,7 @@ static void BuyFlier(Game& game, Side& side, City& city) {
     AIData& data = Data(game, side);
     for (int type_id = 0; type_id <= 28; type_id++) {
         const ArmyType* type = game.types.ById(type_id);
-        if (type && type->flies && type->bonus[48] == 0 && type->price + 30 <= side.gold) {
+        if (type && type->flies && !type->IsMagical() && type->price + 30 <= side.gold) {
             game::BuyProduction(game, side, city, slot, type_id);
             game::SortProduction(city);
             SetCflag(data, city, kCfFlier);
