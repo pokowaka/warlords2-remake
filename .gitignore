@@ -19,3 +19,9 @@ original/GEN*/
 original/DATA/SCENGEN.LST
 web/assets/data/GEN*/
 web/assets/data/DATA/SCENGEN.LST
+
+# Bazel
+/bazel-*
+user.bazelrc
+cpp/.cache/
+compile_commands.json

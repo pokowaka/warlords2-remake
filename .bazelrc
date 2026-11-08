@@ -1,0 +1,21 @@
+# C++23 everywhere. Our own warnings are in cpp/copts.bzl, so they don't
+# apply to SDL, Vorbis and the other external code.
+build --cxxopt=-std=c++23 --host_cxxopt=-std=c++23
+# The external C libraries' own warnings are theirs to fix.
+build --per_file_copt=external/.*@-w
+# No fused multiply-adds: a*b+c rounded twice, as JavaScript and LuaJIT round
+# it, so the three ports' generators make the same worlds bit for bit.
+build --copt=-ffp-contract=off --host_copt=-ffp-contract=off
+build -c opt
+
+# Tests print their failures.
+test --test_output=errors
+
+# Optimise for this machine's CPU (the AI trainer): bazel build --config=native
+build:native --copt=-march=native
+
+# Sanitizers: bazel test --config=asan //cpp/...
+build:asan -c dbg --copt=-fsanitize=address,undefined --linkopt=-fsanitize=address,undefined
+build:asan --copt=-fno-omit-frame-pointer
+
+try-import %workspace%/user.bazelrc

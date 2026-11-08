@@ -1,7 +1,8 @@
 #!/bin/sh
 # Make the same scenario-generator worlds in the C++, JavaScript and Lua
 # ports and compare them byte for byte (docs/scengen.md). Run from the
-# repository root, after building into cpp/build:
+# repository root, after `bazel build //cpp:w2scengen` (or point W2SCENGEN
+# at another w2scengen):
 #     sh cpp/test/scengen_compare.sh [first-seed count]
 set -u
 first=${1:-1}
@@ -10,7 +11,7 @@ tmp=${TMPDIR:-/tmp}/w2scengen.$$
 mkdir -p "$tmp/cpp" "$tmp/js" "$tmp/lua"
 fail=0
 for shape in continents pangaea islands; do
-  cpp/build/w2scengen --dump "$tmp/cpp" --shape $shape --seed "$first" --count "$count" || fail=1
+  ${W2SCENGEN:-bazel-bin/cpp/w2scengen} --dump "$tmp/cpp" --shape $shape --seed "$first" --count "$count" || fail=1
   node web/test/scengen_dump.js "$tmp/js" $shape "$first" "$count" || fail=1
   luajit love2d/test/scengen_dump.lua "$tmp/lua" $shape "$first" "$count" || fail=1
 done

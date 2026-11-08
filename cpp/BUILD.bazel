@@ -1,0 +1,177 @@
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load(":copts.bzl", "W2_COPTS")
+
+package(default_visibility = ["//visibility:private"])
+
+# The rules core and the computer player: no SDL, so the tests and the AI
+# trainer link it alone.
+cc_library(
+    name = "w2core",
+    copts = W2_COPTS,
+    srcs = glob([
+        "src/util/*.cpp",
+        "src/warlords/*.cpp",
+        "src/warlords/ai/*.cpp",
+    ]),
+    hdrs = glob([
+        "src/util/*.hpp",
+        "src/warlords/*.hpp",
+        "src/warlords/ai/*.hpp",
+    ]),
+    includes = ["src"],
+    linkopts = ["-lpthread"],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# The game: the slim layer over SDL2, the front end and the dialogs.
+cc_binary(
+    name = "warlords2",
+    copts = W2_COPTS,
+    srcs = glob([
+        "src/platform/*.cpp",
+        "src/platform/*.hpp",
+        "src/ui/*.cpp",
+        "src/ui/*.hpp",
+        "src/front/*.cpp",
+        "src/front/*.hpp",
+    ]) + ["src/main.cpp"],
+    defines = ["W2_VORBIS=1"],
+    includes = ["src"],
+    deps = [
+        ":w2core",
+        "@sdl2",
+        "@sdl2//:sdl2_headers_flat",   # <SDL.h>, as SDL's own sdl2-config gives it
+        "@vorbis//:vorbisfile",
+    ],
+)
+
+# bazel run //cpp:play: the game, run in the repository root.
+sh_binary(
+    name = "play",
+    srcs = ["play.sh"],
+    args = ["$(rootpath :warlords2)"],
+    data = [":warlords2"],
+)
+
+# The game's files, for anything that reads them.
+DATA = ["//:original_data"]
+
+# The rules suite.
+cc_test(
+    name = "w2test",
+    copts = W2_COPTS,
+    size = "large",
+    srcs = ["test/run.cpp"],
+    # also the trained weights, and the rules' sources, which a check reads
+    # for the bug-compatibility flags they use
+    data = DATA + ["ai_weights.json"] + glob(["src/warlords/*.cpp"]),
+    deps = [":w2core"],
+)
+
+# Tools: the Lua-vs-C++ trace, the FM renderer, the AI trainer and its
+# helpers, the map evaluator and the scenario generator.
+cc_binary(
+    name = "w2trace",
+    copts = W2_COPTS,
+    srcs = ["test/trace.cpp"],
+    deps = [":w2core"],
+)
+
+cc_binary(
+    name = "w2fm",
+    copts = W2_COPTS,
+    srcs = ["test/fmrender.cpp"],
+    deps = [":w2core"],
+)
+
+cc_library(
+    name = "opponents",
+    copts = W2_COPTS,
+    srcs = ["test/opponents.cpp"],
+    hdrs = ["test/opponents.hpp"],
+    deps = [":w2core"],
+)
+
+cc_binary(
+    name = "w2arena",
+    copts = W2_COPTS,
+    srcs = ["test/arena.cpp"],
+    deps = [
+        ":opponents",
+        ":w2core",
+    ],
+)
+
+cc_binary(
+    name = "w2aidiag",
+    copts = W2_COPTS,
+    srcs = ["test/aidiag.cpp"],
+    deps = [
+        ":opponents",
+        ":w2core",
+    ],
+)
+
+cc_binary(
+    name = "w2search",
+    copts = W2_COPTS,
+    srcs = ["test/search.cpp"],
+    deps = [":w2core"],
+)
+
+cc_binary(
+    name = "w2imitate",
+    copts = W2_COPTS,
+    srcs = ["test/imitate.cpp"],
+    deps = [":w2core"],
+)
+
+cc_binary(
+    name = "w2mapeval",
+    copts = W2_COPTS,
+    srcs = ["test/mapeval.cpp"],
+    deps = [":w2core"],
+)
+
+cc_binary(
+    name = "w2scengen",
+    copts = W2_COPTS,
+    srcs = ["test/scengen.cpp"],
+    deps = [":w2core"],
+)
+
+# The refactor's safety net: the same games and worlds as when recorded
+# (cpp/test/golden.sh).
+GOLDEN_TOOLS = [
+    ":w2trace",
+    ":w2scengen",
+    ":w2mapeval",
+]
+
+GOLDEN_ARGS = [
+    "$(rootpath :w2trace)",
+    "$(rootpath :w2scengen)",
+    "$(rootpath :w2mapeval)",
+]
+
+sh_test(
+    name = "golden_test",
+    size = "large",
+    srcs = ["test/golden.sh"],
+    args = GOLDEN_ARGS + ["cpp/test/golden"],
+    data = GOLDEN_TOOLS + DATA + glob(["test/golden/**"]),
+)
+
+# Records the golden files anew: bazel run //cpp:golden_update. Only for a
+# change that is meant to change the games or the worlds.
+sh_binary(
+    name = "golden_update",
+    srcs = ["test/golden.sh"],
+    args = GOLDEN_ARGS + [
+        "cpp/test/golden",
+        "--update",
+    ],
+    data = GOLDEN_TOOLS + DATA,
+)

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Play the same all-computer games in the Lua remake and in the C++ port and
-# compare them turn by turn. Run from the repository root, after building
-# into cpp/build:
+# compare them turn by turn. Run from the repository root, after
+# `bazel build //cpp:w2trace` (or point W2TRACE at another w2trace):
 #     sh cpp/test/compare.sh [scenario seed turns [hidden|diplo|save]]
 set -u
 tmp=${TMPDIR:-/tmp}/w2compare.$$
@@ -9,7 +9,7 @@ mkdir -p "$tmp"
 fail=0
 run() {
   luajit cpp/test/trace.lua "$@" > "$tmp/lua.txt" 2>&1
-  cpp/build/w2trace "$@" > "$tmp/cpp.txt" 2>&1
+  ${W2TRACE:-bazel-bin/cpp/w2trace} "$@" > "$tmp/cpp.txt" 2>&1
   if cmp -s "$tmp/lua.txt" "$tmp/cpp.txt"; then
     echo "same  $* ($(wc -l < "$tmp/lua.txt" | tr -d ' ') turns)"
   else

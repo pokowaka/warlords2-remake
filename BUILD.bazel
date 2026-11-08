@@ -1,0 +1,16 @@
+# The original game's files, which the game, the tools and the tests read at
+# run time (from "original/" under their working directory).
+filegroup(
+    name = "original_data",
+    srcs = glob(
+        ["original/**"],
+        exclude = [
+            "original/GEN*/**",
+            "original/DATA/SCENGEN.LST",
+            # the setup screen rewrites it whenever a game starts; nothing
+            # headless reads it
+            "original/DATA/OPTIONS.DAT",
+        ],
+    ),
+    visibility = ["//cpp:__subpackages__"],
+)
