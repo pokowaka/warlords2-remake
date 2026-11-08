@@ -11,7 +11,9 @@
 //                       [--json PATH] [--issues N] [--threads N] [--data DIR]
 //
 //   --generator NAME   which generator makes the maps (classic: the 1993 port;
-//                      fair: the same with capitals placed for a fair start);
+//                      fair: the same with capitals placed for a fair start;
+//                      scenario: the new scenario generator, docs/scengen.md);
+//   --shape SHAPE      the scenario generator's land: continents, pangaea, islands
 //                      "none" evaluates only --scenarios
 //   --seeds A-B|A,B,C  the seeds to make maps from
 //   --scenarios LIST   scenarios to evaluate as well, by folder name
@@ -54,6 +56,11 @@ const std::map<std::string, Generator>& generators() {
       {"fair", [](const randommap::Options& o) {
          auto f = o;
          f.fairCapitals = true;
+         return randommap::generateNow(f);
+       }},
+      {"scenario", [](const randommap::Options& o) {
+         auto f = o;
+         f.scenario = true;
          return randommap::generateNow(f);
        }},
   };
@@ -154,6 +161,7 @@ int main(int argc, char** argv) {
   std::vector<int> seeds = parseSeeds("1-50");
   std::array<int, 4> sliders{{3, 3, 2, 3}};
   bool allies = false;
+  scengen::Shape shape = scengen::Shape::Continents;
   int issueLimit = 0;
   int threads = (int)std::max(1u, std::thread::hardware_concurrency());
   for (int i = 1; i < argc; i++) {
@@ -172,6 +180,10 @@ int main(int argc, char** argv) {
     else if (a == "--issues") issueLimit = std::stoi(next());
     else if (a == "--threads") threads = std::max(1, std::stoi(next()));
     else if (a == "--allies") allies = true;
+    else if (a == "--shape") {
+      std::string sh = next();
+      if (!scengen::parseShape(sh, shape)) { fprintf(stderr, "unknown shape '%s'\n", sh.c_str()); return 2; }
+    }
     else if (a == "--sliders") {
       auto v = splitList(next());
       if (v.size() != 4) { fprintf(stderr, "--sliders takes Water,Hills,Cities,Forest (0-6, 7 for chance)\n"); return 2; }
@@ -220,6 +232,7 @@ int main(int argc, char** argv) {
           o.rng = &r;
           o.sliders = randommap::settle(sliders, r);
           o.allies = allies;
+          o.world.shape = shape;
           auto files = g->second(o);
           if (!exportDir.empty()) {
             std::string dir = exportDir + "/" + generator + "-" + std::to_string(seeds[k]);

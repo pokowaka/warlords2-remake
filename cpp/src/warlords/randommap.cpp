@@ -13,6 +13,7 @@
 #include "warlords/randommap.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -163,6 +164,9 @@ class Generator {
   Rng* rng;
   bool allies;
   bool fair = false;               // Options::fairCapitals
+  bool modern = false;             // Options::scenario: the scenario generator
+  scengen::Settings world;         // Options::world
+  scengen::World plan;             // what the scenario generator made
   std::vector<uint16_t> tiles;
   std::vector<uint8_t> rd;
   std::string cty, spc, sgn;
@@ -1007,8 +1011,10 @@ class Generator {
 
   /** 513d:003a: site `i`, keeping the template's temples and ruins, with
    *  names and descriptions from RANDOM.DAT's word lists. */
-  void site(int i) {
-    P s = siteSpot();
+  void site(int i) { siteAt(i, siteSpot()); }
+
+  /** Site `i` at `s`: its record, its name and its description. */
+  void siteAt(int i, P s) {
     int o = S_SITES + SITE_STRIDE * i;
     ws16(o, s.x);
     ws16(o + 2, s.y);
@@ -1662,10 +1668,19 @@ class Generator {
     return name;
   }
 
+  /** Does a city before `c` already have this name? */
+  bool nameTaken(int c, const std::string& name) const {
+    for (int j = 0; j < c; j++)
+      if (cstrOf(scn, crec(j) + 4, 16) == name) return true;
+    return false;
+  }
+
   /** 513d:1171: the city's name, income -- value x 2 + 1d8 + 14 -- and its
    *  three lines of description, grander as the city is richer. */
   void cityText(int c, int v, const Surroundings& f) {
     std::string name = cityName(c, f);
+    // the scenario generator's names never repeat (the original's may)
+    for (int tries = 0; modern && tries < 200 && nameTaken(c, name); tries++) name = cityName(c, f);
     ws16(crec(c) + 42, v * 2 + dice(1, 8, 0) + 14);
     auto grade = [&]() { return std::min(9, std::max(0, dice(1, 3, v - 2))); };
     int g1 = grade();
@@ -1865,9 +1880,268 @@ class Generator {
 
   // --- the whole -------------------------------------------------------------
 
+  /** The world as files: the scenario image, the tile map and the roads, the
+   *  signposts and the descriptions. */
+  void writeFiles(Files& files) {
+    std::string map(2 * W * H, '\0');
+    for (int i = 0; i < W * H; i++) {
+      map[2 * i] = (char)(tiles[i] & 0xff);
+      map[2 * i + 1] = (char)(tiles[i] >> 8);
+    }
+    std::string road(W * H, '\0');
+    for (int i = 0; i < W * H; i++) road[i] = (char)(rd[i] & 0x1f);
+    files["SCN"] = std::string(scn.begin(), scn.end());
+    files["MAP"] = map;
+    files["RD"] = road;
+    files["SGN"] = sgn;
+    files["CTY"] = cty;
+    files["SPC"] = spc;
+  }
+
+  // --- not the original's: the scenario generator (warlords/scengen) -------
+
+  /** The terrain grid as the planners take it. */
+  std::vector<uint8_t> grid() const {
+    std::vector<uint8_t> t(W * H);
+    for (int i = 0; i < W * H; i++) t[i] = m[GRID + i];
+    return t;
+  }
+
+  /** Where a river may be bridged: two water tiles in a row, drawn as a
+   *  straight stretch of river (the tiles 5311:05b4 looks for), with firm
+   *  ground beyond both ends. */
+  std::vector<scengen::Span> spans() const {
+    std::vector<scengen::Span> out;
+    for (int y = 1; y < H - 2; y++)
+      for (int x = 1; x < W - 2; x++) {
+        int t = tile(x, y);
+        bool across = (t == 0x26 || t == 0x16) && (tile(x + 1, y) == 0x28 || tile(x + 1, y) == 0x18);
+        bool along = (t == 0x21 || t == 0x11) && (tile(x, y + 1) == 0x24 || tile(x, y + 1) == 0x14);
+        if (across && firm(x - 1, y) && firm(x + 2, y)) out.push_back({x, y, true});
+        if (along && firm(x, y - 1) && firm(x, y + 2)) out.push_back({x, y, false});
+      }
+    return out;
+  }
+
+  /** The planned roads and bridges onto the map. */
+  void layPlannedRoads() {
+    std::vector<std::pair<int, int>> where;
+    for (int c = 0; c < cityCount(); c++) where.push_back({cx(c), cy(c)});
+    auto sp = spans();
+    auto plan = scengen::planRoads(grid(), W, H, where, sp, *rng);
+    SpotList list;
+    for (int i = 0; i < 50; i++) {
+      list.x[i] = list.y[i] = list.ew[i] = list.cityDist[i] = list.chosenDist[i] = -1;
+      list.chosen[i] = 0;
+    }
+    int n = 0;
+    for (int k : plan.bridges) {
+      auto& b = sp[k];
+      if (b.ew) {
+        setTile(b.x, b.y, 0x85); setTile(b.x + 1, b.y, 0x86);
+        put(b.x, b.y, BRIDGE); put(b.x + 1, b.y, BRIDGE);
+      } else {
+        setTile(b.x, b.y, 0x84); setTile(b.x, b.y + 1, 0x94);
+        put(b.x, b.y, BRIDGE); put(b.x, b.y + 1, BRIDGE);
+      }
+      if (n < 50) { list.x[n] = b.x; list.y[n] = b.y; list.chosen[n] = 1; n++; }
+    }
+    for (int i = 0; i < W * H; i++)
+      if (plan.road[i]) setRoad(i % W, i / W, 1);
+    // the crossings keep their distance from the bridges, as 5311:01f6 does
+    crossings(list);
+    landings();
+  }
+
+  /** Every stretch of land with a city or a site on it has a way to the sea:
+   *  a port city, or a crossing -- else a river or a strait could leave it
+   *  out of reach of every army that cannot fly. Where there is neither, a
+   *  shore tile beside it becomes a crossing. */
+  void landings() {
+    auto sea = [&](int x, int y) { int t = at(x, y); return t == WATER || t == SHORE; };
+    std::vector<int> part(W * H, -1);
+    int parts = 0;
+    for (int s0 = 0; s0 < W * H; s0++) {
+      if (part[s0] >= 0 || sea(s0 % W, s0 / W)) continue;
+      std::vector<int> todo{s0};
+      part[s0] = parts;
+      for (size_t k = 0; k < todo.size(); k++) {
+        int x = todo[k] % W, y = todo[k] / W;
+        for (int d = 0; d < 8; d++) {
+          int ax = x + nx(d), ay = y + ny(d);
+          if (ax < 0 || ay < 0 || ax >= W || ay >= H || sea(ax, ay)) continue;
+          int j = ay * W + ax;
+          if (part[j] < 0) { part[j] = parts; todo.push_back(j); }
+        }
+      }
+      parts++;
+    }
+    std::vector<uint8_t> needs(parts, 0), served(parts, 0);
+    for (int c = 0; c < cityCount(); c++) {
+      int p = part[cy(c) * W + cx(c)];
+      if (p < 0) continue;
+      needs[p] = 1;
+      for (auto& r : ROUND_CITY)
+        if (sea(cx(c) + r[0], cy(c) + r[1])) served[p] = 1;
+    }
+    for (int i = 0; i < N_SITES; i++) {
+      int x = s16(S_SITES + SITE_STRIDE * i), y = s16(S_SITES + SITE_STRIDE * i + 2);
+      if (x >= 0 && y >= 0 && x < W && y < H && part[y * W + x] >= 0) needs[part[y * W + x]] = 1;
+    }
+    for (int i = 0; i < W * H; i++)
+      if (tiles[i] & 0x8000) {
+        int x = i % W, y = i / W;
+        for (int d = 0; d < 8; d++) {
+          int ax = x + nx(d), ay = y + ny(d);
+          if (ax >= 0 && ay >= 0 && ax < W && ay < H && part[ay * W + ax] >= 0) served[part[ay * W + ax]] = 1;
+        }
+      }
+    for (int i = 0; i < W * H; i++) {
+      int x = i % W, y = i / W;
+      if (!sea(x, y) || (tiles[i] & 0x8000)) continue;
+      int touched = -1;
+      for (int d = 0; d < 8; d += 2) {   // the four sides
+        int ax = x + nx(d), ay = y + ny(d);
+        if (ax >= 0 && ay >= 0 && ax < W && ay < H && part[ay * W + ax] >= 0) touched = part[ay * W + ax];
+      }
+      if (touched >= 0 && needs[touched] && !served[touched]) {
+        tiles[i] |= 0x8000;
+        served[touched] = 1;
+      }
+    }
+  }
+
+  /** Each road piece from the roads and bridges beside it, north, east,
+   *  south and west (docs/formats/map.md > .RD), and an arm into the city a
+   *  road ends at. */
+  void modernRoadShapes() {
+    // the piece for each N 1, E 2, S 4, W 8 combination
+    static const int PIECE[16] = {0, 15, 14, 10, 13, 2, 11, 7, 12, 9, 1, 6, 8, 5, 4, 3};
+    const int dx[4] = {0, 1, 0, -1}, dy[4] = {-1, 0, 1, 0};
+    std::vector<int> shape(W * H, 0);
+    for (int y = 0; y < H; y++)
+      for (int x = 0; x < W; x++) {
+        if (road(x, y) == 0) continue;
+        int mk = 0, city = -1;
+        for (int d = 0; d < 4; d++) {
+          int ax = x + dx[d], ay = y + dy[d];
+          if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
+          if (road(ax, ay) != 0 || at(ax, ay) == BRIDGE) mk |= 1 << d;
+          else if (at(ax, ay) == CITY && city < 0) city = d;
+        }
+        // a road's end runs into the city beside it
+        if (city >= 0 && std::popcount((unsigned)mk) <= 1) mk |= 1 << city;
+        if (mk == 0) {
+          setRoad(x, y, 0);
+          continue;
+        }
+        shape[y * W + x] = PIECE[mk];
+      }
+    for (int i = 0; i < W * H; i++)
+      if (shape[i]) setRoad(i % W, i / W, shape[i]);
+    // a few straight pieces take their standing-stone look
+    const int swaps[2][2] = {{2, 17}, {1, 16}};
+    for (auto& sw : swaps) {
+      int n = dice(1, 6, 3);
+      for (int k = 0; k < n; k++)
+        for (int tries = 0; tries < 2000; tries++) {
+          int x = dice(1, W, -1), y = dice(1, H, -1);
+          if (road(x, y) == sw[0]) { setRoad(x, y, sw[1]); break; }
+        }
+    }
+  }
+
+  /** Signposts by the roads, away from the cities, each pointing the way
+   *  to the nearest city, a few with RANDOM.DAT's own words. */
+  std::string modernSigns() {
+    std::vector<P> spots;
+    for (int tries = 0; tries < 20000 && (int)spots.size() < 60; tries++) {
+      int x = dice(1, W - 6, 2), y = dice(1, H - 6, 2);
+      if (at(x, y) != PLAIN || road(x, y) != 0 || tile(x, y) == 0) continue;
+      bool byRoad = false, clear = true;
+      for (int dyy = -1; dyy <= 1; dyy++)
+        for (int dxx = -1; dxx <= 1; dxx++)
+          if (road(x + dxx, y + dyy) != 0) byRoad = true;
+      for (int dyy = -3; dyy <= 3 && clear; dyy++)
+        for (int dxx = -3; dxx <= 3 && clear; dxx++) {
+          int t = at(x + dxx, y + dyy);
+          if (t == CITY || t == SITE) clear = false;
+        }
+      for (auto& p : spots)
+        if (reach(p.x, p.y, x, y) < 7) clear = false;
+      if (byRoad && clear) spots.push_back(P{x, y});
+    }
+    int n = (int)spots.size();
+    std::vector<uint8_t> out(2 + 104 * n, 0);
+    setI16(out, 0, n);
+    auto putStr = [&](int o, const std::string& s) {
+      for (size_t i = 0; i < s.size() && i < 49; i++) out[o + i] = (uint8_t)s[i];
+    };
+    int fixed = 0;
+    for (int i = 0; i < n; i++) {
+      int x = spots[i].x, y = spots[i].y, o = 2 + 104 * i;
+      setTile(x, y, 0);
+      setI16(out, o, x); setI16(out, o + 2, y);
+      if (dice(1, 10, 0) < 3 && fixed < r16(SIGNS)) {
+        putStr(o + 4, str(SIGNS + 2 + 60 * fixed, 30));
+        putStr(o + 54, str(SIGNS + 2 + 60 * fixed + 30, 30));
+        fixed++;
+        continue;
+      }
+      int c = -1, best = 1 << 30;
+      for (int j = 0; j < cityCount(); j++) {
+        int d = distance(x, y, cx(j), cy(j));
+        if (d < best) { best = d; c = j; }
+      }
+      if (c < 0) continue;
+      putStr(o + 4, format(str(SIGN_CITY, 20), cstrOf(scn, crec(c) + 4, 16)));
+      putStr(o + 54, format(str(SIGN_LEAGUES, 20), distance(x, y, cx(c), cy(c)) * 2,
+                            std::string(COMPASS[compass(x, y, cx(c), cy(c))])));
+    }
+    return std::string(out.begin(), out.end());
+  }
+
+  /** The scenario generator, a phase a call, as next() is for the original. */
+  std::optional<int> nextModern(Files& files) {
+    switch (stage++) {
+      case 0: return 0;
+      case 1: {
+        plan = scengen::makeWorld(world, *rng, W, H);
+        for (int i = 0; i < W * H; i++) { m[GRID + i] = plan.terrain[i]; rd[i] &= 0xe0; }
+        shores();
+        return 40;
+      }
+      case 2: {
+        setCityCount(0);
+        for (auto& [x, y] : plan.cities) {
+          int c = cityCount();
+          ws16(crec(c), x);
+          ws16(crec(c) + 2, y);
+          setCityCount(c + 1);
+        }
+        sitesBegin();
+        for (int i = 0; i < N_SITES && i < (int)plan.sites.size(); i++)
+          siteAt(i, P{plan.sites[i].first, plan.sites[i].second});
+        return 60;
+      }
+      case 3: roadTiles(); return 70;
+      case 4: layPlannedRoads(); return 85;
+      case 5: modernRoadShapes(); return 90;
+      case 6: cityList(); fairCapitals(); sides(); return 94;
+      case 7: cityDetails(); return 96;
+      case 8: sgn = modernSigns(); return 98;
+      case 9:
+        scn[S_RANDOM] = 0; scn[S_RANDOM + 1] = 0;   // an ordinary scenario
+        writeFiles(files);
+        return 100;
+      default: return std::nullopt;
+    }
+  }
+
   /** random_map_generate (4bed:011c), a phase a call: the progress figure
    *  the original's bar shows after it, or nothing once the world is made. */
   std::optional<int> next(Files& files) {
+    if (modern) return nextModern(files);
     switch (stage++) {
       case 0: return 0;
       case 1:
@@ -1910,23 +2184,10 @@ class Generator {
         return 94;
       case 16: cityDetails(); return 96;
       case 17: sgn = signs(); return 98;
-      case 18: {
+      case 18:
         scn[S_RANDOM] = 1; scn[S_RANDOM + 1] = 0;
-        std::string map(2 * W * H, '\0');
-        for (int i = 0; i < W * H; i++) {
-          map[2 * i] = (char)(tiles[i] & 0xff);
-          map[2 * i + 1] = (char)(tiles[i] >> 8);
-        }
-        std::string road(W * H, '\0');
-        for (int i = 0; i < W * H; i++) road[i] = (char)(rd[i] & 0x1f);
-        files["SCN"] = std::string(scn.begin(), scn.end());
-        files["MAP"] = map;
-        files["RD"] = road;
-        files["SGN"] = sgn;
-        files["CTY"] = cty;
-        files["SPC"] = spc;
+        writeFiles(files);
         return 100;
-      }
       default: return std::nullopt;
     }
   }
@@ -1973,6 +2234,8 @@ Run::Run(const Options& opts) {
   g.rng = opts.rng;
   g.allies = opts.allies;
   g.fair = opts.fairCapitals;
+  g.modern = opts.scenario;
+  g.world = opts.world;
   g.tiles.assign(W * H, 0);
   g.rd.assign(W * H, 0);
   g.scn[S_TERRAIN_SET] = (uint8_t)opts.terrainSet;

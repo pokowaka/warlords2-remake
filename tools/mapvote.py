@@ -111,10 +111,19 @@ class Canvas:
             x += 6 * size
 
 
+def base(folder):
+    """The scenario's files in a folder: RANDOM.* or NAME.* for a folder NAME."""
+    name = os.path.basename(os.path.normpath(folder))
+    for stem in (name, 'RANDOM'):
+        if os.path.exists(os.path.join(folder, stem + '.SCN')):
+            return os.path.join(folder, stem)
+    sys.exit('no scenario (.SCN) in %s' % folder)
+
+
 def features(folder):
     """Cities (x, y, capital colour or None), sites and roads, from the files."""
-    scn = open(os.path.join(folder, 'RANDOM.SCN'), 'rb').read()
-    rd = open(os.path.join(folder, 'RANDOM.RD'), 'rb').read()
+    scn = open(base(folder) + '.SCN', 'rb').read()
+    rd = open(base(folder) + '.RD', 'rb').read()
     caps = {}
     for i in range(8):
         o = SIDE_RECS + SIDE_REC_STRIDE * i
@@ -134,7 +143,7 @@ def features(folder):
 def draw_map(folder, issues=None):
     """The map in the game's own tiles, with roads, cities and sites drawn
     bold over it so they read at 5 pixels a tile; issues ringed if given."""
-    w, h, px = render(os.path.join(folder, 'RANDOM.MAP'), TERRAIN, SCALE)
+    w, h, px = render(base(folder) + '.MAP', TERRAIN, SCALE)
     cv = Canvas(w, h, BACK)
     cv.blit(0, 0, w, h, px)
     cities, sites, rd = features(folder)
@@ -356,6 +365,19 @@ def cmd_agree(args):
             print('%-26s %6d %6d %7.0f%%' % (k, n, a, 100.0 * a / n))
 
 
+def cmd_render(args):
+    pal = load_pal(os.path.join(TERRAIN, 'WAR2.PAL')) + EXTRA
+    cvs = [draw_map(f) for f in args.folders]
+    w = sum(c.w for c in cvs) + GAP * (len(cvs) - 1)
+    out = Canvas(w, cvs[0].h, BACK)
+    x = 0
+    for c in cvs:
+        out.blit(x, 0, c.w, c.h, c.px)
+        x += c.w + GAP
+    write_png(args.out, out.w, out.h, bytes(out.px), pal)
+    print('wrote %s' % args.out)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest='cmd', required=True)
@@ -373,8 +395,11 @@ def main():
     r.add_argument('votes', nargs='+')
     a = sub.add_parser('agree')
     a.add_argument('--eval', required=True, nargs='+')
+    d = sub.add_parser('render', help='draw scenario folders side by side')
+    d.add_argument('out')
+    d.add_argument('folders', nargs='+')
     args = p.parse_args()
-    {'ballot': cmd_ballot, 'record': cmd_record, 'agree': cmd_agree}[args.cmd](args)
+    {'ballot': cmd_ballot, 'record': cmd_record, 'agree': cmd_agree, 'render': cmd_render}[args.cmd](args)
 
 
 if __name__ == '__main__':

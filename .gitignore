@@ -13,3 +13,6 @@ warlords-save*.lua
 warlords-saveinfo.txt
 # and its own settings: the screen's scales, the music's synthesizer
 warlords-prefs.txt
+
+# worlds made by cpp/build/w2scengen (docs/scengen.md)
+original/GEN*/

@@ -2519,6 +2519,30 @@ static void testMapEval() {
   auto me = mapeval::evaluate(*made, "classic#1");
   eq((int)me.metric("cities"), 80, "a generated world is evaluated");
   ok(mapeval::toJson(me).dump().find("\"metrics\"") != std::string::npos, "the evaluation writes as JSON");
+  // the scenario generator (warlords/scengen): every shape, a few seeds, and
+  // every world it makes keeps the hard rules
+  for (auto shape : {scengen::Shape::Continents, scengen::Shape::Pangaea, scengen::Shape::Islands}) {
+    for (int seed = 1; seed <= 3; seed++) {
+      Rng r(seed), again(seed);
+      randommap::Options o;
+      o.dataDir = DATA;
+      o.rng = &r;
+      o.scenario = true;
+      o.world.shape = shape;
+      auto files = randommap::generateNow(o);
+      o.rng = &again;
+      ok(files == randommap::generateNow(o), std::string("the scenario generator is deterministic: ") + scengen::shapeName(shape));
+      auto world = scn::loadFromFiles(DATA + "/RANDOM", "RANDOM", files);
+      auto e = mapeval::evaluate(*world, std::string(scengen::shapeName(shape)) + "#" + std::to_string(seed));
+      std::string first;
+      for (auto& i : e.issues)
+        if (mapeval::isHard(i.check)) { first = ": " + i.check + " " + i.detail; break; }
+      ok(e.passed(), e.name + " keeps every hard rule" + first);
+      eq((int)e.metric("cities"), 80, e.name + " has the 80 cities asked for");
+      ok(e.metric("cityRoadCoverage") >= 0.74, e.name + " puts its cities on roads, as the designers do");
+      eq(world->options.militaryAdvisor, 1, e.name + " reads as an ordinary scenario");
+    }
+  }
 }
 
 static void testRandomMap() {

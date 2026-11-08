@@ -16,6 +16,7 @@
 #include <string>
 
 #include "warlords/rng.hpp"
+#include "warlords/scengen.hpp"
 
 namespace w2::randommap {
 
@@ -39,6 +40,12 @@ struct Options {
    *  the next) instead of 513d:0689's random picks. Off, the world is the
    *  original's, byte for byte. See docs/mapeval.md. */
   bool fairCapitals = false;
+  /** Not the original's: make the world with the scenario generator
+   *  (warlords/scengen) instead, shaped by `world`; its capitals are always
+   *  the fair ones, its city names never repeat, and its .SCN reads as an
+   *  ordinary scenario, not a random one. */
+  bool scenario = false;
+  scengen::Settings world;
 };
 
 /** The sliders as random_map_setup (7bab:10e8) takes them: 7 rolled as 1d7-1. */
