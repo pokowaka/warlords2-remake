@@ -31,139 +31,140 @@ struct Modal;
 }
 
 struct Selection {
-  int x = 0, y = 0;
-  w2::slots::Slots slots;
-  std::vector<w2::Army*> stack;
+    int x = 0, y = 0;
+    w2::slots::Slots slots;
+    std::vector<w2::Army*> stack;
 };
 
 struct Walk {
-  std::set<w2::Army*> armies;
-  std::vector<std::pair<int, int>> tiles;
-  size_t i = 0;
-  double at = 0;
-  w2::Army* top = nullptr;
-  bool computer = false;
-  bool seaBefore = false;    // at sea as it set off: shown so to the walk's end
-  std::vector<w2::Army*> putDown;   // out of moves: put down once the walk has played out
+    std::set<w2::Army*> armies;
+    std::vector<std::pair<int, int>> tiles;
+    size_t i = 0;
+    double at = 0;
+    w2::Army* top = nullptr;
+    bool computer = false;
+    bool seaBefore = false;          // at sea as it set off: shown so to the walk's end
+    std::vector<w2::Army*> putDown;  // out of moves: put down once the walk has played out
 };
 
 struct Banner {
-  std::string name;
-  int turn = 0, colour = 15, edge = 0;
+    std::string name;
+    int turn = 0, colour = 15, edge = 0;
 };
 
 struct Fell {
-  double at = 0, burn = 0;
+    double at = 0, burn = 0;
 };
 
 struct Assault {
-  int x = 0, y = 0;
-  w2::Battle result;
-  std::vector<w2::Army*> def, atk;
-  std::vector<std::pair<int, int>> defSlots, atkSlots;
-  int defSide = 8, atkSide = 8;
-  size_t step = 0;
-  int defDown = 0, atkDown = 0;
-  std::vector<Fell> defFell, atkFell;
-  std::string phase = "cloud";
-  double at = 0, cloudTime = 0, closeAt = 0;
-  bool fast = false, computer = false, window = false;
-  std::string victor, outcome;
-  std::vector<std::string> message;
-  std::function<void()> after;
+    int x = 0, y = 0;
+    w2::Battle result;
+    std::vector<w2::Army*> def, atk;
+    std::vector<std::pair<int, int>> defSlots, atkSlots;
+    int defSide = 8, atkSide = 8;
+    size_t step = 0;
+    int defDown = 0, atkDown = 0;
+    std::vector<Fell> defFell, atkFell;
+    std::string phase = "cloud";
+    double at = 0, cloudTime = 0, closeAt = 0;
+    bool fast = false, computer = false, window = false;
+    std::string victor, outcome;
+    std::vector<std::string> message;
+    std::function<void()> after;
 };
 
 struct Victory {
-  w2::City* city = nullptr;
-  std::string who, where;
-  int enter = 285;   // what Enter and Escape choose: Occupy (285), or what a quest wants
+    w2::City* city = nullptr;
+    std::string who, where;
+    int enter = 285;  // what Enter and Escape choose: Occupy (285), or what a quest wants
 };
 
 struct AiStatus {
-  w2::Side* side = nullptr;
-  std::string text;
-  int progress = 0;
+    w2::Side* side = nullptr;
+    std::string text;
+    int progress = 0;
 };
 
 struct Drag {
-  double cx = 0, cy = 0, dx = 0, dy = 0;
+    double cx = 0, cy = 0, dx = 0, dy = 0;
 };
 
 struct App {
-  std::vector<std::shared_ptr<kit::Modal>> modals;
-  int mouseX = -1, mouseY = -1;
-  w2::pal::Palette palette;
-  std::string dataDir;
+    std::vector<std::shared_ptr<kit::Modal>> modals;
+    int mouseX = -1, mouseY = -1;
+    w2::pal::Palette palette;
+    std::string dataDir;
 
-  // the art
-  std::array<gfx::ImageP, 2> sheets;
-  gfx::ImageP roadImg, shadowImg, marble, bigArmy, cityPic, warPic, shieldImg, victoryPic, heroPicM, heroPicF;
-  std::array<gfx::ImageP, 9> armyImg;
-  gfx::ImageP atransShields, fogImg, cursImg, abits, pointerImg;
-  gfx::ImageP shieldsImg, cityBack, searchPic, templePic, scrollPic;
-  // a promotion's (popups 16-18, by level) and a medal's (popups 24-27) pictures
-  std::map<int, gfx::ImageP> levelPic;
-  std::array<gfx::ImageP, 4> medalPic;
-  std::map<int, gfx::ImageP> moveBars;
-  std::unique_ptr<screen::Screen> screen;
-  FontP font, bigFont, titleFont;
+    // the art
+    std::array<gfx::ImageP, 2> sheets;
+    gfx::ImageP roadImg, shadowImg, marble, bigArmy, cityPic, warPic, shieldImg, victoryPic,
+            heroPicM, heroPicF;
+    std::array<gfx::ImageP, 9> armyImg;
+    gfx::ImageP atransShields, fogImg, cursImg, abits, pointerImg;
+    gfx::ImageP shieldsImg, cityBack, searchPic, templePic, scrollPic;
+    // a promotion's (popups 16-18, by level) and a medal's (popups 24-27) pictures
+    std::map<int, gfx::ImageP> levelPic;
+    std::array<gfx::ImageP, 4> medalPic;
+    std::map<int, gfx::ImageP> moveBars;
+    std::unique_ptr<screen::Screen> screen;
+    FontP font, bigFont, titleFont;
 
-  // the screen
-  int openMenu = -1;
-  layout::Layout layout;
-  bool haveLayout = false;
-  layout::Rect mapRect, stratRect, barRect, menuRect, panelRect;
-  menu::Layout menuLayout;
-  int zoom = 1;
-  double cx = 0, cy = 0;
-  std::array<int, 4> view{};   // the tiles drawn this frame: x0, y0, x1, y1
-  gfx::ImageP stratImage;
+    // the screen
+    int openMenu = -1;
+    layout::Layout layout;
+    bool haveLayout = false;
+    layout::Rect mapRect, stratRect, barRect, menuRect, panelRect;
+    menu::Layout menuLayout;
+    int zoom = 1;
+    double cx = 0, cy = 0;
+    std::array<int, 4> view{};  // the tiles drawn this frame: x0, y0, x1, y1
+    gfx::ImageP stratImage;
 
-  // the game
-  bool starting = false;
-  std::string scenario = "ERYTHEA";
-  double seed = 0;
-  std::unique_ptr<w2::Game> g;
-  w2::Side* player = nullptr;
-  std::optional<std::pair<int, int>> cursor;   // where the army cycle last stopped
-  std::optional<Selection> selection;
-  std::optional<w2::move::Preview> route;
-  std::optional<Walk> walk;
+    // the game
+    bool starting = false;
+    std::string scenario = "ERYTHEA";
+    double seed = 0;
+    std::unique_ptr<w2::Game> g;
+    w2::Side* player = nullptr;
+    std::optional<std::pair<int, int>> cursor;  // where the army cycle last stopped
+    std::optional<Selection> selection;
+    std::optional<w2::move::Preview> route;
+    std::optional<Walk> walk;
 
-  // the turn's openings
-  std::optional<Banner> banner;
-  std::shared_ptr<w2::HeroOffer> offer;
-  bool offerFemale = false;
-  std::string offerName;
-  std::optional<screen::View> heroView;
-  bool mapAfterBanner = false;
+    // the turn's openings
+    std::optional<Banner> banner;
+    std::shared_ptr<w2::HeroOffer> offer;
+    bool offerFemale = false;
+    std::string offerName;
+    std::optional<screen::View> heroView;
+    bool mapAfterBanner = false;
 
-  // battles
-  std::optional<Assault> assault;
-  std::optional<Victory> victory, victoryUnder;
-  w2::Army* medal = nullptr;     // what the assault just closed gave a medal to
-  std::optional<screen::View> victoryView;
+    // battles
+    std::optional<Assault> assault;
+    std::optional<Victory> victory, victoryUnder;
+    w2::Army* medal = nullptr;  // what the assault just closed gave a medal to
+    std::optional<screen::View> victoryView;
 
-  // the computer's turn
-  std::unique_ptr<Coroutine> aiRun;
-  bool aiWait = false, aiSkip = false, aiModsHeld = false;
-  w2::Side* aiSide = nullptr;
-  std::optional<AiStatus> aiStatus;
-  double aiResumeAt = 0;
+    // the computer's turn
+    std::unique_ptr<Coroutine> aiRun;
+    bool aiWait = false, aiSkip = false, aiModsHeld = false;
+    w2::Side* aiSide = nullptr;
+    std::optional<AiStatus> aiStatus;
+    double aiResumeAt = 0;
 
-  bool over = false;
-  std::optional<Drag> drag;
-  int pressed = w2::NONE;
-  struct MoveAll {
-    std::set<w2::Army*> seen;
-    int moved = 0;
-  };
-  std::optional<MoveAll> moveAll;
-  double lastSelectClick = -1;   // when the select pointer was last clicked (1b62:0405)
-  std::vector<std::string> keyBuffer;
-  std::string status;
-  bool modernUi = false;
-  bool quitRequested = false;
+    bool over = false;
+    std::optional<Drag> drag;
+    int pressed = w2::NONE;
+    struct MoveAll {
+        std::set<w2::Army*> seen;
+        int moved = 0;
+    };
+    std::optional<MoveAll> moveAll;
+    double lastSelectClick = -1;  // when the select pointer was last clicked (1b62:0405)
+    std::vector<std::string> keyBuffer;
+    std::string status;
+    bool modernUi = false;
+    bool quitRequested = false;
 };
 extern App G;
 

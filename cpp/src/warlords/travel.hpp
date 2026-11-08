@@ -24,10 +24,10 @@ constexpr int SEA_SWITCH = TURN;
 constexpr int UNREACHED = INT_MAX;
 
 struct Ground {
-  int w = 0, h = 0;
-  std::vector<int> terrain;        // terrain type ids (move::ROAD .. move::SITE)
-  std::vector<uint8_t> road;       // 1 where a road runs
-  std::vector<uint8_t> crossing;   // 1 where land and sea may meet
+    int w = 0, h = 0;
+    std::vector<int> terrain;       // terrain type ids (move::ROAD .. move::SITE)
+    std::vector<uint8_t> road;      // 1 where a road runs
+    std::vector<uint8_t> crossing;  // 1 where land and sea may meet
 };
 
 /** Movement points from the nearest of `sources` (tile indices) to every

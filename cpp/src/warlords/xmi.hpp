@@ -28,13 +28,13 @@ namespace w2::xmi {
 constexpr int TICK_RATE = 120;
 
 struct Event {
-  int t;               // the tick
-  uint8_t st, a, b;    // MIDI status and data; note-offs are 0x80 | channel
+    int t;             // the tick
+    uint8_t st, a, b;  // MIDI status and data; note-offs are 0x80 | channel
 };
 
 struct Sequence {
-  int length = 0;      // in ticks, to the end of the last note
-  std::vector<Event> events;
+    int length = 0;  // in ticks, to the end of the last note
+    std::vector<Event> events;
 };
 
 /** The first sequence of an XMI file's bytes, or nothing without an EVNT

@@ -31,7 +31,7 @@ bool event(const SDL_Event& e, int& button, bool& down);
 bool trigger(int& button, bool& down);
 
 struct Sticks {
-  double lx = 0, ly = 0, rx = 0, ry = 0;   // -1..1 each, 0 inside the dead zone
+    double lx = 0, ly = 0, rx = 0, ry = 0;  // -1..1 each, 0 inside the dead zone
 };
 /** Every pad's sticks, together. */
 Sticks sticks();

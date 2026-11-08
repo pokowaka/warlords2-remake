@@ -28,7 +28,7 @@ constexpr int GLOBAL_DIM = LEGACY_GLOBAL_DIM + ADDED_GLOBAL_DIM;  // 20
 constexpr int CONTEXT_DIM = GLOBAL_DIM + personality::TRAIT_DIM;  // 30
 
 constexpr int RIVAL_DIM = 18;
-constexpr int DIPLO_IN_DIM = CONTEXT_DIM + RIVAL_DIM;             // 42
+constexpr int DIPLO_IN_DIM = CONTEXT_DIM + RIVAL_DIM;  // 42
 constexpr int DIPLO_OUT_DIM = 6;
 
 constexpr int STACK_DIM = 16;
@@ -42,7 +42,7 @@ constexpr int MISSION_OUT_DIM = 2;
 // set), so the policy can see what switching would throw away.
 constexpr int ECON_FEAT_DIM = 21;
 constexpr int ECON_CURRENT = 20;
-constexpr int ECON_IN_DIM = CONTEXT_DIM + ECON_FEAT_DIM;          // 44
+constexpr int ECON_IN_DIM = CONTEXT_DIM + ECON_FEAT_DIM;  // 44
 constexpr int ECON_OUT_DIM = 1;
 
 // Privileged critic features (asymmetric actor-critic). The two critics are
@@ -52,7 +52,7 @@ constexpr int ECON_OUT_DIM = 1;
 // buildCriticFeatures().
 constexpr int CRITIC_DIM = 16;
 
-constexpr int VALUE_IN_DIM = CONTEXT_DIM + CRITIC_DIM;            // 46
+constexpr int VALUE_IN_DIM = CONTEXT_DIM + CRITIC_DIM;  // 46
 constexpr int VALUE_OUT_DIM = 1;
 
 constexpr int STACK_VALUE_IN_DIM = CONTEXT_DIM + STACK_DIM + CRITIC_DIM;  // 62
@@ -87,14 +87,14 @@ using EconInVec = std::array<float, ECON_IN_DIM>;
 using StackValueInVec = std::array<float, STACK_VALUE_IN_DIM>;
 
 struct DiploOutput {
-  std::array<float, 4> stanceLogits{};  // [0]=Allied, [1]=Peace, [2]=Uneasy, [3]=War
-  float tributeLogit = 0.0f;            // >0: offer gold to end a war (binary decision)
-  float jointWarLogit = 0.0f;           // >0: ask the partner to join our war (binary decision)
+    std::array<float, 4> stanceLogits{};  // [0]=Allied, [1]=Peace, [2]=Uneasy, [3]=War
+    float tributeLogit = 0.0f;            // >0: offer gold to end a war (binary decision)
+    float jointWarLogit = 0.0f;           // >0: ask the partner to join our war (binary decision)
 };
 
 struct MissionOutput {
-  float utility = 0.0f;
-  float stageNearLogit = 0.0f;          // >0 stage 1-2 tiles out for sync; <=0 attack now
+    float utility = 0.0f;
+    float stageNearLogit = 0.0f;  // >0 stage 1-2 tiles out for sync; <=0 attack now
 };
 
 /**
@@ -103,191 +103,200 @@ struct MissionOutput {
  */
 template <int InDim, int H1Dim, int H2Dim, int OutDim>
 struct ResidualMLP {
-  static constexpr int IN_DIM = InDim;
-  static constexpr int H1_DIM = H1Dim;
-  static constexpr int H2_DIM = H2Dim;
-  static constexpr int OUT_DIM = OutDim;
-  static constexpr int PARAM_COUNT =
-      (OutDim * InDim) + (H1Dim * InDim + H1Dim) + (H2Dim * H1Dim + H2Dim) + (OutDim * H2Dim + OutDim);
+    static constexpr int IN_DIM = InDim;
+    static constexpr int H1_DIM = H1Dim;
+    static constexpr int H2_DIM = H2Dim;
+    static constexpr int OUT_DIM = OutDim;
+    static constexpr int PARAM_COUNT = (OutDim * InDim) + (H1Dim * InDim + H1Dim) +
+                                       (H2Dim * H1Dim + H2Dim) + (OutDim * H2Dim + OutDim);
 
-  std::array<float, OutDim * InDim> wSkip{};
-  std::array<float, H1Dim * InDim> w1{};
-  std::array<float, H1Dim> b1{};
-  std::array<float, H2Dim * H1Dim> w2{};
-  std::array<float, H2Dim> b2{};
-  std::array<float, OutDim * H2Dim> w3{};
-  std::array<float, OutDim> b3{};
+    std::array<float, OutDim * InDim> wSkip{};
+    std::array<float, H1Dim * InDim> w1{};
+    std::array<float, H1Dim> b1{};
+    std::array<float, H2Dim * H1Dim> w2{};
+    std::array<float, H2Dim> b2{};
+    std::array<float, OutDim * H2Dim> w3{};
+    std::array<float, OutDim> b3{};
 
-  std::array<float, OutDim> forward(const std::array<float, InDim>& x) const;
+    std::array<float, OutDim> forward(const std::array<float, InDim>& x) const;
 
-  /**
-   * Accumulates exact parameter gradients dL/dW and dL/db into `gradAccum`
-   * given input `x` and output gradient `dOut` = dL/dy.
-   */
-  void backward(const std::array<float, InDim>& x, const std::array<float, OutDim>& dOut,
-                ResidualMLP& gradAccum) const;
+    /**
+     * Accumulates exact parameter gradients dL/dW and dL/db into `gradAccum`
+     * given input `x` and output gradient `dOut` = dL/dy.
+     */
+    void backward(const std::array<float, InDim>& x, const std::array<float, OutDim>& dOut,
+                  ResidualMLP& gradAccum) const;
 
-  void zero();
-  void toFlat(std::vector<float>& out) const;
-  size_t fromFlat(const std::vector<float>& in, size_t offset);
+    void zero();
+    void toFlat(std::vector<float>& out) const;
+    size_t fromFlat(const std::vector<float>& in, size_t offset);
 
-  /**
-   * Loads weights saved with a narrower input of `oldInDim` columns: old column
-   * c goes to c (c < insertAt) or c + insertCount (c >= insertAt); every new
-   * column starts at zero, so the function computed is unchanged until
-   * training uses the new inputs.
-   */
-  size_t fromFlatWidenInput(const std::vector<float>& in, size_t offset, int oldInDim, int insertAt,
-                            int insertCount);
+    /**
+     * Loads weights saved with a narrower input of `oldInDim` columns: old column
+     * c goes to c (c < insertAt) or c + insertCount (c >= insertAt); every new
+     * column starts at zero, so the function computed is unchanged until
+     * training uses the new inputs.
+     */
+    size_t fromFlatWidenInput(const std::vector<float>& in, size_t offset, int oldInDim,
+                              int insertAt, int insertCount);
 };
 
 /** Parameters of a residual MLP like `Mlp` but with an input `in` columns wide. */
 template <typename Mlp>
 constexpr int mlpParamsWithInput(int in) {
-  return Mlp::OUT_DIM * in + Mlp::H1_DIM * in + Mlp::H1_DIM + Mlp::H2_DIM * Mlp::H1_DIM + Mlp::H2_DIM +
-         Mlp::OUT_DIM * Mlp::H2_DIM + Mlp::OUT_DIM;
+    return Mlp::OUT_DIM * in + Mlp::H1_DIM * in + Mlp::H1_DIM + Mlp::H2_DIM * Mlp::H1_DIM +
+           Mlp::H2_DIM + Mlp::OUT_DIM * Mlp::H2_DIM + Mlp::OUT_DIM;
 }
 
 class PolicyNetwork {
- public:
-  using DiploNet = ResidualMLP<DIPLO_IN_DIM, 24, 12, DIPLO_OUT_DIM>;
-  using MissionNet = ResidualMLP<MISSION_IN_DIM, 32, 16, MISSION_OUT_DIM>;
-  using EconNet = ResidualMLP<ECON_IN_DIM, 24, 12, ECON_OUT_DIM>;
-  using ValueNet = ResidualMLP<VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
-  using StackValueNet = ResidualMLP<STACK_VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
+  public:
+    using DiploNet = ResidualMLP<DIPLO_IN_DIM, 24, 12, DIPLO_OUT_DIM>;
+    using MissionNet = ResidualMLP<MISSION_IN_DIM, 32, 16, MISSION_OUT_DIM>;
+    using EconNet = ResidualMLP<ECON_IN_DIM, 24, 12, ECON_OUT_DIM>;
+    using ValueNet = ResidualMLP<VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
+    using StackValueNet = ResidualMLP<STACK_VALUE_IN_DIM, 24, 12, VALUE_OUT_DIM>;
 
-  static constexpr int TOTAL_PARAMS = DiploNet::PARAM_COUNT + MissionNet::PARAM_COUNT + EconNet::PARAM_COUNT +
-                                      ValueNet::PARAM_COUNT + StackValueNet::PARAM_COUNT;
+    static constexpr int TOTAL_PARAMS = DiploNet::PARAM_COUNT + MissionNet::PARAM_COUNT +
+                                        EconNet::PARAM_COUNT + ValueNet::PARAM_COUNT +
+                                        StackValueNet::PARAM_COUNT;
 
-  // Legacy files: v5 lacks the 6 added context features; v4/v3 also lack the
-  // privileged critic inputs; v3 also lacks StackValueNet.
-  static constexpr int V5_DROPPED = ADDED_GLOBAL_DIM;
-  static constexpr int V4_CRITIC_DROPPED = ADDED_GLOBAL_DIM + CRITIC_DIM;
-  static constexpr int LEGACY_V5_PARAMS =
-      mlpParamsWithInput<DiploNet>(DiploNet::IN_DIM - V5_DROPPED) +
-      mlpParamsWithInput<MissionNet>(MissionNet::IN_DIM - V5_DROPPED) +
-      mlpParamsWithInput<EconNet>(EconNet::IN_DIM - V5_DROPPED) +
-      mlpParamsWithInput<ValueNet>(ValueNet::IN_DIM - V5_DROPPED) +
-      mlpParamsWithInput<StackValueNet>(StackValueNet::IN_DIM - V5_DROPPED);
-  static constexpr int LEGACY_V3_PARAMS =
-      mlpParamsWithInput<DiploNet>(DiploNet::IN_DIM - V5_DROPPED) +
-      mlpParamsWithInput<MissionNet>(MissionNet::IN_DIM - V5_DROPPED) +
-      mlpParamsWithInput<EconNet>(EconNet::IN_DIM - V5_DROPPED) +
-      mlpParamsWithInput<ValueNet>(ValueNet::IN_DIM - V4_CRITIC_DROPPED);
-  static constexpr int LEGACY_V4_PARAMS =
-      LEGACY_V3_PARAMS + mlpParamsWithInput<StackValueNet>(StackValueNet::IN_DIM - V4_CRITIC_DROPPED);
+    // Legacy files: v5 lacks the 6 added context features; v4/v3 also lack the
+    // privileged critic inputs; v3 also lacks StackValueNet.
+    static constexpr int V5_DROPPED = ADDED_GLOBAL_DIM;
+    static constexpr int V4_CRITIC_DROPPED = ADDED_GLOBAL_DIM + CRITIC_DIM;
+    static constexpr int LEGACY_V5_PARAMS =
+            mlpParamsWithInput<DiploNet>(DiploNet::IN_DIM - V5_DROPPED) +
+            mlpParamsWithInput<MissionNet>(MissionNet::IN_DIM - V5_DROPPED) +
+            mlpParamsWithInput<EconNet>(EconNet::IN_DIM - V5_DROPPED) +
+            mlpParamsWithInput<ValueNet>(ValueNet::IN_DIM - V5_DROPPED) +
+            mlpParamsWithInput<StackValueNet>(StackValueNet::IN_DIM - V5_DROPPED);
+    static constexpr int LEGACY_V3_PARAMS =
+            mlpParamsWithInput<DiploNet>(DiploNet::IN_DIM - V5_DROPPED) +
+            mlpParamsWithInput<MissionNet>(MissionNet::IN_DIM - V5_DROPPED) +
+            mlpParamsWithInput<EconNet>(EconNet::IN_DIM - V5_DROPPED) +
+            mlpParamsWithInput<ValueNet>(ValueNet::IN_DIM - V4_CRITIC_DROPPED);
+    static constexpr int LEGACY_V4_PARAMS =
+            LEGACY_V3_PARAMS +
+            mlpParamsWithInput<StackValueNet>(StackValueNet::IN_DIM - V4_CRITIC_DROPPED);
 
-  PolicyNetwork();
+    PolicyNetwork();
 
-  /** Initializes all parameters from zero-mean random noise (zero human priors). */
-  void initRandomWeights(uint32_t seed = 42);
+    /** Initializes all parameters from zero-mean random noise (zero human priors). */
+    void initRandomWeights(uint32_t seed = 42);
 
-  /** Zeros all weights and biases (used when this instance acts as a gradient buffer). */
-  void zero();
+    /** Zeros all weights and biases (used when this instance acts as a gradient buffer). */
+    void zero();
 
-  /** Evaluates Head 1 (Diplomacy stances, tribute, and joint-war urgency). */
-  DiploOutput scoreDiplomacy(const ContextVec& ctx, const RivalVec& rival) const;
+    /** Evaluates Head 1 (Diplomacy stances, tribute, and joint-war urgency). */
+    DiploOutput scoreDiplomacy(const ContextVec& ctx, const RivalVec& rival) const;
 
-  /** Evaluates Head 2 (Stack mission utility and AttackNow vs StageNear synchronization). */
-  MissionOutput scoreMission(const ContextVec& ctx, const StackVec& stack, const TargetVec& target) const;
+    /** Evaluates Head 2 (Stack mission utility and AttackNow vs StageNear synchronization). */
+    MissionOutput scoreMission(const ContextVec& ctx, const StackVec& stack,
+                               const TargetVec& target) const;
 
-  /** Evaluates Head 3 (Unified Economy, Unit Retention, Production, Vectoring, and Capture Spoils). */
-  float scoreEconomy(const ContextVec& ctx, const EconVec& econ) const;
+    /** Evaluates Head 3 (Unified Economy, Unit Retention, Production, Vectoring, and Capture
+     * Spoils). */
+    float scoreEconomy(const ContextVec& ctx, const EconVec& econ) const;
 
-  /** Evaluates Head 4 (critic: expected discounted return in empire-score units, unbounded). */
-  float evaluateValue(const ContextVec& ctx, const CriticVec& critic) const;
+    /** Evaluates Head 4 (critic: expected discounted return in empire-score units, unbounded). */
+    float evaluateValue(const ContextVec& ctx, const CriticVec& critic) const;
 
-  /** Evaluates Head 5 (per-stack local critic: expected multi-turn local score change from group state). */
-  float evaluateStackValue(const StackValueInVec& stackState) const;
+    /** Evaluates Head 5 (per-stack local critic: expected multi-turn local score change from group
+     * state). */
+    float evaluateStackValue(const StackValueInVec& stackState) const;
 
-  /** Flattens all 5 heads into a single vector of length TOTAL_PARAMS. */
-  std::vector<float> flatten() const;
+    /** Flattens all 5 heads into a single vector of length TOTAL_PARAMS. */
+    std::vector<float> flatten() const;
 
-  /** Loads parameters from a flat vector of length TOTAL_PARAMS (or LEGACY_V5/V4/V3_PARAMS). */
-  void unflatten(const std::vector<float>& params);
+    /** Loads parameters from a flat vector of length TOTAL_PARAMS (or LEGACY_V5/V4/V3_PARAMS). */
+    void unflatten(const std::vector<float>& params);
 
-  /** Loads a legacy (v5/v4/v3) flat vector, widening the inputs function-preservingly. */
-  void unflattenLegacy(const std::vector<float>& params);
+    /** Loads a legacy (v5/v4/v3) flat vector, widening the inputs function-preservingly. */
+    void unflattenLegacy(const std::vector<float>& params);
 
-  /** Saves the weights with the training iteration and the held-out selection score. */
-  bool saveJson(const std::filesystem::path& path, int generation = 0, float selectionCityShare = 0.0f) const;
+    /** Saves the weights with the training iteration and the held-out selection score. */
+    bool saveJson(const std::filesystem::path& path, int generation = 0,
+                  float selectionCityShare = 0.0f) const;
 
-  /** Loads the network weights from a JSON file; returns false if missing or invalid. */
-  bool loadJson(const std::filesystem::path& path);
+    /** Loads the network weights from a JSON file; returns false if missing or invalid. */
+    bool loadJson(const std::filesystem::path& path);
 
-  DiploNet diploNet;
-  MissionNet missionNet;
-  EconNet econNet;
-  ValueNet valueNet;
-  StackValueNet stackValueNet;
+    DiploNet diploNet;
+    MissionNet missionNet;
+    EconNet econNet;
+    ValueNet valueNet;
+    StackValueNet stackValueNet;
 };
 
 // --- Trajectory Recording & Stochastic Exploration Primitives for PPO Self-Play ---
 
 struct MissionStepRecord {
-  std::vector<MissionInVec> candidates;
-  std::vector<float> logMult;
-  int chosenIdx = 0;
-  float oldLogProb = 0.0f;
-  bool hasStageChoice = false;
-  bool stageChosen = false;
-  float oldStageLogProb = 0.0f;
-  float immediateDeltaScore = 0.0f;   // change in empire score while this stack acted
-  StackValueInVec stackValueIn{};     // pre-decision group state for per-stack baseline
-  float stackValuePred = 0.0f;        // V_stack(s) at decision time
-  float stackReturnTarget = 0.0f;     // multi-turn local return achieved by pre-decision group
-  std::vector<std::uintptr_t> unitIds;      // non-recycled Game::pool Army* IDs in chosen stack
-  std::vector<std::uintptr_t> poolUnitIds;  // non-recycled Game::pool Army* IDs matching stackValueIn
-  int vacatedCity = NONE;             // own city this move left without defenders (still empty at turn end)
-  float vacatedLoss = 0.0f;           // filled by the trainer: that city's score weight if lost by our next turn
-  float advantage = 0.0f;             // filled by the trainer
+    std::vector<MissionInVec> candidates;
+    std::vector<float> logMult;
+    int chosenIdx = 0;
+    float oldLogProb = 0.0f;
+    bool hasStageChoice = false;
+    bool stageChosen = false;
+    float oldStageLogProb = 0.0f;
+    float immediateDeltaScore = 0.0f;     // change in empire score while this stack acted
+    StackValueInVec stackValueIn{};       // pre-decision group state for per-stack baseline
+    float stackValuePred = 0.0f;          // V_stack(s) at decision time
+    float stackReturnTarget = 0.0f;       // multi-turn local return achieved by pre-decision group
+    std::vector<std::uintptr_t> unitIds;  // non-recycled Game::pool Army* IDs in chosen stack
+    std::vector<std::uintptr_t>
+            poolUnitIds;     // non-recycled Game::pool Army* IDs matching stackValueIn
+    int vacatedCity = NONE;  // own city this move left without defenders (still empty at turn end)
+    float vacatedLoss =
+            0.0f;  // filled by the trainer: that city's score weight if lost by our next turn
+    float advantage = 0.0f;  // filled by the trainer
 };
 
 struct EconStepRecord {
-  std::vector<EconInVec> candidates;
-  std::vector<float> logMult;
-  int chosenIdx = 0;
-  float oldLogProb = 0.0f;
+    std::vector<EconInVec> candidates;
+    std::vector<float> logMult;
+    int chosenIdx = 0;
+    float oldLogProb = 0.0f;
 };
 
 struct DiploStepRecord {
-  DiploInVec input{};
-  int chosenStance = 1;
-  float oldStanceLogProb = 0.0f;
-  // Optional binary sub-decisions taken alongside a Peace/Ally stance
-  bool hasTribute = false;      // offer gold to end a war (output 4)
-  bool tributeChosen = false;
-  float oldTributeLogProb = 0.0f;
-  bool hasJointWar = false;     // ask the partner to join our war (output 5)
-  bool jointWarChosen = false;
-  float oldJointWarLogProb = 0.0f;
+    DiploInVec input{};
+    int chosenStance = 1;
+    float oldStanceLogProb = 0.0f;
+    // Optional binary sub-decisions taken alongside a Peace/Ally stance
+    bool hasTribute = false;  // offer gold to end a war (output 4)
+    bool tributeChosen = false;
+    float oldTributeLogProb = 0.0f;
+    bool hasJointWar = false;  // ask the partner to join our war (output 5)
+    bool jointWarChosen = false;
+    float oldJointWarLogProb = 0.0f;
 };
 
 struct TurnStepRecord {
-  ContextVec startCtx{};
-  CriticVec startCritic{};            // privileged critic features as the turn begins
-  float valuePred = 0.0f;
-  float startScore = 0.0f;            // empire score as the turn begins
-  float advantage = 0.0f;             // GAE, filled by the trainer
-  float returnTarget = 0.0f;          // critic target, filled by the trainer
-  std::vector<MissionStepRecord> missionSteps;
-  std::vector<EconStepRecord> econSteps;
-  std::vector<DiploStepRecord> diploSteps;
+    ContextVec startCtx{};
+    CriticVec startCritic{};  // privileged critic features as the turn begins
+    float valuePred = 0.0f;
+    float startScore = 0.0f;    // empire score as the turn begins
+    float advantage = 0.0f;     // GAE, filled by the trainer
+    float returnTarget = 0.0f;  // critic target, filled by the trainer
+    std::vector<MissionStepRecord> missionSteps;
+    std::vector<EconStepRecord> econSteps;
+    std::vector<DiploStepRecord> diploSteps;
 };
 
 struct RolloutSampler {
-  uint32_t rngState = 0x9e3779b9u;
-  float temperature = 1.0f;
-  TurnStepRecord* currentTurn = nullptr;
+    uint32_t rngState = 0x9e3779b9u;
+    float temperature = 1.0f;
+    TurnStepRecord* currentTurn = nullptr;
 
-  float nextUniform01();
+    float nextUniform01();
 };
 
 /** Packs (ContextVec, RivalVec) into a single DiploInVec. */
 DiploInVec packDiploInput(const ContextVec& ctx, const RivalVec& rival);
 
 /** Packs (ContextVec, StackVec, TargetVec) into a single MissionInVec. */
-MissionInVec packMissionInput(const ContextVec& ctx, const StackVec& stack, const TargetVec& target);
+MissionInVec packMissionInput(const ContextVec& ctx, const StackVec& stack,
+                              const TargetVec& target);
 
 /** Packs (ContextVec, EconVec) into a single EconInVec. */
 EconInVec packEconInput(const ContextVec& ctx, const EconVec& econ);
@@ -296,7 +305,8 @@ EconInVec packEconInput(const ContextVec& ctx, const EconVec& econ);
 ValueInVec packValueInput(const ContextVec& ctx, const CriticVec& critic);
 
 /** Packs (ContextVec, StackVec, CriticVec) into a single StackValueInVec. */
-StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack, const CriticVec& critic);
+StackValueInVec packStackValueInput(const ContextVec& ctx, const StackVec& stack,
+                                    const CriticVec& critic);
 
 /**
  * Samples an index from softmax(logits / temperature) when `sampler != nullptr`,

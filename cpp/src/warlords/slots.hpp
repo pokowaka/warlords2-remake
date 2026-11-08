@@ -29,20 +29,22 @@ constexpr int NOMARK = -1, CROSS = 0, TICK = 1;
 constexpr int UNGROUPED = 0;
 
 struct Slots {
-  int n = 0;
-  int side = NONE;
-  std::array<Army*, MAX> army{};
-  std::array<int, MAX> group{};
-  std::array<bool, MAX> inGroup{};
-  std::array<int, MAX> mark{};
-  std::optional<int> active;
+    int n = 0;
+    int side = NONE;
+    std::array<Army*, MAX> army{};
+    std::array<int, MAX> group{};
+    std::array<bool, MAX> inGroup{};
+    std::array<int, MAX> mark{};
+    std::optional<int> active;
 };
 
 /** Which armies a click on the tile picks up (8c07:06eb). */
-std::set<Army*> clicked(const Game& g, const std::vector<Army*>& armies, int side, Army* anchor = nullptr);
+std::set<Army*> clicked(const Game& g, const std::vector<Army*>& armies, int side,
+                        Army* anchor = nullptr);
 /** The slots for the armies standing on one tile, at most eight of them.
  *  `selected` is the set of armies that should be moving (none: a click's). */
-Slots build(const Game& g, const std::vector<Army*>& armies, int side, const std::set<Army*>* selected = nullptr);
+Slots build(const Game& g, const std::vector<Army*>& armies, int side,
+            const std::set<Army*>* selected = nullptr);
 /** Click a slot (controls 224-231, 89e0:0963): add that army to the moving
  *  group, or drop it out into a group of its own. */
 void toggle(Slots& s, const Game& g, int i);

@@ -23,54 +23,55 @@ namespace w2 {
 /** An assault group (5f19:08ba). Its lists are keyed 1-6 (members and staged
  *  1-4) with holes, as the original's fixed slots are. */
 struct Group {
-  int active = 0;
-  int target = NONE;           // the side it goes for
-  int rally = NONE;            // the city it gathers at
-  std::map<int, int> members, cities, dist, bonus, taken;   // city indices, distances
-  std::map<int, Army*> staged;
-  int size = 0, flags = 0;
+    int active = 0;
+    int target = NONE;                                       // the side it goes for
+    int rally = NONE;                                        // the city it gathers at
+    std::map<int, int> members, cities, dist, bonus, taken;  // city indices, distances
+    std::map<int, Army*> staged;
+    int size = 0, flags = 0;
 };
 
 /** A side's block of AI data (ai_init_side, 59bf:084d). */
 struct AIData {
-  int turns = 0;
-  int own = 0, enemy = 0, neutral = 0, unseen = 0;
-  int rebuildLimit = 10;
-  bool bold = false;
-  int heroes = 0;
-  int rebuildType = 0, rebuildTypeRich = 0;
-  int bought = 0;
-  int dieHuman = 0, dieLord = 0, dieKnight = 0, dieWarlord = 0;
-  int sims = 10;
-  int searchers = 0, explorers = 0;
-  int raze = 0, sack = 0, pillage = 0, perCity = 0;
-  int bonusHuman = 0, bonusWarlord = 0, bonusLord = 0, bonusKnight = 0;
-  int poor = 0;
-  int solidarity = 0;
-  int minStrength = 0, flyCities = 0, strongCities = 0, fastCities = 0;
-  int early = 0;
-  int humanShare = 80;
-  int questCity = NONE;
-  int cautious = 0;
-  int questsDone = 0, itemsPassed = 0;
-  int maxGroups = 1;
-  std::map<int, int> roles, held, flags, garrison, keep;   // by city index
-  // 1-based, as the original numbers them: an army's aiGroup is the number,
-  // and 0 means none. Held by pointer as the Lua holds tables: cancelling a
-  // group puts a fresh one in its slot, and whoever still holds the old one
-  // goes on with it, as the original's code does.
-  std::array<std::shared_ptr<Group>, 5> groups;
-  std::array<int, 8> heroesKilled{}, armiesKilled{}, battles{}, lost{}, cityBattles{}, citiesLost{};
-  std::optional<std::pair<int, int>> cursor;
+    int turns = 0;
+    int own = 0, enemy = 0, neutral = 0, unseen = 0;
+    int rebuildLimit = 10;
+    bool bold = false;
+    int heroes = 0;
+    int rebuildType = 0, rebuildTypeRich = 0;
+    int bought = 0;
+    int dieHuman = 0, dieLord = 0, dieKnight = 0, dieWarlord = 0;
+    int sims = 10;
+    int searchers = 0, explorers = 0;
+    int raze = 0, sack = 0, pillage = 0, perCity = 0;
+    int bonusHuman = 0, bonusWarlord = 0, bonusLord = 0, bonusKnight = 0;
+    int poor = 0;
+    int solidarity = 0;
+    int minStrength = 0, flyCities = 0, strongCities = 0, fastCities = 0;
+    int early = 0;
+    int humanShare = 80;
+    int questCity = NONE;
+    int cautious = 0;
+    int questsDone = 0, itemsPassed = 0;
+    int maxGroups = 1;
+    std::map<int, int> roles, held, flags, garrison, keep;  // by city index
+    // 1-based, as the original numbers them: an army's aiGroup is the number,
+    // and 0 means none. Held by pointer as the Lua holds tables: cancelling a
+    // group puts a fresh one in its slot, and whoever still holds the old one
+    // goes on with it, as the original's code does.
+    std::array<std::shared_ptr<Group>, 5> groups;
+    std::array<int, 8> heroesKilled{}, armiesKilled{}, battles{}, lost{}, cityBattles{},
+            citiesLost{};
+    std::optional<std::pair<int, int>> cursor;
 };
 
 /** Each city's six nearest cities by land path, by city index. */
 struct Neighbours {
-  struct Entry {
-    std::vector<int> cities;
-    std::vector<int> dist;
-  };
-  std::vector<Entry> byCity;
+    struct Entry {
+        std::vector<int> cities;
+        std::vector<int> dist;
+    };
+    std::vector<Entry> byCity;
 };
 
 namespace ai::core {
@@ -98,20 +99,32 @@ constexpr int GF_MOVE16 = 0x08, GF_MOVE12 = 0x10, GF_FLY = 0x20;
 constexpr int MAX_GROUPS = 4;
 constexpr int UNREACHED = 30001;
 
-inline bool has(int v, int bit) { return (v & bit) != 0; }
-inline int set(int v, int bit) { return v | bit; }
-inline int clear(int v, int bit) { return v & ~bit; }
-inline int get(const std::map<int, int>& m, int k) {
-  auto it = m.find(k);
-  return it == m.end() ? 0 : it->second;
+inline bool has(int v, int bit) {
+    return (v & bit) != 0;
 }
-inline bool hasKey(const std::map<int, int>& m, int k) { return m.count(k) > 0; }
+inline int set(int v, int bit) {
+    return v | bit;
+}
+inline int clear(int v, int bit) {
+    return v & ~bit;
+}
+inline int get(const std::map<int, int>& m, int k) {
+    auto it = m.find(k);
+    return it == m.end() ? 0 : it->second;
+}
+inline bool hasKey(const std::map<int, int>& m, int k) {
+    return m.count(k) > 0;
+}
 
 /** map_distance (2012:1199): the straight-line distance, truncated. */
 int dist(int x1, int y1, int x2, int y2);
-inline int owner(const City& c) { return c.ownerIndex == NONE ? NEUTRAL : c.ownerIndex; }
+inline int owner(const City& c) {
+    return c.ownerIndex == NONE ? NEUTRAL : c.ownerIndex;
+}
 /** Is the city still a city (not ruins)? */
-inline bool standing(const City& c) { return !c.razed; }
+inline bool standing(const City& c) {
+    return !c.razed;
+}
 /** Is a side in the game? */
 bool inPlay(const Game& g, int index);
 bool isComputer(const Game& g, int index);
@@ -134,26 +147,42 @@ bool magical(const Game& g, const Army* a);
 int ability(const Game& g, const Army* a);
 bool woods(const Game& g, const Army* a);
 bool hills(const Game& g, const Army* a);
-inline bool isHero(const Army* a) { return a->hero(); }
+inline bool isHero(const Army* a) {
+    return a->hero();
+}
 /** The side's armies, last record first. */
 std::vector<Army*> armies(const Game& g, int sideIndex);
 /** Every placed army of a side on (x, y), last record first. */
 std::vector<Army*> onTile(const Game& g, int sideIndex, int x, int y);
 /** Is an army still in the game? */
-inline bool alive(const Game& g, const Army* a) { return g.alive(a); }
+inline bool alive(const Game& g, const Army* a) {
+    return g.alive(a);
+}
 
 /** A fresh block of AI data (ai_init_side, 59bf:084d). */
 AIData newData();
 /** An empty assault group (5f19:08ba). */
-inline std::shared_ptr<Group> emptyGroup() { return std::make_shared<Group>(); }
+inline std::shared_ptr<Group> emptyGroup() {
+    return std::make_shared<Group>();
+}
 /** The AI data of a side, made on first use. */
 AIData& data(Game& g, Side& sd);
 AIData& data(Game& g, int sideIndex);
-inline int role(const AIData& d, const City& c) { return get(d.roles, c.index); }
-inline void setRole(AIData& d, const City& c, int r) { d.roles[c.index] = r; }
-inline bool cflag(const AIData& d, const City& c, int bit) { return has(get(d.flags, c.index), bit); }
-inline void setCflag(AIData& d, const City& c, int bit) { d.flags[c.index] = set(get(d.flags, c.index), bit); }
-inline void clearCflag(AIData& d, const City& c, int bit) { d.flags[c.index] = clear(get(d.flags, c.index), bit); }
+inline int role(const AIData& d, const City& c) {
+    return get(d.roles, c.index);
+}
+inline void setRole(AIData& d, const City& c, int r) {
+    d.roles[c.index] = r;
+}
+inline bool cflag(const AIData& d, const City& c, int bit) {
+    return has(get(d.flags, c.index), bit);
+}
+inline void setCflag(AIData& d, const City& c, int bit) {
+    d.flags[c.index] = set(get(d.flags, c.index), bit);
+}
+inline void clearCflag(AIData& d, const City& c, int bit) {
+    d.flags[c.index] = clear(get(d.flags, c.index), bit);
+}
 
 /** A city's neighbours: {cities, dists}. */
 std::pair<std::vector<City*>, std::vector<int>> neighbours(Game& g, const City& c);
@@ -163,11 +192,11 @@ std::shared_ptr<Neighbours> buildNeighbours(Game& g);
 
 /** The stack a computer has "selected". */
 struct Sel {
-  std::vector<Army*> armies;
-  Army* leader = nullptr;
-  int minMoves = 0;
-  int mode = move::LAND;
-  Army* hero = nullptr;
+    std::vector<Army*> armies;
+    Army* leader = nullptr;
+    int minMoves = 0;
+    int mode = move::LAND;
+    Army* hero = nullptr;
 };
 /** The movement points a selection shares, and how it moves. */
 Sel& refresh(Game& g, Sel& sel);
@@ -181,7 +210,10 @@ std::optional<Sel> order(Game& g, const std::vector<Army*>& list, int ord, int d
 /** Where an order points an army (623c:0c7e). */
 void setTarget(Game& g, Army* a, int ord, int dest);
 /** Forget an army's order. */
-inline void clearOrder(Army* a) { a->aiOrder = ORDER_NONE; a->aiDest = NONE; }
+inline void clearOrder(Army* a) {
+    a->aiOrder = ORDER_NONE;
+    a->aiDest = NONE;
+}
 /** Select the stack an army moves with (8c07:06eb); they are marked moved. */
 Sel selectStackOf(Game& g, Army* a);
 /** The side's armies on a tile with at least `minMoves` moves left, up to
@@ -189,12 +221,13 @@ Sel selectStackOf(Game& g, Army* a);
 std::vector<Army*> collect(const Game& g, int sideIndex, int x, int y, int minMoves);
 /** The side's armies on a tile in group nibble `grp` with standing order
  *  `ord`, and a maximum move of at least `minMax` (623c:13b2). */
-std::vector<Army*> collectOrdered(const Game& g, int sideIndex, int x, int y, int grp, int ord, int minMax);
+std::vector<Army*> collectOrdered(const Game& g, int sideIndex, int x, int y, int grp, int ord,
+                                  int minMax);
 
 /** A flood's grid (move::flood). */
 struct Flood {
-  std::vector<int> dist;
-  int W = 0, H = 0;
+    std::vector<int> dist;
+    int W = 0, H = 0;
 };
 /** floodFrom's `fogSide` for the flooding side's own hidden map. */
 constexpr int SAME_SIDE = -3;
@@ -202,14 +235,16 @@ constexpr int SAME_SIDE = -3;
  *  original's bounded sweep (move::flood) over `sideIndex`'s cost grid, at
  *  most `range` rounds. `fogSide` is whose hidden map counts, the flooding
  *  side's by default (a computer's: none). */
-Flood floodFrom(Game& g, int sideIndex, int x, int y, int range, const Sel* sel, int fogSide = SAME_SIDE);
+Flood floodFrom(Game& g, int sideIndex, int x, int y, int range, const Sel* sel,
+                int fogSide = SAME_SIDE);
 Flood floodFrom(Game& g, int sideIndex, int x, int y, int range, int mode, int fogSide = SAME_SIDE);
 /** The flood's cost to (x, y), plus 1, or UNREACHED. */
 int floodAt(const Flood& flood, int x, int y);
 /** The flood's distance to a city: {best, bx, by}, the least over the twelve
  *  tiles round it, or 100 (1000 with `far`) when none is closer, bx NONE
  *  then (59bf:0a85). */
-std::tuple<int, int, int> cityDistance(const Game& g, const Flood& flood, const City& c, bool far = false);
+std::tuple<int, int, int> cityDistance(const Game& g, const Flood& flood, const City& c,
+                                       bool far = false);
 /** The chance, in percent, that the selection takes (x, y) (623c:15c5). */
 int odds(Game& g, const Sel& sel, int x, int y);
 /** A hero picks up whatever lies where it stands (6087:0427). */

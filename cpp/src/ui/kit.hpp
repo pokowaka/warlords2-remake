@@ -25,25 +25,25 @@ using layout::Rect;
 using Done = std::function<void()>;
 
 struct Modal : std::enable_shared_from_this<Modal> {
-  virtual ~Modal() = default;
-  virtual void draw() = 0;
-  virtual void update() {}
-  virtual void mousepressed(int x, int y, int button) {}
-  /** True when the dialog took the release (else the screen's buttons do). */
-  virtual bool mousereleased(int x, int y, int button) { return false; }
-  virtual void keypressed(const std::string& key) {}
-  virtual void textinput(const std::string& text) {}
-  /** A field is being typed into: the Steam Deck's on-screen keyboard comes up. */
-  virtual bool typing() const { return false; }
-  /** The right button on the dialog, where no control's help answered. */
-  virtual void rightpressed(int fx, int fy, int sx, int sy) {}
-  /** A help record's sub-id that stands for something on this dialog
-   *  (infobox::control): true when a box went up. */
-  virtual bool info(int sub, int sx, int sy) { return false; }
-  screen::View* view = nullptr;   // the controls the right button can ask about
-  std::set<int> hidden;           // controls taken off the dialog's face
-  bool menuBar = false;           // the menu bar stays live over it
-  bool infobox = false;
+    virtual ~Modal() = default;
+    virtual void draw() = 0;
+    virtual void update() {}
+    virtual void mousepressed(int x, int y, int button) {}
+    /** True when the dialog took the release (else the screen's buttons do). */
+    virtual bool mousereleased(int x, int y, int button) { return false; }
+    virtual void keypressed(const std::string& key) {}
+    virtual void textinput(const std::string& text) {}
+    /** A field is being typed into: the Steam Deck's on-screen keyboard comes up. */
+    virtual bool typing() const { return false; }
+    /** The right button on the dialog, where no control's help answered. */
+    virtual void rightpressed(int fx, int fy, int sx, int sy) {}
+    /** A help record's sub-id that stands for something on this dialog
+     *  (infobox::control): true when a box went up. */
+    virtual bool info(int sub, int sx, int sy) { return false; }
+    screen::View* view = nullptr;  // the controls the right button can ask about
+    std::set<int> hidden;          // controls taken off the dialog's face
+    bool menuBar = false;          // the menu bar stays live over it
+    bool infobox = false;
 };
 using ModalP = std::shared_ptr<Modal>;
 
@@ -70,9 +70,11 @@ void right(const Font& f, const std::string& text, double x, double y);
 /** A one-pixel bevel (24d0:02e5). */
 void bevel(double x, double y, double w, double h, int a, int b);
 /** A text field (7ecb:0058). */
-void field(double x, double y, double w, double h, const std::string* text, const Font* f = nullptr);
-inline void field(double x, double y, double w, double h, const std::string& text, const Font* f = nullptr) {
-  field(x, y, w, h, &text, f);
+void field(double x, double y, double w, double h, const std::string* text,
+           const Font* f = nullptr);
+inline void field(double x, double y, double w, double h, const std::string& text,
+                  const Font* f = nullptr) {
+    field(x, y, w, h, &text, f);
 }
 /** An army as 8611:08be draws one: the ring (0 none, 1 grey, 2-9 a side's),
  *  then the army's cell -- of ASHADOW.PCK when `shadow`. */
@@ -86,11 +88,15 @@ void mapTarget(int mx, int my, int hx, int hy, int tx, int ty);
 /** A dialog's BUTTON.DAT controls, each in its own state. */
 screen::View view(int dialogId);
 void drawControls(const screen::View& v, const std::set<int>* hidden = nullptr);
-inline void drawControls(const screen::View& v, const std::set<int>& hidden) { drawControls(v, &hidden); }
+inline void drawControls(const screen::View& v, const std::set<int>& hidden) {
+    drawControls(v, &hidden);
+}
 /** The live control under a point: not disabled and not hidden. */
-const w2::uidata::Control* controlAt(const screen::View& v, int x, int y, const std::set<int>* hidden = nullptr);
-inline const w2::uidata::Control* controlAt(const screen::View& v, int x, int y, const std::set<int>& hidden) {
-  return controlAt(v, x, y, &hidden);
+const w2::uidata::Control* controlAt(const screen::View& v, int x, int y,
+                                     const std::set<int>* hidden = nullptr);
+inline const w2::uidata::Control* controlAt(const screen::View& v, int x, int y,
+                                            const std::set<int>& hidden) {
+    return controlAt(v, x, y, &hidden);
 }
 const w2::uidata::Control* control(const screen::View& v, int id);
 /** A string from STRING.DAT, numbered as get_string numbers them. */

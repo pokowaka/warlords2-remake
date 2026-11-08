@@ -29,49 +29,50 @@ constexpr int TILE = 40;
 constexpr int STRATEGIC = 1, MAP = 2, MENUBAR = 3, BOTTOMBAR = 9, MAPPANEL = 13;
 
 struct Art {
-  gfx::ImageP image;
-  int w = 0, h = 0;
+    gfx::ImageP image;
+    int w = 0, h = 0;
 };
 
 /** Another dialog's layout, sharing the screen's art and bitmap table. */
 struct View {
-  w2::uidata::Dialog dialog;
-  std::map<int, int> state;
-  int id = 0;
-  bool screen = false;
-  int stateOf(int id) const {
-    auto it = state.find(id);
-    return it == state.end() ? w2::uidata::NORMAL : it->second;
-  }
+    w2::uidata::Dialog dialog;
+    std::map<int, int> state;
+    int id = 0;
+    bool screen = false;
+    int stateOf(int id) const {
+        auto it = state.find(id);
+        return it == state.end() ? w2::uidata::NORMAL : it->second;
+    }
 };
 
 struct Screen {
-  w2::uidata::UI ui;
-  w2::uidata::Dialog dialog, original;
-  std::string dataDir;
-  w2::pal::Palette palette;
-  int terrain = 0;
-  std::map<int, Art> art;
-  std::array<gfx::ImageP, 4> background;
-  std::array<std::shared_ptr<const w2::pck::Pixels>, 4> backgroundPx;
-  gfx::ImageP bgImage, stoneImg;
-  struct MapColour {
-    std::array<std::array<int, 256>, 4> tile{};
-    std::array<std::array<int, 20>, 4> road{};
-    std::array<int, 16> remap{};
-    bool loaded = false;
-  } mapColour;
-  std::map<int, int> state;   // the live state of each control
+    w2::uidata::UI ui;
+    w2::uidata::Dialog dialog, original;
+    std::string dataDir;
+    w2::pal::Palette palette;
+    int terrain = 0;
+    std::map<int, Art> art;
+    std::array<gfx::ImageP, 4> background;
+    std::array<std::shared_ptr<const w2::pck::Pixels>, 4> backgroundPx;
+    gfx::ImageP bgImage, stoneImg;
+    struct MapColour {
+        std::array<std::array<int, 256>, 4> tile{};
+        std::array<std::array<int, 20>, 4> road{};
+        std::array<int, 16> remap{};
+        bool loaded = false;
+    } mapColour;
+    std::map<int, int> state;  // the live state of each control
 
-  const Art* artFor(int bitmapId);
-  int stateOf(int id) const {
-    auto it = state.find(id);
-    return it == state.end() ? w2::uidata::NORMAL : it->second;
-  }
+    const Art* artFor(int bitmapId);
+    int stateOf(int id) const {
+        auto it = state.find(id);
+        return it == state.end() ? w2::uidata::NORMAL : it->second;
+    }
 };
 
 /** Load the layout and the background the given dialog needs. */
-std::unique_ptr<Screen> load(const std::string& dataDir, const w2::pal::Palette& palette, int dialogId = 0, int terrain = 0);
+std::unique_ptr<Screen> load(const std::string& dataDir, const w2::pal::Palette& palette,
+                             int dialogId = 0, int terrain = 0);
 /** Place the main screen's controls and regions for layout `L`. */
 void relayout(Screen& s, const layout::Layout& L);
 /** The main screen's ground for layout `L`. */

@@ -21,31 +21,31 @@
 namespace w2::randommap {
 
 constexpr const char* DIR = "RANDOM";
-extern const char* const FILES[6];         // what it makes, by extension
+extern const char* const FILES[6];  // what it makes, by extension
 using Files = std::map<std::string, std::string>;
 
 // what the start menu shows beside each slider (4125:28e0, formats 4125:2918)
 extern const int SLIDER_SHOWS[4][7];
 extern const char* const SLIDER_FORMATS[4];
-constexpr int RANDOM_SLIDER = 7;           // a slider of 7 is rolled: 1d7-1
+constexpr int RANDOM_SLIDER = 7;  // a slider of 7 is rolled: 1d7-1
 
 struct Options {
-  std::string dataDir;
-  Rng* rng = nullptr;
-  std::array<int, 4> sliders{{3, 3, 2, 3}};   // Water, Hills, Cities, Forest, 0-7
-  bool allies = false;
-  int terrainSet = 0;
-  /** Not the original's: choose the eight capitals for a fair start (far
-   *  apart, every city near some capital, each side as much room to grow as
-   *  the next) instead of 513d:0689's random picks. Off, the world is the
-   *  original's, byte for byte. See docs/mapeval.md. */
-  bool fairCapitals = false;
-  /** Not the original's: make the world with the scenario generator
-   *  (warlords/scengen) instead, shaped by `world`; its capitals are always
-   *  the fair ones, its city names never repeat, and its .SCN reads as an
-   *  ordinary scenario, not a random one. */
-  bool scenario = false;
-  scengen::Settings world;
+    std::string dataDir;
+    Rng* rng = nullptr;
+    std::array<int, 4> sliders{{3, 3, 2, 3}};  // Water, Hills, Cities, Forest, 0-7
+    bool allies = false;
+    int terrainSet = 0;
+    /** Not the original's: choose the eight capitals for a fair start (far
+     *  apart, every city near some capital, each side as much room to grow as
+     *  the next) instead of 513d:0689's random picks. Off, the world is the
+     *  original's, byte for byte. See docs/mapeval.md. */
+    bool fairCapitals = false;
+    /** Not the original's: make the world with the scenario generator
+     *  (warlords/scengen) instead, shaped by `world`; its capitals are always
+     *  the fair ones, its city names never repeat, and its .SCN reads as an
+     *  ordinary scenario, not a random one. */
+    bool scenario = false;
+    scengen::Settings world;
 };
 
 /** The sliders as random_map_setup (7bab:10e8) takes them: 7 rolled as 1d7-1. */
@@ -56,20 +56,20 @@ class Generator;
 /** A world being made, a phase at a time, so the progress bar can move as
  *  the original's does. */
 class Run {
- public:
-  explicit Run(const Options& opts);
-  ~Run();
-  /** Do the next phase; false once the world is made. */
-  bool step();
-  /** How far along it is, 0-100, as the original's bar shows it. */
-  int progress() const { return pct_; }
-  /** The world's files, keyed by extension, once step() has said false. */
-  const Files& files() const { return files_; }
+  public:
+    explicit Run(const Options& opts);
+    ~Run();
+    /** Do the next phase; false once the world is made. */
+    bool step();
+    /** How far along it is, 0-100, as the original's bar shows it. */
+    int progress() const { return pct_; }
+    /** The world's files, keyed by extension, once step() has said false. */
+    const Files& files() const { return files_; }
 
- private:
-  std::unique_ptr<Generator> gen_;
-  int pct_ = 0;
-  Files files_;
+  private:
+    std::unique_ptr<Generator> gen_;
+    int pct_ = 0;
+    Files files_;
 };
 
 /** Make a random world through to its end. */

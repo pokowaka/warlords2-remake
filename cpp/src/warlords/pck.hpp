@@ -23,9 +23,9 @@ namespace w2::pck {
 
 /** A decoded sheet: w * h colour indices, 0-15. */
 struct Pixels {
-  int w = 0, h = 0;
-  std::vector<uint8_t> px;
-  uint8_t at(int x, int y) const { return px[(size_t)y * w + x]; }
+    int w = 0, h = 0;
+    std::vector<uint8_t> px;
+    uint8_t at(int x, int y) const { return px[(size_t)y * w + x]; }
 };
 
 /** Decode a .PCK; decoded sheets are kept, as they never change. */

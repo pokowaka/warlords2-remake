@@ -14,21 +14,21 @@ namespace w2 {
 
 /** What a finished quest paid (quest_choose_reward). */
 struct Reward {
-  std::string kind;   // "allies", "gold", "item", "revealed"
-  std::vector<Army*> armies;
-  const ArmyType* type = nullptr;
-  int count = 0;      // allies given, room or not
-  int gold = 0;
-  Item* item = nullptr;
-  Site* site = nullptr;
+    std::string kind;  // "allies", "gold", "item", "revealed"
+    std::vector<Army*> armies;
+    const ArmyType* type = nullptr;
+    int count = 0;  // allies given, room or not
+    int gold = 0;
+    Item* item = nullptr;
+    Site* site = nullptr;
 };
 
 /** A quest's end: done with a reward, or failed for a reason. */
 struct QuestResult {
-  std::shared_ptr<Quest> quest;
-  std::shared_ptr<Reward> reward;
-  std::string failed;     // "" when it was done
-  int why = 0;            // the STRING.DAT group quest_check tells a human it with
+    std::shared_ptr<Quest> quest;
+    std::shared_ptr<Reward> reward;
+    std::string failed;  // "" when it was done
+    int why = 0;         // the STRING.DAT group quest_check tells a human it with
 };
 
 namespace quest {
@@ -51,21 +51,23 @@ constexpr int REWARD_ALLY = 19;
 /** Take a quest at a temple, or none (quest_assign, 4976:0d7a): tries until
  *  a quest finds a target -- pillage gold always does. `computer` for a
  *  computer player's (5ad0:15c3). */
-std::shared_ptr<Quest> assign(Game& g, Side& side, Army* h, bool computer = false, bool flying = false);
+std::shared_ptr<Quest> assign(Game& g, Side& side, Army* h, bool computer = false,
+                              bool flying = false);
 /** A line of prose for a quest. */
 std::string describe(const Quest& q);
 
 /** What just happened, for event(). */
 struct Event {
-  std::vector<Army*> stack;
-  std::vector<Army*> killed;
-  City* city = nullptr;
-  int gold = 0;
-  Army* hero = nullptr;
+    std::vector<Army*> stack;
+    std::vector<Army*> killed;
+    City* city = nullptr;
+    int gold = 0;
+    Army* hero = nullptr;
 };
 /** Tell the quest what just happened: "battle", "item", "pillage", "occupy",
  *  "raze" or "turn" (quest_check, 4976:1ded). */
-std::shared_ptr<QuestResult> event(Game& g, Side& side, const std::string& ev, const Event& data = Event());
+std::shared_ptr<QuestResult> event(Game& g, Side& side, const std::string& ev,
+                                   const Event& data = Event());
 /** Choose and give the reward (quest_choose_reward, 4976:1909, and
  *  quest_give_reward, 4976:1c02). */
 std::shared_ptr<Reward> reward(Game& g, Side& side, const Quest* q);

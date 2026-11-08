@@ -19,11 +19,11 @@ constexpr int BAR_H = 17;
 /** "-" is a separator. The key is the accelerator, and is what the front end
  *  dispatches on; `act` is what an item with no accelerator does. */
 struct Item {
-  std::string label, key, act;
+    std::string label, key, act;
 };
 struct Menu {
-  std::string title;
-  std::vector<Item> items;
+    std::string title;
+    std::vector<Item> items;
 };
 extern const std::vector<Menu> MENUS;
 
@@ -34,17 +34,17 @@ extern const std::vector<Menu> MENUS;
 std::vector<Menu> withZooms(int maxUI, int maxMap, double smoothUI = 0, double mapShrink = 1);
 
 struct Row {
-  std::string label, key, act;
-  int x = 0, y = 0, w = 0, h = 0;
+    std::string label, key, act;
+    int x = 0, y = 0, w = 0, h = 0;
 };
 struct Drop {
-  int x = 0, y = 0, w = 0, h = 0, keyCol = 0;
-  std::vector<Row> rows;
+    int x = 0, y = 0, w = 0, h = 0, keyCol = 0;
+    std::vector<Row> rows;
 };
 struct Title {
-  std::string title;
-  int x = 0, w = 0;
-  Drop drop;
+    std::string title;
+    int x = 0, w = 0;
+    Drop drop;
 };
 using Layout = std::vector<Title>;
 

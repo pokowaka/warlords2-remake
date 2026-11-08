@@ -25,7 +25,9 @@ const std::vector<int>& ratingRanks(int n);
 void init(Game& g);
 /** The state between two sides. */
 int state(const Game& g, int a, int b);
-inline bool atWar(const Game& g, int a, int b) { return state(g, a, b) != PEACE; }
+inline bool atWar(const Game& g, int a, int b) {
+    return state(g, a, b) != PEACE;
+}
 /** May `a` attack `b`? A side at peace may not. */
 bool mayAttack(const Game& g, int a, int b);
 /** Propose a state to another side. */
@@ -80,24 +82,24 @@ int alliedTargetCity(const Game& g, int side);
 void setAlliedTargetCity(Game& g, int side, int cityIndex);
 
 struct AttitudeFactor {
-  std::string label;
-  int delta = 0;
+    std::string label;
+    int delta = 0;
 };
 
 struct AttitudeBreakdown {
-  int fromSide = NONE;
-  int toSide = NONE;
-  std::string personalityName;
-  std::string personalityArchetype;
-  std::string motto;
-  int totalScore = 0;
-  int trustScore = 0;
-  int truceRemaining = 0;
-  std::vector<AttitudeFactor> factors;
-  std::string stanceSummary;
-  std::string whatItTakes;
-  int peaceGoldNeeded = 0;   // 0 = free, >0 = gold tribute required, NONE = will not accept
-  int allyGoldNeeded = 0;    // 0 = free, >0 = gold tribute required, NONE = will not accept
+    int fromSide = NONE;
+    int toSide = NONE;
+    std::string personalityName;
+    std::string personalityArchetype;
+    std::string motto;
+    int totalScore = 0;
+    int trustScore = 0;
+    int truceRemaining = 0;
+    std::vector<AttitudeFactor> factors;
+    std::string stanceSummary;
+    std::string whatItTakes;
+    int peaceGoldNeeded = 0;  // 0 = free, >0 = gold tribute required, NONE = will not accept
+    int allyGoldNeeded = 0;   // 0 = free, >0 = gold tribute required, NONE = will not accept
 };
 
 /**

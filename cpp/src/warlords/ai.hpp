@@ -34,9 +34,9 @@ namespace w2::ai {
 
 /** What the front end listens with. */
 struct Hooks {
-  std::function<void(Game&, const std::vector<Army*>&, const move::WalkResult&)> onWalk;
-  std::function<void(Game&, const std::vector<Army*>&, int, int, Battle&)> onFight;
-  std::function<void(Game&, Side&, City&, const std::string&)> onSpoils;
+    std::function<void(Game&, const std::vector<Army*>&, const move::WalkResult&)> onWalk;
+    std::function<void(Game&, const std::vector<Army*>&, int, int, Battle&)> onFight;
+    std::function<void(Game&, Side&, City&, const std::string&)> onSpoils;
 };
 extern Hooks hooks;
 

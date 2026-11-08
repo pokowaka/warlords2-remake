@@ -19,12 +19,12 @@ void init(const std::string& dataDir, const w2::uidata::Strings& files);
 void shutdown();
 
 struct Options {
-  bool music = true, effects = true, speech = true;
+    bool music = true, effects = true, speech = true;
 };
 Options& options();
 /** Write OPTIONS.SND after a switch has changed. */
 void saveOptions();
-void toggle(const std::string& which);   // "music", "effects", "speech"
+void toggle(const std::string& which);  // "music", "effects", "speech"
 
 /** Play a cue's song (warlords/cues). */
 void music(int cue, const std::vector<w2::Side*>& sides = {});

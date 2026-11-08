@@ -13,25 +13,25 @@
 
 namespace input {
 struct Options {
-  std::string title;
-  std::vector<std::string> lines;
-  std::string text;
-  int maxChars = 15, maxWidth = 232;
-  bool cancel = true;     // false greys Cancel
-  bool confirm = false;   // a yes-or-no question: no field
-  std::function<void(const std::string&)> ok;
-  std::function<void()> cancelled;
+    std::string title;
+    std::vector<std::string> lines;
+    std::string text;
+    int maxChars = 15, maxWidth = 232;
+    bool cancel = true;    // false greys Cancel
+    bool confirm = false;  // a yes-or-no question: no field
+    std::function<void(const std::string&)> ok;
+    std::function<void()> cancelled;
 };
 /** Ask for a line of text, or a yes-or-no question (7b4c:0000). */
 void open(const Options& opts);
 /** A line being typed into a field (7b4c:03a6). */
 struct Editor {
-  std::string text;
-  int maxChars = 15, maxWidth = 232;
-  /** "keep" for Enter, "undo" for Escape, "" otherwise. */
-  std::string key(const std::string& k);
-  void input(const std::string& t);
-  void drawCursor(double x, double y) const;
+    std::string text;
+    int maxChars = 15, maxWidth = 232;
+    /** "keep" for Enter, "undo" for Escape, "" otherwise. */
+    std::string key(const std::string& k);
+    void input(const std::string& t);
+    void drawCursor(double x, double y) const;
 };
 }  // namespace input
 
@@ -55,21 +55,22 @@ void medal(w2::Army* a, kit::Done after);
 namespace choose {
 /** The game's list chooser (796c:0000): pick one of `names`, entry `start`
  *  chosen; `after(index or NONE)` runs when it closes. */
-void open(const std::string& title, const std::vector<std::string>& names, int start, std::function<void(int)> after);
-}
+void open(const std::string& title, const std::vector<std::string>& names, int start,
+          std::function<void(int)> after);
+}  // namespace choose
 
 namespace help {
 extern const kit::Rect POPUP4;
 /** Show a help file -- "HELP\HITEM.GFX" -- in popup `R` (or the one its #D
  *  picks); false when there is none. */
 bool open(const std::string& name, kit::Done after = nullptr, const kit::Rect* R = nullptr);
-}
+}  // namespace help
 
 namespace infobox {
 struct Board {
-  int bitmap;
-  const char* file;
-  int w, h, key;
+    int bitmap;
+    const char* file;
+    int w, h, key;
 };
 extern const Board LINES, ARMY, POPUP2;
 /** A board, loaded once and keyed on its mask colour. */
@@ -87,55 +88,77 @@ void armyType(int sx, int sy, int typeId, const w2::Slot& s, int side = w2::NONE
  *  the controls that stand for something. True when a box went up. */
 bool control(int sx, int sy, int id, kit::Modal* d = nullptr);
 /** The control on a dialog's view under a point, disabled ones included. */
-const w2::uidata::Control* controlAt(const screen::View& v, int x, int y, const std::set<int>* hidden = nullptr);
+const w2::uidata::Control* controlAt(const screen::View& v, int x, int y,
+                                     const std::set<int>* hidden = nullptr);
 }  // namespace infobox
 
 namespace advisor {
 /** Have him say a FILE.DAT group, and run `after` once he has finished. */
 void say(int group, kit::Done after = nullptr);
-}
+}  // namespace advisor
 
 namespace tutorial {
 /** Show the page for `moment` once, if the tutorial is on. */
 void show(const std::string& moment, kit::Done after = nullptr);
 void chain(const std::vector<std::string>& moments, kit::Done after = nullptr);
-}
+}  // namespace tutorial
 
-namespace about { void open(); }
-namespace spoils {
-void open(bool sacked, w2::City* city, int gold, const std::vector<std::pair<int, int>>& lost, int left, kit::Done after);
+namespace about {
+void open();
 }
-namespace resign { void open(); }
-namespace items { void open(); }
-namespace levels { void open(); }
-namespace miladvisor { void open(const std::vector<w2::Army*>* stack, int tx, int ty); }
-namespace signpost { void open(const std::vector<w2::Army*>& stack); }
+namespace spoils {
+void open(bool sacked, w2::City* city, int gold, const std::vector<std::pair<int, int>>& lost,
+          int left, kit::Done after);
+}
+namespace resign {
+void open();
+}
+namespace items {
+void open();
+}
+namespace levels {
+void open();
+}
+namespace miladvisor {
+void open(const std::vector<w2::Army*>* stack, int tx, int ty);
+}
+namespace signpost {
+void open(const std::vector<w2::Army*>& stack);
+}
 namespace questnews {
 void show(std::shared_ptr<w2::QuestResult> news, kit::Done after = nullptr);
 /** A quest that ended is told once the screen is the player's again. */
 void poll();
+}  // namespace questnews
+namespace questui {
+void open();
 }
-namespace questui { void open(); }
-namespace stackui { void open(); }
+namespace stackui {
+void open();
+}
 namespace armybonus {
 void open();
 /** 89e0:1a07: the first of the type's bonuses, as group 163 words it. */
 std::string bonusText(const w2::ArmyType& t, const w2::Army* army = nullptr);
-}
+}  // namespace armybonus
 namespace city {
 constexpr int INFO = 0, CITY = 1, PRODUCTION = 2, VECTOR = 3;
 /** Production for one of the side's own by default, Info for any other. */
 void open(w2::City* c, int mode = w2::NONE);
+}  // namespace city
+namespace buyprod {
+void open(w2::City* c, kit::Done after = nullptr);
 }
-namespace buyprod { void open(w2::City* c, kit::Done after = nullptr); }
-namespace fightorder { void open(); }
+namespace fightorder {
+void open();
+}
 namespace ending {
 /** A side put out at the round's end: a line of group 11 (8065:18ab). */
 std::string fallenText(const w2::Fallen& f);
 /** The game's end, or nearly: told, then `after`. */
 void show(w2::Ending& e, kit::Done after);
 void over(w2::Ending& e);
-}
+}  // namespace ending
 namespace diplomacyui {
 void open();
 /** Diplomatic Action, the shield button. */
@@ -148,32 +171,40 @@ void openParley(int otherSide, bool returnToAction = false);
 void pollMissives(kit::Done after = nullptr);
 /** Open the F10 AI Brain & Neural Policy Inspector modal. */
 void openBrainInspector(int initialSide = w2::NONE);
+}  // namespace diplomacyui
+namespace heroinfo {
+void open();
 }
-namespace heroinfo { void open(); }
 namespace historyui {
 void open(int which);
 void triumphs();
+}  // namespace historyui
+namespace reports {
+void open(int which);
 }
-namespace reports { void open(int which); }
 namespace ruin {
 w2::Site* nearest(int x, int y);
 void open(w2::Site* s);
-}
+}  // namespace ruin
 namespace savegame {
 void save();
 void load(std::function<void(std::unique_ptr<w2::Game>)> after);
 int used();
 bool writeSlot(const std::string& key, const w2::Game& g);
 std::unique_ptr<w2::Game> readSlot(const std::string& key);
-}
+}  // namespace savegame
 namespace settings {
 /** `after` runs when OK is pressed. */
 void open(kit::Done after = nullptr);
+}  // namespace settings
+namespace shortcuts {
+void open();
 }
-namespace shortcuts { void open(); }
-namespace tileinfo { void open(int tx, int ty); }
+namespace tileinfo {
+void open(int tx, int ty);
+}
 namespace start {
 /** The start screens (7f77:0000): a new game set up there, or a saved one. */
 void open(std::function<void(const std::string& dir, const w2::game::NewGameOptions& opts)> begin,
           std::function<void(std::unique_ptr<w2::Game>)> loaded);
-}
+}  // namespace start

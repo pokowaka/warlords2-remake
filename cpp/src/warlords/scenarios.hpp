@@ -26,9 +26,9 @@
 namespace w2::scenarios {
 
 struct Entry {
-  std::string name, dir, text;
-  int cities = 0, ruins = 0, players = 0;
-  bool generated = false;
+    std::string name, dir, text;
+    int cities = 0, ruins = 0, players = 0;
+    bool generated = false;
 };
 
 /** SCENARIO.DAT's records in order, then the generated scenarios SCENGEN.LST

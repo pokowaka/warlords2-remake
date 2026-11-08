@@ -16,30 +16,30 @@
 #include "warlords/pck.hpp"
 
 class Font {
- public:
-  /** Load DATA/<name>.FIN and .FNT, keying out `keyIndex`. */
-  static std::shared_ptr<Font> load(const std::string& dataDir, const std::string& name, const w2::pal::Palette& palette,
-                                    int keyIndex);
-  int width(const std::string& text) const;
-  int draw(const std::string& text, double x, double y) const;
-  /** Draw centred in a rect, the way the original centres a control's text. */
-  void drawCentred(const std::string& text, double x, double y, double w, double h) const;
-  /** The same font in other colours, as 78a8:06ae asks for it: the sheet's
-   *  glyph colour (15) becomes `glyph` and its outline (0) `outline`. */
-  const Font& colours(int glyph, int outline) const;
-  int lineHeight = 0, baseline = 0;
+  public:
+    /** Load DATA/<name>.FIN and .FNT, keying out `keyIndex`. */
+    static std::shared_ptr<Font> load(const std::string& dataDir, const std::string& name,
+                                      const w2::pal::Palette& palette, int keyIndex);
+    int width(const std::string& text) const;
+    int draw(const std::string& text, double x, double y) const;
+    /** Draw centred in a rect, the way the original centres a control's text. */
+    void drawCentred(const std::string& text, double x, double y, double w, double h) const;
+    /** The same font in other colours, as 78a8:06ae asks for it: the sheet's
+     *  glyph colour (15) becomes `glyph` and its outline (0) `outline`. */
+    const Font& colours(int glyph, int outline) const;
+    int lineHeight = 0, baseline = 0;
 
- private:
-  struct Metrics {
-    int count = 0, first = 0, sheetWidth = 0;
-    std::array<int, 256> ink{}, width{};
-  };
-  std::shared_ptr<Metrics> m_;
-  std::shared_ptr<std::map<int, gfx::Quad>> quad_;
-  gfx::ImageP image_;
-  std::shared_ptr<const w2::pck::Pixels> px_;
-  w2::pal::Palette palette_;
-  int key_ = -1;
-  mutable std::shared_ptr<std::map<int, std::shared_ptr<Font>>> variants_;
+  private:
+    struct Metrics {
+        int count = 0, first = 0, sheetWidth = 0;
+        std::array<int, 256> ink{}, width{};
+    };
+    std::shared_ptr<Metrics> m_;
+    std::shared_ptr<std::map<int, gfx::Quad>> quad_;
+    gfx::ImageP image_;
+    std::shared_ptr<const w2::pck::Pixels> px_;
+    w2::pal::Palette palette_;
+    int key_ = -1;
+    mutable std::shared_ptr<std::map<int, std::shared_ptr<Font>>> variants_;
 };
 using FontP = std::shared_ptr<Font>;

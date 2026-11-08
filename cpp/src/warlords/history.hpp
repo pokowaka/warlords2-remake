@@ -12,13 +12,13 @@
 
 namespace w2::history {
 
-using w2::DeedType;   // the kinds of deed, in types.hpp beside Deed
+using w2::DeedType;  // the kinds of deed, in types.hpp beside Deed
 
 // A deed's first value where it is not a city, a side or an item:
-constexpr int KILLED_IN_BATTLE = -1;   // HERO_KILLED: in the field, not in a city
-constexpr int KILLED_SEARCHING = -2;   // HERO_KILLED: by a ruin's guardian
-constexpr int WON_BY_NAME = -1;        // CITY_WON: the hero named in the deed took it
-constexpr int FOUND_ALLIES = 100, FOUND_SAGE = 101, FOUND_GOLD = 102;   // FOUND: not an item
+constexpr int KILLED_IN_BATTLE = -1;  // HERO_KILLED: in the field, not in a city
+constexpr int KILLED_SEARCHING = -2;  // HERO_KILLED: by a ruin's guardian
+constexpr int WON_BY_NAME = -1;       // CITY_WON: the hero named in the deed took it
+constexpr int FOUND_ALLIES = 100, FOUND_SAGE = 101, FOUND_GOLD = 102;  // FOUND: not an item
 
 /** The history is recorded for the first 201 rounds only (6d51:0d60). */
 constexpr int LAST_RECORDED_TURN = 201;

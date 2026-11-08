@@ -26,22 +26,22 @@ namespace w2::mapeval {
 
 /** One hard-rule failure, on the tile where it shows. */
 struct Issue {
-  std::string check;    // e.g. "stray-road"
-  int x = 0, y = 0;
-  std::string detail;
+    std::string check;  // e.g. "stray-road"
+    int x = 0, y = 0;
+    std::string detail;
 };
 
 struct Evaluation {
-  std::string name;
-  std::vector<Issue> issues;
-  std::vector<std::pair<std::string, double>> metrics;   // in a fixed order
+    std::string name;
+    std::vector<Issue> issues;
+    std::vector<std::pair<std::string, double>> metrics;  // in a fixed order
 
-  /** No hard rule broken (soft ones, like a spur road, are only counted). */
-  bool passed() const;
-  /** The metric's value, or `dflt` when it was not measured. */
-  double metric(const std::string& key, double dflt = 0) const;
-  /** How many issues a check raised. */
-  int count(const std::string& check) const;
+    /** No hard rule broken (soft ones, like a spur road, are only counted). */
+    bool passed() const;
+    /** The metric's value, or `dflt` when it was not measured. */
+    double metric(const std::string& key, double dflt = 0) const;
+    /** How many issues a check raised. */
+    int count(const std::string& check) const;
 };
 
 /** Every check, by name, in the order they are reported. */
@@ -59,7 +59,7 @@ Evaluation evaluate(const Map& map, const std::string& name);
 
 /** A metric's spread over the reference maps. */
 struct Range {
-  double min = 0, max = 0, mean = 0, sd = 0;
+    double min = 0, max = 0, mean = 0, sd = 0;
 };
 using Reference = std::map<std::string, Range>;
 
@@ -69,8 +69,8 @@ Reference reference(const std::vector<Evaluation>& maps);
 /** How far a map sits outside the reference, metric by metric: 0 inside the
  *  range, else the distance outside it in reference standard deviations. */
 struct Score {
-  double penalty = 0;                                      // the sum
-  std::vector<std::pair<std::string, double>> deviations;  // the non-zero ones
+    double penalty = 0;                                      // the sum
+    std::vector<std::pair<std::string, double>> deviations;  // the non-zero ones
 };
 Score score(const Evaluation& e, const Reference& ref);
 

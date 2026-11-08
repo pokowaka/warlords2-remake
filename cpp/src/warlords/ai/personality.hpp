@@ -15,27 +15,27 @@ namespace w2::ai::personality {
 constexpr int TRAIT_DIM = 10;
 
 enum TraitIndex : int {
-  AGGRESSION = 0,
-  HONOUR = 1,
-  AVARICE = 2,
-  SCORCHED_EARTH = 3,
-  HERO_FOCUS = 4,
-  COALITION_DRIVE = 5,
-  CAVALRY_AFFINITY = 6,
-  FLIER_AFFINITY = 7,
-  SIEGE_AFFINITY = 8,
-  CAUTION = 9,
+    AGGRESSION = 0,
+    HONOUR = 1,
+    AVARICE = 2,
+    SCORCHED_EARTH = 3,
+    HERO_FOCUS = 4,
+    COALITION_DRIVE = 5,
+    CAVALRY_AFFINITY = 6,
+    FLIER_AFFINITY = 7,
+    SIEGE_AFFINITY = 8,
+    CAUTION = 9,
 };
 
 using PersonalityVector = std::array<float, TRAIT_DIM>;
 
 struct Profile {
-  int level = 0;
-  int card = 0;
-  std::string name;
-  std::string archetype;
-  std::string motto;
-  PersonalityVector traits{};
+    int level = 0;
+    int card = 0;
+    std::string name;
+    std::string archetype;
+    std::string motto;
+    PersonalityVector traits{};
 };
 
 /**

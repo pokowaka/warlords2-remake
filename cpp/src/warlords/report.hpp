@@ -15,10 +15,10 @@ constexpr int ARMY = 0, CITY = 1, GOLD = 2, PRODUCTION = 3, WINNING = 4;
 int score(const Game& g, const Side& side);
 
 struct Figures {
-  std::array<int, 8> value{};
-  std::array<bool, 8> out{};
-  int max = 0;
-  int result = 0;
+    std::array<int, 8> value{};
+    std::array<bool, 8> out{};
+    int max = 0;
+    int result = 0;
 };
 /** One report's figures. */
 Figures figures(const Game& g, const Side& side, int n);

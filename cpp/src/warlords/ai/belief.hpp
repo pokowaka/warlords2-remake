@@ -16,49 +16,49 @@
 namespace w2 {
 
 struct ObservedStack {
-  int x = NONE, y = NONE;
-  int owner = NONE;
-  int visibleCount = 0;
-  int topType = 0;
-  int lastInspectedTurn = NONE;
-  std::vector<int> knownTypes;
-  std::vector<int> knownStrengths;
+    int x = NONE, y = NONE;
+    int owner = NONE;
+    int visibleCount = 0;
+    int topType = 0;
+    int lastInspectedTurn = NONE;
+    std::vector<int> knownTypes;
+    std::vector<int> knownStrengths;
 };
 
 struct FrontierCluster {
-  int x = 0, y = 0;
-  int unseenNeighbours = 0;
-  int regionUnseenCount = 0;
-  bool isWater = false;
-  bool onRoad = false;
+    int x = 0, y = 0;
+    int unseenNeighbours = 0;
+    int regionUnseenCount = 0;
+    bool isWater = false;
+    bool onRoad = false;
 };
 
 struct SideBelief {
-  int updatedTurn = 0;
-  float frontierRatio = 0.0f;
-  std::map<int, ObservedStack> stacksByTile;
-  std::array<float, 8> seenEnemyAvgStrength{4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f};
-  std::vector<City*> visibleCities;
-  std::vector<Site*> visibleSites;
-  std::vector<Item*> visibleGroundItems;
-  std::vector<FrontierCluster> fogFrontiers;
-  std::vector<float> cityThreat1Turn;
-  std::vector<float> cityThreat2Turn;
-  std::vector<float> cityNearestEnemyDist;
-  std::array<float, 8> myBorderStrength{};
-  std::array<float, 8> theirBorderStrength{};
-  std::array<int, 8> visibleCitiesBySide{};
+    int updatedTurn = 0;
+    float frontierRatio = 0.0f;
+    std::map<int, ObservedStack> stacksByTile;
+    std::array<float, 8> seenEnemyAvgStrength{4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f, 4.0f};
+    std::vector<City*> visibleCities;
+    std::vector<Site*> visibleSites;
+    std::vector<Item*> visibleGroundItems;
+    std::vector<FrontierCluster> fogFrontiers;
+    std::vector<float> cityThreat1Turn;
+    std::vector<float> cityThreat2Turn;
+    std::vector<float> cityNearestEnemyDist;
+    std::array<float, 8> myBorderStrength{};
+    std::array<float, 8> theirBorderStrength{};
+    std::array<int, 8> visibleCitiesBySide{};
 };
 
 namespace ai::belief {
 
 struct CombatEstimate {
-  float winProb = 1.0f;
-  float expectedSurvivors = 0.0f;
-  float expectedEnemyLosses = 0.0f;
-  int estimatedDefenderCount = 0;
-  float estimatedDefenderStrength = 0.0f;
-  float seenTileFraction = 1.0f;
+    float winProb = 1.0f;
+    float expectedSurvivors = 0.0f;
+    float expectedEnemyLosses = 0.0f;
+    int estimatedDefenderCount = 0;
+    float estimatedDefenderStrength = 0.0f;
+    float seenTileFraction = 1.0f;
 };
 
 /**
@@ -109,18 +109,18 @@ CombatEstimate estimateCombat(Game& g, const Side& side, const std::vector<Army*
  * scoring a stack's options, never across a walk or a battle. Scopes nest.
  */
 class ScopedTileIndex {
- public:
-  explicit ScopedTileIndex(const Game& g);
-  ~ScopedTileIndex();
-  ScopedTileIndex(const ScopedTileIndex&) = delete;
-  ScopedTileIndex& operator=(const ScopedTileIndex&) = delete;
-  const std::vector<Army*>& at(int x, int y) const;
-  const Game& game() const { return g_; }
+  public:
+    explicit ScopedTileIndex(const Game& g);
+    ~ScopedTileIndex();
+    ScopedTileIndex(const ScopedTileIndex&) = delete;
+    ScopedTileIndex& operator=(const ScopedTileIndex&) = delete;
+    const std::vector<Army*>& at(int x, int y) const;
+    const Game& game() const { return g_; }
 
- private:
-  const Game& g_;
-  std::vector<std::vector<Army*>> byTile_;
-  const ScopedTileIndex* prev_;
+  private:
+    const Game& g_;
+    std::vector<std::vector<Army*>> byTile_;
+    const ScopedTileIndex* prev_;
 };
 
 /** game::armiesAt, answered by the innermost ScopedTileIndex for `g` when one is open. */

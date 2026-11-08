@@ -28,29 +28,31 @@ struct SDL_Window;
 
 namespace display {
 
-constexpr int W = 640, H = 480;   // the original's screen, and the smallest
-constexpr int SHORT_H = 400;      // the fewest rows the main screen fits in (front/layout)
-constexpr int SMOOTH = -1;        // the smooth view, as a chosen scale
+constexpr int W = 640, H = 480;  // the original's screen, and the smallest
+constexpr int SHORT_H = 400;     // the fewest rows the main screen fits in (front/layout)
+constexpr int SMOOTH = -1;       // the smooth view, as a chosen scale
 
 struct State {
-  double dpi = 1;            // device pixels to a window point
-  int pw = 640, ph = 480;    // the window, in device pixels
-  double shrink = 1;         // the window's real pixels to a device pixel: under 1 on a canvas
-  int scale = 1;             // device pixels to a UI pixel
-  int maxScale = 1;          // the biggest whole scale that fits
-  int maxShort = 1;          // the biggest that fits the main screen, cut down to SHORT_H rows
-  int minH = H;              // the rows the screen in use needs: H for the start screens
-  double smoothScale = 0;    // the smooth view's size, in real pixels a UI pixel; 0 for none
-  bool smooth = false;       // drawn in the smooth view
-  int chosen = 0;            // picked from the menu: a whole scale, SMOOTH, or 0 for none
-  bool windowed = false;     // in a window on the desktop, not full screen
-  bool crt = false;          // through an old monitor's tube (View > CRT screen): plain where there is no canvas
-  std::optional<std::pair<int, int>> wanted;   // the frame to keep to: View > 4:3
-  int w = 640, h = 480;      // the frame being drawn, in UI pixels
-  int ox = 0, oy = 0;        // where its (0, 0) sits, in device pixels
-  bool mouseInside = true;   // over the window at all
-  std::optional<std::pair<int, int>> off;   // over the black round the frame: where, in UI pixels
-  std::string glassShot;     // a .bmp to write the window to as the next frame shows it (a script's glass)
+    double dpi = 1;          // device pixels to a window point
+    int pw = 640, ph = 480;  // the window, in device pixels
+    double shrink = 1;       // the window's real pixels to a device pixel: under 1 on a canvas
+    int scale = 1;           // device pixels to a UI pixel
+    int maxScale = 1;        // the biggest whole scale that fits
+    int maxShort = 1;        // the biggest that fits the main screen, cut down to SHORT_H rows
+    int minH = H;            // the rows the screen in use needs: H for the start screens
+    double smoothScale = 0;  // the smooth view's size, in real pixels a UI pixel; 0 for none
+    bool smooth = false;     // drawn in the smooth view
+    int chosen = 0;          // picked from the menu: a whole scale, SMOOTH, or 0 for none
+    bool windowed = false;   // in a window on the desktop, not full screen
+    bool crt = false;  // through an old monitor's tube (View > CRT screen): plain where there is no
+                       // canvas
+    std::optional<std::pair<int, int>> wanted;  // the frame to keep to: View > 4:3
+    int w = 640, h = 480;                       // the frame being drawn, in UI pixels
+    int ox = 0, oy = 0;                         // where its (0, 0) sits, in device pixels
+    bool mouseInside = true;                    // over the window at all
+    std::optional<std::pair<int, int>> off;  // over the black round the frame: where, in UI pixels
+    std::string glassShot;  // a .bmp to write the window to as the next frame shows it (a script's
+                            // glass)
 };
 extern State d;
 

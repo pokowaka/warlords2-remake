@@ -17,28 +17,28 @@
 namespace w2 {
 struct SearchResult;
 struct QuestResult;
-}
+}  // namespace w2
 
 namespace w2::game {
 
-constexpr int STANDARD = -2;      // vector destination meaning "the side's standard"
+constexpr int STANDARD = -2;        // vector destination meaning "the side's standard"
 constexpr int MAX_VECTORED_TO = 4;  // no more than four cities may send to one place
 
 /** How a new game is set up. */
 struct SideSetup {
-  bool off = false, computer = false;
-  int level = NONE;
-  int card = 0;
-  std::string name;   // retyped on the setup screen; empty keeps the scenario's
+    bool off = false, computer = false;
+    int level = NONE;
+    int card = 0;
+    std::string name;  // retyped on the setup screen; empty keeps the scenario's
 };
 struct NewGameOptions {
-  double seed = 0;
-  std::vector<std::pair<std::string, int>> options;   // option name, value
-  std::map<int, SideSetup> sides;                     // by side index
-  bool greatest = false;
-  const std::map<std::string, std::string>* memoryFiles = nullptr;
-  int activeSides = 0;   // 0 = keep all scenario sides; 2..8 = keep K nearest capitals
-  int cropMargin = 0;    // >0 = crop map to active capitals +/- cropMargin tiles
+    double seed = 0;
+    std::vector<std::pair<std::string, int>> options;  // option name, value
+    std::map<int, SideSetup> sides;                    // by side index
+    bool greatest = false;
+    const std::map<std::string, std::string>* memoryFiles = nullptr;
+    int activeSides = 0;  // 0 = keep all scenario sides; 2..8 = keep K nearest capitals
+    int cropMargin = 0;   // >0 = crop map to active capitals +/- cropMargin tiles
 };
 
 /** Build a fresh game from the original data files. */
@@ -66,7 +66,8 @@ int itemBonus(const Game& g, const Side& side, int itemType);
  *  (DS:0e54/0e5c); then -- if `spill` -- up to 20 random tries within one
  *  step for a tile no army stands on. {NONE, NONE} when there is none, with
  *  the last tile tried in `last`, where hero_recruit puts its hero regardless. */
-std::pair<int, int> freeTileIn(Game& g, const City& city, bool spill, std::pair<int, int>* last = nullptr);
+std::pair<int, int> freeTileIn(Game& g, const City& city, bool spill,
+                               std::pair<int, int>* last = nullptr);
 /** docs/rules.md > Start of a side's turn, step 4. */
 int income(const Game& g, const Side& side);
 int upkeep(const Game& g, const Side& side);
@@ -147,11 +148,12 @@ Battle& applyAttack(Game& g, Battle& result);
 /** Raise a side's diplomatic score. */
 void addDiploScore(Game& g, Side& side, int n);
 /** Keep the city as it is (city_occupy, 63fa:03fe): ask the quest. */
-std::shared_ptr<QuestResult> occupy(Game& g, Side& side, City& city, const std::vector<Army*>& stack);
+std::shared_ptr<QuestResult> occupy(Game& g, Side& side, City& city,
+                                    const std::vector<Army*>& stack);
 /** What pillaging or sacking took: the gold and the types lost. */
 struct Spoils {
-  int gold = 0;
-  std::vector<std::pair<int, int>> lost;   // type, gold
+    int gold = 0;
+    std::vector<std::pair<int, int>> lost;  // type, gold
 };
 /** Strip the most expensive production type for gold (63fa:0886). */
 Spoils pillage(Game& g, Side& side, City& city, const std::vector<Army*>& stack);
@@ -166,7 +168,8 @@ void resign(Game& g, Side& side);
 bool seen(const Game& g, int side, int x, int y);
 /** Returns true if at least one living human side still holds a city in `g`. */
 bool hasActiveHuman(const Game& g);
-/** Returns `player->index` while a human is in the game, or `NONE` (full-map spectator) in AI-vs-AI. */
+/** Returns `player->index` while a human is in the game, or `NONE` (full-map spectator) in
+ * AI-vs-AI. */
 int viewerSide(const Game& g, const Side* player);
 /** Uncover the tiles around (x, y): 2 out for a flier or on a city, else 1
  *  (FUN_8611_1298). Returns how many were new. */

@@ -13,7 +13,9 @@ namespace prefs {
 std::string get(const std::string& key);
 /** Change a setting ("" removes it), and write the file. */
 void set(const std::string& key, const std::string& value);
-inline void set(const std::string& key, int value) { set(key, std::to_string(value)); }
+inline void set(const std::string& key, int value) {
+    set(key, std::to_string(value));
+}
 int getInt(const std::string& key, int dflt = 0);
 /** Where a file of the player's own goes: prefs, saves. */
 std::string userFile(const std::string& name);

@@ -21,100 +21,106 @@ const char* UNUSED = "Not_Used";
 const char* INFO = "w2-saveinfo.json";
 int last = 0;
 
-std::string slotFile(const std::string& key) { return prefs::userFile("w2-" + key + ".json"); }
-std::string slotKey(int i) { return "save" + std::to_string(i); }
+std::string slotFile(const std::string& key) {
+    return prefs::userFile("w2-" + key + ".json");
+}
+std::string slotKey(int i) {
+    return "save" + std::to_string(i);
+}
 
 std::vector<std::string> readInfo() {
-  std::vector<std::string> names;
-  if (auto text = w2::readFile(prefs::userFile(INFO))) {
-    try {
-      auto j = w2::Json::parse(*text);
-      for (auto& n : j.items()) names.push_back(n.str());
-    } catch (...) {
+    std::vector<std::string> names;
+    if (auto text = w2::readFile(prefs::userFile(INFO))) {
+        try {
+            auto j = w2::Json::parse(*text);
+            for (auto& n : j.items()) names.push_back(n.str());
+        } catch (...) {
+        }
     }
-  }
-  while ((int)names.size() < SLOTS) names.push_back(UNUSED);
-  names.resize(SLOTS);
-  return names;
+    while ((int)names.size() < SLOTS) names.push_back(UNUSED);
+    names.resize(SLOTS);
+    return names;
 }
 
 void writeInfo(const std::vector<std::string>& names) {
-  w2::Json j = w2::Json::array();
-  for (auto& n : names) j.push(n);
-  w2::writeFile(prefs::userFile(INFO), j.dump());
+    w2::Json j = w2::Json::array();
+    for (auto& n : names) j.push(n);
+    w2::writeFile(prefs::userFile(INFO), j.dump());
 }
 }  // namespace
 
 bool writeSlot(const std::string& key, const w2::Game& g) {
-  try {
-    return w2::writeFile(slotFile(key), w2::save::encode(g));
-  } catch (...) {
-    return false;
-  }
+    try {
+        return w2::writeFile(slotFile(key), w2::save::encode(g));
+    } catch (...) {
+        return false;
+    }
 }
 
 std::unique_ptr<w2::Game> readSlot(const std::string& key) {
-  auto text = w2::readFile(slotFile(key));
-  if (!text) return nullptr;
-  try {
-    return w2::save::decode(*text, G.dataDir);
-  } catch (...) {
-    return nullptr;
-  }
+    auto text = w2::readFile(slotFile(key));
+    if (!text) return nullptr;
+    try {
+        return w2::save::decode(*text, G.dataDir);
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 int used() {
-  int n = 0;
-  for (auto& name : readInfo()) if (name != UNUSED) n++;
-  return n;
+    int n = 0;
+    for (auto& name : readInfo())
+        if (name != UNUSED) n++;
+    return n;
 }
 
 void save() {
-  auto names = readInfo();
-  choose::open(kit::text(0x2e, 0), names, last, [names](int slot) mutable {
-    if (slot == w2::NONE) return;
-    last = slot;
-    input::Options o;
-    o.title = kit::text(0x2e, 0);
-    o.lines = {kit::text(0x2e, 1), kit::text(0x2e, 2)};
-    o.text = names[slot] != UNUSED ? names[slot] : "";
-    o.maxChars = 15;
-    o.maxWidth = 160;
-    o.ok = [names, slot](const std::string& typed) mutable {
-      std::string name = typed.empty() ? UNUSED : typed;
-      if (!writeSlot(slotKey(slot), *G.g)) {
-        search::message("The game could not be saved:", "the file could not be written.");
-        return;
-      }
-      names[slot] = name;
-      writeInfo(names);
-    };
-    input::open(o);
-  });
+    auto names = readInfo();
+    choose::open(kit::text(0x2e, 0), names, last, [names](int slot) mutable {
+        if (slot == w2::NONE) return;
+        last = slot;
+        input::Options o;
+        o.title = kit::text(0x2e, 0);
+        o.lines = {kit::text(0x2e, 1), kit::text(0x2e, 2)};
+        o.text = names[slot] != UNUSED ? names[slot] : "";
+        o.maxChars = 15;
+        o.maxWidth = 160;
+        o.ok = [names, slot](const std::string& typed) mutable {
+            std::string name = typed.empty() ? UNUSED : typed;
+            if (!writeSlot(slotKey(slot), *G.g)) {
+                search::message("The game could not be saved:", "the file could not be written.");
+                return;
+            }
+            names[slot] = name;
+            writeInfo(names);
+        };
+        input::open(o);
+    });
 }
 
 void load(std::function<void(std::unique_ptr<w2::Game>)> loaded) {
-  auto names = readInfo();
-  std::vector<std::string> list;
-  std::vector<int> slots;
-  for (int i = 0; i < SLOTS; i++) {
-    if (names[i] != UNUSED) {
-      list.push_back(names[i]);
-      slots.push_back(i);
+    auto names = readInfo();
+    std::vector<std::string> list;
+    std::vector<int> slots;
+    for (int i = 0; i < SLOTS; i++) {
+        if (names[i] != UNUSED) {
+            list.push_back(names[i]);
+            slots.push_back(i);
+        }
     }
-  }
-  if (list.empty()) return;
-  int start = 0;
-  for (size_t k = 0; k < slots.size(); k++) if (slots[k] == last) start = (int)k;
-  choose::open(kit::text(0x2f, 0), list, start, [slots, loaded](int k) {
-    if (k == w2::NONE) return;
-    auto g = readSlot(slotKey(slots[k]));
-    if (!g) return;
-    last = slots[k];
-    std::string name = g->current < (int)g->sides.size() ? g->sides[g->current]->name : "";
-    loaded(std::move(g));
-    search::say(w2::format(kit::text(0x2f, 1), name));
-  });
+    if (list.empty()) return;
+    int start = 0;
+    for (size_t k = 0; k < slots.size(); k++)
+        if (slots[k] == last) start = (int)k;
+    choose::open(kit::text(0x2f, 0), list, start, [slots, loaded](int k) {
+        if (k == w2::NONE) return;
+        auto g = readSlot(slotKey(slots[k]));
+        if (!g) return;
+        last = slots[k];
+        std::string name = g->current < (int)g->sides.size() ? g->sides[g->current]->name : "";
+        loaded(std::move(g));
+        search::say(w2::format(kit::text(0x2f, 1), name));
+    });
 }
 
 }  // namespace savegame

@@ -18,12 +18,13 @@ namespace pckimage {
 gfx::ImageP fromPixels(const w2::pck::Pixels& px, const w2::pal::Palette& palette,
                        const std::map<int, int>& map = {}, const std::set<int>& keys = {});
 
-constexpr int CORNER = -2;   // key out whatever colour the sheet's top left is
+constexpr int CORNER = -2;  // key out whatever colour the sheet's top left is
 constexpr int NOKEY = -1;
 
 /** Decode a .PCK into an image; `key` is the index to make transparent,
  *  NOKEY or CORNER. */
 gfx::ImageP load(const std::string& path, const w2::pal::Palette& palette, int key = NOKEY);
-gfx::ImageP load(const std::string& path, const w2::pal::Palette& palette, const std::set<int>& keys);
+gfx::ImageP load(const std::string& path, const w2::pal::Palette& palette,
+                 const std::set<int>& keys);
 
 }  // namespace pckimage

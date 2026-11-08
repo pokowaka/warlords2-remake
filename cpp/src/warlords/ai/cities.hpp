@@ -14,9 +14,9 @@ namespace w2::ai::cities {
 /** The side's own cities, last first, as the original walks them. */
 std::vector<City*> own(const Game& g, const Side& side);
 struct NeutralNeighbour {
-  City* city;
-  int dist;
-  int slot;   // from 1
+    City* city;
+    int dist;
+    int slot;  // from 1
 };
 /** The neutral cities among a city's neighbours (57ea:01f6). */
 std::vector<NeutralNeighbour> neutralNeighbours(Game& g, Side& side, const City& c);

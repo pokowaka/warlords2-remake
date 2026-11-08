@@ -33,12 +33,14 @@ constexpr int HILLS_F = 0x20, FOREST_F = 0x40, CITY_F = 0x80;
 // stack modes, as the original numbers them
 constexpr int BOAT = 0, LAND = 1, FLYING = 2;
 
-inline bool has(int byte, int flag) { return (byte & flag) != 0; }
+inline bool has(int byte, int flag) {
+    return (byte & flag) != 0;
+}
 
-constexpr int WATER_PENALTY = 10;       // a land stack's route leaving open water
-constexpr int WATER_PENALTY_TO = 20;    // ... when the whole move is aimed at water
-constexpr int PAST_SHORE = 0x80;        // a step after going to sea or ashore
-constexpr int MAX_PATH = 200;           // a path is at most 200 compass steps
+constexpr int WATER_PENALTY = 10;     // a land stack's route leaving open water
+constexpr int WATER_PENALTY_TO = 20;  // ... when the whole move is aimed at water
+constexpr int PAST_SHORE = 0x80;      // a step after going to sea or ashore
+constexpr int MAX_PATH = 200;         // a path is at most 200 compass steps
 
 // compass directions, 0 = north, clockwise (the order the game stores paths in)
 constexpr int DIRS[8][2] = {{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}};
@@ -49,12 +51,14 @@ using Stack = std::vector<Army*>;
 
 /** How a stack moves, and what bonuses it carries. */
 struct Mode {
-  int mode = LAND;
-  bool woods = false, hills = false, atSea = false;
+    int mode = LAND;
+    bool woods = false, hills = false, atSea = false;
 };
 Mode stackMode(const Game& g, const Stack& stack);
 /** Just the mode, for the many callers that want only it. */
-inline int modeOf(const Game& g, const Stack& stack) { return stackMode(g, stack).mode; }
+inline int modeOf(const Game& g, const Stack& stack) {
+    return stackMode(g, stack).mode;
+}
 
 /** Is a city a port -- does any tile bordering its footprint hold a bridge,
  *  water or shore? Gives up the moment its walk would leave the map. */
@@ -68,7 +72,8 @@ void invalidate(Game& g);
 
 /** The wavefront's weight for spreading from one tile to another, or none if
  *  it cannot spread there. This picks the route only. */
-std::optional<int> stepCost(int fromByte, int toByte, int mode, bool woods, bool hills, int penalty);
+std::optional<int> stepCost(int fromByte, int toByte, int mode, bool woods, bool hills,
+                            int penalty);
 /** The moves a walk spends stepping onto a tile (1555:19e4). */
 int walkCost(int byte, int mode, bool woods, bool hills);
 /** Does a land stack stepping onto this tile go to sea (or come ashore)? */
@@ -77,14 +82,14 @@ bool crossesShore(int byte, bool atSea);
 int stackMoves(const Stack& stack);
 
 struct Step {
-  int x = 0, y = 0, cost = 0;
+    int x = 0, y = 0, cost = 0;
 };
 using Path = std::vector<Step>;
 
 /** The route a stack would take to (x, y) and how much of it it can walk now. */
 struct Preview {
-  Path path;
-  int reach = 0;
+    Path path;
+    int reach = 0;
 };
 std::optional<Preview> preview(Game& g, const Stack& stack, int x, int y);
 
@@ -95,12 +100,13 @@ int distance(int x1, int y1, int x2, int y2);
 
 /** path_prepare_grid (1555:08bf): nothing reached, and what the stack can
  *  never enter shut. */
-std::vector<int> prepare(Game& g, const std::vector<int>& grid, int sideIndex, int mode, int dx, int dy);
+std::vector<int> prepare(Game& g, const std::vector<int>& grid, int sideIndex, int mode, int dx,
+                         int dy);
 
 /** What the road builder reads off the map it is making. */
 struct RoadGround {
-  std::function<int(int, int)> terrain;
-  std::function<bool(int, int)> road, crossing;
+    std::function<int(int, int)> terrain;
+    std::function<bool(int, int)> road, crossing;
 };
 /** The route the random map generator lays a road along (5311:0c1c): the
  *  pathfinder run as pseudo-player 14 (path_build_cost_grid with player 14,
@@ -108,21 +114,22 @@ struct RoadGround {
  *  no ground impassable but a city; it moves by land rules, crossing water
  *  only at bridges and crossings; one pass of the wavefront, spreading only
  *  straight; and a trace that steps diagonally only over water. */
-std::optional<std::vector<std::pair<int, int>>> roadRoute(const RoadGround& m, const int costs[12], int W, int H,
-                                                          int sx, int sy, int dx, int dy);
+std::optional<std::vector<std::pair<int, int>>> roadRoute(const RoadGround& m, const int costs[12],
+                                                          int W, int H, int sx, int sy, int dx,
+                                                          int dy);
 
 // The route cache (1555:1508-16f0): 20 slots, slot 0 for routes under 15
 // tiles, 1-19 for longer ones, kept from game start or load for every side.
 constexpr int CACHE_SLOTS = 20;
 struct CachedRoute {
-  int mode = 0, flags = 0;
-  int sx = 0, sy = 0, dx = 0, dy = 0;
-  std::vector<int> dirs;
+    int mode = 0, flags = 0;
+    int sx = 0, sy = 0, dx = 0, dy = 0;
+    std::vector<int> dirs;
 };
 }  // namespace w2::move
 namespace w2 {
 struct PathCache {
-  std::array<std::optional<move::CachedRoute>, move::CACHE_SLOTS> slots;
+    std::array<std::optional<move::CachedRoute>, move::CACHE_SLOTS> slots;
 };
 }  // namespace w2
 namespace w2::move {
@@ -144,22 +151,22 @@ std::optional<Path> findPath(Game& g, const Stack& stack, int sx, int sy, int dx
  *  unreached, else the cost from (x, y) plus 1 (negative while the tile had
  *  still to spread). `gridSide` is whose cost grid; `fogSide` whose hidden
  *  map shuts what it has not seen (only a human's, mid-turn). */
-std::vector<int> flood(Game& g, int gridSide, int x, int y, int range, int mode, bool woods, bool hills,
-                       int fogSide);
+std::vector<int> flood(Game& g, int gridSide, int x, int y, int range, int mode, bool woods,
+                       bool hills, int fogSide);
 
 struct Attack {
-  int x = 0, y = 0;
-  City* city = nullptr;
+    int x = 0, y = 0;
+    City* city = nullptr;
 };
 struct WalkResult {
-  int steps = 0, spent = 0;
-  std::string stopped;         // "arrived", "out of moves", "attack", "at peace", "blocked", "no route"
-  std::optional<Attack> attack;
-  std::vector<std::pair<int, int>> walked;
-  bool outOfMoves = false;     // walk_path's status 2: a human's stack is then put down
-  // at sea as it set off, which is how the walk is shown: place_stack_at_step
-  // (1a8b:04c8) draws every step, and only after the last puts it to sea or ashore
-  bool seaBefore = false;
+    int steps = 0, spent = 0;
+    std::string stopped;  // "arrived", "out of moves", "attack", "at peace", "blocked", "no route"
+    std::optional<Attack> attack;
+    std::vector<std::pair<int, int>> walked;
+    bool outOfMoves = false;  // walk_path's status 2: a human's stack is then put down
+    // at sea as it set off, which is how the walk is shown: place_stack_at_step
+    // (1a8b:04c8) draws every step, and only after the last puts it to sea or ashore
+    bool seaBefore = false;
 };
 
 /** Going to sea and coming ashore, at the end of a walk (1a8b:04c8).

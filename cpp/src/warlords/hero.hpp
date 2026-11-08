@@ -16,17 +16,17 @@ struct Battle;
 
 /** A hero offering itself to a side (hero_offer_check). */
 struct HeroOffer {
-  int price = 0;
-  City* city = nullptr;
-  bool first = false;
-  std::string name;
-  bool female = false;
+    int price = 0;
+    City* city = nullptr;
+    bool first = false;
+    std::string name;
+    bool female = false;
 };
 
 namespace hero {
 
-constexpr int MAX_IN_GAME = 40;          // heroes in the whole game
-constexpr int MAX_PER_SIDE = 5;          // 6 once the side owns this many cities
+constexpr int MAX_IN_GAME = 40;  // heroes in the whole game
+constexpr int MAX_PER_SIDE = 5;  // 6 once the side owns this many cities
 constexpr int MAX_PER_BIG_SIDE = 6, BIG_SIDE_CITIES = 40;
 constexpr int START_STRENGTH = 5, START_MOVES = 14;
 constexpr int MAX_STRENGTH = 9;
@@ -66,10 +66,10 @@ Army* placeAlly(Game& g, const ArmyType* type, int x, int y, const Side& side);
 /** A hired hero, and the allies it brought: their type, how many came, and
  *  those that found room. */
 struct Recruited {
-  Army* hero = nullptr;
-  std::vector<Army*> allies;
-  const ArmyType* type = nullptr;
-  int count = 0;
+    Army* hero = nullptr;
+    std::vector<Army*> allies;
+    const ArmyType* type = nullptr;
+    int count = 0;
 };
 /** Hire the offered hero (hero_recruit, 7563:031b). The hero stands on the
  *  city's first tile with room, or on a free tile round it -- or, with none,
@@ -84,8 +84,8 @@ std::vector<Promotion> checkPromotions(Game& g, const Side& side);
 /** Award experience after a battle. **Original bug**: a surviving defending
  *  hero is credited only when the attacker at the same place in the line is
  *  a hero (67cc:0c8e). */
-void battleExperience(Game& g, const std::vector<Army*>& attackers, const std::vector<Army*>& defenders,
-                      const Battle& result, bool wasCity);
+void battleExperience(Game& g, const std::vector<Army*>& attackers,
+                      const std::vector<Army*>& defenders, const Battle& result, bool wasCity);
 /** What the hero info dialog lists for a hero (796c:03d9): the items it
  *  carries, then those lying on its tile, each in item order. */
 std::vector<Item*> itemsHere(Game& g, const Army* h);

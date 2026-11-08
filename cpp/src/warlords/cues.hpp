@@ -23,7 +23,8 @@ constexpr int TITLE = 0, PLAY = 1, COMPUTER = 2, TRIUMPH = 3, HERO = 4, TEMPLE =
 constexpr int SAGE = 6, PROMOTION = 7, MEDAL = 8, SURRENDER = 9, DEFIANCE = 10, BEGIN = 11;
 
 /** The song for a cue: {FILE.DAT name, loops}; "" for none. */
-std::pair<std::string, bool> song(const uidata::Strings& files, int cue, const std::vector<Side*>& sides, const Roll& roll);
+std::pair<std::string, bool> song(const uidata::Strings& files, int cue,
+                                  const std::vector<Side*>& sides, const Roll& roll);
 
 // The advisor's clips are FILE.DAT groups 40-62, each with its subtitle 30
 // groups on -- or, for the four set phrases, at index 1 of its own.

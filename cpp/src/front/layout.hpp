@@ -21,19 +21,21 @@ constexpr int W = 640, H = 480;
 constexpr int SHORT_H = 400;
 
 struct Rect {
-  int x = 0, y = 0, w = 0, h = 0;
-  int id = 0;
-  bool contains(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; }
+    int x = 0, y = 0, w = 0, h = 0;
+    int id = 0;
+    bool contains(int px, int py) const { return px >= x && py >= y && px < x + w && py < y + h; }
 };
-struct Offset { int x = 0, y = 0; };
+struct Offset {
+    int x = 0, y = 0;
+};
 
 struct Layout {
-  int w = W, h = H, ex = 0, ey = 0;
-  int cut = 0;   // rows under 480, taken off the strategic map's foot
-  bool classic = true;
-  Offset strat, panel, bar, map, dialog;
-  Rect mapRect, panelRect, stratRect, barRect;
-  const Offset& offset(const std::string& group) const;
+    int w = W, h = H, ex = 0, ey = 0;
+    int cut = 0;  // rows under 480, taken off the strategic map's foot
+    bool classic = true;
+    Offset strat, panel, bar, map, dialog;
+    Rect mapRect, panelRect, stratRect, barRect;
+    const Offset& offset(const std::string& group) const;
 };
 
 /** The layout of a screen `w` x `h` UI pixels. */
