@@ -36,6 +36,7 @@
 #include "warlords/game.hpp"
 #include "warlords/hero.hpp"
 #include "warlords/history.hpp"
+#include "warlords/mapeval.hpp"
 #include "warlords/move.hpp"
 #include "warlords/pck.hpp"
 #include "warlords/quest.hpp"
@@ -2422,6 +2423,73 @@ static void testBugFlags() {
 
 // The random map generator (warlords/randommap.cpp, docs/re/random_map.md):
 // what it makes, and a game played on it and saved.
+// The map evaluator (warlords/mapeval, docs/mapeval.md): the hand-made maps
+// break no hard rule, and each rule fires when a map is broken on purpose.
+static void testMapEval() {
+  printf("map evaluator\n");
+  for (const char* s : {"ERYTHEA", "HADESHA", "ISLADIA", "DRAGON", "SORCERY"}) {
+    auto map = scn::load(DATA + "/" + s, s);
+    auto e = mapeval::evaluate(*map, s);
+    std::string first = "";
+    for (auto& i : e.issues)
+      if (mapeval::isHard(i.check)) { first = i.check + ": " + i.detail; break; }
+    ok(e.passed(), std::string(s) + " breaks no hard rule " + first);
+    ok(e.metric("clarkEvansR") > 1.3, std::string(s) + "'s cities are spread out (Clark-Evans R > 1.3)");
+  }
+  auto map = scn::load(DATA + "/ERYTHEA", "ERYTHEA");
+  Map& m = *map;
+  auto at = [&](int x, int y) { return y * MAP_W + x; };
+  auto tileOf = [&](int type) {
+    for (int t = 0; t < 256; t++) if (m.terrainType[t] == type) return t;
+    return -1;
+  };
+  // a lone road piece on open plain, away from everything
+  int lx = -1, ly = -1;
+  for (int y = 3; y < MAP_H - 3 && lx < 0; y++)
+    for (int x = 3; x < MAP_W - 3 && lx < 0; x++) {
+      bool clear = true;
+      for (int dy = -2; dy <= 2 && clear; dy++)
+        for (int dx = -2; dx <= 2 && clear; dx++)
+          clear = scn::terrainAt(m, x + dx, y + dy) == movement::PLAIN && scn::roadAt(m, x + dx, y + dy) == 0;
+      if (clear) { lx = x; ly = y; }
+    }
+  ok(lx >= 0, "found open plain for a stray road");
+  m.roads[at(lx, ly)] = 1;   // piece 1: east-west
+  // a city on top of another, a name used twice, a signpost that lies
+  m.cities[1].x = m.cities[0].x + 1;
+  m.cities[1].y = m.cities[0].y;
+  m.cities[3].name = m.cities[2].name;
+  m.signs[0].lines = {m.cities[5].name, "999 leagues north"};
+  // a ruin walled in by mountains
+  const Site& walled = m.sites[0];
+  for (int dy = -2; dy <= 2; dy++)
+    for (int dx = -2; dx <= 2; dx++) {
+      int x = walled.x + dx, y = walled.y + dy;
+      if ((dx == 0 && dy == 0) || x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+      m.tiles[at(x, y)] = tileOf(movement::MOUNTAINS);
+      m.roads[at(x, y)] = 0;
+    }
+  auto e = mapeval::evaluate(m, "broken");
+  ok(!e.passed(), "a broken map fails");
+  for (const char* c : {"road-to-nowhere", "dead-end", "city-gap", "city-terrain", "city-name", "signpost", "unreachable"})
+    ok(e.count(c) > 0, std::string("the broken map trips ") + c);
+  // the reference and the score: the designers' own maps score nothing
+  std::vector<mapeval::Evaluation> refs;
+  for (const char* s : {"ERYTHEA", "HADESHA"}) refs.push_back(mapeval::evaluate(*scn::load(DATA + "/" + s, s), s));
+  auto ref = mapeval::reference(refs);
+  for (auto& r : refs) eq(mapeval::score(r, ref).penalty, 0.0, r.name + " sits inside its own reference");
+  // a generated world is evaluated like any other, straight from memory
+  Rng r(1);
+  randommap::Options o;
+  o.dataDir = DATA;
+  o.rng = &r;
+  auto files = randommap::generateNow(o);
+  auto made = scn::loadFromFiles(DATA + "/RANDOM", "RANDOM", files);
+  auto me = mapeval::evaluate(*made, "classic#1");
+  eq((int)me.metric("cities"), 80, "a generated world is evaluated");
+  ok(mapeval::toJson(me).dump().find("\"metrics\"") != std::string::npos, "the evaluation writes as JSON");
+}
+
 static void testRandomMap() {
   printf("random map\n");
   auto make = [](int seed, std::array<int, 4> sliders, bool allies) {
@@ -3760,6 +3828,7 @@ int main() {
   testCityCastles();
   testComputerPlayers();
   testRandomMap();
+  testMapEval();
   testAIGame("TUTORIA", 30);
   testAIGame("ERYTHEA", 25);
   if (fileExists(DATA + "/TUTORIA/TUTORIA.SCN")) testTutorialHero();
