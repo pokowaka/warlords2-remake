@@ -10,3 +10,15 @@
 {"batch": 1, "pair": 10, "a": "classic#41", "b": "classic#153", "kind": "rules", "winner": "b", "note": "", "penalty": [4.947160075496183, 24.09940329198471], "passed": [false, true]}
 {"batch": 1, "pair": 11, "a": "classic#75", "b": "classic#18", "kind": "clear", "winner": "b", "note": "B has black, green and red capitals close together, but A has a large swath of isolated cities that will be black's hinterland", "penalty": [29.692652395227725, 3.71828985240236], "passed": [false, false]}
 {"batch": 1, "pair": 12, "a": "classic#77", "b": "classic#65", "kind": "close", "winner": "b", "note": "", "penalty": [18.34302004602447, 16.09622714264609], "passed": [false, false]}
+{"batch": 2, "pair": 1, "a": "fair#26", "b": "classic#26", "kind": "matched", "winner": "a", "note": "", "penalty": [15.825715545261254, 17.294959940265556], "passed": [false, false]}
+{"batch": 2, "pair": 2, "a": "fair#78", "b": "classic#78", "kind": "matched", "winner": "a", "note": "", "penalty": [14.779269901794716, 22.1238893144907], "passed": [false, false]}
+{"batch": 2, "pair": 3, "a": "classic#15", "b": "fair#15", "kind": "matched", "winner": "b", "note": "", "penalty": [6.508163246134583, 10.290573088389147], "passed": [false, false]}
+{"batch": 2, "pair": 4, "a": "fair#170", "b": "classic#170", "kind": "matched", "winner": "a", "note": "", "penalty": [15.807939712447823, 24.955615839325812], "passed": [false, false]}
+{"batch": 2, "pair": 5, "a": "classic#178", "b": "fair#178", "kind": "matched", "winner": "b", "note": "", "penalty": [16.0988799623669, 11.739049012477514], "passed": [false, false]}
+{"batch": 2, "pair": 6, "a": "fair#109", "b": "classic#109", "kind": "matched", "winner": "a", "note": "", "penalty": [25.20016770028584, 29.750751467641855], "passed": [false, false]}
+{"batch": 2, "pair": 7, "a": "classic#48", "b": "fair#48", "kind": "matched", "winner": "b", "note": "", "penalty": [14.559281051598159, 11.588937289270085], "passed": [false, false]}
+{"batch": 2, "pair": 8, "a": "fair#195", "b": "classic#195", "kind": "matched", "winner": "a", "note": "", "penalty": [7.469590595605175, 22.91091737438423], "passed": [false, false]}
+{"batch": 2, "pair": 9, "a": "fair#62", "b": "classic#62", "kind": "matched", "winner": "a", "note": "", "penalty": [13.90769307288823, 16.06112273111177], "passed": [false, false]}
+{"batch": 2, "pair": 10, "a": "classic#94", "b": "fair#94", "kind": "matched", "winner": "b", "note": "", "penalty": [13.341189780925923, 9.972957454871914], "passed": [false, false]}
+{"batch": 2, "pair": 11, "a": "classic#23", "b": "fair#23", "kind": "matched", "winner": "b", "note": "", "penalty": [29.833833572587938, 19.130179305391763], "passed": [false, false]}
+{"batch": 2, "pair": 12, "a": "classic#10", "b": "fair#10", "kind": "matched", "winner": "b", "note": "", "penalty": [22.718370254003275, 7.093260845889179], "passed": [false, false]}
