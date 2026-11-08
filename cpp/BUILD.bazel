@@ -252,6 +252,19 @@ sh_binary(
 # The game's files, for anything that reads them.
 DATA = ["//:original_data"]
 
+# GoogleTest suite for the domain model, value types, and .SCN record views.
+cc_test(
+    name = "model_gtest",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/model_test.cpp"],
+    data = DATA,
+    deps = [
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # The rules suite.
 cc_test(
     name = "w2test",

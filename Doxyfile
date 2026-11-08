@@ -1,0 +1,22 @@
+# Doxyfile configuration for Warlords II Remake (C++23)
+
+PROJECT_NAME           = "Warlords II Remake"
+PROJECT_BRIEF          = "Cross-platform C++23 remake of Warlords II (1993) with ML-driven AI"
+OUTPUT_DIRECTORY       = build/docs
+INPUT                  = cpp/src docs/ARCHITECTURE.md docs/STYLE.md
+USE_MDFILE_AS_MAINPAGE = docs/ARCHITECTURE.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp *.cpp *.md
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+JAVADOC_AUTOBRIEF      = YES
+QT_AUTOBRIEF           = YES
+MARKDOWN_SUPPORT       = YES
+
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
