@@ -67,6 +67,8 @@ static void ok(bool cond, const std::string& what) {
 static std::string show(bool v) { return v ? "true" : "false"; }
 template <class T, std::enable_if_t<std::is_integral_v<T> && !std::is_same_v<T, bool>, int> = 0>
 static std::string show(T v) { return std::is_signed_v<T> && (long long)v == NONE ? "nil" : std::to_string(v); }
+template <class T, std::enable_if_t<std::is_enum_v<T>, int> = 0>
+static std::string show(T v) { return std::to_string((long long)v); }
 static std::string show(const std::string& v) { return v; }
 static std::string show(const char* v) { return v ? v : "nil"; }
 template <class T>
@@ -513,15 +515,15 @@ static void testHistory(const std::string& scenario) {
   auto gp = newGame(scenario, seed(41));
   Game& g = *gp;
   Side* side = game::begin(g);
-  history::deed(g, side, history::FINDS, history::SAGE, 0, "Hero");
-  history::deed(g, side, history::WON, side->index, 3, side->name);
-  history::deed(g, side, history::EMERGES, 1, 0, "Hero");
+  history::deed(g, side, DeedType::FOUND, history::FOUND_SAGE, 0, "Hero");
+  history::deed(g, side, DeedType::CITY_WON, side->index, 3, side->name);
+  history::deed(g, side, DeedType::HERO_EMERGES, 1, 0, "Hero");
   eq((int)g.deeds[side->index].size(), 2, "two deeds a side");
-  std::vector<int> types = {g.deeds[side->index][0].type, g.deeds[side->index][1].type};
+  std::vector<history::DeedType> types = {g.deeds[side->index][0].type, g.deeds[side->index][1].type};
   std::sort(types.begin(), types.end());
-  eq(types[0], history::EMERGES, "a lower type pushes out the higher");
-  eq(types[1], history::WON, "and the lower of the two stays");
-  history::deed(g, side, history::PEACE, 0, 1, "");
+  eq(types[0], DeedType::HERO_EMERGES, "a lower type pushes out the higher");
+  eq(types[1], DeedType::CITY_WON, "and the lower of the two stays");
+  history::deed(g, side, DeedType::AT_PEACE, 0, 1, "");
   eq((int)g.deeds[side->index].size(), 2, "a higher type does not get in");
   int guard = 0;
   while (g.turn < 3 && guard < 50) { endTurn(g); guard++; }
@@ -542,9 +544,9 @@ static void testHistory(const std::string& scenario) {
   dead.type = 28;
   dead.items = {&std};
   history::tally(g, &dead, side->index);
-  eq(history::triumph(g, side->index, foe->index, history::HEROES), 1, "a hero killed");
-  eq(history::triumph(g, side->index, foe->index, history::STANDARDS), 1, "and the standard it carried");
-  eq(history::triumph(g, foe->index, foe->index, history::HEROES), 1, "the loser counts its own loss");
+  eq(history::triumph(g, side->index, foe->index, history::Loss::HEROES), 1, "a hero killed");
+  eq(history::triumph(g, side->index, foe->index, history::Loss::STANDARDS), 1, "and the standard it carried");
+  eq(history::triumph(g, foe->index, foe->index, history::Loss::HEROES), 1, "the loser counts its own loss");
 }
 
 static void testSetup() {

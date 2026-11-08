@@ -130,7 +130,7 @@ std::shared_ptr<QuestResult> finish(Game& g, Side& side, const std::string& reas
   auto out = std::make_shared<QuestResult>();
   out->quest = q;
   if (reason == "done") {
-    history::deed(g, &side, history::QUEST_DONE, 0, 0, q->hero ? q->hero->name : "");   // 4976:1da8
+    history::deed(g, &side, DeedType::QUEST_COMPLETED, 0, 0, q->hero ? q->hero->name : "");   // 4976:1da8
     hero::addExperience(g, q->hero, EXPERIENCE);
     out->reward = reward(g, side, q.get());
   } else {
@@ -145,7 +145,7 @@ std::shared_ptr<QuestResult> finish(Game& g, Side& side, const std::string& reas
 std::shared_ptr<Quest> assign(Game& g, Side& side, Army* h, bool computer, bool flying) {
   if (side.quest) return nullptr;                    // one at a time
   if (g.map->options.quests == 0) return nullptr;
-  history::deed(g, &side, history::QUEST_GIVEN, 0, 0, h ? h->name : "");   // 4976:0dae
+  history::deed(g, &side, DeedType::QUEST_RECEIVED, 0, 0, h ? h->name : "");   // 4976:0dae
   for (int n = 1;; n++) {
     int type = questType(g, n, computer);
     Quest q;

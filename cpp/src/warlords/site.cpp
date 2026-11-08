@@ -215,7 +215,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
 
   if (s->content == SAGE) {
     hero::addExperience(g, h, 3);
-    history::deed(g, side, history::FINDS, history::SAGE, 0, h->name);  // 6536:013c
+    history::deed(g, side, DeedType::FOUND, history::FOUND_SAGE, 0, h->name);  // 6536:013c
     s->searched = true;
     out->kind = "sage";
     return out;
@@ -231,7 +231,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
     int str = guardianStrength(g, *s);
     const Monster* monster = monsterOf(g, s->guardian);
     if (!survivesGuardian(g, *h, str)) {
-      history::deed(g, side, history::KILLED, history::SEARCHING, 0, h->name);  // 6536:02ef
+      history::deed(g, side, DeedType::HERO_KILLED, history::KILLED_SEARCHING, 0, h->name);  // 6536:02ef
       history::tally(g, h, NONE, false);   // the side's own losses
       hero::dropItems(g, h, h->x, h->y, h->owner);
       g.remove(h);
@@ -253,7 +253,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
       found->status = 3;                              // carried
       h->items.push_back(found);
     }
-    if (found) history::deed(g, side, history::FINDS, found->index, 0, h->name);   // 6536:0571
+    if (found) history::deed(g, side, DeedType::FOUND, found->index, 0, h->name);   // 6536:0571
     s->searched = true;
     s->content = EMPTY;
     out->kind = "item";
@@ -263,7 +263,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
     int gold = s->rich ? g.rng.dice(3, 1000, 1000) : g.rng.dice(3, 500, 500);
     if (side) side->gold += gold;
     s->searched = true;
-    history::deed(g, side, history::FINDS, history::GOLD, 0, h->name);
+    history::deed(g, side, DeedType::FOUND, history::FOUND_GOLD, 0, h->name);
     out->kind = "gold";
     out->gold = gold;
     return out;
@@ -277,7 +277,7 @@ std::shared_ptr<SearchResult> search(Game& g, const std::vector<Army*>& stack, i
       Army* a = hero::placeAlly(g, type, x, y, *side);
       if (a) out->armies.push_back(a);
     }
-    history::deed(g, side, history::FINDS, history::ALLIES, 0, h->name);  // 6536:07a1
+    history::deed(g, side, DeedType::FOUND, history::FOUND_ALLIES, 0, h->name);  // 6536:07a1
     out->kind = "allies";
     out->type = type;
     out->count = n;

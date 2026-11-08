@@ -168,7 +168,7 @@ Recruited recruit(Game& g, Side& side, const HeroOffer& off) {
   }
   Recruited out;
   out.hero = g.add(h);
-  history::deed(g, &side, history::EMERGES, city->index, 0, out.hero->name);     // 7563:04e7
+  history::deed(g, &side, DeedType::HERO_EMERGES, city->index, 0, out.hero->name);     // 7563:04e7
 
   if (!off.first) {
     auto [type, n] = allies(g);

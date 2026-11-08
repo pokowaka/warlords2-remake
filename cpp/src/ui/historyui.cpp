@@ -17,6 +17,7 @@
 namespace historyui {
 
 namespace history = w2::history;
+using w2::DeedType;
 using w2::format;
 
 namespace {
@@ -45,32 +46,33 @@ std::string eventText(const w2::Deed& e) {
   auto t = [](int i) { return kit::text(0x5e, i); };
   auto sideName = [](int i) { return i >= 0 && i < 8 ? G.g->map->sides[i].name : std::string(); };
   auto cityName = [](int i) { w2::City* c = G.g->map->city(i); return c ? c->name : std::string(); };
-  int ty = e.type, v1 = e.v1, v2 = e.v2;
-  if (ty == history::EMERGES) return format(t(0), e.name, cityName(v1));
-  if (ty == history::KILLED) {
-    if (v1 == history::IN_BATTLE) return format(t(1), e.name);
-    if (v1 == history::SEARCHING) return format(t(2), e.name);
-    return format(t(3), e.name, cityName(v1));
+  int v1 = e.v1, v2 = e.v2;
+  // the lines are group 94 of STRING.DAT, in the order below
+  switch (e.type) {
+    case DeedType::HERO_EMERGES: return format(t(0), e.name, cityName(v1));
+    case DeedType::HERO_KILLED:
+      if (v1 == history::KILLED_IN_BATTLE) return format(t(1), e.name);
+      if (v1 == history::KILLED_SEARCHING) return format(t(2), e.name);
+      return format(t(3), e.name, cityName(v1));
+    case DeedType::QUEST_COMPLETED: return format(t(4), e.name);
+    case DeedType::QUEST_RECEIVED: return format(t(5), e.name);
+    case DeedType::SIDE_VANQUISHED: return format(t(6), sideName(v1));
+    case DeedType::CITY_WON:
+      if (v1 == history::WON_BY_NAME) return format(t(7), e.name, cityName(v2));
+      return format(t(8), sideName(v1), cityName(v2));
+    case DeedType::FOUND: {
+      std::string what;
+      if (v1 == history::FOUND_ALLIES) what = t(13);
+      else if (v1 == history::FOUND_SAGE) what = t(14);
+      else if (v1 == history::FOUND_GOLD) what = t(15);
+      else for (auto& it : G.g->map->items) if (it.index == v1) what = it.name;
+      return format(t(9), e.name, what);
+    }
+    case DeedType::SIDE_VICTORIOUS: return format(t(10), sideName(v1));
+    case DeedType::AT_WAR: return format(t(11), sideName(v1));
+    case DeedType::AT_PEACE: return format(t(12), sideName(v1));
+    case DeedType::TREACHERY: return format(t(16), sideName(v1));
   }
-  if (ty == history::QUEST_DONE) return format(t(4), e.name);
-  if (ty == history::QUEST_GIVEN) return format(t(5), e.name);
-  if (ty == history::VANQUISHED) return format(t(6), sideName(v1));
-  if (ty == history::WON) {
-    if (v1 == history::BY_NAME) return format(t(7), e.name, cityName(v2));
-    return format(t(8), sideName(v1), cityName(v2));
-  }
-  if (ty == history::FINDS) {
-    std::string what;
-    if (v1 == history::ALLIES) what = t(13);
-    else if (v1 == history::SAGE) what = t(14);
-    else if (v1 == history::GOLD) what = t(15);
-    else for (auto& it : G.g->map->items) if (it.index == v1) what = it.name;
-    return format(t(9), e.name, what);
-  }
-  if (ty == history::VICTORIOUS) return format(t(10), sideName(v1));
-  if (ty == history::TREACHERY) return format(t(16), sideName(v1));
-  if (ty == history::WAR) return format(t(11), sideName(v1));
-  if (ty == history::PEACE) return format(t(12), sideName(v1));
   return "";
 }
 
@@ -142,7 +144,7 @@ struct History : kit::Modal {
       std::string text = eventText(e);
       gfx::setColor(1, 1, 1);
       f.draw(text, 280, y);
-      if (e.type == history::WAR || e.type == history::PEACE || e.type == history::TREACHERY)
+      if (e.type == DeedType::AT_WAR || e.type == DeedType::AT_PEACE || e.type == DeedType::TREACHERY)
         shield(e.v2, 280 + f.width(text) / 8 * 8 + 16, y + 1);
     }
     kit::bevel(272, 319, 320, 17, 4, 2);
@@ -221,7 +223,7 @@ struct Triumphs : kit::Modal {
     for (int k = 0; k <= 4; k++) {
       int y = 168 + 35 * k;
       kit::army(KINDS[k], opp, 104, y, 1);
-      int cnt = history::triumph(*G.g, me, opp, k);
+      int cnt = history::triumph(*G.g, me, opp, (history::Loss)k);
       if (cnt > 0) {
         gfx::setColor(1, 1, 1);
         f.draw(format(kit::text(base + k, cnt == 1 ? 0 : 1), cnt), 144, y + 9);
@@ -247,7 +249,7 @@ struct Triumphs : kit::Modal {
 }  // namespace
 
 void open(int which) {
-  int n = std::min((int)G.g->history.size(), history::LAST_TURN);
+  int n = std::min((int)G.g->history.size(), history::LAST_RECORDED_TURN);
   if (n < 1) {
     search::message(kit::text(0x5d, 0), kit::text(0x5d, 1));
     return;

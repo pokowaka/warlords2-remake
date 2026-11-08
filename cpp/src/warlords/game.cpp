@@ -466,7 +466,7 @@ static Fallen eliminate(Game& g, Side& side, bool boxed) {
     if (g.armies[i]->owner == side.index) mine.push_back(g.armies[i]);
   }
   disband(g, side, mine);
-  history::deed(g, &side, history::VANQUISHED, side.index, 0, "");     // 8065:19f1
+  history::deed(g, &side, DeedType::SIDE_VANQUISHED, side.index, 0, "");     // 8065:19f1
   int line = g.rng.dice(1, FALLEN_LINES, -1);
   g.log.push_back(side.name + " has been eliminated.");
   side.alive = false;
@@ -925,8 +925,8 @@ Battle& applyAttack(Game& g, Battle& result) {
   const auto& boats = result.boats;
 
   auto fallen = [&](Army* h) {
-    history::deed(g, g.map->side(h->owner == NONE ? 8 : h->owner), history::KILLED,
-                  tileCity ? tileCity->index : history::IN_BATTLE, 0, h->name);
+    history::deed(g, g.map->side(h->owner == NONE ? 8 : h->owner), DeedType::HERO_KILLED,
+                  tileCity ? tileCity->index : history::KILLED_IN_BATTLE, 0, h->name);
   };
   int mine = stack.empty() ? NONE : stack[0]->owner;
   {
@@ -943,8 +943,8 @@ Battle& applyAttack(Game& g, Battle& result) {
   if (tileCity && result.won && mine != NONE && attackers.size() + defenders.size() >= 8 &&
       defenders.size() >= 4) {
     Side* side = g.map->side(mine);
-    if (result.hero) history::deed(g, side, history::WON, history::BY_NAME, tileCity->index, result.hero->name);
-    else history::deed(g, side, history::WON, mine, tileCity->index, "");
+    if (result.hero) history::deed(g, side, DeedType::CITY_WON, history::WON_BY_NAME, tileCity->index, result.hero->name);
+    else history::deed(g, side, DeedType::CITY_WON, mine, tileCity->index, "");
   }
   // the fallen heroes' items drop on the tile fought for, attacker's too
   // (67cc:16cd with after_battle's x, y)
@@ -1284,7 +1284,7 @@ void revealStart(Game& g, const Side& side) {
 void acceptSurrender(Game& g, Side& side) {
   for (Side* s : g.sides) if (s->computer) s->alive = false;
   g.won = true;
-  history::deed(g, &side, history::VICTORIOUS, side.index, 0, "");
+  history::deed(g, &side, DeedType::SIDE_VICTORIOUS, side.index, 0, "");
 }
 
 bool surrenderPending(const Game& g) { return g.surrenderOffered && !g.surrenderShown && !g.won; }
@@ -1372,7 +1372,7 @@ Ending checkEnd(Game& g) {
     int mine = (int)sideCities(g, *humans[0]).size();
     if (mine * 2 > standing) {
       g.won = true;
-      history::deed(g, humans[0], history::VICTORIOUS, humans[0]->index, 0, "");
+      history::deed(g, humans[0], DeedType::SIDE_VICTORIOUS, humans[0]->index, 0, "");
       e.won = true;
       e.winner = humans[0];
       e.message = humans[0]->name + " rules the world!";
@@ -1384,7 +1384,7 @@ Ending checkEnd(Game& g) {
     Side* winner = computers[0];
     g.won = true;
     winner->computer = false;
-    history::deed(g, winner, history::VICTORIOUS, winner->index, 0, "");
+    history::deed(g, winner, DeedType::SIDE_VICTORIOUS, winner->index, 0, "");
     e.triumph = true;
     e.winner = winner;
     e.message = winner->name + " has triumphed!";

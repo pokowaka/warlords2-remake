@@ -319,9 +319,30 @@ struct Map {
 
 // ----------------------------------------------------------------- the game
 
-/** A deed of the round, for the history (history.lua). */
+/** What a deed was: one of the events History plays back (STRING.DAT group
+ *  94, docs/formats/history.md). The order is also each deed's rank: a side
+ *  keeps only its two most important deeds of a round, and a lower value
+ *  counts for more. The comments say what a deed's two values hold. */
+enum class DeedType : int {
+  HERO_EMERGES = 0,      // v1: the city the hero appeared in
+  HERO_KILLED = 1,       // v1: the city, or history::KILLED_IN_BATTLE / KILLED_SEARCHING
+  QUEST_COMPLETED = 2,
+  QUEST_RECEIVED = 3,
+  SIDE_VANQUISHED = 4,   // v1: the side
+  CITY_WON = 5,          // v1: the side, or history::WON_BY_NAME; v2: the city
+  FOUND = 6,             // v1: the item, or history::FOUND_ALLIES / FOUND_SAGE / FOUND_GOLD
+  SIDE_VICTORIOUS = 7,   // v1: the side
+  TREACHERY = 8,         // v1: the side that attacked at peace, v2: its victim
+  AT_WAR = 9,            // v1, v2: the two sides
+  AT_PEACE = 10,         // v1, v2: the two sides
+};
+
+/** A deed of the round, for the history: who did it, what, two values whose
+ *  meaning depends on the type, and the hero's or the side's name. */
 struct Deed {
-  int side = 0, type = 0, v1 = 0, v2 = 0;
+  int side = 0;
+  DeedType type = DeedType::HERO_EMERGES;
+  int v1 = 0, v2 = 0;
   std::string name;
 };
 /** A round's record: what History plays back. */

@@ -12,30 +12,33 @@
 
 namespace w2::history {
 
-// the deed types, which are also their rank: lower counts for more
-constexpr int EMERGES = 0, KILLED = 1, QUEST_DONE = 2, QUEST_GIVEN = 3;
-constexpr int VANQUISHED = 4, WON = 5, FINDS = 6, VICTORIOUS = 7;
-constexpr int TREACHERY = 8, WAR = 9, PEACE = 10;
-// first values with a meaning of their own
-constexpr int IN_BATTLE = -1, SEARCHING = -2;          // KILLED
-constexpr int BY_NAME = -1;                            // WON: the name won it
-constexpr int ALLIES = 100, SAGE = 101, GOLD = 102;    // FINDS
+using w2::DeedType;   // the kinds of deed, in types.hpp beside Deed
 
-constexpr int LAST_TURN = 201;
-constexpr int MAX_EVENTS = 10;
+// A deed's first value where it is not a city, a side or an item:
+constexpr int KILLED_IN_BATTLE = -1;   // HERO_KILLED: in the field, not in a city
+constexpr int KILLED_SEARCHING = -2;   // HERO_KILLED: by a ruin's guardian
+constexpr int WON_BY_NAME = -1;        // CITY_WON: the hero named in the deed took it
+constexpr int FOUND_ALLIES = 100, FOUND_SAGE = 101, FOUND_GOLD = 102;   // FOUND: not an item
+
+/** The history is recorded for the first 201 rounds only (6d51:0d60). */
+constexpr int LAST_RECORDED_TURN = 201;
+/** A round's record keeps at most ten deeds: every side's first, then
+ *  second ones while there is room (6d51:132f). */
+constexpr int MAX_DEEDS_PER_ROUND = 10;
 
 /** Note a deed of a side's (6d51:1244). `name` is the hero's or the side's. */
-void deed(Game& g, const Side* side, int type, int v1, int v2, const std::string& name);
+void deed(Game& g, const Side* side, DeedType type, int v1, int v2, const std::string& name);
 
-// What History > Triumphs counts: a side's own row counts what it lost; its
-// row for another side, what it killed of them (67cc:1b43-1e92).
-constexpr int ARMIES = 0, CREATURES = 1, HEROES = 2, NAVIES = 3, STANDARDS = 4;
+/** What History > Triumphs counts, by kind: a side's own row counts what it
+ *  lost; its row for another side, what it killed of them (67cc:1b43-1e92). */
+enum class Loss : int { ARMIES = 0, CREATURES = 1, HEROES = 2, NAVIES = 3, STANDARDS = 4 };
+constexpr int LOSS_KINDS = 5;
 
 /** An army of its owner's killed by `killer`'s; `boat` when it fought as a
  *  boat, at sea on water or shore (67cc:1aff counts those navies). */
 void tally(Game& g, const Army* army, int killer, bool boat = false);
-/** The count for side `me` against `opp`, kind k. */
-int triumph(const Game& g, int me, int opp, int k);
+/** The count for side `me` against `opp`, of one kind. */
+int triumph(const Game& g, int me, int opp, Loss kind);
 /** The round's record (6d51:0d60), taken as the turn counter goes up. */
 void record(Game& g);
 

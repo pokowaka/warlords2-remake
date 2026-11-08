@@ -221,14 +221,14 @@ std::vector<std::string> apply(Game& g, Side& side) {
             }
           }
           if (want == WAR) {
-            history::deed(g, &side, history::WAR, a, b, "");          // 484e:0f15
+            history::deed(g, &side, DeedType::AT_WAR, a, b, "");          // 484e:0f15
             messages.push_back("War declared with " + other->name + "!");
           }
         } else if (proposal(g, b, a) <= want) {      // de-escalation: mutual
           g.diplomacy.state[key(a, b)] = want;
           g.diplomacy.state[key(b, a)] = want;
           if (want == PEACE) {
-            history::deed(g, &side, history::PEACE, a, b, "");         // 484e:1027
+            history::deed(g, &side, DeedType::AT_PEACE, a, b, "");         // 484e:1027
             messages.push_back("Peace negotiated with " + other->name + "!");
             if (!side.classicAi || !other->classicAi) {
               setTruce(g, a, b, 10);
@@ -277,7 +277,7 @@ void attackAnyway(Game& g, int a, int b) {
     g.diplomacy.state[k] = WAR;
     g.diplomacy.proposal[k] = WAR;
   }
-  history::deed(g, side, history::TREACHERY, a, b, "");
+  history::deed(g, side, DeedType::TREACHERY, a, b, "");
 }
 
 void scoreUpdate(Game& g, Side& side) {

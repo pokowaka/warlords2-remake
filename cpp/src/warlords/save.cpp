@@ -347,7 +347,7 @@ std::string encode(const Game& g) {
   Json history = Json::array();
   auto deedJson = [](const Deed& e) {
     Json o = Json::object();
-    o.set("side", e.side); o.set("type", e.type); o.set("v1", e.v1); o.set("v2", e.v2); o.set("name", e.name);
+    o.set("side", e.side); o.set("type", (int)e.type); o.set("v1", e.v1); o.set("v2", e.v2); o.set("name", e.name);
     return o;
   };
   for (auto& r : g.history) {
@@ -541,7 +541,7 @@ std::unique_ptr<Game> decode(const std::string& text, const std::string& dataDir
   }
   g.history.clear();
   auto readDeed = [](const Json& o) {
-    return Deed{(int)o["side"].integer(), (int)o["type"].integer(), (int)o["v1"].integer(), (int)o["v2"].integer(),
+    return Deed{(int)o["side"].integer(), (DeedType)o["type"].integer(), (int)o["v1"].integer(), (int)o["v2"].integer(),
                 o["name"].str()};
   };
   for (auto& r : state["history"].items()) {
