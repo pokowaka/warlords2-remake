@@ -82,7 +82,8 @@ class Noise {
 /** The value at quantile q (0..1) of the listed values. */
 double cut(std::vector<double> v, double q) {
   if (v.empty()) return 0;
-  size_t k = std::min(v.size() - 1, (size_t)(q * (double)(v.size() - 1)));
+  double at = std::max(0.0, q * (double)(v.size() - 1));   // a share above 1 asks for the lowest
+  size_t k = std::min(v.size() - 1, (size_t)at);
   std::nth_element(v.begin(), v.begin() + k, v.end());
   return v[k];
 }
@@ -478,7 +479,8 @@ Title title(Shape shape, long seed) {
   const auto& nouns = NOUNS[shape == Shape::Pangaea ? 1 : shape == Shape::Islands ? 2 : 0];
   Title t;
   for (int tries = 0; tries < 50; tries++) {
-    std::string place = std::string(pickWord(rng, FIRST)) + pickWord(rng, SECOND);
+    std::string place = pickWord(rng, FIRST);   // two statements: the dice in a fixed order
+    place += pickWord(rng, SECOND);
     std::string noun = pickWord(rng, nouns), adj = pickWord(rng, ADJECTIVES);
     int form = rng.below(3);
     if (form == 0) t.name = "The " + adj + " " + noun;
