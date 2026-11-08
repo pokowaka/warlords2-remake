@@ -12,11 +12,20 @@
 // .MAP, .RD, .SGN, .CTY and .SPC -- which scn.load reads as it reads the
 // shipped ones. The dice are the engine's (rng.js), so a map is not the one
 // the original would make from the same seed, but every rule is its rule.
+//
+// Not the original's, and off unless asked for (so the classic world stays
+// the original's, byte for byte): opts.fairCapitals chooses the capitals for
+// a fair start (warlords/travel), and opts.scenario makes the world with the
+// scenario generator instead (warlords/scengen), through the same tiles,
+// records and files. Both are cpp/src/warlords/randommap.cpp's, and make
+// the same files from the same seed.
 
 import * as vfs from "../vfs.js";
 import * as armytype from "./armytype.js";
 import "./game.js";      // before move.js, which game.js and the AI import in turn
 import * as move from "./move.js";
+import * as travel from "./travel.js";
+import * as scengen from "./scengen.js";
 import { u16, cstr } from "./bytes.js";
 import { bytesOf, fmt } from "../util.js";
 
@@ -120,6 +129,10 @@ export class Generator {
     this.types = types;
     this.rng = rng;
     this.allies = !!opts.allies;
+    this.fair = !!opts.fairCapitals;                 // opts.fairCapitals
+    this.modern = !!opts.scenario;                   // opts.scenario: the scenario generator
+    this.world = scengen.settings(opts.world || {}); // opts.world
+    this.plan = null;                                // what the scenario generator made
     this.tiles = new Uint16Array(W * H);
     this.rd = new Uint8Array(W * H);
     this.cty = "";
@@ -928,37 +941,47 @@ export class Generator {
     return [x, y];
   }
 
-  /** 513d:003a: forty sites, keeping the template's temples and ruins, with
-   *  names and descriptions from RANDOM.DAT's word lists. */
-  *sites() {
+  /** 513d:003a, its start: forty sites, every one unplaced. */
+  sitesBegin() {
     this.ws16(S_SITE_COUNT, N_SITES);
     for (let i = 0; i < N_SITES; i++) {
       this.ws16(S_SITES + SITE_STRIDE * i + 2, -1);
       this.ws16(S_SITES + SITE_STRIDE * i, -1);
     }
+  }
+
+  /** 513d:003a: forty sites, keeping the template's temples and ruins, with
+   *  names and descriptions from RANDOM.DAT's word lists. */
+  *sites() {
+    this.sitesBegin();
     let tenth = 0;
     for (let i = 0; i < N_SITES; i++) {
       const now = idiv(i * 10, N_SITES);
       if (now !== tenth) { tenth = now; yield 70 + now; }
       const [x, y] = this.siteSpot();
-      const o = S_SITES + SITE_STRIDE * i;
-      this.ws16(o, x);
-      this.ws16(o + 2, y);
-      this.put(x, y, SITE);
-      let name, text;
-      if (this.scn[o + 24] === 1) {
-        name = fmt("%s Temple", this.str(0x1000 + 10 * this.dice(1, 10, -1), 10));
-        text = "#%03d|The %s can bless your|armies or give you|quests|\n";
-      } else {
-        const f = this.dice(1, this.r16(SITE_FORMATS), -1);
-        const end = this.str(0xf9c + 10 * this.dice(1, 10, -1), 10);
-        const word = this.str(0xf38 + 10 * this.dice(1, 10, -1), 10) + end;
-        name = fmt(this.str(SITE_FORMATS + 2 + 20 * f, 20), word);
-        text = "#%03d|%s is|inhabited by monsters and|full of treasure!|\n";
-      }
-      this.wstr(o + 4, name);
-      this.spc += fmt(text, i, name);
+      this.siteAt(i, x, y);
     }
+  }
+
+  /** Site `i` at (x, y): its record, its name and its description. */
+  siteAt(i, x, y) {
+    const o = S_SITES + SITE_STRIDE * i;
+    this.ws16(o, x);
+    this.ws16(o + 2, y);
+    this.put(x, y, SITE);
+    let name, text;
+    if (this.scn[o + 24] === 1) {
+      name = fmt("%s Temple", this.str(0x1000 + 10 * this.dice(1, 10, -1), 10));
+      text = "#%03d|The %s can bless your|armies or give you|quests|\n";
+    } else {
+      const f = this.dice(1, this.r16(SITE_FORMATS), -1);
+      const end = this.str(0xf9c + 10 * this.dice(1, 10, -1), 10);
+      const word = this.str(0xf38 + 10 * this.dice(1, 10, -1), 10) + end;
+      name = fmt(this.str(SITE_FORMATS + 2 + 20 * f, 20), word);
+      text = "#%03d|%s is|inhabited by monsters and|full of treasure!|\n";
+    }
+    this.wstr(o + 4, name);
+    this.spc += fmt(text, i, name);
   }
 
   // --- 4fef: terrain to tiles -----------------------------------------------
@@ -1238,13 +1261,18 @@ export class Generator {
     }
   }
 
-  /** 5311:0000: tiles, then bridges, crossings and roads. */
-  *roads() {
-    yield 81;
+  /** 5311:0000, its tiles: then bridges and crossings. */
+  roadTiles() {
     this.toTiles();
     this.shapes();
     this.shapes();
     for (let i = 0; i < W * H; i++) { this.tiles[i] &= 0x7fff; this.rd[i] &= 0xe0; }
+  }
+
+  /** 5311:0000: tiles, then bridges, crossings and roads. */
+  *roads() {
+    yield 81;
+    this.roadTiles();
     yield 82;
     const list = { x: [], y: [], ew: [], cityDist: [], chosen: [], chosenDist: [] };
     for (let i = 0; i < 50; i++) {
@@ -1363,6 +1391,13 @@ export class Generator {
       }
       if (!again) break;
     }
+    this.crown();
+  }
+
+  /** The capitals in the side records take their sides: the city's owner
+   *  byte, and the castle in the side's colours (513d:09b3). */
+  crown() {
+    const S = (s) => S_SIDE_REC + 20 * s;
     for (let s = 0; s < 8; s++) {
       const x = this.s16(S(s) + 6), y = this.s16(S(s) + 8);
       for (let c = 0; c < this.cityCount; c++) {
@@ -1373,6 +1408,122 @@ export class Generator {
       this.setTile(x, y, t); this.setTile(x + 1, y, t + 1);
       this.setTile(x, y + 1, t + 16); this.setTile(x + 1, y + 1, t + 17);
     }
+  }
+
+  /** Not the original's (opts.fairCapitals): the eight capitals chosen
+   *  among the cities for a fair start, by travel cost between them
+   *  (warlords/travel). What a fair start is was learned from the hand-made
+   *  scenarios and from votes on generated maps (docs/mapeval.md):
+   *   - no city far from every capital (a swathe nobody is near becomes one
+   *     side's free hinterland),
+   *   - each side about as many cities it reaches first as the next,
+   *   - capitals at least FAIR_GAP turns apart (none of the designers' maps
+   *     comes nearer than 2.5).
+   *  A local search from a few random starts, swapping one capital at a
+   *  time while the start gets fairer. cpp/src/warlords/randommap.cpp's. */
+  fairCapitals() {
+    const SIDES = 8;
+    const FAIR_GAP = 3.0;      // turns
+    const REMOTE = 5.0;        // turns from the nearest capital
+    const STARTS = 12, PASSES = 40;
+    const S = (s) => S_SIDE_REC + 20 * s;
+    const n = this.cityCount;
+    if (n < SIDES) { this.capitals(); return; }
+    const g = {
+      w: W, h: H,
+      terrain: new Uint8Array(W * H), road: new Uint8Array(W * H), crossing: new Uint8Array(W * H),
+    };
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x, t = this.terrainOf(this.tile(x, y));
+        g.terrain[i] = t;
+        g.road[i] = this.road(x, y) !== 0 ? 1 : 0;
+        g.crossing[i] = (this.tiles[i] & 0x8000) !== 0 || t === BRIDGE ? 1 : 0;
+      }
+    }
+    const footprint = (c) => {
+      const f = [];
+      for (const [dx, dy] of FOOTPRINT) {
+        if (this.cx(c) + dx < W && this.cy(c) + dy < H) f.push((this.cy(c) + dy) * W + this.cx(c) + dx);
+      }
+      return f;
+    };
+    // a port city is a crossing (1555:109d): its footprint touches the sea
+    for (let c = 0; c < n; c++) {
+      let port = false;
+      for (const [rx, ry] of ROUND_CITY) {
+        const t = this.terrainOf(this.tile(this.cx(c) + rx, this.cy(c) + ry));
+        if (t === BRIDGE || t === WATER || t === SHORE) port = true;
+      }
+      if (port) for (const i of footprint(c)) g.crossing[i] = 1;
+    }
+    const d = [];
+    for (let c = 0; c < n; c++) {
+      const row = new Array(n).fill(travel.UNREACHED);
+      const field = travel.costs(g, footprint(c));
+      for (let o = 0; o < n; o++) for (const i of footprint(o)) row[o] = Math.min(row[o], field[i]);
+      d.push(row);
+    }
+    // how unfair a choice is; lower is better
+    const unfairness = (caps) => {
+      let gap = 1e9;
+      for (let a = 0; a < SIDES; a++) for (let b = a + 1; b < SIDES; b++) gap = Math.min(gap, d[caps[a]][caps[b]]);
+      if (gap >= travel.UNREACHED) return 1e12;   // a capital cut off from another
+      gap /= travel.TURN;
+      const share = new Array(SIDES).fill(0);
+      let remote = 0, reach = 0;
+      for (let c = 0; c < n; c++) {
+        if (caps.includes(c)) continue;
+        let best = travel.UNREACHED, who = 0;
+        for (let s = 0; s < SIDES; s++) if (d[caps[s]][c] < best) { best = d[caps[s]][c]; who = s; }
+        if (best === travel.UNREACHED) { remote++; continue; }
+        share[who]++;
+        reach += best / travel.TURN;
+        if (best > REMOTE * travel.TURN) remote++;
+      }
+      const lo = Math.min(...share), hi = Math.max(...share);
+      return 3.0 * remote + 1.0 * (hi - lo) + reach / n + (gap < FAIR_GAP ? 10.0 * (FAIR_GAP - gap) : 0.0);
+    };
+    let best = new Array(SIDES).fill(0);
+    let bestScore = 1e18;
+    for (let start = 0; start < STARTS; start++) {
+      const caps = new Array(SIDES).fill(0);
+      for (let s = 0; s < SIDES; s++) {
+        let c;
+        do c = this.dice(1, n, -1); while (caps.slice(0, s).includes(c));
+        caps[s] = c;
+      }
+      let score = unfairness(caps);
+      for (let pass = 0; pass < PASSES; pass++) {
+        let better = false;
+        for (let s = 0; s < SIDES; s++) {
+          for (let c = 0; c < n; c++) {
+            if (caps.includes(c)) continue;
+            const was = caps[s];
+            caps[s] = c;
+            const now = unfairness(caps);
+            if (now < score - 1e-9) { score = now; better = true; }
+            else caps[s] = was;
+          }
+        }
+        if (!better) break;
+      }
+      if (score < bestScore) { bestScore = score; best = caps.slice(); }
+    }
+    // the sides take the capitals in a random order; a side's armies favour
+    // the region its capital stands in, as 513d:0689 has it
+    for (let s = SIDES - 1; s > 0; s--) {
+      const j = this.dice(1, s + 1, -1);
+      const t = best[s]; best[s] = best[j]; best[j] = t;
+    }
+    for (let s = 0; s < SIDES; s++) {
+      const x = this.cx(best[s]), y = this.cy(best[s]);
+      const region = Math.min(3, idiv(x, 28)) + 4 * Math.min(1, idiv(y, 78));
+      this.w16(REGION_CLASS + 2 * region, this.r16(SIDE_CLASS + 2 * s));
+      this.ws16(S(s) + 6, x);
+      this.ws16(S(s) + 8, y);
+    }
+    this.crown();
   }
 
   /** 5132:0014 / 006b: each side a name from five, and 3d50+20 gold. */
@@ -1429,10 +1580,18 @@ export class Generator {
     return name.slice(0, 15);
   }
 
+  /** Does a city before `c` already have this name? */
+  nameTaken(c, name) {
+    for (let j = 0; j < c; j++) if (cstr(this.scn, this.crec(j) + 4, 16) === name) return true;
+    return false;
+  }
+
   /** 513d:1171: the city's name, income -- value x 2 + 1d8 + 14 -- and its
    *  three lines of description, grander as the city is richer. */
   cityText(c, v, f) {
-    const name = this.cityName(c, f);
+    let name = this.cityName(c, f);
+    // the scenario generator's names never repeat (the original's may)
+    for (let tries = 0; this.modern && tries < 200 && this.nameTaken(c, name); tries++) name = this.cityName(c, f);
     this.ws16(this.crec(c) + 42, v * 2 + this.dice(1, 8, 0) + 14);
     const grade = () => Math.min(9, Math.max(0, this.dice(1, 3, v - 2)));
     const g1 = grade(), g2 = grade();
@@ -1623,6 +1782,7 @@ export class Generator {
   /** random_map_generate (4bed:011c), yielding as the original's progress
    *  bar moves; returns the scenario's files. */
   *run() {
+    if (this.modern) return yield* this.runModern();
     yield 0;
     // 4bed:036b: the map starts as sea
     for (let i = 0; i < W * H; i++) { this.m[GRID + i] = WATER; this.rd[i] &= 0xe0; }
@@ -1648,7 +1808,8 @@ export class Generator {
     this.roadShapes();
     yield 92;
     this.cityList();
-    this.capitals();
+    if (this.fair) this.fairCapitals();
+    else this.capitals();
     this.sides();
     yield 94;
     this.cityDetails();
@@ -1656,13 +1817,259 @@ export class Generator {
     const sgn = this.signs();
     yield 98;
     this.scn[S_RANDOM] = 1; this.scn[S_RANDOM + 1] = 0;
+    const files = this.writeFiles(sgn);
+    yield 100;
+    return files;
+  }
+
+  /** The world as files: the scenario image, the tile map and the roads, the
+   *  signposts and the descriptions. */
+  writeFiles(sgn) {
     const map = new Uint8Array(2 * W * H);
     const mv = new DataView(map.buffer);
     for (let i = 0; i < W * H; i++) mv.setUint16(2 * i, this.tiles[i], true);
     const rd = new Uint8Array(W * H);
     for (let i = 0; i < W * H; i++) rd[i] = this.rd[i] & 0x1f;
-    yield 100;
     return { SCN: this.scn, MAP: map, RD: rd, SGN: sgn, CTY: bytesOf(this.cty), SPC: bytesOf(this.spc) };
+  }
+
+  // --- not the original's: the scenario generator (warlords/scengen) -------
+
+  /** The terrain grid as the planners take it. */
+  grid() {
+    return this.m.slice(GRID, GRID + W * H);
+  }
+
+  /** Where a river may be bridged: two water tiles in a row, drawn as a
+   *  straight stretch of river (the tiles 5311:05b4 looks for), with firm
+   *  ground beyond both ends. */
+  spans() {
+    const out = [];
+    for (let y = 1; y < H - 2; y++) {
+      for (let x = 1; x < W - 2; x++) {
+        const t = this.tile(x, y);
+        const across = (t === 0x26 || t === 0x16) && (this.tile(x + 1, y) === 0x28 || this.tile(x + 1, y) === 0x18);
+        const along = (t === 0x21 || t === 0x11) && (this.tile(x, y + 1) === 0x24 || this.tile(x, y + 1) === 0x14);
+        if (across && this.firm(x - 1, y) && this.firm(x + 2, y)) out.push({ x, y, ew: true });
+        if (along && this.firm(x, y - 1) && this.firm(x, y + 2)) out.push({ x, y, ew: false });
+      }
+    }
+    return out;
+  }
+
+  /** The planned roads and bridges onto the map. */
+  layPlannedRoads() {
+    const where = [];
+    for (let c = 0; c < this.cityCount; c++) where.push([this.cx(c), this.cy(c)]);
+    const sp = this.spans();
+    const plan = scengen.planRoads(this.grid(), W, H, where, sp, this.rng);
+    const list = { x: [], y: [], ew: [], cityDist: [], chosen: [], chosenDist: [] };
+    for (let i = 0; i < 50; i++) {
+      list.x[i] = list.y[i] = list.ew[i] = list.cityDist[i] = list.chosenDist[i] = -1;
+      list.chosen[i] = 0;
+    }
+    let n = 0;
+    for (const k of plan.bridges) {
+      const b = sp[k];
+      if (b.ew) {
+        this.setTile(b.x, b.y, 0x85); this.setTile(b.x + 1, b.y, 0x86);
+        this.put(b.x, b.y, BRIDGE); this.put(b.x + 1, b.y, BRIDGE);
+      } else {
+        this.setTile(b.x, b.y, 0x84); this.setTile(b.x, b.y + 1, 0x94);
+        this.put(b.x, b.y, BRIDGE); this.put(b.x, b.y + 1, BRIDGE);
+      }
+      if (n < 50) { list.x[n] = b.x; list.y[n] = b.y; list.chosen[n] = 1; n++; }
+    }
+    for (let i = 0; i < W * H; i++) if (plan.road[i]) this.setRoad(i % W, idiv(i, W), 1);
+    // the crossings keep their distance from the bridges, as 5311:01f6 does
+    this.crossings(list);
+    this.landings();
+  }
+
+  /** Every stretch of land with a city or a site on it has a way to the sea:
+   *  a port city, or a crossing -- else a river or a strait could leave it
+   *  out of reach of every army that cannot fly. Where there is neither, a
+   *  shore tile beside it becomes a crossing. */
+  landings() {
+    const sea = (x, y) => { const t = this.at(x, y); return t === WATER || t === SHORE; };
+    const part = new Int32Array(W * H).fill(-1);
+    let parts = 0;
+    for (let s0 = 0; s0 < W * H; s0++) {
+      if (part[s0] >= 0 || sea(s0 % W, idiv(s0, W))) continue;
+      const todo = [s0];
+      part[s0] = parts;
+      for (let k = 0; k < todo.length; k++) {
+        const x = todo[k] % W, y = idiv(todo[k], W);
+        for (let d = 0; d < 8; d++) {
+          const ax = x + this.nx(d), ay = y + this.ny(d);
+          if (ax < 0 || ay < 0 || ax >= W || ay >= H || sea(ax, ay)) continue;
+          const j = ay * W + ax;
+          if (part[j] < 0) { part[j] = parts; todo.push(j); }
+        }
+      }
+      parts++;
+    }
+    const needs = new Uint8Array(parts), served = new Uint8Array(parts);
+    for (let c = 0; c < this.cityCount; c++) {
+      const p = part[this.cy(c) * W + this.cx(c)];
+      if (p < 0) continue;
+      needs[p] = 1;
+      for (const [rx, ry] of ROUND_CITY) if (sea(this.cx(c) + rx, this.cy(c) + ry)) served[p] = 1;
+    }
+    for (let i = 0; i < N_SITES; i++) {
+      const x = this.s16(S_SITES + SITE_STRIDE * i), y = this.s16(S_SITES + SITE_STRIDE * i + 2);
+      if (x >= 0 && y >= 0 && x < W && y < H && part[y * W + x] >= 0) needs[part[y * W + x]] = 1;
+    }
+    for (let i = 0; i < W * H; i++) {
+      if (!(this.tiles[i] & 0x8000)) continue;
+      const x = i % W, y = idiv(i, W);
+      for (let d = 0; d < 8; d++) {
+        const ax = x + this.nx(d), ay = y + this.ny(d);
+        if (ax >= 0 && ay >= 0 && ax < W && ay < H && part[ay * W + ax] >= 0) served[part[ay * W + ax]] = 1;
+      }
+    }
+    for (let i = 0; i < W * H; i++) {
+      const x = i % W, y = idiv(i, W);
+      if (!sea(x, y) || (this.tiles[i] & 0x8000)) continue;
+      let touched = -1;
+      for (let d = 0; d < 8; d += 2) {   // the four sides
+        const ax = x + this.nx(d), ay = y + this.ny(d);
+        if (ax >= 0 && ay >= 0 && ax < W && ay < H && part[ay * W + ax] >= 0) touched = part[ay * W + ax];
+      }
+      if (touched >= 0 && needs[touched] && !served[touched]) {
+        this.tiles[i] |= 0x8000;
+        served[touched] = 1;
+      }
+    }
+  }
+
+  /** Each road piece from the roads and bridges beside it, north, east,
+   *  south and west (docs/formats/map.md > .RD), and an arm into the city a
+   *  road ends at. */
+  modernRoadShapes() {
+    // the piece for each N 1, E 2, S 4, W 8 combination
+    const PIECE = [0, 15, 14, 10, 13, 2, 11, 7, 12, 9, 1, 6, 8, 5, 4, 3];
+    const dx = [0, 1, 0, -1], dy = [-1, 0, 1, 0];
+    const bits = (v) => (v & 1) + ((v >> 1) & 1) + ((v >> 2) & 1) + ((v >> 3) & 1);
+    const shape = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        if (this.road(x, y) === 0) continue;
+        let mk = 0, city = -1;
+        for (let d = 0; d < 4; d++) {
+          const ax = x + dx[d], ay = y + dy[d];
+          if (ax < 0 || ay < 0 || ax >= W || ay >= H) continue;
+          if (this.road(ax, ay) !== 0 || this.at(ax, ay) === BRIDGE) mk |= 1 << d;
+          else if (this.at(ax, ay) === CITY && city < 0) city = d;
+        }
+        // a road's end runs into the city beside it
+        if (city >= 0 && bits(mk) <= 1) mk |= 1 << city;
+        if (mk === 0) {
+          this.setRoad(x, y, 0);
+          continue;
+        }
+        shape[y * W + x] = PIECE[mk];
+      }
+    }
+    for (let i = 0; i < W * H; i++) if (shape[i]) this.setRoad(i % W, idiv(i, W), shape[i]);
+    // a few straight pieces take their standing-stone look
+    for (const [from, to] of [[2, 17], [1, 16]]) {
+      const n = this.dice(1, 6, 3);
+      for (let k = 0; k < n; k++) {
+        for (let tries = 0; tries < 2000; tries++) {
+          const x = this.dice(1, W, -1), y = this.dice(1, H, -1);
+          if (this.road(x, y) === from) { this.setRoad(x, y, to); break; }
+        }
+      }
+    }
+  }
+
+  /** Signposts by the roads, away from the cities, each pointing the way
+   *  to the nearest city, a few with RANDOM.DAT's own words. */
+  modernSigns() {
+    const spots = [];
+    for (let tries = 0; tries < 20000 && spots.length < 60; tries++) {
+      const x = this.dice(1, W - 6, 2), y = this.dice(1, H - 6, 2);
+      if (this.at(x, y) !== PLAIN || this.road(x, y) !== 0 || this.tile(x, y) === 0) continue;
+      let byRoad = false, clear = true;
+      for (let dyy = -1; dyy <= 1; dyy++) {
+        for (let dxx = -1; dxx <= 1; dxx++) if (this.road(x + dxx, y + dyy) !== 0) byRoad = true;
+      }
+      for (let dyy = -3; dyy <= 3 && clear; dyy++) {
+        for (let dxx = -3; dxx <= 3 && clear; dxx++) {
+          const t = this.at(x + dxx, y + dyy);
+          if (t === CITY || t === SITE) clear = false;
+        }
+      }
+      for (const [px, py] of spots) if (reach(px, py, x, y) < 7) clear = false;
+      if (byRoad && clear) spots.push([x, y]);
+    }
+    const n = spots.length;
+    const out = new Uint8Array(2 + 104 * n);
+    const dv = new DataView(out.buffer);
+    dv.setInt16(0, n, true);
+    const put = (o, s) => { for (let i = 0; i < s.length && i < 49; i++) out[o + i] = s.charCodeAt(i) & 0xff; };
+    let fixed = 0;
+    for (let i = 0; i < n; i++) {
+      const [x, y] = spots[i], o = 2 + 104 * i;
+      this.setTile(x, y, 0);
+      dv.setInt16(o, x, true); dv.setInt16(o + 2, y, true);
+      if (this.dice(1, 10, 0) < 3 && fixed < this.r16(SIGNS)) {
+        put(o + 4, this.str(SIGNS + 2 + 60 * fixed, 30));
+        put(o + 54, this.str(SIGNS + 2 + 60 * fixed + 30, 30));
+        fixed++;
+        continue;
+      }
+      let c = -1, best = 1 << 30;
+      for (let j = 0; j < this.cityCount; j++) {
+        const d = distance(x, y, this.cx(j), this.cy(j));
+        if (d < best) { best = d; c = j; }
+      }
+      if (c < 0) continue;
+      put(o + 4, fmt(this.str(SIGN_CITY, 20), cstr(this.scn, this.crec(c) + 4, 16)));
+      put(o + 54, fmt(this.str(SIGN_LEAGUES, 20),
+        distance(x, y, this.cx(c), this.cy(c)) * 2, COMPASS[compass(x, y, this.cx(c), this.cy(c))]));
+    }
+    return out;
+  }
+
+  /** The scenario generator, yielding as run() does for the original. */
+  *runModern() {
+    yield 0;
+    this.plan = scengen.makeWorld(this.world, this.rng, W, H);
+    for (let i = 0; i < W * H; i++) { this.m[GRID + i] = this.plan.terrain[i]; this.rd[i] &= 0xe0; }
+    this.shores();
+    yield 40;
+    this.cityCount = 0;
+    for (const [x, y] of this.plan.cities) {
+      const c = this.cityCount;
+      this.ws16(this.crec(c), x);
+      this.ws16(this.crec(c) + 2, y);
+      this.cityCount = c + 1;
+    }
+    this.sitesBegin();
+    for (let i = 0; i < N_SITES && i < this.plan.sites.length; i++) {
+      this.siteAt(i, this.plan.sites[i][0], this.plan.sites[i][1]);
+    }
+    yield 60;
+    this.roadTiles();
+    yield 70;
+    this.layPlannedRoads();
+    yield 85;
+    this.modernRoadShapes();
+    yield 90;
+    this.cityList();
+    this.fairCapitals();
+    this.sides();
+    yield 94;
+    this.cityDetails();
+    yield 96;
+    const sgn = this.modernSigns();
+    yield 98;
+    this.scn[S_RANDOM] = 0; this.scn[S_RANDOM + 1] = 0;   // an ordinary scenario
+    const files = this.writeFiles(sgn);
+    yield 100;
+    return files;
   }
 }
 
@@ -1710,7 +2117,10 @@ export function params(dataDir, sliders) {
  *  original's bar shows it, and returns the files, keyed by extension.
  *
  *  opts: { dataDir, rng, sliders: [water, hills, cities, forest] (0-7),
- *          allies, terrainSet } */
+ *          allies, terrainSet, and not the original's: fairCapitals (the
+ *          classic world with capitals chosen for a fair start), scenario
+ *          (the scenario generator's world instead, warlords/scengen) and
+ *          world (its settings, scengen.settings' defaults filled in) } */
 export function* generate(opts) {
   const sliders = settle(opts.sliders || [3, 3, 2, 3], opts.rng);
   const dat = params(opts.dataDir, sliders);

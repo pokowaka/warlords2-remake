@@ -33,6 +33,8 @@ import * as aigroups from "../src/warlords/ai/groups.js";
 import * as aidiplomacy from "../src/warlords/ai/diplomacy.js";
 import * as vfs from "../src/vfs.js";
 import * as randommap from "../src/warlords/randommap.js";
+import * as scengen from "../src/warlords/scengen.js";
+import * as startUi from "../src/ui/start.js";
 import { fmt } from "../src/util.js";
 
 loadData();
@@ -1996,6 +1998,83 @@ function testRandomMap() {
   eq(g2.map.signs.length, g.map.signs.length, "... and its own signposts");
 }
 
+// Not the original's: the fair capitals, the scenario generator
+// (warlords/scengen) and New Scenario's list of its worlds, as
+// cpp/test/run.cpp's testMapEval has them. That the worlds are the C++'s,
+// byte for byte, cpp/test/scengen_compare.sh checks (web/test/scengen_dump.js).
+function testScenarioGenerator() {
+  console.log("scenario generator");
+  const same = (a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)) === 0;
+  // the fair capitals: the same world, its capitals chosen for a fair start
+  const classic = randommap.generateNow({ dataDir: DATA, rng: new Rng(11) });
+  const fair = randommap.generateNow({ dataDir: DATA, rng: new Rng(11), fairCapitals: true });
+  ok(!same(classic.SCN, fair.SCN), "fair capitals make a different start");
+  ok(same(classic.RD, fair.RD), "on the classic world, its roads unchanged");
+  randommap.install(DATA, fair);
+  const fairMap = scn.load(DATA + "/RANDOM", "RANDOM");
+  const fairCaps = new Set(fairMap.sides.map((s) => s.capital));
+  eq(fairCaps.size, 8, "fair capitals: eight, one a side");
+  ok(fairMap.sides.every((s) => s.capital && s.capital.owner === s), "every side holds its fair capital");
+
+  // every shape, a few seeds
+  for (const shape of scengen.SHAPES) {
+    for (let seed = 1; seed <= 3; seed++) {
+      const opts = { dataDir: DATA, scenario: true, world: scengen.settings({ shape }) };
+      const files = randommap.generateNow({ ...opts, rng: new Rng(seed) });
+      const again = randommap.generateNow({ ...opts, rng: new Rng(seed) });
+      ok(randommap.FILES.every((ext) => same(files[ext], again[ext])),
+         "the scenario generator is deterministic: " + shape + "#" + seed);
+      eq(files.SCN.length, 12001, shape + "#" + seed + " writes a .SCN of the usual size");
+      randommap.install(DATA, files);
+      const map = scn.load(DATA + "/RANDOM", "RANDOM");
+      const name = shape + "#" + seed;
+      eq(map.cities.length, 80, name + " has the 80 cities asked for");
+      eq(map.sites.length, 40, name + " has its forty sites");
+      eq(new Set(map.sides.map((s) => s.capital)).size, 8, name + " has eight capitals, one a side");
+      eq(new Set(map.cities.map((c) => c.name)).size, map.cities.length, name + "'s city names never repeat");
+      eq(map.options.militaryAdvisor, 1, name + " reads as an ordinary scenario");
+      ok(map.signs.length > 0 && map.signs.length <= 60, name + " has its signposts by the roads");
+    }
+  }
+  // the world's name and description, from the seed alone
+  eq(scengen.title("continents", 1).name, "The Ashen Marches", "a world's name is the C++'s for the seed");
+  eq(scengen.title("islands", 1).name, "Thornfell Skerries", "... for every shape");
+  let fits = true;
+  for (const shape of scengen.SHAPES) {
+    for (let seed = 1; seed <= 200; seed++) {
+      const t = scengen.title(shape, seed);
+      if (t.name.length === 0 || t.name.length > 20 || t.text.length === 0 || t.text.length > 30) fits = false;
+    }
+  }
+  ok(fits, "every world's name fits New Scenario's list (20) and its line its box (30)");
+  eq(scengen.title("pangaea", 9).name, scengen.title("pangaea", 9).name, "the same seed, the same name");
+
+  // New Scenario's list: SCENARIO.DAT's six, then a generated world's folder
+  // with its NAME.INF, in a data folder of its own
+  const tmp = "w2test-scenarios";
+  vfs.install(tmp + "/DATA/SCENARIO.DAT", vfs.read(DATA + "/DATA/SCENARIO.DAT"));
+  const inf = "name=Continents 7 and a name too long\ntext=A new world, seed 7\n# a comment\ncities=80\nruins=40\nplayers=8\n";
+  vfs.install(tmp + "/GEN7/GEN7.INF", Buffer.from(inf, "latin1"));
+  vfs.install(tmp + "/GEN7/GEN7.SCN", new Uint8Array(0));
+  vfs.install(tmp + "/NOINFO/NOINFO.SCN", new Uint8Array(0));
+  vfs.install(tmp + "/NOSCN/NOSCN.INF", Buffer.from("name=No scenario\n", "latin1"));
+  vfs.install(tmp + "/DATA/SCENGEN.LST", Buffer.from("GEN7\r\n\n  NOINFO  \nNOSCN\nerythea\ngen7\n", "latin1"));
+  const list = startUi.scenarios(tmp);
+  eq(list.length, 7, "SCENARIO.DAT's six and the one listed world with a NAME.INF and .SCN");
+  eq(list[3].dir, "Erythea", "SCENARIO.DAT's own order first");
+  eq(list[6].name, "Continents 7 and a n", "the generated world after them, by its NAME.INF, cut to 20");
+  eq(list[6].dir, "GEN7", "in its own folder");
+  eq(list[6].cities, 80, "with its cities");
+  eq(list[6].players, 8, "and its players");
+  ok(list[6].generated && !list[0].generated, "and marked as generated");
+  const back = startUi.parseInfo("name=x\ntext=" + "y".repeat(40) + "\nruins=forty\n", "GEN9");
+  ok(back && back.text.length === 30 && back.ruins === 0, "NAME.INF's text is cut to 30, a count not a number is 0");
+  eq(startUi.parseInfo("text=no name\n", "GEN9"), null, "a NAME.INF without a name is left out");
+  const shipped = startUi.scenarios(DATA);
+  ok(shipped.length >= 6 && shipped.slice(0, 6).every((e) => !e.generated), "the shipped list starts with SCENARIO.DAT's");
+  randommap.install(DATA, classic);
+}
+
 function testSave() {
   console.log("save and load");
   const q = quest;
@@ -2717,6 +2796,7 @@ testEndGame();
 testHiddenMap();
 testSave();
 testRandomMap();
+testScenarioGenerator();
 testNeighbourCache();
 testSites("ERYTHEA");
 testSites("DRAGON");

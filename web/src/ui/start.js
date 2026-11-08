@@ -16,7 +16,8 @@
 //
 // New Scenario (7f77:058d, 0725): popup 19, NEWSCEN.PCK, dialog 29 -- the
 // scenarios of SCENARIO.DAT in a black box, seven rows, and on the crystal
-// ball the chosen one's name, description, cities, ruins and players.
+// ball the chosen one's name, description, cities, ruins and players. Not
+// the original's: generated worlds follow SCENARIO.DAT's (w2scengen).
 //
 // Begin (7bab:0000) sets the sides up on the main screen's own frame,
 // dialog 3: a box a side with its face, its button -- Human, Knight, Lord,
@@ -87,17 +88,77 @@ function keepOptions(dataDir) {
   vfs.write(dataDir + "/DATA/OPTIONS.DAT", b);
 }
 
-/** SCENARIO.DAT's records. */
+// New Scenario's list: SCENARIO.DAT's 84-byte records, then the worlds the
+// scenario generator made (not the original's; cpp/src/warlords/scenarios,
+// docs/scengen.md). A generated world lives in its own folder, NAME/NAME.*,
+// like the shipped ones, but is not written into SCENARIO.DAT; DATA/SCENGEN.LST
+// names the folders a line each, and each holds NAME.INF, lines of
+// "key=value" -- name (at most 20 characters), text (at most 30), cities,
+// ruins, players -- and PICS/SCENARIO.PCK, the start menu's picture.
+const SCENARIO_RECORD = 84;
+const LIST_NAME_MAX = 20, LIST_TEXT_MAX = 30;
+
+// C's isspace, as the C++ trims: not JavaScript's trim, which takes more
+const trimC = (s) => s.replace(/^[ \t\n\v\f\r]+/, "").replace(/[ \t\n\v\f\r]+$/, "");
+// the lines of a text, with no empty ones (util::splitLines)
+const lines = (s) => s.split(/[\r\n]/).filter((l) => l.length > 0);
+// C's toupper: the letters a-z only
+const upperC = (s) => s.replace(/[a-z]+/g, (m) => m.toUpperCase());
+// a whole number, sign and digits only, else 0 (util::toInt)
+const toInt = (s) => {
+  const t = trimC(s);
+  return /^[-+]?[0-9]+$/.test(t) ? parseInt(t, 10) : 0;
+};
+
+/** NAME.INF read back: an entry, or null if it lacks a name. */
+export function parseInfo(text, dir) {
+  const e = { name: "", dir, text: "", cities: 0, ruins: 0, players: 0, generated: true };
+  for (const raw of lines(text)) {
+    const line = trimC(raw);
+    const eq = line.indexOf("=");
+    if (line.length === 0 || line[0] === "#" || eq < 0) continue;
+    const key = trimC(line.slice(0, eq)), value = trimC(line.slice(eq + 1));
+    if (key === "name") e.name = value.slice(0, LIST_NAME_MAX);
+    else if (key === "text") e.text = value.slice(0, LIST_TEXT_MAX);
+    else if (key === "cities") e.cities = toInt(value);
+    else if (key === "ruins") e.ruins = toInt(value);
+    else if (key === "players") e.players = toInt(value);
+  }
+  return e.name.length > 0 ? e : null;
+}
+
+/** SCENARIO.DAT's records in order, then the generated worlds SCENGEN.LST
+ *  names, in its order: each folder once, not one SCENARIO.DAT has (by name,
+ *  any case), and only with its NAME.INF and NAME.SCN there. */
 export function scenarios(dataDir) {
-  const s = vfs.read(dataDir + "/DATA/SCENARIO.DAT");
-  if (!s) return [];
   const out = [];
-  for (let i = 0; i < Math.floor(s.length / 84); i++) {
-    const o = 84 * i;
-    out.push({
-      name: cstr(s, o, 20), dir: cstr(s, o + 20, 8), text: cstr(s, o + 28, 30),
-      cities: u16(s, o + 76), ruins: u16(s, o + 78), players: u16(s, o + 80),
-    });
+  const listed = [];
+  const s = vfs.read(dataDir + "/DATA/SCENARIO.DAT");
+  if (s) {
+    for (let i = 0; i < Math.floor(s.length / SCENARIO_RECORD); i++) {
+      const o = SCENARIO_RECORD * i;
+      const e = {
+        name: cstr(s, o, 20), dir: cstr(s, o + 20, 8), text: cstr(s, o + 28, 30),
+        cities: u16(s, o + 76), ruins: u16(s, o + 78), players: u16(s, o + 80), generated: false,
+      };
+      listed.push(upperC(e.dir));
+      out.push(e);
+    }
+  }
+  const lst = vfs.readText(dataDir + "/DATA/SCENGEN.LST");
+  if (lst) {
+    for (const raw of lines(lst)) {
+      const dir = trimC(raw);
+      if (dir.length === 0 || listed.includes(upperC(dir))) continue;
+      const base = dataDir + "/" + dir + "/" + dir;
+      const text = vfs.readText(base + ".INF");
+      if (text === null || !vfs.exists(base + ".SCN")) continue;
+      const e = parseInfo(text, dir);
+      if (e) {
+        listed.push(upperC(dir));
+        out.push(e);
+      }
+    }
   }
   return out;
 }

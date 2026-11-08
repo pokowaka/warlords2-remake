@@ -17,3 +17,5 @@ warlords-prefs.txt
 # worlds made by cpp/build/w2scengen (docs/scengen.md)
 original/GEN*/
 original/DATA/SCENGEN.LST
+web/assets/data/GEN*/
+web/assets/data/DATA/SCENGEN.LST
