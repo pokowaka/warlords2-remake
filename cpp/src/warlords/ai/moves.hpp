@@ -1,6 +1,11 @@
-// The computer players' movement phases: move (standing orders), rescue, last
-// rescue, move search and move explore, specials -- and the explorer walk and
-// hero parties they use. docs/re/ai.md > Movement phases.
+/**
+ * @file
+ * @brief The computer players' movement phases.
+ *
+ * Move (standing orders), rescue, last rescue, move search, move explore and
+ * specials, plus the explorer walk and the hero parties they use. See
+ * docs/re/ai.md, "Movement phases".
+ */
 #pragma once
 
 #include <vector>
@@ -10,25 +15,66 @@
 
 namespace w2::ai::moves {
 
-/** A hero searches the site it has reached (5ad0:15c3). 2 when it searched. */
-int SearchSite(Game& g, core::Sel* sel, Army* h, Site& s);
-/** Send a hero and one flying companion off (5ad0:11a6). */
-int Party(Game& g, Side& side, std::vector<Army*> list);
-/** Send an army exploring (57ea:0e4b): steps while it has moves. */
-void Explore(Game& g, Side& side, Army* a, City* home);
-/** move search (ai_phase_move_search, 5ad0:0284), with the map hidden. */
-void Search(Game& g, Side& side);
-/** move explore (ai_phase_move_explore, 5ad0:0458). */
-void HeroParties(Game& g, Side& side);
-/** move #1 and #2 (ai_phase_move, 5ad0:0000). */
-void MoveAll(Game& g, Side& side);
-/** An idle army out in the field (5ad0:0c5b). */
-void SendIdle(Game& g, Side& side, Army* a);
-/** rescue (ai_phase_rescue, 5ad0:0888). */
-void Rescue(Game& g, Side& side);
-/** last rescue (ai_phase_last_rescue, 5ad0:0b4d). */
-void LastRescue(Game& g, Side& side);
-/** specials (ai_phase_specials, 5ad0:10e3). */
-void Specials(Game& g, Side& side);
+/**
+ * @brief A hero searches the site it has reached.
+ *
+ * At a temple the side may take a quest; at an allies site the new magical
+ * allies are sent exploring when the map is hidden.
+ * @param sel The hero's selected stack, or nullptr to search with the hero alone.
+ * @return 0 when nothing was searched or the searcher is no hero, 2 when the
+ *         hero searched (or the site was already empty).
+ */
+int SearchSite(Game& game, core::Sel* sel, Army* hero, Site& place);
+
+/**
+ * @brief Sends a hero and one flying companion off to a site or a rally city.
+ *
+ * The pair aims for the best unsearched, explored site (or, failing that, one
+ * of the side's own cities, rally cities preferred) and walks there.
+ * @param list The armies on the hero's tile to pick the pair from.
+ * @return 0 when there is no hero (or nothing to search), 1 when there is a
+ *         hero but no flier, 2 when the hero searched a site.
+ */
+int Party(Game& game, Side& side, std::vector<Army*> list);
+
+/**
+ * @brief Sends an army exploring: it takes steps while it has moves left.
+ * @param home The city whose open neutral neighbour is the fallback target, or
+ *             nullptr for none.
+ */
+void Explore(Game& game, Side& side, Army* army, City* home);
+
+/** @brief The "move search" phase: walks the side's explorers, heroes last. */
+void Search(Game& game, Side& side);
+
+/** @brief The "move explore" phase: sends the side's marked heroes off in parties. */
+void HeroParties(Game& game, Side& side);
+
+/**
+ * @brief The "move" phases (#1 and #2): walks every stack along its standing order.
+ *
+ * Stacks go nearest-first from a cursor that follows the last stack moved.
+ */
+void MoveAll(Game& game, Side& side);
+
+/**
+ * @brief Finds work for an idle army out in the field, or disbands it.
+ *
+ * It gathers the stack on its tile and sends it to the best city within reach
+ * by the flood; weak or aimless stacks are disbanded.
+ */
+void SendIdle(Game& game, Side& side, Army* army);
+
+/** @brief The "rescue" phase: idle armies out in the field get a new target. */
+void Rescue(Game& game, Side& side);
+
+/**
+ * @brief The "last rescue" phase: armies out in the field that still have
+ *        their full moves drop their orders and are sent anew.
+ */
+void LastRescue(Game& game, Side& side);
+
+/** @brief The "specials" phase: heroes in the side's cities set off in parties. */
+void Specials(Game& game, Side& side);
 
 }  // namespace w2::ai::moves
