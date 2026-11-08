@@ -21,6 +21,8 @@
 local armytype = require("warlords.armytype")
 local move     = require("warlords.move")
 local scn      = require("warlords.scn")
+local scengen  = require("warlords.scengen")
+local travel   = require("warlords.travel")
 
 local M = {}
 
@@ -202,6 +204,9 @@ function M.newGenerator(dat, template, types, rng, opts)
   for i = 0, W * H - 1 do self.tiles[i], self.rd[i] = 0, 0 end
   self.cty, self.spc = {}, {}
   self.siteCell = -1            -- 4125:02d4, where the sites' round begins
+  self.fair = opts.fairCapitals and true or false   -- not the original's
+  self.modern = opts.scenario and true or false     -- the scenario generator
+  self.world = scengen.settings(opts.world)
   return self
 end
 
@@ -1090,34 +1095,43 @@ end
 --- 513d:003a: forty sites, keeping the template's temples and ruins, with
 --- names and descriptions from RANDOM.DAT's word lists.
 function G:sites()
+  self:sitesBegin()
+  local tenth = 0
+  for i = 0, N_SITES - 1 do
+    local now = idiv(i * 10, N_SITES)
+    if now ~= tenth then tenth = now coroutine.yield(70 + now) end
+    self:siteAt(i, self:siteSpot())
+  end
+end
+
+--- 513d:003a, its start: forty sites, every one unplaced.
+function G:sitesBegin()
   self:ws16(S_SITE_COUNT, N_SITES)
   for i = 0, N_SITES - 1 do
     self:ws16(S_SITES + SITE_STRIDE * i + 2, -1)
     self:ws16(S_SITES + SITE_STRIDE * i, -1)
   end
-  local tenth = 0
-  for i = 0, N_SITES - 1 do
-    local now = idiv(i * 10, N_SITES)
-    if now ~= tenth then tenth = now coroutine.yield(70 + now) end
-    local x, y = self:siteSpot()
-    local o = S_SITES + SITE_STRIDE * i
-    self:ws16(o, x)
-    self:ws16(o + 2, y)
-    self:put(x, y, SITE)
-    local name, text
-    if self.scn[o + 24] == 1 then
-      name = ("%s Temple"):format(self:str(0x1000 + 10 * self:dice(1, 10, -1), 10))
-      text = "#%03d|The %s can bless your|armies or give you|quests|\n"
-    else
-      local f = self:dice(1, self:r16(SITE_FORMATS), -1)
-      local ending = self:str(0xf9c + 10 * self:dice(1, 10, -1), 10)
-      local word = self:str(0xf38 + 10 * self:dice(1, 10, -1), 10) .. ending
-      name = self:str(SITE_FORMATS + 2 + 20 * f, 20):format(word)
-      text = "#%03d|%s is|inhabited by monsters and|full of treasure!|\n"
-    end
-    self:wstr(o + 4, name)
-    self.spc[#self.spc + 1] = text:format(i, name)
+end
+
+--- Site `i` at (x, y): its record, its name and its description.
+function G:siteAt(i, x, y)
+  local o = S_SITES + SITE_STRIDE * i
+  self:ws16(o, x)
+  self:ws16(o + 2, y)
+  self:put(x, y, SITE)
+  local name, text
+  if self.scn[o + 24] == 1 then
+    name = ("%s Temple"):format(self:str(0x1000 + 10 * self:dice(1, 10, -1), 10))
+    text = "#%03d|The %s can bless your|armies or give you|quests|\n"
+  else
+    local f = self:dice(1, self:r16(SITE_FORMATS), -1)
+    local ending = self:str(0xf9c + 10 * self:dice(1, 10, -1), 10)
+    local word = self:str(0xf38 + 10 * self:dice(1, 10, -1), 10) .. ending
+    name = self:str(SITE_FORMATS + 2 + 20 * f, 20):format(word)
+    text = "#%03d|%s is|inhabited by monsters and|full of treasure!|\n"
   end
+  self:wstr(o + 4, name)
+  self.spc[#self.spc + 1] = text:format(i, name)
 end
 
 -- --- 4fef: terrain to tiles -----------------------------------------------------
@@ -1418,13 +1432,18 @@ function G:layRoad(served, from, to)
   end
 end
 
---- 5311:0000: tiles, then bridges, crossings and roads.
-function G:roads()
-  coroutine.yield(81)
+--- 5311:0000, its tiles: the terrain drawn, no crossings and no roads yet.
+function G:roadTiles()
   self:toTiles()
   self:shapes()
   self:shapes()
   for i = 0, W * H - 1 do self:clearCrossing(i) self:clearRoad(i) end
+end
+
+--- 5311:0000: tiles, then bridges, crossings and roads.
+function G:roads()
+  coroutine.yield(81)
+  self:roadTiles()
   coroutine.yield(82)
   local list = { x = {}, y = {}, ew = {}, cityDist = {}, chosen = {}, chosenDist = {} }
   for i = 0, 49 do
@@ -1565,6 +1584,12 @@ function G:capitals()
     if not again then break end
     round = round + 1
   end
+  self:crown()
+end
+
+--- The capitals in the side records take their sides: the city's owner
+--- byte, and the castle in the side's colours (513d:09b3).
+function G:crown()
   for s = 0, 7 do
     local x, y = self:s16(sideRec(s) + 6), self:s16(sideRec(s) + 8)
     for c = 0, self:cityCount() - 1 do
@@ -1575,6 +1600,149 @@ function G:capitals()
     self:setTile(x, y, t) self:setTile(x + 1, y, t + 1)
     self:setTile(x, y + 1, t + 16) self:setTile(x + 1, y + 1, t + 17)
   end
+end
+
+--- Not the original's (opts.fairCapitals): the eight capitals chosen among
+--- the cities for a fair start, by travel cost between them
+--- (warlords/travel). What a fair start is was learned from the hand-made
+--- scenarios and from votes on generated maps (docs/mapeval.md):
+---  - no city far from every capital (a swathe nobody is near becomes one
+---    side's free hinterland),
+---  - each side about as many cities it reaches first as the next,
+---  - capitals at least FAIR_GAP turns apart (none of the designers' maps
+---    comes nearer than 2.5).
+--- A local search from a few random starts, swapping one capital at a time
+--- while the start gets fairer. cpp/src/warlords/randommap.cpp's, step for
+--- step and die for die.
+function G:fairCapitals()
+  local SIDES = 8
+  local FAIR_GAP = 3.0      -- turns
+  local REMOTE = 5.0        -- turns from the nearest capital
+  local STARTS, PASSES = 12, 40
+  local TURN, UNREACHED = travel.TURN, travel.UNREACHED
+  local n = self:cityCount()
+  if n < SIDES then self:capitals() return end
+  local g = { w = W, h = H, terrain = {}, road = {}, crossing = {} }
+  for y = 0, H - 1 do
+    for x = 0, W - 1 do
+      local i = y * W + x
+      local t = self:terrainOf(self:tile(x, y))
+      g.terrain[i] = t
+      g.road[i] = self:road(x, y) ~= 0
+      g.crossing[i] = self:crossingAt(i) or t == BRIDGE
+    end
+  end
+  local function footprint(c)
+    local f = {}
+    for _, d in ipairs(FOOTPRINT) do
+      if self:cx(c) + d[1] < W and self:cy(c) + d[2] < H then
+        f[#f + 1] = (self:cy(c) + d[2]) * W + self:cx(c) + d[1]
+      end
+    end
+    return f
+  end
+  -- a port city is a crossing (1555:109d): its footprint touches the sea
+  for c = 0, n - 1 do
+    local port = false
+    for r = 0, 11 do
+      local t = self:terrainOf(self:tile(self:cx(c) + ROUND_CITY[r][1], self:cy(c) + ROUND_CITY[r][2]))
+      if t == BRIDGE or t == WATER or t == SHORE then port = true end
+    end
+    if port then
+      for _, i in ipairs(footprint(c)) do g.crossing[i] = true end
+    end
+  end
+  local d = {}
+  for c = 0, n - 1 do
+    d[c] = {}
+    for o = 0, n - 1 do d[c][o] = UNREACHED end
+  end
+  for c = 0, n - 1 do
+    local field = travel.costs(g, footprint(c))
+    for o = 0, n - 1 do
+      for _, i in ipairs(footprint(o)) do d[c][o] = min(d[c][o], field[i]) end
+    end
+  end
+  -- how unfair a choice is; lower is better
+  local isCap, share = {}, {}
+  local function unfairness(caps)
+    local gap = 1e9
+    for a = 0, SIDES - 1 do
+      for b = a + 1, SIDES - 1 do gap = min(gap, d[caps[a]][caps[b]]) end
+    end
+    if gap >= UNREACHED then return 1e12 end   -- a capital cut off from another
+    gap = gap / TURN
+    for c = 0, n - 1 do isCap[c] = false end
+    for s = 0, SIDES - 1 do isCap[caps[s]] = true share[s] = 0 end
+    local remote, reach = 0, 0
+    for c = 0, n - 1 do
+      if not isCap[c] then
+        local best, who = UNREACHED, 0
+        for s = 0, SIDES - 1 do
+          if d[caps[s]][c] < best then best = d[caps[s]][c] who = s end
+        end
+        if best == UNREACHED then
+          remote = remote + 1
+        else
+          share[who] = share[who] + 1
+          reach = reach + best / TURN
+          if best > REMOTE * TURN then remote = remote + 1 end
+        end
+      end
+    end
+    local lo, hi = share[0], share[0]
+    for s = 1, SIDES - 1 do lo = min(lo, share[s]) hi = max(hi, share[s]) end
+    return 3.0 * remote + 1.0 * (hi - lo) + reach / n + (gap < FAIR_GAP and 10.0 * (FAIR_GAP - gap) or 0.0)
+  end
+  local best, bestScore = {}, 1e18
+  for _ = 1, STARTS do
+    local caps = {}
+    for s = 0, SIDES - 1 do
+      local c, taken
+      repeat
+        c = self:dice(1, n, -1)
+        taken = false
+        for k = 0, s - 1 do if caps[k] == c then taken = true end end
+      until not taken
+      caps[s] = c
+    end
+    local score = unfairness(caps)
+    for _ = 1, PASSES do
+      local better = false
+      for s = 0, SIDES - 1 do
+        for c = 0, n - 1 do
+          local taken = false
+          for k = 0, SIDES - 1 do if caps[k] == c then taken = true end end
+          if not taken then
+            local was = caps[s]
+            caps[s] = c
+            local now = unfairness(caps)
+            if now < score - 1e-9 then score = now better = true
+            else caps[s] = was end
+          end
+        end
+      end
+      if not better then break end
+    end
+    if score < bestScore then
+      bestScore = score
+      for s = 0, SIDES - 1 do best[s] = caps[s] end
+    end
+  end
+  -- the sides take the capitals in a random order; a side's armies favour
+  -- the region its capital stands in, as 513d:0689 has it
+  for s = SIDES - 1, 1, -1 do
+    local k = self:dice(1, s + 1, -1)
+    best[s], best[k] = best[k], best[s]
+  end
+  for s = 0, SIDES - 1 do
+    local x, y = self:cx(best[s]), self:cy(best[s])
+    local region = min(3, idiv(x, 28)) + 4 * min(1, idiv(y, 78))
+    self:w16(REGION_CLASS + 2 * region, self:r16(SIDE_CLASS + 2 * s))
+    self:ws16(sideRec(s) + 6, x)
+    self:ws16(sideRec(s) + 8, y)
+  end
+  self:crown()
 end
 
 --- 5132:0014 / 006b: each side a name from five, and 3d50+20 gold.
@@ -1633,10 +1801,24 @@ function G:cityName(c, f)
   return name
 end
 
+--- Does a city before `c` already have this name?
+function G:nameTaken(c, name)
+  for j = 0, c - 1 do
+    if cstr(self.scn, self:crec(j) + 4, 16) == name then return true end
+  end
+  return false
+end
+
 --- 513d:1171: the city's name, income -- value x 2 + 1d8 + 14 -- and its
 --- three lines of description, grander as the city is richer.
 function G:cityText(c, v, f)
   local name = self:cityName(c, f)
+  -- the scenario generator's names never repeat (the original's may)
+  local tries = 0
+  while self.modern and tries < 200 and self:nameTaken(c, name) do
+    name = self:cityName(c, f)
+    tries = tries + 1
+  end
   self:ws16(self:crec(c) + 42, v * 2 + self:dice(1, 8, 0) + 14)
   local function grade() return min(9, max(0, self:dice(1, 3, v - 2))) end
   local g1 = grade()
@@ -1855,9 +2037,300 @@ end
 
 -- --- the whole -----------------------------------------------------------------
 
+--- The world as files, keyed by extension: the scenario image, the tile map
+--- and the roads, the signposts and the descriptions.
+function G:writeFiles(sgn)
+  local map, rd = {}, {}
+  for i = 0, W * H - 1 do
+    local v = self.tiles[i]
+    map[2 * i] = v % 256
+    map[2 * i + 1] = (v - v % 256) / 256
+    rd[i] = self.rd[i] % 32
+  end
+  return {
+    SCN = str(self.scn, self.scnSize), MAP = str(map, 2 * W * H), RD = str(rd, W * H),
+    SGN = sgn, CTY = table.concat(self.cty), SPC = table.concat(self.spc),
+  }
+end
+
+-- --- not the original's: the scenario generator (warlords/scengen) ---------
+
+--- The terrain grid as the planners take it, 0-based.
+function G:grid()
+  local t = {}
+  for i = 0, W * H - 1 do t[i] = self.m[GRID + i] end
+  return t
+end
+
+--- Where a river may be bridged: two water tiles in a row, drawn as a
+--- straight stretch of river (the tiles 5311:05b4 looks for), with firm
+--- ground beyond both ends.
+function G:spans()
+  local out = {}
+  for y = 1, H - 3 do
+    for x = 1, W - 3 do
+      local t = self:tile(x, y)
+      local across = (t == 0x26 or t == 0x16) and (self:tile(x + 1, y) == 0x28 or self:tile(x + 1, y) == 0x18)
+      local along = (t == 0x21 or t == 0x11) and (self:tile(x, y + 1) == 0x24 or self:tile(x, y + 1) == 0x14)
+      if across and self:firm(x - 1, y) and self:firm(x + 2, y) then out[#out + 1] = { x = x, y = y, ew = true } end
+      if along and self:firm(x, y - 1) and self:firm(x, y + 2) then out[#out + 1] = { x = x, y = y, ew = false } end
+    end
+  end
+  return out
+end
+
+--- The planned roads and bridges onto the map.
+function G:layPlannedRoads()
+  local where = {}
+  for c = 0, self:cityCount() - 1 do where[#where + 1] = { self:cx(c), self:cy(c) } end
+  local sp = self:spans()
+  local plan = scengen.planRoads(self:grid(), W, H, where, sp, self.rng)
+  local list = { x = {}, y = {}, ew = {}, cityDist = {}, chosen = {}, chosenDist = {} }
+  for i = 0, 49 do
+    list.x[i], list.y[i], list.ew[i], list.cityDist[i], list.chosenDist[i] = -1, -1, -1, -1, -1
+    list.chosen[i] = 0
+  end
+  local n = 0
+  for _, k in ipairs(plan.bridges) do
+    local b = sp[k]
+    if b.ew then
+      self:setTile(b.x, b.y, 0x85) self:setTile(b.x + 1, b.y, 0x86)
+      self:put(b.x, b.y, BRIDGE) self:put(b.x + 1, b.y, BRIDGE)
+    else
+      self:setTile(b.x, b.y, 0x84) self:setTile(b.x, b.y + 1, 0x94)
+      self:put(b.x, b.y, BRIDGE) self:put(b.x, b.y + 1, BRIDGE)
+    end
+    if n < 50 then list.x[n], list.y[n], list.chosen[n] = b.x, b.y, 1 n = n + 1 end
+  end
+  for i = 0, W * H - 1 do
+    if plan.road[i] then self:setRoad(i % W, (i - i % W) / W, 1) end
+  end
+  -- the crossings keep their distance from the bridges, as 5311:01f6 does
+  self:crossings(list)
+  self:landings()
+end
+
+--- Every stretch of land with a city or a site on it has a way to the sea:
+--- a port city, or a crossing -- else a river or a strait could leave it
+--- out of reach of every army that cannot fly. Where there is neither, a
+--- shore tile beside it becomes a crossing.
+function G:landings()
+  local function sea(x, y) local t = self:at(x, y) return t == WATER or t == SHORE end
+  local part = {}
+  for i = 0, W * H - 1 do part[i] = -1 end
+  local parts = 0
+  for s0 = 0, W * H - 1 do
+    if part[s0] < 0 and not sea(s0 % W, (s0 - s0 % W) / W) then
+      local todo = { s0 }
+      part[s0] = parts
+      local k = 1
+      while k <= #todo do
+        local x = todo[k] % W
+        local y = (todo[k] - x) / W
+        for d = 0, 7 do
+          local ax, ay = x + self:nx(d), y + self:ny(d)
+          if not (ax < 0 or ay < 0 or ax >= W or ay >= H or sea(ax, ay)) then
+            local j = ay * W + ax
+            if part[j] < 0 then part[j] = parts todo[#todo + 1] = j end
+          end
+        end
+        k = k + 1
+      end
+      parts = parts + 1
+    end
+  end
+  local needs, served = {}, {}
+  for p = 0, parts - 1 do needs[p], served[p] = false, false end
+  for c = 0, self:cityCount() - 1 do
+    local p = part[self:cy(c) * W + self:cx(c)]
+    if p >= 0 then
+      needs[p] = true
+      for r = 0, 11 do
+        if sea(self:cx(c) + ROUND_CITY[r][1], self:cy(c) + ROUND_CITY[r][2]) then served[p] = true end
+      end
+    end
+  end
+  for i = 0, N_SITES - 1 do
+    local x, y = self:s16(S_SITES + SITE_STRIDE * i), self:s16(S_SITES + SITE_STRIDE * i + 2)
+    if x >= 0 and y >= 0 and x < W and y < H and part[y * W + x] >= 0 then needs[part[y * W + x]] = true end
+  end
+  for i = 0, W * H - 1 do
+    if self:crossingAt(i) then
+      local x = i % W
+      local y = (i - x) / W
+      for d = 0, 7 do
+        local ax, ay = x + self:nx(d), y + self:ny(d)
+        if ax >= 0 and ay >= 0 and ax < W and ay < H and part[ay * W + ax] >= 0 then served[part[ay * W + ax]] = true end
+      end
+    end
+  end
+  for i = 0, W * H - 1 do
+    local x = i % W
+    local y = (i - x) / W
+    if sea(x, y) and not self:crossingAt(i) then
+      local touched = -1
+      for d = 0, 7, 2 do   -- the four sides
+        local ax, ay = x + self:nx(d), y + self:ny(d)
+        if ax >= 0 and ay >= 0 and ax < W and ay < H and part[ay * W + ax] >= 0 then touched = part[ay * W + ax] end
+      end
+      if touched >= 0 and needs[touched] and not served[touched] then
+        self:setCrossing(i)
+        served[touched] = true
+      end
+    end
+  end
+end
+
+-- the road piece for each N 1, E 2, S 4, W 8 combination
+local PIECE = { [0] = 0, 15, 14, 10, 13, 2, 11, 7, 12, 9, 1, 6, 8, 5, 4, 3 }
+local DX4, DY4 = { [0] = 0, 1, 0, -1 }, { [0] = -1, 0, 1, 0 }
+local BIT4 = { [0] = 1, 2, 4, 8 }
+
+--- Each road piece from the roads and bridges beside it, north, east,
+--- south and west (docs/formats/map.md > .RD), and an arm into the city a
+--- road ends at.
+function G:modernRoadShapes()
+  local shape = {}
+  for i = 0, W * H - 1 do shape[i] = 0 end
+  for y = 0, H - 1 do
+    for x = 0, W - 1 do
+      if self:road(x, y) ~= 0 then
+        local mk, arms, city = 0, 0, -1
+        for d = 0, 3 do
+          local ax, ay = x + DX4[d], y + DY4[d]
+          if not (ax < 0 or ay < 0 or ax >= W or ay >= H) then
+            if self:road(ax, ay) ~= 0 or self:at(ax, ay) == BRIDGE then mk = mk + BIT4[d] arms = arms + 1
+            elseif self:at(ax, ay) == CITY and city < 0 then city = d end
+          end
+        end
+        -- a road's end runs into the city beside it
+        if city >= 0 and arms <= 1 then mk = mk + BIT4[city] end
+        if mk == 0 then
+          self:setRoad(x, y, 0)
+        else
+          shape[y * W + x] = PIECE[mk]
+        end
+      end
+    end
+  end
+  for i = 0, W * H - 1 do
+    if shape[i] ~= 0 then self:setRoad(i % W, (i - i % W) / W, shape[i]) end
+  end
+  -- a few straight pieces take their standing-stone look
+  for _, sw in ipairs({ { 2, 17 }, { 1, 16 } }) do
+    local n = self:dice(1, 6, 3)
+    for _ = 1, n do
+      for _ = 1, 2000 do
+        local x = self:dice(1, W, -1)
+        local y = self:dice(1, H, -1)
+        if self:road(x, y) == sw[1] then self:setRoad(x, y, sw[2]) break end
+      end
+    end
+  end
+end
+
+--- Signposts by the roads, away from the cities, each pointing the way to
+--- the nearest city, a few with RANDOM.DAT's own words.
+function G:modernSigns()
+  local spots = {}
+  local tries = 0
+  while tries < 20000 and #spots < 60 do
+    local x, y = self:dice(1, W - 6, 2), self:dice(1, H - 6, 2)
+    if not (self:at(x, y) ~= PLAIN or self:road(x, y) ~= 0 or self:tile(x, y) == 0) then
+      local byRoad, clear = false, true
+      for dyy = -1, 1 do
+        for dxx = -1, 1 do
+          if self:road(x + dxx, y + dyy) ~= 0 then byRoad = true end
+        end
+      end
+      for dyy = -3, 3 do
+        for dxx = -3, 3 do
+          local t = self:at(x + dxx, y + dyy)
+          if t == CITY or t == SITE then clear = false end
+        end
+      end
+      for _, p in ipairs(spots) do
+        if reach(p.x, p.y, x, y) < 7 then clear = false end
+      end
+      if byRoad and clear then spots[#spots + 1] = { x = x, y = y } end
+    end
+    tries = tries + 1
+  end
+  local n = #spots
+  local out = {}
+  for i = 0, 2 + 104 * n - 1 do out[i] = 0 end
+  setI16(out, 0, n)
+  local function put(o, s)
+    for i = 1, min(#s, 49) do out[o + i - 1] = s:byte(i) end
+  end
+  local fixed = 0
+  for i = 0, n - 1 do
+    local x, y, o = spots[i + 1].x, spots[i + 1].y, 2 + 104 * i
+    self:setTile(x, y, 0)
+    setI16(out, o, x) setI16(out, o + 2, y)
+    if self:dice(1, 10, 0) < 3 and fixed < self:r16(SIGNS) then
+      put(o + 4, self:str(SIGNS + 2 + 60 * fixed, 30))
+      put(o + 54, self:str(SIGNS + 2 + 60 * fixed + 30, 30))
+      fixed = fixed + 1
+    else
+      local c, best = -1, 1073741824
+      for j = 0, self:cityCount() - 1 do
+        local d = distance(x, y, self:cx(j), self:cy(j))
+        if d < best then best, c = d, j end
+      end
+      if c >= 0 then
+        local cx, cy = self:cx(c), self:cy(c)
+        put(o + 4, self:str(SIGN_CITY, 20):format(cstr(self.scn, self:crec(c) + 4, 16)))
+        put(o + 54, self:str(SIGN_LEAGUES, 20):format(distance(x, y, cx, cy) * 2,
+          COMPASS[compass(x, y, cx, cy)]))
+      end
+    end
+  end
+  return str(out, 2 + 104 * n)
+end
+
+--- The scenario generator, yielding its progress as run() does for the
+--- original's; returns the scenario's files.
+function G:runModern()
+  coroutine.yield(0)
+  local plan = scengen.makeWorld(self.world, self.rng, W, H)
+  for i = 0, W * H - 1 do self.m[GRID + i] = plan.terrain[i] self:clearRoad(i) end
+  self:shores()
+  coroutine.yield(40)
+  self:setCityCount(0)
+  for _, p in ipairs(plan.cities) do
+    local c = self:cityCount()
+    self:ws16(self:crec(c), p[1])
+    self:ws16(self:crec(c) + 2, p[2])
+    self:setCityCount(c + 1)
+  end
+  self:sitesBegin()
+  for i = 0, min(N_SITES, #plan.sites) - 1 do self:siteAt(i, plan.sites[i + 1][1], plan.sites[i + 1][2]) end
+  coroutine.yield(60)
+  self:roadTiles()
+  coroutine.yield(70)
+  self:layPlannedRoads()
+  coroutine.yield(85)
+  self:modernRoadShapes()
+  coroutine.yield(90)
+  self:cityList()
+  self:fairCapitals()
+  self:sides()
+  coroutine.yield(94)
+  self:cityDetails()
+  coroutine.yield(96)
+  local sgn = self:modernSigns()
+  coroutine.yield(98)
+  self.scn[S_RANDOM], self.scn[S_RANDOM + 1] = 0, 0   -- an ordinary scenario
+  local files = self:writeFiles(sgn)
+  coroutine.yield(100)
+  return files
+end
+
 --- random_map_generate (4bed:011c), yielding as the original's progress
 --- bar moves; returns the scenario's files.
 function G:run()
+  if self.modern then return self:runModern() end
   coroutine.yield(0)
   -- 4bed:036b: the map starts as sea
   for i = 0, W * H - 1 do self.m[GRID + i] = WATER self:clearRoad(i) end
@@ -1883,7 +2356,7 @@ function G:run()
   self:roadShapes()
   coroutine.yield(92)
   self:cityList()
-  self:capitals()
+  if self.fair then self:fairCapitals() else self:capitals() end
   self:sides()
   coroutine.yield(94)
   self:cityDetails()
@@ -1891,18 +2364,9 @@ function G:run()
   local sgn = self:signs()
   coroutine.yield(98)
   self.scn[S_RANDOM], self.scn[S_RANDOM + 1] = 1, 0
-  local map, rd = {}, {}
-  for i = 0, W * H - 1 do
-    local v = self.tiles[i]
-    map[2 * i] = v % 256
-    map[2 * i + 1] = (v - v % 256) / 256
-    rd[i] = self.rd[i] % 32
-  end
+  local files = self:writeFiles(sgn)
   coroutine.yield(100)
-  return {
-    SCN = str(self.scn, self.scnSize), MAP = str(map, 2 * W * H), RD = str(rd, W * H),
-    SGN = sgn, CTY = table.concat(self.cty), SPC = table.concat(self.spc),
-  }
+  return files
 end
 
 --- The sliders as random_map_setup (7bab:10e8) takes them: Water, Hills,
@@ -1936,7 +2400,15 @@ end
 --- the original's bar shows it, and returns the files, keyed by extension.
 ---
 --- opts: { dataDir, rng, sliders = { water, hills, cities, forest } (0-7),
----         allies, terrainSet }
+---         allies, terrainSet, fairCapitals, scenario, world }
+---
+--- Not the original's: `fairCapitals` chooses the eight capitals for a fair
+--- start (far apart, every city near some capital, each side as much room
+--- to grow as the next) instead of 513d:0689's random picks; off, the world
+--- is the original's, byte for byte (docs/mapeval.md). `scenario` makes the
+--- world with the scenario generator (warlords/scengen) instead, shaped by
+--- `world` (scengen.settings); its capitals are always the fair ones, its
+--- city names never repeat, and its .SCN reads as an ordinary scenario.
 function M.generate(opts)
   local sliders = M.settle(opts.sliders or { 3, 3, 2, 3 }, opts.rng)
   local dat = M.params(opts.dataDir, sliders)

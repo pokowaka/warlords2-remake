@@ -2920,6 +2920,142 @@ local function testRandomMap()
   eq(#g2.map.signs, #g.map.signs, "... and its own signposts")
 end
 
+-- Not the original's: the scenario generator (warlords/scengen.lua), the
+-- fair capitals (randommap's opts.fairCapitals, warlords/travel.lua) and the
+-- generated worlds in New Scenario's list (ui/start.lua). docs/scengen.md;
+-- the C++'s cpp/test/run.cpp checks the same. That the three ports make the
+-- same worlds byte for byte is cpp/test/scengen_compare.sh's to check.
+local function testScenarioGenerator()
+  print("scenario generator")
+  local randommap = require("warlords.randommap")
+  local scengen = require("warlords.scengen")
+  local travel = require("warlords.travel")
+  local rngMod = require("warlords.rng")
+  local scnMod = require("warlords.scn")
+
+  -- travel: a road is 1 a tile, mountains are shut, and the sea is reached
+  -- only at a crossing, for a turn's worth of points
+  local ground = { w = 4, h = 1, terrain = { [0] = movement.PLAIN, movement.FOREST, movement.MOUNTAINS, movement.PLAIN },
+                   road = {}, crossing = {} }
+  local d = travel.costs(ground, { 0 })
+  eq(d[1], movement.COST[movement.FOREST], "travel: forest costs its movement points")
+  eq(d[2], travel.UNREACHED, "travel: mountains without a road are shut")
+  ground.road[2] = true
+  eq(travel.costs(ground, { 0 })[3], 4 + 1 + 2, "travel: a road over the mountains is a pass")
+  local coast = { w = 2, h = 1, terrain = { [0] = movement.PLAIN, movement.WATER }, road = {}, crossing = {} }
+  eq(travel.costs(coast, { 0 })[1], travel.UNREACHED, "travel: no way to sea without a crossing")
+  coast.crossing[0] = true
+  eq(travel.costs(coast, { 0 })[1], movement.COST[movement.WATER] + travel.SEA_SWITCH,
+     "travel: going to sea at a crossing ends the move")
+
+  -- names: from the seed alone, short enough for the list
+  local name, text = scengen.title("continents", 1)
+  eq(name, "The Ashen Marches", "a world's name comes from its seed (as the C++ names it)")
+  eq(text, "Eight warlords, one throne", "... and its line")
+  local fits = true
+  for _, shape in ipairs(scengen.SHAPES) do
+    for seed = 1, 200 do
+      local n, t = scengen.title(shape, seed)
+      if #n == 0 or #n > 20 or #t == 0 or #t > 30 then fits = false end
+    end
+  end
+  ok(fits, "every name fits the list's 20 characters and every line its 30")
+  eq(scengen.parseShape("islands"), "islands", "the shapes are parsed")
+  eq(scengen.parseShape("atlantis"), nil, "... and an unknown one is not")
+
+  -- worlds: every shape, deterministic, as many cities as asked for
+  local function make(shape, seed)
+    return randommap.generateNow({ dataDir = DATA, rng = rngMod.new(seed), scenario = true, world = { shape = shape } })
+  end
+  for _, shape in ipairs(scengen.SHAPES) do
+    for seed = 1, 2 do
+      local files = make(shape, seed)
+      local what = shape .. "#" .. seed
+      if seed == 1 then
+        local again = make(shape, seed)
+        local same = true
+        for _, ext in ipairs(randommap.FILES) do
+          ok(files[ext] and #files[ext] > 0, what .. " writes RANDOM." .. ext)
+          if files[ext] ~= again[ext] then same = false end
+        end
+        ok(same, "the scenario generator is deterministic: " .. shape)
+      end
+      eq(files.SCN:byte(0x120 + 1), 0, what .. " reads as an ordinary scenario, not a random one")
+      randommap.install(DATA, files)
+      local map = scnMod.load(DATA .. "/RANDOM", "RANDOM")
+      eq(#map.cities, 80, what .. " has the 80 cities asked for")
+      eq(#map.sites, 40, what .. " has its 40 sites")
+      local capitals, nCapitals = {}, 0
+      for _, sd in ipairs(map.sides) do
+        if sd.capital and sd.capital.owner == sd and not capitals[sd.capital] then
+          capitals[sd.capital] = true
+          nCapitals = nCapitals + 1
+        end
+      end
+      eq(nCapitals, 8, what .. ": eight capitals, one a side")
+      local names, unique = {}, true
+      for _, c in ipairs(map.cities) do
+        if names[c.name] then unique = false end
+        names[c.name] = true
+      end
+      ok(unique, what .. ": no two cities share a name")
+      local roads = 0
+      for y = 0, 155 do
+        for x = 0, 111 do
+          if scnMod.roadAt(map, x, y) % 32 ~= 0 then roads = roads + 1 end
+        end
+      end
+      ok(roads > 200, what .. " has roads between its cities")
+    end
+  end
+
+  -- the fair capitals on the classic world: the same world, another start
+  local classic = randommap.generateNow({ dataDir = DATA, rng = rngMod.new(11) })
+  local fair = randommap.generateNow({ dataDir = DATA, rng = rngMod.new(11), fairCapitals = true })
+  ok(classic.SCN ~= fair.SCN, "fair capitals make a different start")
+  ok(fair.RD == classic.RD, "... on the same land, with the same roads")
+  randommap.install(DATA, fair)
+  local fmap = scnMod.load(DATA .. "/RANDOM", "RANDOM")
+  local caps, nCaps = {}, 0
+  for _, sd in ipairs(fmap.sides) do
+    if sd.capital and sd.capital.owner == sd and not caps[sd.capital] then caps[sd.capital] = true nCaps = nCaps + 1 end
+  end
+  eq(nCaps, 8, "fair capitals: eight, one a side")
+
+  -- New Scenario's list: SCENARIO.DAT's six, then the folders SCENGEN.LST
+  -- names that hold NAME.INF and NAME.SCN, each once
+  local start = require("ui.start")
+  local tmp = os.tmpname()
+  os.remove(tmp)
+  os.execute(("mkdir -p '%s/DATA' '%s/GEN7' '%s/NOINFO'"):format(tmp, tmp, tmp))
+  local function write(path, s)
+    local f = assert(io.open(path, "wb"))
+    f:write(s)
+    f:close()
+  end
+  local sf = assert(io.open(DATA .. "/DATA/SCENARIO.DAT", "rb"))
+  write(tmp .. "/DATA/SCENARIO.DAT", sf:read("*a"))
+  sf:close()
+  write(tmp .. "/GEN7/GEN7.INF", "name=Continents 7 and a name too long\r\ntext = A new world, seed 7\n# a comment\n"
+    .. "cities=80\nruins=40\nplayers=8\nbogus\n")
+  write(tmp .. "/GEN7/GEN7.SCN", "")
+  write(tmp .. "/NOINFO/NOINFO.SCN", "")
+  write(tmp .. "/DATA/SCENGEN.LST", "  GEN7  \n\nNOINFO\r\nERYTHEA\ngen7\nGONE\n")
+  local list = start.scenarios(tmp)
+  eq(#list, 7, "SCENARIO.DAT's six and the one listed world with a NAME.INF")
+  eq(list[4] and list[4].dir, "Erythea", "SCENARIO.DAT's own order first")
+  local gen = list[#list]
+  eq(gen.dir, "GEN7", "the generated world after them, by SCENGEN.LST")
+  eq(gen.name, "Continents 7 and a n", "its name from NAME.INF, at most 20 characters")
+  eq(gen.text, "A new world, seed 7", "its line, trimmed")
+  eq(gen.cities, 80, "with its cities")
+  eq(gen.ruins, 40, "its ruins")
+  eq(gen.players, 8, "and its players")
+  ok(gen.generated and not list[1].generated, "and marked as generated")
+  eq(start.parseInfo("text=nameless\n", "X"), nil, "a NAME.INF without a name lists nothing")
+  os.execute(("rm -rf '%s'"):format(tmp))
+end
+
 ------------------------------------------------------------ the computer AI
 
 -- The computer players: their character cards, what the level and the card
@@ -3750,6 +3886,7 @@ testScreenLayout()
 testCityCastles()
 testComputerPlayers()
 testRandomMap()
+testScenarioGenerator()
 testAIGame("TUTORIA", 30)
 testAIGame("ERYTHEA", 25)
 if exists(DATA .. "/TUTORIA/TUTORIA.SCN") then testTutorialHero() end

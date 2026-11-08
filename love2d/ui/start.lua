@@ -24,7 +24,8 @@
 -- colour 5, the name centred on (416, 101), the description on (416, 174),
 -- the cities ending at x = 368 and the ruins from x = 472 at y = 234, and the
 -- players centred on (416, 254). 476-482 choose a row, 470-473 scroll, OK
--- (474) takes it, Cancel (475).
+-- (474) takes it, Cancel (475). Not the original's: the worlds the scenario
+-- generator made follow SCENARIO.DAT's (M.scenarios, docs/scengen.md).
 --
 -- **Begin** (7bab:0000) sets the sides up on the main screen's own frame
 -- (8065:0a10), dialog 3: in the map's panel a box a side, (24, 40) and
@@ -110,19 +111,94 @@ local function keepOptions(dataDir)
   f:close()
 end
 
---- SCENARIO.DAT's records.
-function M.scenarios(dataDir)
-  local f = io.open(dataDir .. "/DATA/SCENARIO.DAT", "rb")
-  if not f then return {} end
+local function readAll(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
   local s = f:read("*a")
   f:close()
+  return s
+end
+
+local function trim(s) return (s:match("^%s*(.-)%s*$")) end
+
+--- The non-empty lines of a text, split at CR or LF.
+local function splitLines(s)
   local out = {}
-  for i = 0, math.floor(#s / 84) - 1 do
-    local o = 84 * i
-    out[#out + 1] = {
-      name = cstr(s, o, 20), dir = cstr(s, o + 20, 8), text = cstr(s, o + 28, 30),
-      cities = u16(s, o + 76), ruins = u16(s, o + 78), players = u16(s, o + 80),
-    }
+  for line in s:gmatch("[^\r\n]+") do out[#out + 1] = line end
+  return out
+end
+
+--- A whole number with an optional sign, or nil.
+local function toInt(s)
+  local sign, digits = trim(s):match("^([+-]?)(%d+)$")
+  if not digits then return nil end
+  local v = tonumber(digits)
+  return sign == "-" and -v or v
+end
+
+-- New Scenario's lines for a generated world (cpp/src/warlords/scenarios.cpp)
+local LIST_NAME_MAX, LIST_TEXT_MAX = 20, 30
+
+--- Not the original's: a generated world's NAME.INF read back -- lines of
+--- key=value: name (at most 20 characters), text (at most 30), cities,
+--- ruins and players. nil if it lacks a name.
+function M.parseInfo(text, dir)
+  local e = { name = "", dir = dir, text = "", cities = 0, ruins = 0, players = 0, generated = true }
+  for _, raw in ipairs(splitLines(text)) do
+    local line = trim(raw)
+    local eq = line:find("=", 1, true)
+    if line ~= "" and line:sub(1, 1) ~= "#" and eq then
+      local key, value = trim(line:sub(1, eq - 1)), trim(line:sub(eq + 1))
+      if key == "name" then e.name = value:sub(1, LIST_NAME_MAX)
+      elseif key == "text" then e.text = value:sub(1, LIST_TEXT_MAX)
+      elseif key == "cities" then e.cities = toInt(value) or 0
+      elseif key == "ruins" then e.ruins = toInt(value) or 0
+      elseif key == "players" then e.players = toInt(value) or 0 end
+    end
+  end
+  if e.name == "" then return nil end
+  return e
+end
+
+--- SCENARIO.DAT's records, and after them the worlds the scenario generator
+--- made (not the original's; docs/scengen.md). A generated world lives in
+--- its own folder, DATA/NAME/NAME.*, but is not written into SCENARIO.DAT,
+--- so the original's file stays as it shipped: DATA/DATA/SCENGEN.LST names
+--- the folders, one a line, in the order they are listed, and each holds
+--- NAME.INF (M.parseInfo) and PICS/SCENARIO.PCK, the start menu's picture.
+--- A folder already listed, or without its NAME.INF and NAME.SCN, is left
+--- out. As cpp/src/warlords/scenarios.cpp has it.
+function M.scenarios(dataDir)
+  local out, listed = {}, {}
+  local s = readAll(dataDir .. "/DATA/SCENARIO.DAT")
+  if s then
+    for i = 0, math.floor(#s / 84) - 1 do
+      local o = 84 * i
+      local e = {
+        name = cstr(s, o, 20), dir = cstr(s, o + 20, 8), text = cstr(s, o + 28, 30),
+        cities = u16(s, o + 76), ruins = u16(s, o + 78), players = u16(s, o + 80),
+        generated = false,
+      }
+      listed[e.dir:upper()] = true
+      out[#out + 1] = e
+    end
+  end
+  local lst = readAll(dataDir .. "/DATA/SCENGEN.LST")
+  if lst then
+    for _, raw in ipairs(splitLines(lst)) do
+      local dir = trim(raw)
+      if dir ~= "" and not listed[dir:upper()] then
+        local base = dataDir .. "/" .. dir .. "/" .. dir
+        local text = readAll(base .. ".INF")
+        local scnFile = io.open(base .. ".SCN", "rb")
+        if scnFile then scnFile:close() end
+        local e = text and scnFile and M.parseInfo(text, dir)
+        if e then
+          listed[dir:upper()] = true
+          out[#out + 1] = e
+        end
+      end
+    end
   end
   return out
 end
