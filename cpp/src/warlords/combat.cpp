@@ -25,102 +25,122 @@ const char* const kAdvice[10] = {
     "as simple as butchering sleeping cattle!",
 };
 
-// ARMYTYPE offsets
-static const int kBonusSelf = 32, kBonusStack = 40;  // + 2*class
-static const int kSubtract = 50, kAbility = 52;
+// Offsets into an army type's bonus fields (see docs/formats/armytype.md).
+// The two terrain bonuses are per class: add 2 * class.
+static const int kBonusSelf = 32;   ///< The army's own +n strength on a terrain class.
+static const int kBonusStack = 40;  ///< The +n the army gives its whole line on a class.
+static const int kSubtract = 50;    ///< The -n the army takes off every enemy army.
+static const int kAbility = 52;     ///< The ability enum: kSiege, kNegateHero, kNegateOther.
 
-int TerrainClass(const Game& g, int x, int y) {
-    if (game::TowerAt(g, x, y)) return kCity;
-    int t = scn::TerrainAt(*g.map, x, y);
-    if (t == move::kCity || t == move::kSite) return kCity;
-    if (t == move::kForest) return kWoods;
-    if (t == move::kHills || t == move::kMountains) return kHills;
+int TerrainClass(const Game& game, int x, int y) {
+    if (game::TowerAt(game, x, y)) return kCity;
+    int terrain = scn::TerrainAt(*game.map, x, y);
+    if (terrain == move::kCity || terrain == move::kSite) return kCity;
+    if (terrain == move::kForest) return kWoods;
+    if (terrain == move::kHills || terrain == move::kMountains) return kHills;
     return kOpen;
 }
 
 namespace {
-// On water, shore and mountains a side holding a hero sends one flier to the
-// back, keeping the hero's carrier alive longest: the first flier in the
-// order the line was gathered that is not at sea gets 80 on its rank
-// (6a89:008b, before the sort). Returns the army, or null.
-const Army* HeroCarrier(const Game& g, const std::vector<Army*>& line, int x, int y) {
-    int t = scn::TerrainAt(*g.map, x, y);
-    if (t != move::kWater && t != move::kShore && t != move::kMountains) return nullptr;
-    if (std::none_of(line.begin(), line.end(), [](Army* a) { return a->type == armytype::kHero; }))
+/**
+ * @brief Picks the flier a line holding a hero sends to the back.
+ *
+ * On water, shore and mountains a line holding a hero sends one flier to the
+ * back, keeping the hero's carrier alive longest: the first flier in the
+ * order the line was gathered that is not at sea gets 80 on its rank (before
+ * the line is sorted).
+ * @return The carrier, or null.
+ */
+const Army* HeroCarrier(const Game& game, const std::vector<Army*>& line, int x, int y) {
+    int terrain = scn::TerrainAt(*game.map, x, y);
+    if (terrain != move::kWater && terrain != move::kShore && terrain != move::kMountains)
         return nullptr;
-    for (Army* a : line)
-        if (!a->at_sea && g.types.ById(a->type)->flies) return a;
+    if (std::none_of(line.begin(), line.end(),
+                     [](Army* army) { return army->type == armytype::kHero; }))
+        return nullptr;
+    for (Army* army : line)
+        if (!army->at_sea && game.types.ById(army->type)->flies) return army;
     return nullptr;
 }
 
-// Sort a line by its owner's fight order, lowest first, ties keeping the
-// order it was gathered in (an insertion sort, 6a89:05f1).
-void SortLine(const Game& g, std::vector<Army*>& line, int owner_index, const Army* carrier) {
-    const auto& row = g.map->fight_order[owner_index == kNone ? 8 : owner_index];
-    std::map<const Army*, std::pair<int, int>> key;
+/**
+ * @brief Sorts a line by its owner's fight order, lowest first.
+ *
+ * Ties keep the order the line was gathered in, as the original's insertion
+ * sort does. The hero's carrier ranks 80 higher, so it fights last.
+ */
+void SortLine(const Game& game, std::vector<Army*>& line, int owner_index, const Army* carrier) {
+    const auto& row = game.map->fight_order[owner_index == kNone ? 8 : owner_index];
+    std::map<const Army*, std::pair<int, int>> sort_keys;
     for (size_t i = 0; i < line.size(); i++) {
-        key[line[i]] = {row[line[i]->type] + (line[i] == carrier ? 80 : 0), static_cast<int>(i)};
+        sort_keys[line[i]] = {row[line[i]->type] + (line[i] == carrier ? 80 : 0),
+                              static_cast<int>(i)};
     }
-    LuaSort(line, [&](Army* p, Army* q) {
-        const auto& kp = key[p];
-        const auto& kq = key[q];
-        if (kp.first != kq.first) return kp.first < kq.first;
-        return kp.second < kq.second;
+    LuaSort(line, [&](Army* left, Army* right) {
+        const auto& left_key = sort_keys[left];
+        const auto& right_key = sort_keys[right];
+        if (left_key.first != right_key.first) return left_key.first < right_key.first;
+        return left_key.second < right_key.second;
     });
 }
 
+/** @brief The summed value of the army's items of one type. */
 int ItemTotal(const Army& army, int item_type) {
     int total = 0;
-    for (Item* it : army.items)
-        if (it->type == item_type) total += it->value;
+    for (Item* item : army.items)
+        if (item->type == item_type) total += item->value;
     return total;
 }
 
-bool LineHas(const Game& g, const std::vector<Army*>& line, int ability) {
-    for (Army* a : line)
-        if (g.types.ById(a->type)->bonus[kAbility] == ability) return true;
+/** @brief Whether any army in the line has the given ability (kSiege, ...). */
+bool LineHas(const Game& game, const std::vector<Army*>& line, int ability) {
+    for (Army* army : line)
+        if (game.types.ById(army->type)->bonus[kAbility] == ability) return true;
     return false;
 }
 
-int StackBonus(const Game& g, const std::vector<Army*>& line, int cls) {
+/** @brief The best stack bonus any army in the line gives on the terrain class. */
+int StackBonus(const Game& game, const std::vector<Army*>& line, int cls) {
     int best = 0;
-    for (Army* a : line) best = std::max(best, g.types.ById(a->type)->bonus[kBonusStack + 2 * cls]);
+    for (Army* army : line)
+        best = std::max(best, game.types.ById(army->type)->bonus[kBonusStack + 2 * cls]);
     return best;
 }
 
-int Subtract(const Game& g, const std::vector<Army*>& line) {
+/** @brief The largest penalty (most negative subtract) the line puts on its enemies. */
+int Subtract(const Game& game, const std::vector<Army*>& line) {
     int least = 0;
-    for (Army* a : line) least = std::min(least, g.types.ById(a->type)->bonus[kSubtract]);
+    for (Army* army : line) least = std::min(least, game.types.ById(army->type)->bonus[kSubtract]);
     return least;
 }
 }  // namespace
 
-Lines BattleLines(const Game& g, const std::vector<Army*>& stack, int x, int y) {
-    int attacker = stack.empty() ? kNone : stack[0]->owner;
-    // only a standing city is fought for as one (its terrain is 10, which
-    // combat_setup and after_battle test); ruins are open ground
-    City* city = g.map->city_tile[y * g.map->width + x];
+Lines BattleLines(const Game& game, const std::vector<Army*>& stack, int x, int y) {
+    int attacking_side = stack.empty() ? kNone : stack[0]->owner;
+    // only a standing city is fought for as one (its terrain is 10, which the
+    // original's battle setup and aftermath test); ruins are open ground
+    City* city = game.map->city_tile[y * game.map->width + x];
     if (city && city->razed) city = nullptr;
-    int x0 = city ? city->x : x, y0 = city ? city->y : y;
-    int x1 = city ? city->x + 1 : x, y1 = city ? city->y + 1 : y;
-    Lines out;
-    bool any = false;
-    for (int i = static_cast<int>(g.armies.size()) - 1; i >= 0; i--) {
-        Army* a = g.armies[i];
-        if (!a->transit && a->owner != attacker && a->x >= x0 && a->x <= x1 && a->y >= y0 &&
-            a->y <= y1) {
-            out.defenders.push_back(a);
-            if (!any) {
-                out.def_owner = a->owner;
-                any = true;
+    int min_x = city ? city->x : x, min_y = city ? city->y : y;
+    int max_x = city ? city->x + 1 : x, max_y = city ? city->y + 1 : y;
+    Lines lines;
+    bool found_defender = false;
+    for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
+        Army* army = game.armies[i];
+        if (!army->transit && army->owner != attacking_side && army->x >= min_x &&
+            army->x <= max_x && army->y >= min_y && army->y <= max_y) {
+            lines.defenders.push_back(army);
+            if (!found_defender) {
+                lines.def_owner = army->owner;
+                found_defender = true;
             }
         }
     }
-    out.attackers = stack;
-    SortLine(g, out.attackers, attacker, HeroCarrier(g, out.attackers, x, y));
-    SortLine(g, out.defenders, out.def_owner, HeroCarrier(g, out.defenders, x, y));
-    out.city = city;
-    return out;
+    lines.attackers = stack;
+    SortLine(game, lines.attackers, attacking_side, HeroCarrier(game, lines.attackers, x, y));
+    SortLine(game, lines.defenders, lines.def_owner, HeroCarrier(game, lines.defenders, x, y));
+    lines.city = city;
+    return lines;
 }
 
 int BattleItems(const Army& army) {
@@ -128,177 +148,185 @@ int BattleItems(const Army& army) {
 }
 
 int CommandItems(const Army& army) {
-    int n = ItemTotal(army, rules::kItemCommand);
-    for (Item* it : army.items)
-        if (it->type == rules::kItemStandard) n++;
-    return n;
+    int count = ItemTotal(army, rules::kItemCommand);
+    for (Item* item : army.items)
+        if (item->type == rules::kItemStandard) count++;
+    return count;
 }
 
-int HeroBonus(const Game& g, const std::vector<Army*>& line) {
+int HeroBonus(const Game& game, const std::vector<Army*>& line) {
     int best = 0, command = 0;
-    for (Army* a : line) {
-        if (a->type == armytype::kHero) {
-            int str = a->strength + BattleItems(*a);
-            best = std::max(best, std::min(9, str));
-            command += CommandItems(*a);
+    for (Army* army : line) {
+        if (army->type == armytype::kHero) {
+            int hero_strength = army->strength + BattleItems(*army);
+            best = std::max(best, std::min(9, hero_strength));
+            command += CommandItems(*army);
         }
     }
     return kHeroTable[std::max(0, best)] + command;
 }
 
-int Fortify(const Game& g, const std::vector<Army*>& attackers, int x, int y, int cls) {
+int Fortify(const Game& game, const std::vector<Army*>& attackers, int x, int y, int cls) {
     if (cls != kCity) return 0;
-    if (LineHas(g, attackers, kSiege)) return 0;
+    if (LineHas(game, attackers, kSiege)) return 0;
     int value;
-    City* c = g.map->city_tile[y * g.map->width + x];
-    if (game::TowerAt(g, x, y))
+    City* city = game.map->city_tile[y * game.map->width + x];
+    if (game::TowerAt(game, x, y))
         value = 1;
-    else if (scn::TerrainAt(*g.map, x, y) == move::kSite)
+    else if (scn::TerrainAt(*game.map, x, y) == move::kSite)
         value = 2;
     else
-        value = c ? c->defence : 0;
-    if (c && c->owner_index == kNone) value = value / 2;  // neutral
+        value = city ? city->defence : 0;
+    if (city && city->owner_index == kNone) value = value / 2;  // neutral
     return value;
 }
 
-std::pair<int, int> Modifiers(const Game& g, const std::vector<Army*>& attackers,
+std::pair<int, int> Modifiers(const Game& game, const std::vector<Army*>& attackers,
                               const std::vector<Army*>& defenders, int x, int y, int cls) {
-    int cap = g.map->combat_cap;
-    int atk_hero = LineHas(g, defenders, kNegateHero) ? 0 : HeroBonus(g, attackers);
-    int atk_stack = LineHas(g, defenders, kNegateOther) ? 0 : StackBonus(g, attackers, cls);
-    int def_hero = LineHas(g, attackers, kNegateHero) ? 0 : HeroBonus(g, defenders);
-    int def_stack = LineHas(g, attackers, kNegateOther) ? 0 : StackBonus(g, defenders, cls);
-    int attack_mod = std::min(cap, atk_hero + atk_stack) + Subtract(g, defenders);
-    int defend_mod = std::min(cap, def_hero + def_stack + Fortify(g, attackers, x, y, cls)) +
-                     Subtract(g, attackers);
+    int cap = game.map->combat_cap;
+    int atk_hero = LineHas(game, defenders, kNegateHero) ? 0 : HeroBonus(game, attackers);
+    int atk_stack = LineHas(game, defenders, kNegateOther) ? 0 : StackBonus(game, attackers, cls);
+    int def_hero = LineHas(game, attackers, kNegateHero) ? 0 : HeroBonus(game, defenders);
+    int def_stack = LineHas(game, attackers, kNegateOther) ? 0 : StackBonus(game, defenders, cls);
+    int attack_mod = std::min(cap, atk_hero + atk_stack) + Subtract(game, defenders);
+    int defend_mod = std::min(cap, def_hero + def_stack + Fortify(game, attackers, x, y, cls)) +
+                     Subtract(game, attackers);
     return {attack_mod, defend_mod};
 }
 
-int Strength(const Game& g, const Army& army, int mod, int cls, int terrain) {
+int Strength(const Game& game, const Army& army, int mod, int cls, int terrain) {
     if (army.at_sea && (terrain == move::kWater || terrain == move::kShore)) return 4;
-    int s = army.strength + mod + BattleItems(army) +
-            g.types.ById(army.type)->bonus[kBonusSelf + 2 * cls];
-    return std::min(kMaxStrength, s);
+    int strength = army.strength + mod + BattleItems(army) +
+                   game.types.ById(army.type)->bonus[kBonusSelf + 2 * cls];
+    return std::min(kMaxStrength, strength);
 }
 
-std::map<const Army*, int> StackStrengths(const Game& g, const std::vector<Army*>& armies, int x,
+std::map<const Army*, int> StackStrengths(const Game& game, const std::vector<Army*>& armies, int x,
                                           int y) {
-    int cls = TerrainClass(g, x, y);
-    int total = 0, best = 0;
-    for (Army* a : armies) {
-        if (!a->at_sea) {
-            if (a->type == armytype::kHero) {
-                int s = std::min(9, a->strength + BattleItems(*a));
-                total += kHeroTable[std::max(0, s)] + CommandItems(*a);
+    int cls = TerrainClass(game, x, y);
+    int total = 0, best_stack_bonus = 0;
+    for (Army* army : armies) {
+        if (!army->at_sea) {
+            if (army->type == armytype::kHero) {
+                int hero_strength = std::min(9, army->strength + BattleItems(*army));
+                total += kHeroTable[std::max(0, hero_strength)] + CommandItems(*army);
             } else {
-                int v = g.types.ById(a->type)->bonus[kBonusStack + 2 * cls];
-                if (v > best) {
-                    total = total + v - best;
-                    best = v;
+                int stack_bonus = game.types.ById(army->type)->bonus[kBonusStack + 2 * cls];
+                if (stack_bonus > best_stack_bonus) {
+                    total = total + stack_bonus - best_stack_bonus;
+                    best_stack_bonus = stack_bonus;
                 }
             }
         }
     }
-    total = std::min(total, g.map->combat_cap);
-    std::map<const Army*, int> out;
-    for (Army* a : armies) {
-        int s;
-        if (a->at_sea)
-            s = 4;
-        else if (a->type == armytype::kHero)
-            s = a->strength + BattleItems(*a);
+    total = std::min(total, game.map->combat_cap);
+    std::map<const Army*, int> strengths;
+    for (Army* army : armies) {
+        int strength;
+        if (army->at_sea)
+            strength = 4;
+        else if (army->type == armytype::kHero)
+            strength = army->strength + BattleItems(*army);
         else
-            s = a->strength + g.types.ById(a->type)->bonus[kBonusSelf + 2 * cls];
-        out[a] = std::min(9, s) + total;
+            strength = army->strength + game.types.ById(army->type)->bonus[kBonusSelf + 2 * cls];
+        strengths[army] = std::min(9, strength) + total;
     }
-    return out;
+    return strengths;
 }
 
-Battle Resolve(Game& g, const std::vector<Army*>& attackers, const std::vector<Army*>& defenders,
+Battle Resolve(Game& game, const std::vector<Army*>& attackers, const std::vector<Army*>& defenders,
                int x, int y) {
-    int cls = TerrainClass(g, x, y);
-    int terrain = scn::TerrainAt(*g.map, x, y);
-    auto [attack_mod, defend_mod] = Modifiers(g, attackers, defenders, x, y, cls);
-    int die = g.map->options.intense_combat != 0 ? kDieIntense : kDie;
+    int cls = TerrainClass(game, x, y);
+    int terrain = scn::TerrainAt(*game.map, x, y);
+    auto [attack_mod, defend_mod] = Modifiers(game, attackers, defenders, x, y, cls);
+    int die = game.map->options.intense_combat != 0 ? kDieIntense : kDie;
 
-    struct E {
-        Army* army;
-        int strength;
-        int hits;
-        bool dead = false;
+    /** @brief One army in a battle line, as the fight wears it down. */
+    struct Fighter {
+        Army* army;         ///< The army fighting.
+        int strength;       ///< Its battle strength, at least 1.
+        int hits;           ///< Hits it can still take; it dies below 0.
+        bool dead = false;  ///< Whether it has died.
     };
     auto prepare = [&](const std::vector<Army*>& line, int mod) {
-        std::vector<E> out;
-        for (Army* a : line)
-            out.push_back(E{a, std::max(1, Strength(g, *a, mod, cls, terrain)), kHitPoints - 1});
-        return out;
+        std::vector<Fighter> fighters;
+        for (Army* army : line)
+            fighters.push_back(Fighter{army, std::max(1, Strength(game, *army, mod, cls, terrain)),
+                                       kHitPoints - 1});
+        return fighters;
     };
-    auto atk = prepare(attackers, attack_mod), def = prepare(defenders, defend_mod);
-    Battle b;
-    // an army at sea on water or shore fights as a boat, strength 4
-    // (DS:029c / DS:02a4); Triumphs counts it a navy
+    auto attack_line = prepare(attackers, attack_mod), defend_line = prepare(defenders, defend_mod);
+    Battle battle;
+    // an army at sea on water or shore fights as a boat, strength 4;
+    // Triumphs counts it a navy
     for (const auto* line : {&attackers, &defenders}) {
-        for (Army* a : *line) {
-            if (a->at_sea && (terrain == move::kWater || terrain == move::kShore))
-                b.boats.insert(a);
+        for (Army* army : *line) {
+            if (army->at_sea && (terrain == move::kWater || terrain == move::kShore))
+                battle.boats.insert(army);
         }
     }
-    size_t ai = 0, di = 0;
+    size_t attacker_index = 0, defender_index = 0;
     int throws = 0;
-    while (ai < atk.size() && di < def.size()) {
-        E& a = atk[ai];
-        E& d = def[di];
-        int ra = g.rng.Dice(1, die, 0), rd = g.rng.Dice(1, die, 0);
-        bool a_hits = ra <= a.strength && rd > d.strength;
-        bool d_hits = rd <= d.strength && ra > a.strength;
+    while (attacker_index < attack_line.size() && defender_index < defend_line.size()) {
+        Fighter& attacker = attack_line[attacker_index];
+        Fighter& defender = defend_line[defender_index];
+        int attacker_roll = game.rng.Dice(1, die, 0), defender_roll = game.rng.Dice(1, die, 0);
+        bool attacker_hits =
+                attacker_roll <= attacker.strength && defender_roll > defender.strength;
+        bool defender_hits =
+                defender_roll <= defender.strength && attacker_roll > attacker.strength;
         // past 10,000 throws in one duel the attacker takes the hit; the count
-        // starts again with each army that falls (67cc:08a6)
+        // starts again with each army that falls
         if (throws > kStalemate) {
-            a_hits = false;
-            d_hits = true;
+            attacker_hits = false;
+            defender_hits = true;
         }
         throws++;
 
         // Tutorial: a human player's hero cannot die attacking a neutral defender.
-        if (d_hits && g.map->options.tutorial != 0 && a.army->type == armytype::kHero) {
-            Side* s = g.map->Side(a.army->owner == kNone ? 0 : a.army->owner);
-            if (!(s && s->computer) && d.army->owner == kNone) d_hits = false;
+        if (defender_hits && game.map->options.tutorial != 0 &&
+            attacker.army->type == armytype::kHero) {
+            Side* side = game.map->Side(attacker.army->owner == kNone ? 0 : attacker.army->owner);
+            if (!(side && side->computer) && defender.army->owner == kNone) defender_hits = false;
         }
-        if (a_hits) {
-            d.hits--;
-            if (d.hits < 0) {
-                d.dead = true;
-                b.log.push_back(0);
-                di++;
+        if (attacker_hits) {
+            defender.hits--;
+            if (defender.hits < 0) {
+                defender.dead = true;
+                battle.log.push_back(0);
+                defender_index++;
                 throws = 0;
             }
-        } else if (d_hits) {
-            a.hits--;
-            if (a.hits < 0) {
-                a.dead = true;
-                b.log.push_back(1);
-                ai++;
+        } else if (defender_hits) {
+            attacker.hits--;
+            if (attacker.hits < 0) {
+                attacker.dead = true;
+                battle.log.push_back(1);
+                attacker_index++;
                 throws = 0;
             }
         }
     }
-    for (auto& e : atk) (e.dead ? b.dead_attackers : b.attackers).push_back(e.army);
-    for (auto& e : def) (e.dead ? b.dead_defenders : b.defenders).push_back(e.army);
-    for (Army* a : b.dead_attackers) b.dead_by_army.insert(a);
-    for (Army* a : b.dead_defenders) b.dead_by_army.insert(a);
-    b.won = b.defenders.empty();
-    b.attack_mod = attack_mod;
-    b.defend_mod = defend_mod;
-    b.cls = cls;
-    b.def_strength0 = defenders.empty() ? 0 : Strength(g, *defenders[0], defend_mod, cls, terrain);
-    return b;
+    for (auto& fighter : attack_line)
+        (fighter.dead ? battle.dead_attackers : battle.attackers).push_back(fighter.army);
+    for (auto& fighter : defend_line)
+        (fighter.dead ? battle.dead_defenders : battle.defenders).push_back(fighter.army);
+    for (Army* army : battle.dead_attackers) battle.dead_by_army.insert(army);
+    for (Army* army : battle.dead_defenders) battle.dead_by_army.insert(army);
+    battle.won = battle.defenders.empty();
+    battle.attack_mod = attack_mod;
+    battle.defend_mod = defend_mod;
+    battle.cls = cls;
+    battle.def_strength0 =
+            defenders.empty() ? 0 : Strength(game, *defenders[0], defend_mod, cls, terrain);
+    return battle;
 }
 
-std::pair<std::string, int> Advise(Game& g, const std::vector<Army*>& attackers,
+std::pair<std::string, int> Advise(Game& game, const std::vector<Army*>& attackers,
                                    const std::vector<Army*>& defenders, int x, int y) {
     int wins = 0;
     for (int i = 0; i < kAdviceBattles; i++) {
-        if (Resolve(g, attackers, defenders, x, y).won) wins++;
+        if (Resolve(game, attackers, defenders, x, y).won) wins++;
     }
     return {kAdvice[wins / 2], wins};
 }
