@@ -252,6 +252,20 @@ sh_binary(
 # The game's files, for anything that reads them.
 DATA = ["//:original_data"]
 
+# Shared scenario fixtures and RAII state guards for headless GoogleTest suites.
+cc_library(
+    name = "test_helpers",
+    testonly = True,
+    copts = W2_COPTS,
+    srcs = ["test/test_helpers.cpp"],
+    hdrs = ["test/test_helpers.hpp"],
+    includes = ["."],
+    deps = [
+        ":w2core",
+        "@googletest//:gtest",
+    ],
+)
+
 # GoogleTest suite for the domain model, value types, and .SCN record views.
 cc_test(
     name = "model_gtest",
@@ -265,16 +279,154 @@ cc_test(
     ],
 )
 
-# The rules suite.
+# Per-layer headless GoogleTest suites (migrated from test/run.cpp).
 cc_test(
-    name = "w2test",
+    name = "formats_and_ui_data_test",
     copts = W2_COPTS,
-    size = "large",
-    srcs = ["test/run.cpp"],
-    # also the trained weights, and the rules' sources, which a check reads
-    # for the bug-compatibility flags they use
-    data = DATA + ["ai_weights.json"] + glob(["src/warlords/*.cpp"]),
-    deps = [":w2core"],
+    size = "small",
+    srcs = ["test/formats_and_ui_data_test.cpp"],
+    data = DATA,
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "rules_setup_and_turn_test",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/rules_setup_and_turn_test.cpp"],
+    data = DATA,
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "rules_movement_and_sea_test",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/rules_movement_and_sea_test.cpp"],
+    data = DATA,
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "rules_combat_and_capture_test",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/rules_combat_and_capture_test.cpp"],
+    data = DATA,
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "rules_heroes_sites_quests_test",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/rules_heroes_sites_quests_test.cpp"],
+    # Includes warlords sources so BugFlagsTest can verify every flag is read.
+    data = DATA + glob(["src/warlords/**/*.cpp"]),
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "rules_diplomacy_test",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/rules_diplomacy_test.cpp"],
+    data = DATA,
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "ai_classic_test",
+    copts = W2_COPTS,
+    size = "medium",
+    srcs = ["test/ai_classic_test.cpp"],
+    data = DATA,
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "ai_modern_test",
+    copts = W2_COPTS,
+    size = "medium",
+    srcs = ["test/ai_modern_test.cpp"],
+    data = DATA + ["ai_weights.json"],
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "worldgen_test",
+    copts = W2_COPTS,
+    size = "medium",
+    srcs = ["test/worldgen_test.cpp"],
+    data = DATA,
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "persistence_test",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/persistence_test.cpp"],
+    data = DATA,
+    deps = [
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# Umbrella suite for all 11 headless GoogleTest targets (no SDL required).
+test_suite(
+    name = "headless_tests",
+    tests = [
+        ":ai_classic_test",
+        ":ai_modern_test",
+        ":formats_and_ui_data_test",
+        ":model_gtest",
+        ":persistence_test",
+        ":rules_combat_and_capture_test",
+        ":rules_diplomacy_test",
+        ":rules_heroes_sites_quests_test",
+        ":rules_movement_and_sea_test",
+        ":rules_setup_and_turn_test",
+        ":worldgen_test",
+    ],
 )
 
 # Tools: the Lua-vs-C++ trace, the FM renderer, the AI trainer and its

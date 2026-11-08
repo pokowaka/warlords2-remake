@@ -28,4 +28,4 @@ jobs:
         with:
           path: ~/.cache/bazel
           key: bazel-${{ hashFiles('MODULE.bazel.lock') }}
-      - run: bazel test //cpp:w2test //cpp:golden_test
+      - run: bazel test //cpp:headless_tests //cpp:golden_test

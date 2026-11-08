@@ -19,8 +19,8 @@ if [[ ! -f original/TERRAIN0/ARMYTYPE.DAT ]]; then
   exit 1
 fi
 
-bazel build --config=native //cpp:w2test //cpp:w2arena
-bazel-bin/cpp/w2test | tail -1
+bazel test --config=native //cpp:headless_tests
+bazel build --config=native //cpp:w2arena
 
 RUN="runs/$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$RUN"
