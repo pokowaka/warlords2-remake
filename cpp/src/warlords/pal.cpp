@@ -13,41 +13,46 @@ Palette Load(const std::string& path) {
     // every run of three numbers separated by blanks, as the Lua's pattern
     std::vector<long> nums;
     Palette out;
-    const std::string& s = *text;
-    size_t i = 0;
-    while (i < s.size()) {
+    const std::string& contents = *text;
+    size_t pos = 0;
+    while (pos < contents.size()) {
         // find three integers separated by whitespace
-        if (std::isdigit(static_cast<unsigned char>(s[i]))) {
-            size_t j = i;
-            long v[3];
-            bool ok = true;
-            for (int k = 0; k < 3; k++) {
-                if (j >= s.size() || !std::isdigit(static_cast<unsigned char>(s[j]))) {
-                    ok = false;
+        if (std::isdigit(static_cast<unsigned char>(contents[pos]))) {
+            size_t scan = pos;
+            long rgb[3];
+            bool matched = true;
+            for (int component = 0; component < 3; component++) {
+                if (scan >= contents.size() ||
+                    !std::isdigit(static_cast<unsigned char>(contents[scan]))) {
+                    matched = false;
                     break;
                 }
-                long n = 0;
-                while (j < s.size() && std::isdigit(static_cast<unsigned char>(s[j])))
-                    n = n * 10 + (s[j++] - '0');
-                v[k] = n;
-                if (k < 2) {
-                    size_t w = j;
-                    while (j < s.size() && std::isspace(static_cast<unsigned char>(s[j]))) j++;
-                    if (j == w) {
-                        ok = false;
+                long number = 0;
+                while (scan < contents.size() &&
+                       std::isdigit(static_cast<unsigned char>(contents[scan])))
+                    number = number * 10 + (contents[scan++] - '0');
+                rgb[component] = number;
+                if (component < 2) {
+                    size_t blank_start = scan;
+                    while (scan < contents.size() &&
+                           std::isspace(static_cast<unsigned char>(contents[scan])))
+                        scan++;
+                    if (scan == blank_start) {
+                        matched = false;
                         break;
                     }
                 }
             }
-            if (ok) {
-                out.push_back({v[0] / 99.0, v[1] / 99.0, v[2] / 99.0});
-                i = j;
+            if (matched) {
+                out.push_back({rgb[0] / 99.0, rgb[1] / 99.0, rgb[2] / 99.0});
+                pos = scan;
                 continue;
             }
-            while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) i++;
+            while (pos < contents.size() && std::isdigit(static_cast<unsigned char>(contents[pos])))
+                pos++;
             continue;
         }
-        i++;
+        pos++;
     }
     if (out.size() != 16)
         throw std::runtime_error(

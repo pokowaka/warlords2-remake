@@ -8,169 +8,178 @@ namespace w2 {
 namespace {
 
 // ADLIB.ADV file offsets (it loads at offset 0 of its segment)
-constexpr size_t kAdvFreq = 0x101;       // 192 words: 12 half-tones x 16 fine steps of F-number
-constexpr size_t kAdvOctave = 0x281;     // 96 bytes: the octave of each note from C-2
-constexpr size_t kAdvHalftone = 0x2e1;   // 96 bytes: its half-tone
-constexpr size_t kAdvReset = 0x340;      // register values written to 1..0xF5 at start-up
-constexpr size_t kAdvVelocity = 0x52b;   // 16 bytes: velocity / 8 -> sensitivity, 82..127
-constexpr size_t kAdvPrograms = 0x2203;  // the program each channel 1..8 starts on
+constexpr size_t kAdvFreq = 0x101;       ///< 192 words: 12 half-tones x 16 fine steps of F-number.
+constexpr size_t kAdvOctave = 0x281;     ///< 96 bytes: the octave of each note from C-2.
+constexpr size_t kAdvHalftone = 0x2e1;   ///< 96 bytes: its half-tone.
+constexpr size_t kAdvReset = 0x340;      ///< Register values written to 1..0xF5 at start-up.
+constexpr size_t kAdvVelocity = 0x52b;   ///< 16 bytes: velocity / 8 -> sensitivity, 82..127.
+constexpr size_t kAdvPrograms = 0x2203;  ///< The program each channel 1..8 starts on.
 
-// operator register offsets of voice v's modulator; the carrier is +3
+/// Operator register offsets of each voice's modulator; the carrier is +3.
 const int kOpreg[9] = {0, 1, 2, 8, 9, 10, 16, 17, 18};
 
-int ByteAt(const std::string& s, size_t i) {
-    return i < s.size() ? static_cast<uint8_t>(s[i]) : 0;
+/** @brief The unsigned byte at `offset`, or 0 past the end. */
+int ByteAt(const std::string& bytes, size_t offset) {
+    return offset < bytes.size() ? static_cast<uint8_t>(bytes[offset]) : 0;
 }
-int U16(const std::string& s, size_t i) {
-    return ByteAt(s, i) + ByteAt(s, i + 1) * 256;
+/** @brief The unsigned little-endian word at `offset`. */
+int U16(const std::string& bytes, size_t offset) {
+    return ByteAt(bytes, offset) + ByteAt(bytes, offset + 1) * 256;
 }
-int S16(const std::string& s, size_t i) {
-    int v = U16(s, i);
-    return v >= 0x8000 ? v - 0x10000 : v;
+/** @brief The signed little-endian word at `offset`. */
+int S16(const std::string& bytes, size_t offset) {
+    int value = U16(bytes, offset);
+    return value >= 0x8000 ? value - 0x10000 : value;
 }
-int S8(int v) {
-    return v >= 0x80 ? v - 0x100 : v;
-}
-
-// hi8(a * b * 2), then one more unless it came to 0: the driver's product
-int Scale(int a, int b) {
-    int v = (a * b * 2 / 256) % 256;
-    return v == 0 ? 0 : v + 1;
+/** @brief A byte read as signed. */
+int S8(int byte) {
+    return byte >= 0x80 ? byte - 0x100 : byte;
 }
 
-inline int FloorDiv(int a, int b) {
-    return static_cast<int>(std::floor(static_cast<double>(a) / b));
+/** @brief The driver's product: hi8(level * factor * 2), then one more unless it came to 0. */
+int Scale(int level, int factor) {
+    int value = (level * factor * 2 / 256) % 256;
+    return value == 0 ? 0 : value + 1;
+}
+
+/** @brief Division rounding towards minus infinity, as the Lua's // does. */
+inline int FloorDiv(int dividend, int divisor) {
+    return static_cast<int>(std::floor(static_cast<double>(dividend) / divisor));
 }
 
 }  // namespace
 
-AilFm::AilFm(const std::string& adv, const std::string& ad) {
+AilFm::AilFm(const std::string& adv, const std::string& library) {
     for (int i = 0; i < 192; i++) freq_[i] = S16(adv, kAdvFreq + static_cast<size_t>(i) * 2);
     for (int i = 0; i < 96; i++) {
         octave_[i] = ByteAt(adv, kAdvOctave + i);
         halftone_[i] = ByteAt(adv, kAdvHalftone + i);
     }
-    for (int r = 1; r <= 0xf5; r++) reset_[r] = ByteAt(adv, kAdvReset + r);
+    for (int reg = 1; reg <= 0xf5; reg++) reset_[reg] = ByteAt(adv, kAdvReset + reg);
     for (int i = 0; i < 16; i++) velocity_[i] = ByteAt(adv, kAdvVelocity + i);
-    for (int ch = 1; ch <= 8; ch++) programs_[ch] = ByteAt(adv, kAdvPrograms + ch);
+    for (int channel = 1; channel <= 8; channel++)
+        programs_[channel] = ByteAt(adv, kAdvPrograms + channel);
     // The Global Timbre Library: a directory of 6-byte entries { patch, bank,
     // offset:u32 } ended by bank 0xFF, and at each offset a timbre -- a u16
     // length then the bytes.
-    for (size_t p = 0; p + 6 <= ad.size(); p += 6) {
-        int patch = ByteAt(ad, p), bank = ByteAt(ad, p + 1);
+    for (size_t entry = 0; entry + 6 <= library.size(); entry += 6) {
+        int patch = ByteAt(library, entry), bank = ByteAt(library, entry + 1);
         if (bank == 0xff) break;
-        size_t off =
-                static_cast<size_t>(U16(ad, p + 2)) + static_cast<size_t>(U16(ad, p + 4)) * 65536;
-        int len = U16(ad, off);
-        Timbre t;
-        for (int i = 2; i < len; i++) t.push_back(static_cast<uint8_t>(ByteAt(ad, off + i)));
-        lib_[bank * 128 + patch] = t;
+        size_t offset = static_cast<size_t>(U16(library, entry + 2)) +
+                        static_cast<size_t>(U16(library, entry + 4)) * 65536;
+        int length = U16(library, offset);
+        Timbre timbre;
+        for (int i = 2; i < length; i++)
+            timbre.push_back(static_cast<uint8_t>(ByteAt(library, offset + i)));
+        lib_[bank * 128 + patch] = timbre;
     }
-    for (int r = 1; r <= 0xf5; r++) chip_.Write(r, reset_[r]);
+    for (int reg = 1; reg <= 0xf5; reg++) chip_.Write(reg, reset_[reg]);
     // channel state, as the driver's start-up leaves it on channels 1..9
-    for (int ch = 1; ch <= 9; ch++) {
-        Chan& c = chans_[ch];
-        c.vol = 127;
-        c.expr = 127;
-        if (ch <= 8) Program(ch, programs_[ch]);
+    for (int channel = 1; channel <= 9; channel++) {
+        Chan& chan = chans_[channel];
+        chan.vol = 127;
+        chan.expr = 127;
+        if (channel <= 8) Program(channel, programs_[channel]);
     }
-    for (int& o : owner_) o = -1;
+    for (int& owner : owner_) owner = -1;
 }
 
-void AilFm::Program(int ch, int p) {
-    auto it = lib_.find(chans_[ch].bank * 128 + p);
-    chans_[ch].timbre = it == lib_.end() ? nullptr : &it->second;
+void AilFm::Program(int channel, int program) {
+    auto found = lib_.find(chans_[channel].bank * 128 + program);
+    chans_[channel].timbre = found == lib_.end() ? nullptr : &found->second;
 }
 
-// Write whatever the slot's flags say has changed (1807).
-void AilFm::Update(Slot& s) {
-    int v = s.voice;
-    if (v < 0) return;
-    int f = s.flags;
-    Chan& c = chans_[s.ch];
-    int m = kOpreg[v], k = kOpreg[v] + 3;
-    if (f >= 0x80) {
-        int vib = c.mod >= 64 ? 0x40 : 0;
-        chip_.Write(0x20 + m, s.mod_mult + s.mod_avek + (s.mod_avek % 0x80 >= 0x40 ? 0 : vib));
-        chip_.Write(0x20 + k, s.car_mult + s.car_avek + (s.car_avek % 0x80 >= 0x40 ? 0 : vib));
-        f -= 0x80;
+void AilFm::Update(Slot& slot) {
+    int voice = slot.voice;
+    if (voice < 0) return;
+    int flags = slot.flags;
+    Chan& chan = chans_[slot.ch];
+    int mod_reg = kOpreg[voice], car_reg = kOpreg[voice] + 3;
+    if (flags >= 0x80) {
+        int vib = chan.mod >= 64 ? 0x40 : 0;
+        chip_.Write(0x20 + mod_reg,
+                    slot.mod_mult + slot.mod_avek + (slot.mod_avek % 0x80 >= 0x40 ? 0 : vib));
+        chip_.Write(0x20 + car_reg,
+                    slot.car_mult + slot.car_avek + (slot.car_avek % 0x80 >= 0x40 ? 0 : vib));
+        flags -= 0x80;
     }
-    if (f >= 0x40) {
-        int vol = Scale(Scale(c.vol, c.expr), s.vel);
-        int ml = s.mod_level;
-        if (s.scale_mod) ml = ml * vol / 127;
-        int cl = s.car_level * vol / 127;
-        chip_.Write(0x40 + m, 63 - ml % 64 + s.mod_ksl);
-        chip_.Write(0x40 + k, 63 - cl % 64 + s.car_ksl);
-        f -= 0x40;
+    if (flags >= 0x40) {
+        int vol = Scale(Scale(chan.vol, chan.expr), slot.vel);
+        int mod_level = slot.mod_level;
+        if (slot.scale_mod) mod_level = mod_level * vol / 127;
+        int car_level = slot.car_level * vol / 127;
+        chip_.Write(0x40 + mod_reg, 63 - mod_level % 64 + slot.mod_ksl);
+        chip_.Write(0x40 + car_reg, 63 - car_level % 64 + slot.car_ksl);
+        flags -= 0x40;
     }
-    if (f >= 0x20) {
-        chip_.Write(0x60 + m, s.mod_ad);
-        chip_.Write(0x60 + k, s.car_ad);
-        chip_.Write(0x80 + m, s.mod_sr);
-        chip_.Write(0x80 + k, s.car_sr);
-        f -= 0x20;
+    if (flags >= 0x20) {
+        chip_.Write(0x60 + mod_reg, slot.mod_ad);
+        chip_.Write(0x60 + car_reg, slot.car_ad);
+        chip_.Write(0x80 + mod_reg, slot.mod_sr);
+        chip_.Write(0x80 + car_reg, slot.car_sr);
+        flags -= 0x20;
     }
-    if (f >= 0x10) {
-        chip_.Write(0xe0 + k, s.car_ws);
-        chip_.Write(0xe0 + m, s.mod_ws);
-        f -= 0x10;
+    if (flags >= 0x10) {
+        chip_.Write(0xe0 + car_reg, slot.car_ws);
+        chip_.Write(0xe0 + mod_reg, slot.mod_ws);
+        flags -= 0x10;
     }
-    if (f >= 0x08) {
-        chip_.Write(0xc0 + v, s.fbc % 16);
-        f -= 0x08;
+    if (flags >= 0x08) {
+        chip_.Write(0xc0 + voice, slot.fbc % 16);
+        flags -= 0x08;
     }
-    if (f % 2 == 1) {
-        if (s.keyon == 0) {
-            chip_.Write(0xb0 + v, s.b0 - s.b0 % 64 + s.b0 % 32);  // key off, pitch kept
+    if (flags % 2 == 1) {
+        if (slot.keyon == 0) {
+            chip_.Write(0xb0 + voice,
+                        slot.b0 - slot.b0 % 64 + slot.b0 % 32);  // key off, pitch kept
         } else {
-            chip_.Write(0xa0 + v, Frequency(s, c) % 256);
-            s.b0 = (fw_ / 256) % 4 + block_ * 4 + s.keyon;
-            chip_.Write(0xb0 + v, s.b0);
+            chip_.Write(0xa0 + voice, Frequency(slot, chan) % 256);
+            slot.b0 = (fw_ / 256) % 4 + block_ * 4 + slot.keyon;
+            chip_.Write(0xb0 + voice, slot.b0);
         }
-        f -= 1;
+        flags -= 1;
     }
-    s.flags = f;
+    slot.flags = flags;
 }
 
-// F-number and block for a slot's note (1b61): the note less two octaves,
-// folded into the 96 the tables cover, in sixteenths of a half-tone.
-int AilFm::Frequency(const Slot& s, const Chan& c) {
-    int n = s.note + s.transpose - 24;
-    while (n < 0) n += 12;
-    while (n > 95) n -= 12;
-    int bend = FloorDiv(c.bend, 32) * 12;  // +-12 half-tones over the range
-    int x = FloorDiv(n * 256 + bend + 8, 16);
-    while (x < 0) x += 192;
-    while (x > 0x5ff) x -= 192;
-    int semi = x / 16;
-    int fw = freq_[halftone_[semi] * 16 + x % 16];
+// The note less two octaves, folded into the 96 the tables cover, in
+// sixteenths of a half-tone.
+int AilFm::Frequency(const Slot& slot, const Chan& chan) {
+    int note = slot.note + slot.transpose - 24;
+    while (note < 0) note += 12;
+    while (note > 95) note -= 12;
+    int bend = FloorDiv(chan.bend, 32) * 12;  // +-12 half-tones over the range
+    int pitch = FloorDiv(note * 256 + bend + 8, 16);
+    while (pitch < 0) pitch += 192;
+    while (pitch > 0x5ff) pitch -= 192;
+    int semi = pitch / 16;
+    int fnum = freq_[halftone_[semi] * 16 + pitch % 16];
     int block = octave_[semi] - 1;
     // the upper half-tones are stored an octave down, flagged negative
-    if (fw < 0) block++;
+    if (fnum < 0) block++;
     if (block < 0) {
         block++;
-        fw = FloorDiv(fw, 2);
+        fnum = FloorDiv(fnum, 2);
     }
-    if (fw < 0) fw += 0x10000;
-    fw_ = fw;
+    if (fnum < 0) fnum += 0x10000;
+    fw_ = fnum;
     block_ = block;
-    return fw;
+    return fnum;
 }
 
-// Give a slot a free voice, round-robin from the last one (1740); with none
-// free, let the slots fight over them (1c69).
-void AilFm::Allocate(Slot& s) {
-    int v = next_voice_;
+// A free voice goes round-robin from the last one handed out; with none
+// free, the slots fight over them.
+void AilFm::Allocate(Slot& slot) {
+    int voice = next_voice_;
     for (int i = 0; i < 9; i++) {
-        v = (v + 1) % 9;
-        next_voice_ = v;
-        if (owner_[v] < 0) {
-            s.voice = v;
-            owner_[v] = s.ch;
-            chans_[s.ch].voices++;
-            s.flags = 0xf9;
-            Update(s);
+        voice = (voice + 1) % 9;
+        next_voice_ = voice;
+        if (owner_[voice] < 0) {
+            slot.voice = voice;
+            owner_[voice] = slot.ch;
+            chans_[slot.ch].voices++;
+            slot.flags = 0xf9;
+            Update(slot);
             return;
         }
     }
@@ -183,193 +192,192 @@ void AilFm::Allocate(Slot& s) {
 // with a voice, the weaker note is cut off and its voice handed over.
 void AilFm::Steal() {
     int prio[16] = {};
-    int n = 0;
+    int active_count = 0;
     for (int i = 0; i < 16; i++) {
-        Slot& s = slots_[i];
-        if (s.active) {
-            n++;
-            Chan& c = chans_[s.ch];
-            int p = (c.lock >= 64 ? 0xffff : 0x7fff) - c.voices;
-            prio[i] = p < 0 ? 0 : p;
+        Slot& slot = slots_[i];
+        if (slot.active) {
+            active_count++;
+            Chan& chan = chans_[slot.ch];
+            int priority = (chan.lock >= 64 ? 0xffff : 0x7fff) - chan.voices;
+            prio[i] = priority < 0 ? 0 : priority;
         }
     }
-    while (n > 0) {
-        int best = -1, best_p = 0, worst = -1, worst_p = 0xffff;
+    while (active_count > 0) {
+        int best = -1, best_priority = 0, worst = -1, worst_priority = 0xffff;
         for (int i = 0; i < 16; i++) {
-            Slot& s = slots_[i];
-            if (!s.active) continue;
-            int p = prio[i];
-            if (s.voice < 0) {
-                if (p >= best_p) {
+            Slot& slot = slots_[i];
+            if (!slot.active) continue;
+            int priority = prio[i];
+            if (slot.voice < 0) {
+                if (priority >= best_priority) {
                     best = i;
-                    best_p = p;
+                    best_priority = priority;
                 }
-            } else if (p <= worst_p) {
+            } else if (priority <= worst_priority) {
                 worst = i;
-                worst_p = p;
+                worst_priority = priority;
             }
         }
-        if (best_p < worst_p || best_p == 0 || best < 0 || worst < 0) return;
-        Slot& w = slots_[worst];
-        Slot& b = slots_[best];
-        int v = w.voice;
-        Release(w);
-        w.active = false;
-        b.voice = v;
-        owner_[v] = b.ch;
-        chans_[b.ch].voices++;
-        b.flags = 0xf9;
-        Update(b);
-        n--;
+        if (best_priority < worst_priority || best_priority == 0 || best < 0 || worst < 0) return;
+        Slot& loser = slots_[worst];
+        Slot& winner = slots_[best];
+        int voice = loser.voice;
+        Release(loser);
+        loser.active = false;
+        winner.voice = voice;
+        owner_[voice] = winner.ch;
+        chans_[winner.ch].voices++;
+        winner.flags = 0xf9;
+        Update(winner);
+        active_count--;
     }
 }
 
-// Key off and give the voice back (179c).
-void AilFm::Release(Slot& s) {
-    if (s.voice < 0) return;
-    s.keyon = 0;
-    if (s.flags % 2 == 0) s.flags++;
-    Update(s);
-    chans_[s.ch].voices--;
-    owner_[s.voice] = -1;
-    s.voice = -1;
+void AilFm::Release(Slot& slot) {
+    if (slot.voice < 0) return;
+    slot.keyon = 0;
+    if (slot.flags % 2 == 0) slot.flags++;
+    Update(slot);
+    chans_[slot.ch].voices--;
+    owner_[slot.voice] = -1;
+    slot.voice = -1;
 }
 
-void AilFm::NoteOn(int ch, int key, int vel) {
-    if (vel == 0) return NoteOff(ch, key);
-    const Timbre* t;
-    if (ch == 9) {
-        auto it = percussion_.find(key);
-        if (it == percussion_.end()) {
-            auto l = lib_.find(127 * 128 + key);
-            t = l == lib_.end() ? nullptr : &l->second;
-            percussion_[key] = t;
+void AilFm::NoteOn(int channel, int key, int vel) {
+    if (vel == 0) return NoteOff(channel, key);
+    const Timbre* found;
+    if (channel == 9) {
+        auto cached = percussion_.find(key);
+        if (cached == percussion_.end()) {
+            auto entry = lib_.find(127 * 128 + key);
+            found = entry == lib_.end() ? nullptr : &entry->second;
+            percussion_[key] = found;
         } else {
-            t = it->second;
+            found = cached->second;
         }
     } else {
-        t = chans_[ch].timbre;
+        found = chans_[channel].timbre;
     }
-    if (!t || t->size() != 12) return;
-    Slot* sp = nullptr;
-    for (Slot& s : slots_)
-        if (!s.active) {
-            sp = &s;
+    if (!found || found->size() != 12) return;
+    Slot* free_slot = nullptr;
+    for (Slot& candidate : slots_)
+        if (!candidate.active) {
+            free_slot = &candidate;
             break;
         }
-    if (!sp) return;
-    Slot& s = *sp;
-    const Timbre& timbre = *t;
-    s.ch = ch;
-    s.key = key;
+    if (!free_slot) return;
+    Slot& slot = *free_slot;
+    const Timbre& timbre = *found;
+    slot.ch = channel;
+    slot.key = key;
     // a drum plays at the pitch its timbre's transpose byte names
-    if (ch == 9) {
-        s.note = timbre[0];
-        s.transpose = 0;
+    if (channel == 9) {
+        slot.note = timbre[0];
+        slot.transpose = 0;
     } else {
-        s.note = key;
-        s.transpose = S8(timbre[0]);
+        slot.note = key;
+        slot.transpose = S8(timbre[0]);
     }
-    s.vel = velocity_[vel / 8];
-    s.active = true;
-    s.sustained = false;
-    s.voice = -1;
-    // Copy a 14-byte timbre into the slot (1d6c). Bytes, after the length:
+    slot.vel = velocity_[vel / 8];
+    slot.active = true;
+    slot.sustained = false;
+    slot.voice = -1;
+    // Copy a 14-byte timbre into the slot. Bytes, after the length:
     // transpose, then the modulator's 20/40/60/80/E0 registers, C0, and the
     // carrier's 20/40/60/80/E0.
-    s.keyon = 0x20;
-    s.fbc = timbre[6];
-    s.conn = timbre[6] % 2;
-    s.mod_ksl = timbre[2] - timbre[2] % 64;
-    s.mod_level = 63 - timbre[2] % 64;
-    s.car_ksl = timbre[8] - timbre[8] % 64;
-    s.car_level = 63 - timbre[8] % 64;
-    s.mod_avek = timbre[1] - timbre[1] % 16;
-    s.mod_mult = timbre[1] % 16;
-    s.car_avek = timbre[7] - timbre[7] % 16;
-    s.car_mult = timbre[7] % 16;
-    s.mod_ad = timbre[3];
-    s.mod_sr = timbre[4];
-    s.mod_ws = timbre[5];
-    s.car_ad = timbre[9];
-    s.car_sr = timbre[10];
-    s.car_ws = timbre[11];
+    slot.keyon = 0x20;
+    slot.fbc = timbre[6];
+    slot.conn = timbre[6] % 2;
+    slot.mod_ksl = timbre[2] - timbre[2] % 64;
+    slot.mod_level = 63 - timbre[2] % 64;
+    slot.car_ksl = timbre[8] - timbre[8] % 64;
+    slot.car_level = 63 - timbre[8] % 64;
+    slot.mod_avek = timbre[1] - timbre[1] % 16;
+    slot.mod_mult = timbre[1] % 16;
+    slot.car_avek = timbre[7] - timbre[7] % 16;
+    slot.car_mult = timbre[7] % 16;
+    slot.mod_ad = timbre[3];
+    slot.mod_sr = timbre[4];
+    slot.mod_ws = timbre[5];
+    slot.car_ad = timbre[9];
+    slot.car_sr = timbre[10];
+    slot.car_ws = timbre[11];
     // which operators follow the volume: the carrier always, the modulator
     // only when it is heard directly (additive)
-    s.scale_mod = s.conn == 1;
-    s.flags = 0xf9;
-    Allocate(s);
+    slot.scale_mod = slot.conn == 1;
+    slot.flags = 0xf9;
+    Allocate(slot);
 }
 
-void AilFm::NoteOff(int ch, int key) {
-    Chan& c = chans_[ch];
-    for (Slot& s : slots_) {
-        if (s.active && s.key == key && s.ch == ch) {
-            if (c.sustain >= 64) {
-                s.sustained = true;
+void AilFm::NoteOff(int channel, int key) {
+    Chan& chan = chans_[channel];
+    for (Slot& slot : slots_) {
+        if (slot.active && slot.key == key && slot.ch == channel) {
+            if (chan.sustain >= 64) {
+                slot.sustained = true;
             } else {
-                Release(s);
-                s.active = false;
+                Release(slot);
+                slot.active = false;
             }
         }
     }
 }
 
-void AilFm::Controller(int ch, int n, int v) {
-    Chan& c = chans_[ch];
-    int bitv = 0;
+void AilFm::Controller(int channel, int number, int value) {
+    Chan& chan = chans_[channel];
+    int flag_bit = 0;
     int* field = nullptr;
-    if (n == 114)
-        c.bank = v;
-    else if (n == 112)
-        c.lock = v;
-    else if (n == 64) {
-        c.sustain = v;
-        if (v < 64) {
-            for (Slot& s : slots_)
-                if (s.active && s.ch == ch && s.sustained) NoteOff(ch, s.key);
+    if (number == 114)
+        chan.bank = value;
+    else if (number == 112)
+        chan.lock = value;
+    else if (number == 64) {
+        chan.sustain = value;
+        if (value < 64) {
+            for (Slot& slot : slots_)
+                if (slot.active && slot.ch == channel && slot.sustained) NoteOff(channel, slot.key);
         }
-    } else if (n == 1) {
-        field = &c.mod;
-        bitv = 0x80;
-    } else if (n == 7) {
-        field = &c.vol;
-        bitv = 0x40;
-    } else if (n == 11) {
-        field = &c.expr;
-        bitv = 0x40;
-    } else if (n == 10) {
-        field = &c.pan;
-        bitv = 0x40;
+    } else if (number == 1) {
+        field = &chan.mod;
+        flag_bit = 0x80;
+    } else if (number == 7) {
+        field = &chan.vol;
+        flag_bit = 0x40;
+    } else if (number == 11) {
+        field = &chan.expr;
+        flag_bit = 0x40;
+    } else if (number == 10) {
+        field = &chan.pan;
+        flag_bit = 0x40;
     }
     if (field) {
-        *field = v;
-        for (Slot& s : slots_) {
-            if (s.active && s.ch == ch) {
-                if ((s.flags / bitv) % 2 == 0) s.flags += bitv;
-                Update(s);
+        *field = value;
+        for (Slot& slot : slots_) {
+            if (slot.active && slot.ch == channel) {
+                if ((slot.flags / flag_bit) % 2 == 0) slot.flags += flag_bit;
+                Update(slot);
             }
         }
     }
 }
 
-// One MIDI message (2009). Notes only sound on channels 2-10 (1-9 here).
-void AilFm::Message(int st, int a, int b) {
-    int hi = st & 0xf0, ch = st & 15;
-    if (hi == 0x90) {
-        if (ch >= 1 && ch <= 9) NoteOn(ch, a, b);
-    } else if (hi == 0x80) {
-        NoteOff(ch, a);
-    } else if (hi == 0xb0) {
-        Controller(ch, a, b);
-    } else if (hi == 0xc0) {
-        Program(ch, a);
-    } else if (hi == 0xe0) {
-        chans_[ch].bend = b * 128 + a - 0x2000;
-        for (Slot& s : slots_) {
-            if (s.active && s.ch == ch) {
-                if (s.flags % 2 == 0) s.flags++;
-                Update(s);
+// Notes only sound on channels 2-10 (1-9 here).
+void AilFm::Message(int status, int data1, int data2) {
+    int kind = status & 0xf0, channel = status & 15;
+    if (kind == 0x90) {
+        if (channel >= 1 && channel <= 9) NoteOn(channel, data1, data2);
+    } else if (kind == 0x80) {
+        NoteOff(channel, data1);
+    } else if (kind == 0xb0) {
+        Controller(channel, data1, data2);
+    } else if (kind == 0xc0) {
+        Program(channel, data1);
+    } else if (kind == 0xe0) {
+        chans_[channel].bend = data2 * 128 + data1 - 0x2000;
+        for (Slot& slot : slots_) {
+            if (slot.active && slot.ch == channel) {
+                if (slot.flags % 2 == 0) slot.flags++;
+                Update(slot);
             }
         }
     }
@@ -385,29 +393,28 @@ void AilFm::Play(const xmi::Sequence* seq, bool loop) {
 }
 
 void AilFm::Stop() {
-    for (Slot& s : slots_) {
-        if (s.active) {
-            Release(s);
-            s.active = false;
+    for (Slot& slot : slots_) {
+        if (slot.active) {
+            Release(slot);
+            slot.active = false;
         }
     }
     playing_ = false;
 }
 
-// one interval of AIL's 120 Hz timer
 void AilFm::Interval() {
-    const xmi::Sequence* q = seq_;
-    if (!playing_ || !q) return;
-    int t = tick_;
-    while (pos_ < q->events.size() && q->events[pos_].t <= t) {
-        const auto& e = q->events[pos_];
-        Message(e.st, e.a, e.b);
+    const xmi::Sequence* seq = seq_;
+    if (!playing_ || !seq) return;
+    int tick = tick_;
+    while (pos_ < seq->events.size() && seq->events[pos_].t <= tick) {
+        const auto& event = seq->events[pos_];
+        Message(event.st, event.a, event.b);
         pos_++;
     }
-    tick_ = t + 1;
-    if (pos_ >= q->events.size() && tick_ > q->length) {
+    tick_ = tick + 1;
+    if (pos_ >= seq->events.size() && tick_ > seq->length) {
         if (loop_)
-            Play(q, true);
+            Play(seq, true);
         else
             Stop();
     }
@@ -418,17 +425,17 @@ bool AilFm::Idle() const {
 }
 
 void AilFm::Render(int16_t* out, int n) {
-    const double per = Opl::kRate / xmi::kTickRate;
-    int i = 0;
-    while (i < n) {
+    const double samples_per_tick = Opl::kRate / xmi::kTickRate;
+    int done = 0;
+    while (done < n) {
         if (until_tick_ <= 0) {
             Interval();
-            until_tick_ += per;
+            until_tick_ += samples_per_tick;
         }
-        int k = std::min(n - i, static_cast<int>(std::ceil(until_tick_)));
-        chip_.Generate(out + i, k);
-        i += k;
-        until_tick_ -= k;
+        int chunk = std::min(n - done, static_cast<int>(std::ceil(until_tick_)));
+        chip_.Generate(out + done, chunk);
+        done += chunk;
+        until_tick_ -= chunk;
     }
 }
 
