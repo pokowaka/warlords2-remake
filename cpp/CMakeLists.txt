@@ -8,6 +8,9 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-sign-compare)
+  # no fused multiply-adds: a*b+c rounded twice, as JavaScript and LuaJIT
+  # round it, so the three ports' generators make the same worlds bit for bit
+  add_compile_options(-ffp-contract=off)
 endif()
 
 # W2_BUILD_GAME=OFF builds only the rules core, the tests and the AI trainer
