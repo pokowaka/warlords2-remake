@@ -1,16 +1,19 @@
-// A help screen from a .GFX file (8065:168d), e.g. HELP\HITEM.GFX.
-//
-// The file's #D number picks the popup -- 14 + n -- and 7ecb:06de lays the
-// page out inside it, every position counted from the popup's corner:
-//
-//   #H          font 1, colour 15        #T      font 2, colour 15
-//   #Fnnn       font 2, colour nnn       #E      the end
-//   #C(x,y)|t|  centred on x             #L(x,y)|t|  from x
-//   #R(x,y)|t|  ending at x
-//   #G(x,y,w,h)nnn(dx,dy)  the (x, y) w x h of bitmap nnn, at (dx, dy)
-//
-// A key or a click puts it away. The control panel's "?" shows HMOUSE and
-// then HKEYS in popup 4, (120, 50) 400x360.
+/**
+ * @file
+ * @brief A help screen from a .GFX file, e.g. HELP\HITEM.GFX.
+ *
+ * The file's #D number picks the popup -- 14 + n -- and the page is laid
+ * out inside it, every position counted from the popup's corner:
+ *
+ *   #H          font 1, colour 15        #T      font 2, colour 15
+ *   #Fnnn       font 2, colour nnn       #E      the end
+ *   #C(x,y)|t|  centred on x             #L(x,y)|t|  from x
+ *   #R(x,y)|t|  ending at x
+ *   #G(x,y,w,h)nnn(dx,dy)  the (x, y) w x h of bitmap nnn, at (dx, dy)
+ *
+ * A key or a click puts it away. The control panel's "?" shows HMOUSE and
+ * then HKEYS in popup 4, (120, 50) 400x360.
+ */
 #include <regex>
 
 #include "ui/dialogs.hpp"
@@ -21,20 +24,34 @@ namespace help {
 const kit::Rect kPopuP4{120, 50, 400, 360};
 
 namespace {
+/// The popups a page's #D picks: 0 (or none) popup 14, 1 popup 15.
 const kit::Rect kPopups[2] = {
     {256, 40, 352, 340},  // popup 14
     {32, 40, 352, 340},   // popup 15
 };
 
+/** @brief One instruction of a help page: a font change, a line of text or a piece of bitmap. */
 struct Step {
-    int font = 0, colour = 15;  // a font change when font != 0
-    bool is_text = false;
-    std::string text;
-    char align = 'L';
-    int x = 0, y = 0;
-    int bitmap = -1, sx = 0, sy = 0, w = 0, h = 0;
+    int font = 0;          ///< A font change to this font when not 0.
+    int colour = 15;       ///< The text colour that comes with a font change.
+    bool is_text = false;  ///< A line of text.
+    std::string text;      ///< The text, for a line of text.
+    char align = 'L';      ///< 'C' centred on x, 'L' from x, 'R' ending at x.
+    int x = 0;             ///< Where the text or the bitmap piece goes, from the popup's corner.
+    int y = 0;             ///< Where the text or the bitmap piece goes, from the popup's corner.
+    int bitmap = -1;       ///< The bitmap (FILE.DAT art) a piece is cut from, or -1.
+    int source_x = 0;      ///< The piece's left edge in the bitmap.
+    int source_y = 0;      ///< The piece's top edge in the bitmap.
+    int width = 0;         ///< The piece's width.
+    int height = 0;        ///< The piece's height.
 };
 
+/**
+ * @brief Reads a .GFX help page into steps.
+ * @param text The file's contents.
+ * @param steps Gets the page's steps appended, up to #E.
+ * @return The page's #D number, which picks the popup (0 when there is none).
+ */
 int Parse(const std::string& text, std::vector<Step>& steps) {
     int page = 0;
     static const std::regex kLineRe("^#([A-Z])(.*)$");
@@ -42,87 +59,94 @@ int Parse(const std::string& text, std::vector<Step>& steps) {
     static const std::regex kTextRe("^\\((\\d+),(\\d+)\\)\\|(.*?)\\|");
     static const std::regex kGfxRe("^\\((\\d+),(\\d+),(\\d+),(\\d+)\\)(\\d+)\\((\\d+),(\\d+)\\)");
     for (auto& line : w2::SplitLines(text)) {
-        std::smatch m;
-        if (!std::regex_search(line, m, kLineRe)) continue;
-        char op = m[1].str()[0];
-        std::string rest = m[2];
-        std::smatch t;
-        if (op == 'D') {
-            page = std::regex_search(rest, t, kNumRe) ? std::stoi(t[1]) : 0;
-        } else if (op == 'H') {
-            Step s;
-            s.font = 1;
-            s.colour = 15;
-            steps.push_back(s);
-        } else if (op == 'T') {
-            Step s;
-            s.font = 2;
-            s.colour = 15;
-            steps.push_back(s);
-        } else if (op == 'F') {
-            Step s;
-            s.font = 2;
-            s.colour = std::regex_search(rest, t, kNumRe) ? std::stoi(t[1]) : 15;
-            steps.push_back(s);
-        } else if (op == 'C' || op == 'L' || op == 'R') {
-            if (std::regex_search(rest, t, kTextRe)) {
-                Step s;
-                s.is_text = true;
-                s.text = t[3];
-                s.align = op;
-                s.x = std::stoi(t[1]);
-                s.y = std::stoi(t[2]);
-                steps.push_back(s);
+        std::smatch line_match;
+        if (!std::regex_search(line, line_match, kLineRe)) continue;
+        char code = line_match[1].str()[0];
+        std::string rest = line_match[2];
+        std::smatch args;
+        if (code == 'D') {
+            page = std::regex_search(rest, args, kNumRe) ? std::stoi(args[1]) : 0;
+        } else if (code == 'H') {
+            Step step;
+            step.font = 1;
+            step.colour = 15;
+            steps.push_back(step);
+        } else if (code == 'T') {
+            Step step;
+            step.font = 2;
+            step.colour = 15;
+            steps.push_back(step);
+        } else if (code == 'F') {
+            Step step;
+            step.font = 2;
+            step.colour = std::regex_search(rest, args, kNumRe) ? std::stoi(args[1]) : 15;
+            steps.push_back(step);
+        } else if (code == 'C' || code == 'L' || code == 'R') {
+            if (std::regex_search(rest, args, kTextRe)) {
+                Step step;
+                step.is_text = true;
+                step.text = args[3];
+                step.align = code;
+                step.x = std::stoi(args[1]);
+                step.y = std::stoi(args[2]);
+                steps.push_back(step);
             }
-        } else if (op == 'G') {
-            if (std::regex_search(rest, t, kGfxRe)) {
-                Step s;
-                s.bitmap = std::stoi(t[5]);
-                s.sx = std::stoi(t[1]);
-                s.sy = std::stoi(t[2]);
-                s.w = std::stoi(t[3]);
-                s.h = std::stoi(t[4]);
-                s.x = std::stoi(t[6]);
-                s.y = std::stoi(t[7]);
-                steps.push_back(s);
+        } else if (code == 'G') {
+            if (std::regex_search(rest, args, kGfxRe)) {
+                Step step;
+                step.bitmap = std::stoi(args[5]);
+                step.source_x = std::stoi(args[1]);
+                step.source_y = std::stoi(args[2]);
+                step.width = std::stoi(args[3]);
+                step.height = std::stoi(args[4]);
+                step.x = std::stoi(args[6]);
+                step.y = std::stoi(args[7]);
+                steps.push_back(step);
             }
-        } else if (op == 'E') {
+        } else if (code == 'E') {
             break;
         }
     }
     return page;
 }
 
+/** @brief A help page on the screen; any key or click puts it away. */
 struct Page : kit::Modal {
-    std::vector<Step> steps;
-    kit::Rect r;
-    kit::Done after;
+    std::vector<Step> steps;  ///< The page, in drawing order.
+    kit::Rect rect;           ///< The popup it is drawn in.
+    kit::Done after;          ///< Runs once it has closed.
+
+    /** @brief Closes, then runs `after`. */
     void Close() {
-        auto a = after;
+        auto after_copy = after;
         kit::Pop(this);
-        if (a) a();
+        if (after_copy) after_copy();
     }
+
+    /** @brief Draws the popup and runs the steps, font changes holding until the next. */
     void Draw() override {
-        kit::Popup(r);
+        kit::Popup(rect);
         const Font* font = &kit::GetFont(2);
         int colour = 15;
-        for (const Step& s : steps) {
-            if (s.font) {
-                font = &kit::GetFont(s.font);
-                colour = s.colour;
-            } else if (s.is_text) {
-                const Font& fc = font->Colours(colour, 0);
+        for (const Step& step : steps) {
+            if (step.font) {
+                font = &kit::GetFont(step.font);
+                colour = step.colour;
+            } else if (step.is_text) {
+                const Font& coloured = font->Colours(colour, 0);
                 gfx::SetColor(1, 1, 1);
-                if (s.align == 'C')
-                    kit::Centred(fc, s.text, r.x + s.x, r.y + s.y);
-                else if (s.align == 'R')
-                    kit::Right(fc, s.text, r.x + s.x, r.y + s.y);
+                if (step.align == 'C')
+                    kit::Centred(coloured, step.text, rect.x + step.x, rect.y + step.y);
+                else if (step.align == 'R')
+                    kit::Right(coloured, step.text, rect.x + step.x, rect.y + step.y);
                 else
-                    fc.Draw(s.text, r.x + s.x, r.y + s.y);
-            } else if (s.bitmap >= 0) {
-                if (auto art = G.screen->ArtFor(s.bitmap)) {
+                    coloured.Draw(step.text, rect.x + step.x, rect.y + step.y);
+            } else if (step.bitmap >= 0) {
+                if (auto art = G.screen->ArtFor(step.bitmap)) {
                     gfx::SetColor(1, 1, 1);
-                    gfx::Draw(art->image, gfx::NewQuad(s.sx, s.sy, s.w, s.h), r.x + s.x, r.y + s.y);
+                    gfx::Draw(art->image,
+                              gfx::NewQuad(step.source_x, step.source_y, step.width, step.height),
+                              rect.x + step.x, rect.y + step.y);
                 }
             }
         }
@@ -132,17 +156,24 @@ struct Page : kit::Modal {
 };
 }  // namespace
 
-bool Open(const std::string& name, kit::Done after, const kit::Rect* r) {
+/**
+ * @brief Shows a help file in a popup.
+ * @param name The file under the data directory, DOS-style ("HELP\HITEM.GFX").
+ * @param after Runs once the page has been put away.
+ * @param rect The popup to use; when null, the one the file's #D picks.
+ * @return False when there is no such file.
+ */
+bool Open(const std::string& name, kit::Done after, const kit::Rect* rect) {
     std::string path = name;
-    for (auto& c : path)
-        if (c == '\\') c = '/';
+    for (auto& character : path)
+        if (character == '\\') character = '/';
     auto text = w2::ReadFile(G.data_dir + "/" + path);
     if (!text) return false;
-    auto d = std::make_shared<Page>();
-    int page = Parse(*text, d->steps);
-    d->r = r ? *r : (page == 1 ? kPopups[1] : kPopups[0]);
-    d->after = after;
-    kit::Push(d);
+    auto dialog = std::make_shared<Page>();
+    int page = Parse(*text, dialog->steps);
+    dialog->rect = rect ? *rect : (page == 1 ? kPopups[1] : kPopups[0]);
+    dialog->after = after;
+    kit::Push(dialog);
     return true;
 }
 

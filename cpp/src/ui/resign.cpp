@@ -1,22 +1,30 @@
-// Order > Resign (7721:150d).
-//
-// Popup 1, (160, 90) 320x200: "Resign!" (group 165) in font 1 centred on
-// (320, 92), and three lines of font 2. Dialog 33: 487 resigns graciously,
-// 488 resigns, 489 thinks better of it (default and cancel both). Either way
-// the side's cities burn and its armies go (7721:1608). The gracious way is
-// asked three times first; the other is told afterwards what has burned.
+/**
+ * @file
+ * @brief Order > Resign.
+ *
+ * Popup 1, (160, 90) 320x200: "Resign!" (group 165) in font 1 centred on
+ * (320, 92), and three lines of font 2. Dialog 33: 487 resigns graciously,
+ * 488 resigns, 489 thinks better of it (default and cancel both). Either way
+ * the side's cities burn and its armies go. The gracious way is asked three
+ * times first; the other is told afterwards what has burned.
+ */
 #include "ui/dialogs.hpp"
 
 namespace resign {
 
 namespace {
-const kit::Rect kR{160, 90, 320, 200};  // popup 1
-const int kDialog = 33, kGracious = 487, kResign = 488, kCancel = 489;
-const int kS = 0xa5;
-std::string T(int i) {
-    return kit::Text(kS, i);
+const kit::Rect kPopupRect{160, 90, 320, 200};  ///< Popup 1.
+const int kDialog = 33,                         ///< The dialog with the buttons.
+        kGracious = 487,                        ///< Resigns graciously.
+        kResign = 488,                          ///< Resigns.
+        kCancel = 489;                          ///< Thinks better of it.
+const int kTextGroup = 0xa5;                    ///< STRING.DAT group with all the dialog's lines.
+/** @brief Line `line` of the resign text group. */
+std::string ResignLine(int line) {
+    return kit::Text(kTextGroup, line);
 }
 
+/** @brief Resigns the player: its cities burn and its armies go; then `after`. */
 void Burn(kit::Done after) {
     w2::game::Resign(*G.g, *G.player);
     G.selection.reset();
@@ -24,32 +32,34 @@ void Burn(kit::Done after) {
     if (after) after();
 }
 
+/** @brief The Resign dialog: graciously, outright, or not at all. */
 struct Resign : kit::Modal {
-    screen::View v;
+    screen::View dialog_view;  ///< Dialog 33's buttons.
     void Draw() override {
-        kit::Popup(kR);
+        kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
-        kit::Centred(kit::GetFont(1), T(0), 320, 92);
-        for (int i = 1; i <= 3; i++) kit::Centred(kit::GetFont(2), T(i), 320, 120 + 20 * i);
-        kit::DrawControls(v);
+        kit::Centred(kit::GetFont(1), ResignLine(0), 320, 92);
+        for (int i = 1; i <= 3; i++)
+            kit::Centred(kit::GetFont(2), ResignLine(i), 320, 120 + 20 * i);
+        kit::DrawControls(dialog_view);
     }
     void Mousepressed(int x, int y, int) override {
-        auto c = kit::ControlAt(v, x, y);
-        if (!c) return;
-        if (c->id == kCancel) {
+        auto control = kit::ControlAt(dialog_view, x, y);
+        if (!control) return;
+        if (control->id == kCancel) {
             kit::Pop(this);
-        } else if (c->id == kGracious) {
+        } else if (control->id == kGracious) {
             kit::Pop(this);
-            search::Say(T(6), []() {
-                search::Say(T(7), []() {
-                    search::Say(T(8), []() {
-                        search::ShowMessage(T(9), T(10), []() { Burn(nullptr); });
+            search::Say(ResignLine(6), []() {
+                search::Say(ResignLine(7), []() {
+                    search::Say(ResignLine(8), []() {
+                        search::ShowMessage(ResignLine(9), ResignLine(10), []() { Burn(nullptr); });
                     });
                 });
             });
-        } else if (c->id == kResign) {
+        } else if (control->id == kResign) {
             kit::Pop(this);
-            Burn([]() { search::ShowMessage(T(4), T(5)); });
+            Burn([]() { search::ShowMessage(ResignLine(4), ResignLine(5)); });
         }
     }
     void Keypressed(const std::string& key) override {
@@ -58,13 +68,19 @@ struct Resign : kit::Modal {
 };
 }  // namespace
 
+/**
+ * @brief Opens Order > Resign for the player; does nothing when the side has
+ * no city left.
+ */
 void Open() {
-    if (w2::game::SideCities(*G.g, *G.player).empty()) return;  // 4125:5dea
-    auto d = std::make_shared<Resign>();
-    d->v = kit::View(kDialog);
-    d->view = &d->v;
-    for (int id : {kGracious, kResign, kCancel}) d->v.state[id] = w2::uidata::kNormal;
-    kit::Push(d);
+    // a side with no city left has nothing to resign
+    if (w2::game::SideCities(*G.g, *G.player).empty()) return;
+    auto dialog = std::make_shared<Resign>();
+    dialog->dialog_view = kit::View(kDialog);
+    dialog->view = &dialog->dialog_view;
+    for (int control_id : {kGracious, kResign, kCancel})
+        dialog->dialog_view.state[control_id] = w2::uidata::kNormal;
+    kit::Push(dialog);
 }
 
 }  // namespace resign

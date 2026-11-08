@@ -1,16 +1,19 @@
-// View > Stack (89e0:0c9c): the selected stack laid out at length, to be
-// grouped the way the bar under the map groups it.
-//
-// It works on a copy of the bar's slots and its clicks are the bar's: an army
-// (336-343) joins the group that moves or leaves it, a mark (344-351) makes
-// its group the one, Group (334) puts the lot together and Ungroup (335)
-// breaks it up. OK (332) keeps it, Cancel (333) throws it away.
-//
-// Popup 0, (80, 60) 480x320 (89e0:0e85): STACK.PCK's column heads with the
-// combat cap, and eight rows 30 apart from (112, 90): the mark, the army on a
-// ring of its group's colour (its shadow when not moving), name, strength --
-// and for the group that moves its strength in a fight here (89e0:1b9c) --
-// moves, how it moves and its bonus.
+/**
+ * @file
+ * @brief View > Stack: the selected stack laid out at length, to be grouped
+ * the way the bar under the map groups it.
+ *
+ * It works on a copy of the bar's slots and its clicks are the bar's: an army
+ * (336-343) joins the group that moves or leaves it, a mark (344-351) makes
+ * its group the one, Group (334) puts the lot together and Ungroup (335)
+ * breaks it up. OK (332) keeps it, Cancel (333) throws it away.
+ *
+ * Popup 0, (80, 60) 480x320: STACK.PCK's column heads with the combat cap,
+ * and eight rows 30 apart from (112, 90): the mark, the army on a ring of its
+ * group's colour (its shadow when not moving), name, strength -- and for the
+ * group that moves its strength in a fight here -- moves, how it moves and
+ * its bonus.
+ */
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/combat.hpp"
@@ -19,127 +22,143 @@
 namespace stackui {
 
 namespace {
-const kit::Rect kR{80, 60, 480, 320};  // popup 0
-const int kDialog = 18, kOk = 332, kCancel = 333, kGroup = 334, kUngroup = 335, kArmy = 336,
-          kMark = 344;
-const int kRows = 8;
+const kit::Rect kPopupRect{80, 60, 480, 320};  ///< Popup 0, the whole dialog.
+const int kDialog = 18;                        ///< BUTTON.DAT dialog number.
+const int kOk = 332;                           ///< OK: keep the grouping.
+const int kCancel = 333;                       ///< Cancel: throw it away.
+const int kGroup = 334;                        ///< Group: the whole stack moves.
+const int kUngroup = 335;                      ///< Ungroup: break the stack up.
+const int kArmy = 336;                         ///< First of the eight army rows.
+const int kMark = 344;                         ///< First of the eight marks.
+const int kRows = 8;                           ///< Rows: a stack holds up to eight.
 
-bool Flies(const w2::Army* a, const w2::ArmyType* t) {
-    if (t->flies) return true;
-    if (!a->Hero()) return false;
-    for (w2::Item* it : a->items)
-        if (it->type == w2::rules::kItemFlight) return true;
+/** @brief True when the army flies: its type does, or it is a hero with a flying item. */
+bool Flies(const w2::Army* army, const w2::ArmyType* type) {
+    if (type->flies) return true;
+    if (!army->Hero()) return false;
+    for (w2::Item* item : army->items)
+        if (item->type == w2::rules::kItemFlight) return true;
     return false;
 }
 
+/** @brief The stack dialog, working on a copy of the bar's slots. */
 struct Stack : kit::Modal {
-    screen::View v;
-    w2::slots::Slots s;
+    screen::View dialog_view;      ///< Dialog 18's controls.
+    w2::slots::Slots stack_slots;  ///< The copy of the bar's slots being regrouped.
+    /** @brief Enables the controls the stack's size allows. */
     void Refresh() {
-        auto& st = v.state;
-        st[kOk] = st[kCancel] = w2::uidata::kNormal;
-        st[kGroup] = s.n > 1 ? w2::uidata::kNormal : w2::uidata::kDisabled;
-        st[kUngroup] = st[kGroup];
+        auto& states = dialog_view.state;
+        states[kOk] = states[kCancel] = w2::uidata::kNormal;
+        states[kGroup] = stack_slots.n > 1 ? w2::uidata::kNormal : w2::uidata::kDisabled;
+        states[kUngroup] = states[kGroup];
         for (int i = 0; i < kRows; i++) {
-            st[kArmy + i] = i < s.n ? w2::uidata::kNormal : w2::uidata::kDisabled;
-            st[kMark + i] = st[kArmy + i];
+            states[kArmy + i] = i < stack_slots.n ? w2::uidata::kNormal : w2::uidata::kDisabled;
+            states[kMark + i] = states[kArmy + i];
         }
     }
+    /** @brief Draws the column heads and a row for each army of the stack. */
     void Draw() override {
         w2::Side* side = G.player;
-        kit::Popup(kR);
+        kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         if (auto head = G.screen->ArtFor(46))
             gfx::Draw(head->image, gfx::NewQuad(0, 0, 400, 23), 80, 62);
-        const Font& f = kit::GetFont(2);
-        f.Draw(w2::Fmt("(max +%d)", G.g->map->combat_cap), 480, 66);  // 4125:320d
-        auto abits = [](int sx, int sy, int w, int h, int x, int y) {
+        const Font& font = kit::GetFont(2);
+        font.Draw(w2::Fmt("(max +%d)", G.g->map->combat_cap), 480, 66);
+        // draws a cell of ABITS at (x, y)
+        auto abits = [](int cell_x, int cell_y, int width, int height, int x, int y) {
             gfx::SetColor(1, 1, 1);
-            gfx::Draw(G.abits, gfx::NewQuad(sx, sy, w, h), x, y);
+            gfx::Draw(G.abits, gfx::NewQuad(cell_x, cell_y, width, height), x, y);
         };
         std::vector<w2::Army*> moving;
-        for (int i = 0; i < s.n; i++)
-            if (s.in_group[i]) moving.push_back(s.army[i]);
-        w2::Army* a1 = s.n > 0 ? s.army[0] : nullptr;
-        auto fight = a1 ? w2::combat::StackStrengths(*G.g, moving, a1->x, a1->y)
-                        : std::map<const w2::Army*, int>{};
+        for (int i = 0; i < stack_slots.n; i++)
+            if (stack_slots.in_group[i]) moving.push_back(stack_slots.army[i]);
+        w2::Army* first = stack_slots.n > 0 ? stack_slots.army[0] : nullptr;
+        auto fight_strengths = first ? w2::combat::StackStrengths(*G.g, moving, first->x, first->y)
+                                     : std::map<const w2::Army*, int>{};
         for (int i = 0; i < kRows; i++) {
             int x = 112, y = 90 + 30 * i;
-            if (i < s.n && s.army[i]) {
-                w2::Army* a = s.army[i];
-                const w2::ArmyType* t = G.g->types.ById(a->type);
-                if (s.mark[i] != w2::slots::kNomark)
-                    abits(448, s.mark[i] == w2::slots::kTick ? 16 : 0, 32, 16, x - 32, y + 5);
-                kit::Army(a->type, side->index, x, y, (side->index + s.group[i]) % 8 + 2,
-                          !s.in_group[i]);
+            if (i < stack_slots.n && stack_slots.army[i]) {
+                w2::Army* army = stack_slots.army[i];
+                const w2::ArmyType* type = G.g->types.ById(army->type);
+                if (stack_slots.mark[i] != w2::slots::kNomark)
+                    abits(448, stack_slots.mark[i] == w2::slots::kTick ? 16 : 0, 32, 16, x - 32,
+                          y + 5);
+                kit::Army(army->type, side->index, x, y,
+                          (side->index + stack_slots.group[i]) % 8 + 2, !stack_slots.in_group[i]);
                 gfx::SetColor(1, 1, 1);
-                f.Draw(a->Hero() ? a->name : t->name, x + 48, y + 5);
-                int str = a->strength;
-                if (a->Hero()) str += w2::combat::BattleItems(*a);
-                f.Draw(w2::Fmt("%d", std::min(9, str)), x + 168, y + 5);
-                auto fi = fight.find(a);
-                if (s.in_group[i] && fi != fight.end())
-                    f.Draw(w2::Fmt("(%d)", fi->second), x + 184, y + 5);
-                f.Draw(w2::Fmt("%d", a->moves), x + 232, y + 5);
-                int src = -1;
-                if (Flies(a, t))
-                    src = 184;
-                else if (a->at_sea)
-                    src = 424;
-                else if (t->woods_move && t->hills_move)
-                    src = 216;
-                else if (t->woods_move)
-                    src = 248;
-                else if (t->hills_move)
-                    src = 152;
-                if (src >= 0) abits(src, 30, 32, 10, x + 256, y + 8);
+                font.Draw(army->Hero() ? army->name : type->name, x + 48, y + 5);
+                int strength = army->strength;
+                if (army->Hero()) strength += w2::combat::BattleItems(*army);
+                font.Draw(w2::Fmt("%d", std::min(9, strength)), x + 168, y + 5);
+                auto fight_strength = fight_strengths.find(army);
+                if (stack_slots.in_group[i] && fight_strength != fight_strengths.end())
+                    font.Draw(w2::Fmt("(%d)", fight_strength->second), x + 184, y + 5);
+                font.Draw(w2::Fmt("%d", army->moves), x + 232, y + 5);
+                // the left of the ABITS cell showing how it moves; -1 for on foot
+                int move_cell_x = -1;
+                if (Flies(army, type))
+                    move_cell_x = 184;
+                else if (army->at_sea)
+                    move_cell_x = 424;
+                else if (type->woods_move && type->hills_move)
+                    move_cell_x = 216;
+                else if (type->woods_move)
+                    move_cell_x = 248;
+                else if (type->hills_move)
+                    move_cell_x = 152;
+                if (move_cell_x >= 0) abits(move_cell_x, 30, 32, 10, x + 256, y + 8);
                 gfx::SetColor(1, 1, 1);
-                f.Draw(armybonus::BonusText(*t, a), x + 304, y + 5);
+                font.Draw(armybonus::BonusText(*type, army), x + 304, y + 5);
             } else {
                 kit::Army(w2::kNone, side->index, x, y, 1);
             }
         }
-        std::set<int> h;
+        // the rows and marks are drawn above, not as controls
+        std::set<int> drawn_by_hand;
         for (int i = 0; i < kRows; i++) {
-            h.insert(kArmy + i);
-            h.insert(kMark + i);
+            drawn_by_hand.insert(kArmy + i);
+            drawn_by_hand.insert(kMark + i);
         }
-        kit::DrawControls(v, h);
+        kit::DrawControls(dialog_view, drawn_by_hand);
     }
+    /** @brief Closes the dialog and gives the bar the new grouping. */
     void Keep() {
-        w2::slots::Slots kept = s;
+        w2::slots::Slots kept = stack_slots;
         kit::Pop(this);
         if (G.selection) G.selection->slots = kept;
         front::AfterSlotChange();
     }
+    /** @brief OK, Cancel, Group, Ungroup, or a row's army or mark, as the bar does. */
     void Mousepressed(int x, int y, int) override {
-        auto c = kit::ControlAt(v, x, y);
-        if (!c || v.StateOf(c->id) == w2::uidata::kDisabled) return;
-        int id = c->id;
-        if (id == kOk) return Keep();
-        if (id == kCancel) {
+        auto control = kit::ControlAt(dialog_view, x, y);
+        if (!control || dialog_view.StateOf(control->id) == w2::uidata::kDisabled) return;
+        int control_id = control->id;
+        if (control_id == kOk) return Keep();
+        if (control_id == kCancel) {
             kit::Pop(this);
             return;
         }
-        if (id == kGroup)
-            w2::slots::All(s, *G.g);
-        else if (id == kUngroup)
-            w2::slots::Single(s, *G.g);
-        else if (id >= kArmy && id < kArmy + kRows)
-            w2::slots::Toggle(s, *G.g, id - kArmy);
-        else if (id >= kMark && id < kMark + kRows)
-            w2::slots::PickGroup(s, *G.g, id - kMark);
+        if (control_id == kGroup)
+            w2::slots::All(stack_slots, *G.g);
+        else if (control_id == kUngroup)
+            w2::slots::Single(stack_slots, *G.g);
+        else if (control_id >= kArmy && control_id < kArmy + kRows)
+            w2::slots::Toggle(stack_slots, *G.g, control_id - kArmy);
+        else if (control_id >= kMark && control_id < kMark + kRows)
+            w2::slots::PickGroup(stack_slots, *G.g, control_id - kMark);
         Refresh();
     }
-    // the right button on a row (sub-ids 37-44, 89e0:1747)
-    bool Info(int sub, int sx, int sy) override {
-        int n = sub - 37;
-        if (n >= 0 && n < s.n)
-            infobox::Army(sx, sy, s.army[n]);
+    /** @brief The right button on a row (sub-ids 37-44): the army's info box. */
+    bool Info(int sub, int screen_x, int screen_y) override {
+        int row = sub - 37;
+        if (row >= 0 && row < stack_slots.n)
+            infobox::Army(screen_x, screen_y, stack_slots.army[row]);
         else
-            infobox::ShowLines(sx, sy, "Select Army", "Select armies when present");
+            infobox::ShowLines(screen_x, screen_y, "Select Army", "Select armies when present");
         return true;
     }
+    /** @brief Enter keeps the grouping, Escape throws it away. */
     void Keypressed(const std::string& key) override {
         if (key == "return" || key == "kpenter")
             Keep();
@@ -149,14 +168,15 @@ struct Stack : kit::Modal {
 };
 }  // namespace
 
+/** @brief Opens the stack dialog on the selected stack, if any. */
 void Open() {
     if (!G.selection) return;
-    auto d = std::make_shared<Stack>();
-    d->s = G.selection->slots;
-    d->v = kit::View(kDialog);
-    d->view = &d->v;
-    d->Refresh();
-    kit::Push(d);
+    auto dialog = std::make_shared<Stack>();
+    dialog->stack_slots = G.selection->slots;
+    dialog->dialog_view = kit::View(kDialog);
+    dialog->view = &dialog->dialog_view;
+    dialog->Refresh();
+    kit::Push(dialog);
 }
 
 }  // namespace stackui
