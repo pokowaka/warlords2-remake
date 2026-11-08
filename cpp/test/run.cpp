@@ -100,7 +100,7 @@ static std::string Show(const std::string& value) {
     return value;
 }
 /** @brief Formats a C string for a failure message; null shows as "nil". */
-static std::string Show(const char* value) {
+[[maybe_unused]] static std::string Show(const char* value) {
     return value ? value : "nil";
 }
 /** @brief Formats a pointer for a failure message; null shows as "nil". */
@@ -1359,46 +1359,50 @@ static void TestCapture(const std::string& scenario) {
     }
 }
 
+/** @brief Checks that in the tutorial a hero cannot die attacking neutrals. */
 static void TestTutorialHero() {
     printf("tutorial: a hero cannot die attacking neutrals\n");
-    auto gp = NewGame("TUTORIA", Seed(31));
-    Game& g = *gp;
-    Side* side = game::Begin(g);
-    Eq(g.map->options.tutorial, 1, "TUTORIA sets the tutorial flag");
+    auto game_ptr = NewGame("TUTORIA", Seed(31));
+    Game& game = *game_ptr;
+    Side* side = game::Begin(game);
+    Eq(game.map->options.tutorial, 1, "TUTORIA sets the tutorial flag");
     Ok(!side->computer, "the tutorial player is human");
-    Army h;
-    h.type = armytype::kHero;
-    h.strength = 1;
-    h.owner = side->index;
+    Army hero;
+    hero.type = armytype::kHero;
+    hero.strength = 1;
+    hero.owner = side->index;
     std::vector<Army> defender_pool(8);
     std::vector<Army*> defenders;
-    for (auto& d : defender_pool) {
-        d.type = 11;
-        d.strength = 9;
-        d.owner = kNone;
-        defenders.push_back(&d);
+    for (auto& defender : defender_pool) {
+        defender.type = 11;
+        defender.strength = 9;
+        defender.owner = kNone;
+        defenders.push_back(&defender);
     }
     int deaths = 0;
     for (int i = 0; i < 50; i++)
-        deaths += static_cast<int>(combat::Resolve(g, {&h}, defenders, 0, 0).dead_attackers.size());
+        deaths += static_cast<int>(
+                combat::Resolve(game, {&hero}, defenders, 0, 0).dead_attackers.size());
     Eq(deaths, 0, "the tutorial hero never dies against neutrals");
-    g.map->options.tutorial = 0;
+    game.map->options.tutorial = 0;
     deaths = 0;
     for (int i = 0; i < 50; i++)
-        deaths += static_cast<int>(combat::Resolve(g, {&h}, defenders, 0, 0).dead_attackers.size());
+        deaths += static_cast<int>(
+                combat::Resolve(game, {&hero}, defenders, 0, 0).dead_attackers.size());
     Ok(deaths > 0, "without the tutorial flag the hero can die");
 }
 
+/** @brief Checks pillaging, sacking, and razing a captured city. */
 static void TestCityChoices(const std::string& scenario) {
     printf("pillage, sack and raze: %s\n", scenario.c_str());
-    auto gp = NewGame(scenario, Seed(29));
-    Game& g = *gp;
-    Side* side = game::Begin(g);
+    auto game_ptr = NewGame(scenario, Seed(29));
+    Game& game = *game_ptr;
+    Side* side = game::Begin(game);
     auto captured = [&](size_t want) -> City* {
-        for (auto& c : g.map->cities) {
-            if (c.owner_index == kNone && c.slots.size() >= want) {
-                game::SetCityOwner(g, c, side->index);
-                return &c;
+        for (auto& city_cand : game.map->cities) {
+            if (city_cand.owner_index == kNone && city_cand.slots.size() >= want) {
+                game::SetCityOwner(game, city_cand, side->index);
+                return &city_cand;
             }
         }
         return nullptr;
@@ -1406,140 +1410,145 @@ static void TestCityChoices(const std::string& scenario) {
     City* city = captured(2);
     Ok(city != nullptr, "found a city with something to pillage");
     if (city) {
-        size_t n = city->slots.size();
+        size_t slot_count = city->slots.size();
         Slot dear = city->slots.back();
-        int want = std::abs(g.types.ById(dear.type)->price) / 2;
+        int want = std::abs(game.types.ById(dear.type)->price) / 2;
         int gold0 = side->gold, score0 = side->diplo_score;
-        auto got = game::Pillage(g, *side, *city, {});
+        auto got = game::Pillage(game, *side, *city, {});
         Eq(got.gold, want, "pillage pays half the type's purchase price");
         Eq(side->gold, gold0 + want, "the gold was paid");
-        Eq(city->slots.size(), n - 1, "pillage removed one type");
+        Eq(city->slots.size(), slot_count - 1, "pillage removed one type");
         Eq(city->defence, rules::CityDefence(static_cast<int>(city->slots.size())),
            "defence was recomputed");
-        int d = side->diplo_score - score0;
-        Ok(d >= 1 && d <= 5, "pillage costs 1d5 diplomatic score: " + std::to_string(d));
+        int score_delta = side->diplo_score - score0;
+        Ok(score_delta >= 1 && score_delta <= 5,
+           "pillage costs 1d5 diplomatic score: " + std::to_string(score_delta));
     }
     City* city2 = captured(3);
     if (city2) {
         Slot cheapest = city2->slots[0];
         int want = 0;
         for (size_t i = 1; i < city2->slots.size(); i++)
-            want += std::abs(g.types.ById(city2->slots[i].type)->price) / 2;
+            want += std::abs(game.types.ById(city2->slots[i].type)->price) / 2;
         int gold0 = side->gold, score0 = side->diplo_score;
-        size_t n2 = city2->slots.size();
-        auto got = game::Sack(g, *side, *city2, {});
+        size_t slot_count = city2->slots.size();
+        auto got = game::Sack(game, *side, *city2, {});
         Eq(got.gold, want, "sack pays for every type it strips");
-        Eq(got.lost.size(), n2 - 1, "sack lists every type it strips");
+        Eq(got.lost.size(), slot_count - 1, "sack lists every type it strips");
         int sum = 0;
-        for (auto& l : got.lost) sum += l.second;
+        for (auto& lost_entry : got.lost) sum += lost_entry.second;
         Eq(sum, want, "and what each was worth adds up to the gold");
         Eq(side->gold, gold0 + want, "the gold was paid");
         Eq(static_cast<int>(city2->slots.size()), 1, "only the cheapest type is left");
         Ok(city2->slots[0] == cheapest, "and it is the cheapest one");
         Eq(city2->defence, 1, "one type means defence 1");
-        int d = side->diplo_score - score0;
-        Ok(d >= 6 && d <= 15, "sack costs 1d10+5 diplomatic score: " + std::to_string(d));
+        int score_delta = side->diplo_score - score0;
+        Ok(score_delta >= 6 && score_delta <= 15,
+           "sack costs 1d10+5 diplomatic score: " + std::to_string(score_delta));
     }
     City* city3 = captured(1);
     if (city3) {
-        int before = static_cast<int>(game::SideCities(g, *side).size());
+        int before = static_cast<int>(game::SideCities(game, *side).size());
         City* other = nullptr;
-        for (auto& c : g.map->cities)
-            if (!other && c.owner_index == side->index && &c != city3) other = &c;
-        if (other) game::Vector(g, *other, city3);
+        for (auto& city_cand : game.map->cities)
+            if (!other && city_cand.owner_index == side->index && &city_cand != city3)
+                other = &city_cand;
+        if (other) game::Vector(game, *other, city3);
         int score0 = side->diplo_score;
-        game::Raze(g, *side, *city3, {});
+        game::Raze(game, *side, *city3, {});
         Eq(city3->owner_index, kNone, "a razed city is neutral");
         Eq(static_cast<int>(city3->slots.size()), 0, "a razed city produces nothing");
         Eq(city3->income, 0, "a razed city earns nothing");
-        Eq(static_cast<int>(game::SideCities(g, *side).size()), before - 1,
+        Eq(static_cast<int>(game::SideCities(game, *side).size()), before - 1,
            "the side no longer owns it");
         if (other) Eq(other->vector_to, kNone, "vectoring to it was cancelled");
-        int d = side->diplo_score - score0;
-        Ok(d >= 11 && d <= 25, "raze costs 1d15+10 diplomatic score: " + std::to_string(d));
-        int rb = movement::Grid(g, side->index)[city3->y * g.map->width + city3->x];
-        Ok(!movement::Has(rb, movement::kCityF) && rb % 8 != 0,
-           "a razed city's ruins can be walked over: " + std::to_string(rb));
+        int score_delta = side->diplo_score - score0;
+        Ok(score_delta >= 11 && score_delta <= 25,
+           "raze costs 1d15+10 diplomatic score: " + std::to_string(score_delta));
+        int ruin_byte = movement::Grid(game, side->index)[city3->y * game.map->width + city3->x];
+        Ok(!movement::Has(ruin_byte, movement::kCityF) && ruin_byte % 8 != 0,
+           "a razed city's ruins can be walked over: " + std::to_string(ruin_byte));
     }
     City empty;
     empty.index = -1;
-    Eq(game::Pillage(g, *side, empty, {}).gold, 0, "pillaging an empty city pays nothing");
+    Eq(game::Pillage(game, *side, empty, {}).gold, 0, "pillaging an empty city pays nothing");
     City one;
     one.index = -1;
     one.slots.push_back(Slot{11, "", 0, 0, 0, 0, 0});
-    Eq(game::Sack(g, *side, one, {}).gold, 0, "sacking a one-type city pays nothing");
+    Eq(game::Sack(game, *side, one, {}).gold, 0, "sacking a one-type city pays nothing");
 }
 
+/** @brief Checks hero offers, recruiting, promotions, allies, limits, and dropped items. */
 static void TestHeroes(const std::string& scenario) {
     printf("heroes: %s\n", scenario.c_str());
-    auto gp = NewGame(scenario, Seed(37));
-    Game& g = *gp;
-    Side* side = game::Begin(g);
+    auto game_ptr = NewGame(scenario, Seed(37));
+    Game& game = *game_ptr;
+    Side* side = game::Begin(game);
     auto offer = side->hero_offer;
     Ok(offer != nullptr, "a hero offers itself on turn 1");
     if (!offer) return;
     Eq(offer->price, 0, "the first hero is free");
     Eq(offer->city, side->capital, "the first hero appears at the capital");
-    const auto& names = hero::Names(g, *side);
+    const auto& names = hero::Names(game, *side);
     Eq(static_cast<int>(names.size()), 100, "a side has a hundred candidate heroes");
     Ok(!offer->name.empty(), "the offer carries a name");
     bool known = false;
-    for (auto& n : names)
-        if (n.first == offer->name) known = true;
+    for (auto& entry : names)
+        if (entry.first == offer->name) known = true;
     Ok(known, "and the name comes from that side's file");
     bool heroine = false;
-    for (auto& n : hero::Names(g, g.map->sides[0]))
-        if (n.second) heroine = true;
+    for (auto& entry : hero::Names(game, game.map->sides[0]))
+        if (entry.second) heroine = true;
     Ok(!heroine, "side 0 has no heroines to offer");
-    auto hired = hero::Recruit(g, *side, *offer);
-    Army* h = hired.hero;
+    auto hired = hero::Recruit(game, *side, *offer);
+    Army* hero = hired.hero;
     auto& allies = hired.allies;
-    Eq(h->type, armytype::kHero, "the recruit is a hero");
-    Eq(h->name, offer->name, "the hero keeps the name it was offered under");
-    Eq(h->strength, 5, "a new hero has strength 5");
-    Eq(h->max_moves, 14, "a new hero has 14 movement");
-    Eq(h->moves, 14, "a new hero joins with its moves already full");
+    Eq(hero->type, armytype::kHero, "the recruit is a hero");
+    Eq(hero->name, offer->name, "the hero keeps the name it was offered under");
+    Eq(hero->strength, 5, "a new hero has strength 5");
+    Eq(hero->max_moves, 14, "a new hero has 14 movement");
+    Eq(hero->moves, 14, "a new hero joins with its moves already full");
     Eq(static_cast<int>(allies.size()), 0, "the first hero brings no allies");
-    Eq(static_cast<int>(h->items.size()), 1, "the first hero carries one item");
-    Eq(h->items[0]->type, rules::kItemStandard, "and it is the side's standard");
-    h->experience = 15;
-    auto promoted = hero::CheckPromotions(g, *side);
+    Eq(static_cast<int>(hero->items.size()), 1, "the first hero carries one item");
+    Eq(hero->items[0]->type, rules::kItemStandard, "and it is the side's standard");
+    hero->experience = 15;
+    auto promoted = hero::CheckPromotions(game, *side);
     Eq(static_cast<int>(promoted.size()), 1, "15 experience promotes a Hero");
-    Eq(h->level, 2, "the hero is now level 2");
-    Eq(h->title, "Cavalier", "level 2 is a Cavalier");
-    Eq(h->strength, 6, "promotion adds a strength");
-    Eq(h->max_moves, 16, "promotion adds 2 movement");
-    Eq(static_cast<int>(hero::CheckPromotions(g, *side).size()), 0,
+    Eq(hero->level, 2, "the hero is now level 2");
+    Eq(hero->title, "Cavalier", "level 2 is a Cavalier");
+    Eq(hero->strength, 6, "promotion adds a strength");
+    Eq(hero->max_moves, 16, "promotion adds 2 movement");
+    Eq(static_cast<int>(hero::CheckPromotions(game, *side).size()), 0,
        "no second promotion on the same experience");
-    h->experience = 60;
-    hero::CheckPromotions(g, *side);
-    Eq(h->level, 3, "60 experience promotes one step only");
-    hero::CheckPromotions(g, *side);
-    Eq(h->title, "Paladin", "the next check reaches Paladin");
-    Eq(static_cast<int>(hero::CheckPromotions(g, *side).size()), 0,
+    hero->experience = 60;
+    hero::CheckPromotions(game, *side);
+    Eq(hero->level, 3, "60 experience promotes one step only");
+    hero::CheckPromotions(game, *side);
+    Eq(hero->title, "Paladin", "the next check reaches Paladin");
+    Eq(static_cast<int>(hero::CheckPromotions(game, *side).size()), 0,
        "a Paladin is not promoted again");
-    hero::AddExperience(g, h, 99);
-    Eq(h->experience, rules::kMaxHeroXp, "experience is capped at 60");
-    auto [type, n] = hero::Allies(g);
+    hero::AddExperience(game, hero, 99);
+    Eq(hero->experience, rules::kMaxHeroXp, "experience is capped at 60");
+    auto [type, ally_count] = hero::Allies(game);
     Ok(type != nullptr, "the allies have a type");
-    Ok(n >= 1 && n <= 3, "1 to 3 allies arrive");
-    g.turn = 4;
+    Ok(ally_count >= 1 && ally_count <= 3, "1 to 3 allies arrive");
+    game.turn = 4;
     HeroOffer later;
     later.city = side->capital;
-    auto escort = hero::Recruit(g, *side, later).allies;
+    auto escort = hero::Recruit(game, *side, later).allies;
     Ok(!escort.empty(), "a later hero arrives with an escort");
-    for (Army* a : escort) {
-        Eq(a->moves, a->max_moves, "an ally joins with its moves already full");
-        Eq(a->upkeep, 0, "an ally costs no upkeep");
+    for (Army* ally : escort) {
+        Eq(ally->moves, ally->max_moves, "an ally joins with its moves already full");
+        Eq(ally->upkeep, 0, "an ally costs no upkeep");
     }
-    g.turn = 1;
+    game.turn = 1;
     Eq(hero::kMaxPerSide, 5, "a side may hold 5 heroes");
     Eq(hero::kMaxInGame, 40, "the game holds 40 heroes");
     bool blocked = true;
-    for (int i = 0; i < 5; i++) AddArmy(g, 0, 0, side->index, armytype::kHero, 5);
-    g.turn = 2;
+    for (int i = 0; i < 5; i++) AddArmy(game, 0, 0, side->index, armytype::kHero, 5);
+    game.turn = 2;
     for (int i = 0; i < 50; i++)
-        if (hero::Offer(g, *side)) blocked = false;
+        if (hero::Offer(game, *side)) blocked = false;
     Ok(blocked, "no hero is offered once the side is at its limit");
     Item fire;
     fire.name = "Firesword";
@@ -1550,27 +1559,27 @@ static void TestHeroes(const std::string& scenario) {
     carrier.owner = side->index;
     carrier.items = {&fire};
     int dx = kNone, dy = kNone;
-    for (int y = 0; y < g.map->height && dx == kNone; y++)
-        for (int x = 0; x < g.map->width; x++)
-            if (dx == kNone && scn::TerrainAt(*g.map, x, y) == movement::kPlain) {
+    for (int y = 0; y < game.map->height && dx == kNone; y++)
+        for (int x = 0; x < game.map->width; x++)
+            if (dx == kNone && scn::TerrainAt(*game.map, x, y) == movement::kPlain) {
                 dx = x;
                 dy = y;
             }
-    auto dropped = hero::DropItems(g, &carrier, dx, dy);
+    auto dropped = hero::DropItems(game, &carrier, dx, dy);
     Eq(static_cast<int>(dropped.size()), 1, "the item was dropped");
     if (!dropped.empty()) {
         Eq(dropped[0]->status, 1, "a dropped item lies on the ground");
         Eq(dropped[0]->x, dx, "it lies where the hero fell");
     }
     Eq(static_cast<int>(carrier.items.size()), 0, "the dead hero carries nothing");
-    int wx = kNone, wy = kNone;
-    for (int y = 0; y < g.map->height && wx == kNone; y++)
-        for (int x = 0; x < g.map->width; x++)
-            if (wx == kNone && scn::TerrainAt(*g.map, x, y) == movement::kWater) {
-                wx = x;
-                wy = y;
+    int water_x = kNone, water_y = kNone;
+    for (int y = 0; y < game.map->height && water_x == kNone; y++)
+        for (int x = 0; x < game.map->width; x++)
+            if (water_x == kNone && scn::TerrainAt(*game.map, x, y) == movement::kWater) {
+                water_x = x;
+                water_y = y;
             }
-    if (wx != kNone) {
+    if (water_x != kNone) {
         Item ice;
         ice.name = "Icesword";
         ice.type = rules::kItemBattle;
@@ -1580,16 +1589,17 @@ static void TestHeroes(const std::string& scenario) {
         drowner.type = armytype::kHero;
         drowner.owner = side->index;
         drowner.items = {&ice};
-        Eq(static_cast<int>(hero::DropItems(g, &drowner, wx, wy).size()), 0,
+        Eq(static_cast<int>(hero::DropItems(game, &drowner, water_x, water_y).size()), 0,
            "nothing is dropped in water");
         Eq(ice.status, 0, "an item lost at sea is gone for good");
     }
 }
 
+/** @brief Checks the hero experience bug compatibility flag and battle experience awards. */
 static void TestHeroExperienceBug() {
     printf("hero experience: the original's bug\n");
-    auto gp = NewGame("ERYTHEA", Seed(41));
-    Game& g = *gp;
+    auto game_ptr = NewGame("ERYTHEA", Seed(41));
+    Game& game = *game_ptr;
     auto run = [&]() {
         Army def_hero, att;
         def_hero.type = armytype::kHero;
@@ -1598,8 +1608,8 @@ static void TestHeroExperienceBug() {
         att.type = 11;
         att.strength = 3;
         att.owner = 0;
-        Battle b;
-        hero::BattleExperience(g, {&att}, {&def_hero}, b, false);
+        Battle battle;
+        hero::BattleExperience(game, {&att}, {&def_hero}, battle, false);
         return def_hero.experience;
     };
     rules::bugs.hero_experience_reads_attacker_types = true;
@@ -1607,278 +1617,285 @@ static void TestHeroExperienceBug() {
     rules::bugs.hero_experience_reads_attacker_types = false;
     Eq(run(), 1, "with the bug off, the defender is credited");
     rules::bugs.hero_experience_reads_attacker_types = true;
-    Army h;
-    h.type = armytype::kHero;
-    h.strength = 5;
-    h.owner = 0;
+    Army hero;
+    hero.type = armytype::kHero;
+    hero.strength = 5;
+    hero.owner = 0;
     Battle none;
-    hero::BattleExperience(g, {&h}, {}, none, false);
-    Eq(h.experience, 1, "an attacking hero gains 1 in the open");
-    hero::BattleExperience(g, {&h}, {}, none, true);
-    Eq(h.experience, 3, "attacking a city is worth 2");
+    hero::BattleExperience(game, {&hero}, {}, none, false);
+    Eq(hero.experience, 1, "an attacking hero gains 1 in the open");
+    hero::BattleExperience(game, {&hero}, {}, none, true);
+    Eq(hero.experience, 3, "attacking a city is worth 2");
     Army dead;
     dead.type = armytype::kHero;
     dead.strength = 5;
     dead.owner = 0;
     Battle died;
     died.dead_by_army.insert(&dead);
-    hero::BattleExperience(g, {&dead}, {}, died, true);
+    hero::BattleExperience(game, {&dead}, {}, died, true);
     Eq(dead.experience, 0, "a hero that died gains nothing");
 }
 
+/** @brief Runs an all-AI game for `turns` turns and checks board invariants. */
 static void TestAiGame(const std::string& scenario, int turns) {
     printf("AI game: %s, %d turns\n", scenario.c_str(), turns);
-    auto gp = NewGame(scenario, Seed(101));
-    Game& g = *gp;
-    Side* side = game::Begin(g);
+    auto game_ptr = NewGame(scenario, Seed(101));
+    Game& game = *game_ptr;
+    Side* side = game::Begin(game);
     std::map<int, int> owned_at_start;
-    for (Side* s : g.sides)
-        owned_at_start[s->index] = static_cast<int>(game::SideCities(g, *s).size());
-    while (side && g.turn <= turns) {
-        PlayAi(g, *side);
-        side = EndTurn(g);
+    for (Side* player : game.sides)
+        owned_at_start[player->index] = static_cast<int>(game::SideCities(game, *player).size());
+    while (side && game.turn <= turns) {
+        PlayAi(game, *side);
+        side = EndTurn(game);
     }
-    Ok(g.turn > turns || side == nullptr, "the game ran to the turn limit");
+    Ok(game.turn > turns || side == nullptr, "the game ran to the turn limit");
     std::map<int, int> per_tile;
-    for (Army* a : g.armies) {
-        Ok(g.types.ById(a->type) != nullptr, "every army has a real type");
-        if (!a->transit) {
-            Ok(a->x != kNone && a->y != kNone, "a placed army has a position");
-            Ok(a->x >= 0 && a->x < g.map->width && a->y >= 0 && a->y < g.map->height,
+    for (Army* army : game.armies) {
+        Ok(game.types.ById(army->type) != nullptr, "every army has a real type");
+        if (!army->transit) {
+            Ok(army->x != kNone && army->y != kNone, "a placed army has a position");
+            Ok(army->x >= 0 && army->x < game.map->width && army->y >= 0 &&
+                       army->y < game.map->height,
                "every army is on the map");
-            per_tile[a->y * g.map->width + a->x]++;
+            per_tile[army->y * game.map->width + army->x]++;
         }
-        Ok(a->moves >= 0, "movement never goes negative");
-        Ok(a->moves <= rules::kMaxMove, "movement never exceeds the cap");
+        Ok(army->moves >= 0, "movement never goes negative");
+        Ok(army->moves <= rules::kMaxMove, "movement never exceeds the cap");
     }
     int worst = 0;
-    for (auto& [k, v] : per_tile) worst = std::max(worst, v);
+    for (auto& [tile_idx, tile_count] : per_tile) worst = std::max(worst, tile_count);
     Ok(worst <= rules::kMaxStack,
        "no tile ever holds more than 8 armies: " + std::to_string(worst));
-    for (Side* s : g.sides) {
-        Ok(s->gold >= 0, s->name + " never goes into debt");
-        if (!s->alive) Ok(game::SideCities(g, *s).empty(), "a dead side owns nothing");
+    for (Side* player : game.sides) {
+        Ok(player->gold >= 0, player->name + " never goes into debt");
+        if (!player->alive) Ok(game::SideCities(game, *player).empty(), "a dead side owns nothing");
     }
-    for (auto& c : g.map->cities) {
-        if (c.owner_index != kNone)
-            Ok(g.map->Side(c.owner_index) != nullptr, "a city's owner is a real side");
-        Ok(c.slots.size() <= 4, "a city never gains production slots");
+    for (auto& city : game.map->cities) {
+        if (city.owner_index != kNone)
+            Ok(game.map->Side(city.owner_index) != nullptr, "a city's owner is a real side");
+        Ok(city.slots.size() <= 4, "a city never gains production slots");
     }
     bool moved = false;
     int captures = 0;
-    for (Side* s : g.sides) {
-        int now = static_cast<int>(game::SideCities(g, *s).size());
-        if (now != owned_at_start[s->index]) moved = true;
-        captures += std::max(0, now - owned_at_start[s->index]);
+    for (Side* player : game.sides) {
+        int now = static_cast<int>(game::SideCities(game, *player).size());
+        if (now != owned_at_start[player->index]) moved = true;
+        captures += std::max(0, now - owned_at_start[player->index]);
     }
     Ok(moved, "cities changed hands over " + std::to_string(turns) + " turns");
     Ok(captures > 0, Fmt("the computer players took %d cities", captures));
-    Ok(g.armies.size() > g.map->cities.size(),
-       Fmt("armies were built: %d from %d cities", static_cast<int>(g.armies.size()),
-           static_cast<int>(g.map->cities.size())));
+    Ok(game.armies.size() > game.map->cities.size(),
+       Fmt("armies were built: %d from %d cities", static_cast<int>(game.armies.size()),
+           static_cast<int>(game.map->cities.size())));
 }
 
+/** @brief Checks the army selection bar: grouping, toggling, marks, and survivor retention. */
 static void TestSlots() {
     printf("army slots\n");
     // a stand-in game: the fight-order table and the army list are all the
     // model wants
+    /** @brief Minimal game and army list fixture for slot tests. */
     struct Stand {
-        Game g;
-        std::vector<Army*> a;
+        Game g;                ///< Stand-in game state.
+        std::vector<Army*> a;  ///< Armies on the tile.
     };
     auto stack = [](int n) {
-        auto s = std::make_unique<Stand>();
-        s->g.map = std::make_unique<Map>();
-        s->g.map->fight_order.assign(9, std::vector<int>(29, 0));
+        auto stand = std::make_unique<Stand>();
+        stand->g.map = std::make_unique<Map>();
+        stand->g.map->fight_order.assign(9, std::vector<int>(29, 0));
         for (int i = 1; i <= n; i++) {
-            Army a;
-            a.type = i;
-            a.moves = 10 + i;
-            a.group = 0;
-            s->g.map->fight_order[0][i] = n - i;  // the first army ranks highest
-            s->a.push_back(s->g.Add(a));
+            Army army;
+            army.type = i;
+            army.moves = 10 + i;
+            army.group = 0;
+            stand->g.map->fight_order[0][i] = n - i;  // the first army ranks highest
+            stand->a.push_back(stand->g.Add(army));
         }
-        return s;
+        return stand;
     };
     {
-        auto st = stack(3);
-        auto& a = st->a;
-        auto s = slots::Build(st->g, a, 0);
-        Eq(s.n, 3, "three armies fill three slots");
-        Eq(s.army[0], a[0], "the highest in the fight order takes the first slot");
-        Ok(s.in_group[0] && !s.in_group[1] && !s.in_group[2],
+        auto stand = stack(3);
+        auto& armies = stand->a;
+        auto bar = slots::Build(stand->g, armies, 0);
+        Eq(bar.n, 3, "three armies fill three slots");
+        Eq(bar.army[0], armies[0], "the highest in the fight order takes the first slot");
+        Ok(bar.in_group[0] && !bar.in_group[1] && !bar.in_group[2],
            "clicking a tile selects one army, not the stack");
-        Eq(s.group[0], 0, "ungrouped armies are each their own group");
-        Eq(s.group[2], 2, "numbered off down the bar");
-        Eq(s.mark[0], slots::kTick, "the one that moves is ticked");
-        Eq(s.mark[1], slots::kCross, "the others are crossed");
-        Eq(slots::Moves(s), 11, "and Group Move is that army's own");
-        Eq(slots::Grouped(s), false, "so the Grp button is not green yet");
-        Eq(static_cast<int>(slots::Selected(s).size()), 1, "one army moves");
+        Eq(bar.group[0], 0, "ungrouped armies are each their own group");
+        Eq(bar.group[2], 2, "numbered off down the bar");
+        Eq(bar.mark[0], slots::kTick, "the one that moves is ticked");
+        Eq(bar.mark[1], slots::kCross, "the others are crossed");
+        Eq(slots::Moves(bar), 11, "and Group Move is that army's own");
+        Eq(slots::Grouped(bar), false, "so the Grp button is not green yet");
+        Eq(static_cast<int>(slots::Selected(bar).size()), 1, "one army moves");
     }
     {
-        auto st = stack(3);
-        auto s = slots::Build(st->g, st->a, 0);
-        slots::Toggle(s, st->g, 1);
-        Ok(s.in_group[1] && s.group[1] == s.group[0], "a click adds an army to the group");
-        Eq(s.mark[1], slots::kNomark, "only the head of a group is marked");
-        Eq(slots::Moves(s), 11, "the group moves at its slowest army's pace");
-        slots::Toggle(s, st->g, 1);
-        Ok(!s.in_group[1], "clicking it again drops it out");
-        Ok(s.group[1] != s.group[0], "into a group of its own");
-        slots::Toggle(s, st->g, 0);
-        Ok(s.in_group[0], "the last army of a group cannot be dropped");
+        auto stand = stack(3);
+        auto bar = slots::Build(stand->g, stand->a, 0);
+        slots::Toggle(bar, stand->g, 1);
+        Ok(bar.in_group[1] && bar.group[1] == bar.group[0], "a click adds an army to the group");
+        Eq(bar.mark[1], slots::kNomark, "only the head of a group is marked");
+        Eq(slots::Moves(bar), 11, "the group moves at its slowest army's pace");
+        slots::Toggle(bar, stand->g, 1);
+        Ok(!bar.in_group[1], "clicking it again drops it out");
+        Ok(bar.group[1] != bar.group[0], "into a group of its own");
+        slots::Toggle(bar, stand->g, 0);
+        Ok(bar.in_group[0], "the last army of a group cannot be dropped");
     }
     {
-        auto st = stack(3);
-        auto s = slots::Build(st->g, st->a, 0);
-        slots::All(s, st->g);
-        Eq(static_cast<int>(slots::Selected(s).size()), 3, "Grp takes the whole stack");
-        Eq(slots::Grouped(s), true, "and turns the button green");
-        Eq(s.mark[1], slots::kNomark, "one mark for the one group");
-        slots::Single(s, st->g);
-        Eq(static_cast<int>(slots::Selected(s).size()), 1, "and Grp again breaks it up");
-        Eq(slots::Grouped(s), false, "leaving the button red");
-        slots::PickGroup(s, st->g, 2);
-        Ok(s.in_group[2] && !s.in_group[0], "a mark picks out that group alone");
-        Eq(s.mark[2], slots::kTick, "which is then the ticked one");
+        auto stand = stack(3);
+        auto bar = slots::Build(stand->g, stand->a, 0);
+        slots::All(bar, stand->g);
+        Eq(static_cast<int>(slots::Selected(bar).size()), 3, "Grp takes the whole stack");
+        Eq(slots::Grouped(bar), true, "and turns the button green");
+        Eq(bar.mark[1], slots::kNomark, "one mark for the one group");
+        slots::Single(bar, stand->g);
+        Eq(static_cast<int>(slots::Selected(bar).size()), 1, "and Grp again breaks it up");
+        Eq(slots::Grouped(bar), false, "leaving the button red");
+        slots::PickGroup(bar, stand->g, 2);
+        Ok(bar.in_group[2] && !bar.in_group[0], "a mark picks out that group alone");
+        Eq(bar.mark[2], slots::kTick, "which is then the ticked one");
     }
     {
-        auto st = stack(3);
-        auto s = slots::Build(st->g, st->a, 0);
-        slots::All(s, st->g);
-        s.in_group[2] = false;
-        slots::PickGroup(s, st->g, 0);
-        Ok(s.in_group[2], "picking a group takes all of it");
+        auto stand = stack(3);
+        auto bar = slots::Build(stand->g, stand->a, 0);
+        slots::All(bar, stand->g);
+        bar.in_group[2] = false;
+        slots::PickGroup(bar, stand->g, 0);
+        Ok(bar.in_group[2], "picking a group takes all of it");
     }
     {
-        auto st = stack(3);
-        auto& a = st->a;
-        Game& g = st->g;
-        auto s = slots::Build(g, a, 0);
-        slots::All(s, g);
-        slots::Commit(s, g);
-        int id = a[0]->group;
-        Ok(id != slots::kUngrouped && id == a[1]->group && id == a[2]->group,
+        auto stand = stack(3);
+        auto& armies = stand->a;
+        Game& game = stand->g;
+        auto bar = slots::Build(game, armies, 0);
+        slots::All(bar, game);
+        slots::Commit(bar, game);
+        int group_id = armies[0]->group;
+        Ok(group_id != slots::kUngrouped && group_id == armies[1]->group &&
+                   group_id == armies[2]->group,
            "a group of more than one is written back into its armies");
-        auto again = slots::Build(g, a, 0);
+        auto again = slots::Build(game, armies, 0);
         Eq(static_cast<int>(slots::Selected(again).size()), 3,
            "so picking it up again takes the whole group");
         Eq(slots::Grouped(again), true, "with the Grp button still green");
         Eq(again.group[0], again.group[2], "and all three in one group in the bar");
-        slots::Commit(again, g);
-        Eq(a[0]->group, id, "picking it up does not renumber it");
-        slots::Toggle(again, g, 2);
-        slots::Commit(again, g);
-        auto third = slots::Build(g, a, 0);
+        slots::Commit(again, game);
+        Eq(armies[0]->group, group_id, "picking it up does not renumber it");
+        slots::Toggle(again, game, 2);
+        slots::Commit(again, game);
+        auto third = slots::Build(game, armies, 0);
         Eq(static_cast<int>(slots::Selected(third).size()), 2,
            "dropping one out leaves the rest grouped");
-        Eq(a[2]->group, slots::kUngrouped, "and the one dropped out is on its own");
-        Eq(a[0]->group, id, "while the group keeps its id");
-        slots::Single(third, g);
-        slots::Commit(third, g);
-        Eq(a[0]->group, slots::kUngrouped, "and breaking it up clears the grouping");
-        Eq(static_cast<int>(slots::Selected(slots::Build(g, a, 0)).size()), 1,
+        Eq(armies[2]->group, slots::kUngrouped, "and the one dropped out is on its own");
+        Eq(armies[0]->group, group_id, "while the group keeps its id");
+        slots::Single(third, game);
+        slots::Commit(third, game);
+        Eq(armies[0]->group, slots::kUngrouped, "and breaking it up clears the grouping");
+        Eq(static_cast<int>(slots::Selected(slots::Build(game, armies, 0)).size()), 1,
            "so a click picks up one army again");
     }
     {
-        auto st = stack(3);
-        auto& a = st->a;
-        auto s = slots::Build(st->g, a, 0);
-        slots::All(s, st->g);
-        auto left = slots::Keep(s, st->g, {a[0], a[2]});
+        auto stand = stack(3);
+        auto& armies = stand->a;
+        auto bar = slots::Build(stand->g, armies, 0);
+        slots::All(bar, stand->g);
+        auto left = slots::Keep(bar, stand->g, {armies[0], armies[2]});
         Ok(left.has_value(), "the survivors are still a selection");
         if (left) {
             Eq(left->n, 2, "the dead leave the bar");
             Ok(left->in_group[0] && left->in_group[1], "the survivors keep moving together");
         }
-        Ok(!slots::Keep(s, st->g, {}).has_value(), "and a wiped-out stack is no selection at all");
+        Ok(!slots::Keep(bar, stand->g, {}).has_value(),
+           "and a wiped-out stack is no selection at all");
     }
 }
 
+/** @brief Checks UI data tables, dialogs, regions, shortcut icons, and button bitmaps. */
 static void TestScreenLayout() {
     printf("screen layout\n");
-    auto ui = uidata::Load(kData);
-    Eq(ui.bitmaps[0], "startup.pck", "bitmap 0 is the startup screen");
-    Eq(ui.bitmaps[4], "button.pck", "bitmap 4 is the button sheet");
-    Eq(ui.bitmaps[78], "movebar7.pck", "there are 79 bitmaps, 0 to 78");
-    Eq(static_cast<int>(ui.joins.size()), 36, "JOIN.DAT names 36 dialogs");
-    Eq(ui.joins[0].button, 0, "dialog 0 uses button group 0");
-    Eq(ui.joins[0].area, 2, "dialog 0 uses area screen 2");
-    Eq(ui.joins[9].button, 11, "dialog 9 takes button group 11");
-    Eq(ui.joins[12].button, 9, "and dialog 12 takes group 9");
-    auto d = uidata::FindDialog(ui, uidata::kMainScreen);
-    Eq(static_cast<int>(d.controls.size()), 43, "the main screen has 43 controls");
-    Eq(static_cast<int>(d.regions.size()), 6, "and 6 regions");
+    auto ui_data = uidata::Load(kData);
+    Eq(ui_data.bitmaps[0], "startup.pck", "bitmap 0 is the startup screen");
+    Eq(ui_data.bitmaps[4], "button.pck", "bitmap 4 is the button sheet");
+    Eq(ui_data.bitmaps[78], "movebar7.pck", "there are 79 bitmaps, 0 to 78");
+    Eq(static_cast<int>(ui_data.joins.size()), 36, "JOIN.DAT names 36 dialogs");
+    Eq(ui_data.joins[0].button, 0, "dialog 0 uses button group 0");
+    Eq(ui_data.joins[0].area, 2, "dialog 0 uses area screen 2");
+    Eq(ui_data.joins[9].button, 11, "dialog 9 takes button group 11");
+    Eq(ui_data.joins[12].button, 9, "and dialog 12 takes group 9");
+    auto dialog = uidata::FindDialog(ui_data, uidata::kMainScreen);
+    Eq(static_cast<int>(dialog.controls.size()), 43, "the main screen has 43 controls");
+    Eq(static_cast<int>(dialog.regions.size()), 6, "and 6 regions");
     std::map<int, std::array<int, 4>> want = {{1, {400, 30, 224, 312}},
                                               {2, {16, 30, 360, 360}},
                                               {3, {0, 0, 640, 18}},
                                               {9, {16, 408, 360, 56}}};
-    for (auto& r : d.regions) {
-        auto w = want.find(r.id);
-        if (w != want.end()) {
-            Eq(r.x, w->second[0], Fmt("region %d x", r.id));
-            Eq(r.y, w->second[1], Fmt("region %d y", r.id));
-            Eq(r.w, w->second[2], Fmt("region %d width", r.id));
-            Eq(r.h, w->second[3], Fmt("region %d height", r.id));
+    for (auto& region : dialog.regions) {
+        auto found = want.find(region.id);
+        if (found != want.end()) {
+            Eq(region.x, found->second[0], Fmt("region %d x", region.id));
+            Eq(region.y, found->second[1], Fmt("region %d y", region.id));
+            Eq(region.w, found->second[2], Fmt("region %d width", region.id));
+            Eq(region.h, found->second[3], Fmt("region %d height", region.id));
         }
     }
-    Eq(ui.shortcut_names[507], "Move All", "UDB.DAT names menu item 507");
-    Eq(ui.shortcut_names[535], "End Turn", "and item 535");
+    Eq(ui_data.shortcut_names[507], "Move All", "UDB.DAT names menu item 507");
+    Eq(ui_data.shortcut_names[535], "End Turn", "and item 535");
     const char* want_sc[4] = {"Search", "Move All", "Heroes", "End Turn"};
     for (int i = 0; i < 4; i++) {
-        Eq(ui.shortcut_names[ui.shortcuts[i]], want_sc[i],
+        Eq(ui_data.shortcut_names[ui_data.shortcuts[i]], want_sc[i],
            Fmt("button %d (control %d) is %s", i, 179 + i, want_sc[i]));
     }
     {
         auto img = pck::Decode(kData + "/PICS/MENUBUTT.PCK");
-        int w = img->w, h = img->h;
-        Eq(w, 320, "MENUBUTT.PCK is 320 wide");
-        Eq(h, 197, "and 197 tall: 7 rows 28 apart, plus the last row's border");
+        int width = img->w, height = img->h;
+        Eq(width, 320, "MENUBUTT.PCK is 320 wide");
+        Eq(height, 197, "and 197 tall: 7 rows 28 apart, plus the last row's border");
         std::set<std::string> cells;
-        int n = 0;
-        for (auto& [id, item] : ui.shortcut_items) {
-            Eq(item.w, 32, Fmt("item %d icon width", id));
-            Eq(item.h, 29, Fmt("item %d icon height", id));
-            for (int st = 0; st <= 2; st++) {
-                auto src = item.src[st];
-                Eq(src.x % 32, 0, Fmt("item %d state %d sits on a column", id, st));
-                Eq(src.y % 28, 0, Fmt("item %d state %d sits on a row", id, st));
-                Ok(src.x + 32 <= w && src.y + 29 <= h,
-                   Fmt("item %d state %d is inside the sheet", id, st));
+        int cell_count = 0;
+        for (auto& [item_id, item] : ui_data.shortcut_items) {
+            Eq(item.w, 32, Fmt("item %d icon width", item_id));
+            Eq(item.h, 29, Fmt("item %d icon height", item_id));
+            for (int state = 0; state <= 2; state++) {
+                auto src = item.src[state];
+                Eq(src.x % 32, 0, Fmt("item %d state %d sits on a column", item_id, state));
+                Eq(src.y % 28, 0, Fmt("item %d state %d sits on a row", item_id, state));
+                Ok(src.x + 32 <= width && src.y + 29 <= height,
+                   Fmt("item %d state %d is inside the sheet", item_id, state));
                 std::string key = Fmt("%d,%d", src.x, src.y);
                 Ok(!cells.count(key), "cell " + key + " is used once");
                 cells.insert(key);
-                n++;
+                cell_count++;
             }
         }
-        Eq(n, 63, "21 items, three cells each");
-        auto& end_turn = ui.shortcut_items[535];
+        Eq(cell_count, 63, "21 items, three cells each");
+        auto& end_turn = ui_data.shortcut_items[535];
         Eq(end_turn.src[uidata::kNormal].x, 0, "End Turn rests at the sheet's origin");
         Eq(end_turn.src[uidata::kNormal].y, 0, "at the top of it");
         Eq(end_turn.src[uidata::kActive].x, 32, "and lights up one cell right");
     }
     {
         auto img = pck::Decode(kData + "/PICS/ABITS.PCK");
-        int w = img->w, h = img->h;
-        const auto& px = img->px;
-        Eq(w, 480, "ABITS.PCK is 480 wide");
-        Eq(h, 40, "and 40 tall");
-        const int bg = 3;
+        int width = img->w, height = img->h;
+        const auto& pixels = img->px;
+        Eq(width, 480, "ABITS.PCK is 480 wide");
+        Eq(height, 40, "and 40 tall");
+        const int bg_color = 3;
         std::set<int> seen;
         for (int cell = 0; cell <= 8; cell++) {
             std::map<int, int> count;
             for (int y = 0; y <= 29; y++) {
                 for (int x = cell * 32; x <= cell * 32 + 31; x++) {
-                    int v = px[y * w + x];
-                    if (v != bg) count[v]++;
+                    int pixel = pixels[y * width + x];
+                    if (pixel != bg_color) count[pixel]++;
                 }
             }
             int best = kNone, best_n = 0;
-            for (auto& [v, c] : count)
-                if (c > best_n) {
-                    best = v;
-                    best_n = c;
+            for (auto& [color, color_count] : count)
+                if (color_count > best_n) {
+                    best = color;
+                    best_n = color_count;
                 }
             Ok(best_n > 40, Fmt("ring %d has ink", cell));
             if (cell > 0) {
@@ -1888,44 +1905,46 @@ static void TestScreenLayout() {
         }
         int ring_row = 0, strip_row = 0;
         for (int x = 0; x <= 287; x++) {
-            if (px[15 * w + x] != bg) ring_row++;
-            if (px[38 * w + x] != bg) strip_row++;
+            if (pixels[15 * width + x] != bg_color) ring_row++;
+            if (pixels[38 * width + x] != bg_color) strip_row++;
         }
         Ok(strip_row > ring_row * 2,
            "row 38 is far denser than row 15, so it is not part of the rings");
+        /** @brief Status-strip icon rectangle in ABITS.PCK. */
         struct Icon {
-            int sx, sy;
-            const char* name;
+            int sx, sy;        ///< Top-left coordinates in the sheet.
+            const char* name;  ///< Icon label.
         };
-        for (Icon ic : {Icon{344, 0, "cities"}, Icon{344, 20, "treasury"}, Icon{384, 0, "income"},
-                        Icon{384, 20, "upkeep"}}) {
-            Ok(ic.sx >= 288, Fmt("the %s icon is past the nine rings", ic.name));
-            Ok(ic.sx + 40 <= w && ic.sy + 20 <= h, Fmt("the %s icon is inside the sheet", ic.name));
+        for (Icon icon : {Icon{344, 0, "cities"}, Icon{344, 20, "treasury"}, Icon{384, 0, "income"},
+                          Icon{384, 20, "upkeep"}}) {
+            Ok(icon.sx >= 288, Fmt("the %s icon is past the nine rings", icon.name));
+            Ok(icon.sx + 40 <= width && icon.sy + 20 <= height,
+               Fmt("the %s icon is inside the sheet", icon.name));
             int ink = 0;
-            for (int y = ic.sy; y <= ic.sy + 19; y++)
-                for (int x = ic.sx; x <= ic.sx + 39; x++)
-                    if (px[y * w + x] != bg) ink++;
-            Ok(ink > 40, Fmt("the %s icon has ink", ic.name));
+            for (int y = icon.sy; y <= icon.sy + 19; y++)
+                for (int x = icon.sx; x <= icon.sx + 39; x++)
+                    if (pixels[y * width + x] != bg_color) ink++;
+            Ok(ink > 40, Fmt("the %s icon has ink", icon.name));
             int edge = 0;
-            for (int y = ic.sy; y <= ic.sy + 19; y++)
-                if (px[y * w + ic.sx - 1] != bg) edge++;
-            Eq(edge, 0, Fmt("the %s icon starts on a clear column", ic.name));
+            for (int y = icon.sy; y <= icon.sy + 19; y++)
+                if (pixels[y * width + icon.sx - 1] != bg_color) edge++;
+            Eq(edge, 0, Fmt("the %s icon starts on a clear column", icon.name));
         }
     }
     std::map<std::string, std::pair<int, int>> sizes;
     std::set<std::string> missing;
     int checked = 0;
-    for (auto& [gid, group] : ui.buttons) {
-        for (auto& c : group.controls) {
-            if (c.bitmap != 0 && c.w > 0) {
-                std::string name = ui.bitmaps[c.bitmap];
+    for (auto& [gid, group] : ui_data.buttons) {
+        for (auto& control : group.controls) {
+            if (control.bitmap != 0 && control.w > 0) {
+                std::string name = ui_data.bitmaps[control.bitmap];
                 if (!sizes.count(name) && !missing.count(name)) {
                     bool found = false;
                     for (const char* dir : {"/PICS/", "/TERRAIN0/", "/"}) {
-                        std::string p = kData + dir + Upper(name);
-                        if (FileExists(p)) {
-                            auto im = pck::Decode(p);
-                            sizes[name] = {im->w, im->h};
+                        std::string path = kData + dir + Upper(name);
+                        if (FileExists(path)) {
+                            auto image = pck::Decode(path);
+                            sizes[name] = {image->w, image->h};
                             found = true;
                             break;
                         }
@@ -1934,10 +1953,12 @@ static void TestScreenLayout() {
                 }
                 Ok(sizes.count(name), "bitmap resolves to a file: " + name);
                 if (sizes.count(name)) {
-                    auto [sw, sh] = sizes[name];
-                    for (int st = 0; st <= 2; st++) {
-                        Ok(c.src[st].x + c.w <= sw && c.src[st].y + c.h <= sh,
-                           Fmt("control %d state %d lies inside %s", c.id, st, name.c_str()));
+                    auto [sheet_w, sheet_h] = sizes[name];
+                    for (int state = 0; state <= 2; state++) {
+                        Ok(control.src[state].x + control.w <= sheet_w &&
+                                   control.src[state].y + control.h <= sheet_h,
+                           Fmt("control %d state %d lies inside %s", control.id, state,
+                               name.c_str()));
                         checked++;
                     }
                 }
@@ -1947,11 +1968,12 @@ static void TestScreenLayout() {
     Ok(checked >= 400, Fmt("checked %d source rects", checked));
 }
 
+/** @brief Checks castle tile blocks by owner and razed ruin tile blocks. */
 static void TestCityCastles() {
     printf("city castles\n");
-    auto gp = NewGame("TUTORIA", Seed(11));
-    Game& g = *gp;
-    Map& map = *g.map;
+    auto game_ptr = NewGame("TUTORIA", Seed(11));
+    Game& game = *game_ptr;
+    Map& map = *game.map;
     std::map<int, int> expected_by_level = {{-1, 96}, {0, 98},  {1, 100}, {2, 102}, {3, 104},
                                             {4, 106}, {5, 108}, {6, 128}, {7, 130}};
     City& city = map.cities[0];
@@ -1981,66 +2003,68 @@ static void TestCityCastles() {
                 Ok(scn::TerrainAt(map, city.x + dx, city.y + dy) == 11,
                    Fmt("ruin cell %d,%d is ruins terrain", dx, dy));
     }
-    auto g2p = NewGame("TUTORIA", Seed(12));
-    Game& g2 = *g2p;
-    City& c2 = g2.map->cities[0];
-    for (Side* s : g2.sides) {
-        game::SetCityOwner(g2, c2, s->index);
-        scn::SetCityTiles(*g2.map, c2);
+    auto game2_ptr = NewGame("TUTORIA", Seed(12));
+    Game& game2 = *game2_ptr;
+    City& city2 = game2.map->cities[0];
+    for (Side* side : game2.sides) {
+        game::SetCityOwner(game2, city2, side->index);
+        scn::SetCityTiles(*game2.map, city2);
     }
-    auto mine_list = game::SideCities(g2, *g2.sides[0]);
+    auto mine_list = game::SideCities(game2, *game2.sides[0]);
     City* mine = mine_list.empty() ? nullptr : mine_list[0];
     Ok(mine != nullptr, "the first side holds a city to raze");
     if (mine) {
         int was = mine->owner_index;
-        game::Raze(g2, *g2.sides[0], *mine, {});
+        game::Raze(game2, *game2.sides[0], *mine, {});
         Ok(mine->razed_by == was, "raze remembers who held the city");
-        Ok(scn::TileAt(*g2.map, mine->x, mine->y) == 0xa0 + 2 * was,
+        Ok(scn::TileAt(*game2.map, mine->x, mine->y) == 0xa0 + 2 * was,
            "raze restamps the map with that side's ruins");
     }
 }
 
+/** @brief Checks site contents, rich ruins, item placement, searching, temples, and guardians. */
 static void TestSites(const std::string& scenario) {
     printf("sites: %s\n", scenario.c_str());
-    auto gp = NewGame(scenario, Seed(53));
-    Game& g = *gp;
+    auto game_ptr = NewGame(scenario, Seed(53));
+    Game& game = *game_ptr;
     int rich = 0;
-    for (auto& s : g.map->sites) {
-        Ok(s.content != site::kEmpty, "no site is left empty");
-        if (s.rich) {
+    for (auto& map_site : game.map->sites) {
+        Ok(map_site.content != site::kEmpty, "no site is left empty");
+        if (map_site.rich) {
             rich++;
-            Ok(s.type != site::kTemple, "a temple is never rich");
+            Ok(map_site.type != site::kTemple, "a temple is never rich");
         }
-        if (s.content == site::kAllies) {
-            Ok(s.ally_type != kNone, "an ally ruin knows what joins");
-            Ok(g.types.ById(s.ally_type) != nullptr, "and it is a real army type");
+        if (map_site.content == site::kAllies) {
+            Ok(map_site.ally_type != kNone, "an ally ruin knows what joins");
+            Ok(game.types.ById(map_site.ally_type) != nullptr, "and it is a real army type");
         }
         // an allies site keeps its allies' type where the guardian would be,
-        // and nothing guards it (66d4:0000, 6536:01ab)
-        if (s.content == site::kAllies)
-            Eq(s.guardian, kNone, "nothing guards an allies ruin");
-        else if (s.content != site::kTemple)
-            Ok(s.guardian >= 1 && s.guardian <= 9, "a ruin has a guardian");
+        // and nothing guards it
+        if (map_site.content == site::kAllies)
+            Eq(map_site.guardian, kNone, "nothing guards an allies ruin");
+        else if (map_site.content != site::kTemple)
+            Ok(map_site.guardian >= 1 && map_site.guardian <= 9, "a ruin has a guardian");
     }
-    Eq(rich, static_cast<int>(g.map->sites.size()) * 3 / 10, "three in ten sites are rich");
+    Eq(rich, static_cast<int>(game.map->sites.size()) * 3 / 10, "three in ten sites are rich");
     std::set<int> placed;
-    for (auto& s : g.map->sites) {
-        if (s.content == site::kItem) {
-            Ok(!placed.count(s.item), "an item is hidden in only one ruin");
-            placed.insert(s.item);
+    for (auto& map_site : game.map->sites) {
+        if (map_site.content == site::kItem) {
+            Ok(!placed.count(map_site.item), "an item is hidden in only one ruin");
+            placed.insert(map_site.item);
         }
     }
-    for (auto& it : g.map->items)
-        if (placed.count(it.index)) Eq(it.status, 2, "a hidden item is marked hidden");
+    for (auto& item : game.map->items)
+        if (placed.count(item.index)) Eq(item.status, 2, "a hidden item is marked hidden");
     std::map<int, Item*> by_index;
-    for (auto& it : g.map->items) by_index[it.index] = &it;
-    for (auto& s : g.map->sites) {
-        if (s.content == site::kItem)
-            Eq(site::ItemReserved(*by_index[s.item]), s.rich, "a reserved item needs a rich ruin");
+    for (auto& item : game.map->items) by_index[item.index] = &item;
+    for (auto& map_site : game.map->sites) {
+        if (map_site.content == site::kItem)
+            Eq(site::ItemReserved(*by_index[map_site.item]), map_site.rich,
+               "a reserved item needs a rich ruin");
     }
-    if (g.map->item_pool) {
+    if (game.map->item_pool) {
         std::set<std::string> names;
-        for (auto& p : *g.map->item_pool) names.insert(p.name);
+        for (auto& pool_item : *game.map->item_pool) names.insert(pool_item.name);
         for (int i = 8; i <= 21; i++)
             if (by_index.count(i))
                 Ok(names.count(by_index[i]->name),
@@ -2050,166 +2074,178 @@ static void TestSites(const std::string& scenario) {
                 Eq(by_index[i]->type, rules::kItemStandard, "records 0-7 are standards");
     }
     Site* ruin = nullptr;
-    for (auto& s : g.map->sites)
-        if (!ruin && s.content == site::kGold) ruin = &s;
+    for (auto& map_site : game.map->sites)
+        if (!ruin && map_site.content == site::kGold) ruin = &map_site;
     if (ruin) {
-        Side* side = g.sides[0];
-        Army* grunt = AddArmy(g, ruin->x, ruin->y, side->index, 11, 3, 10, 10);
-        auto r = site::Search(g, {grunt}, ruin->x, ruin->y);
-        Eq(r->kind, "no hero", "a stack without a hero cannot search a ruin");
+        Side* side = game.sides[0];
+        Army* grunt = AddArmy(game, ruin->x, ruin->y, side->index, 11, 3, 10, 10);
+        auto result = site::Search(game, {grunt}, ruin->x, ruin->y);
+        Eq(result->kind, "no hero", "a stack without a hero cannot search a ruin");
         Ok(!ruin->searched, "and the ruin is not used up");
-        Army* h = AddArmy(g, ruin->x, ruin->y, side->index, armytype::kHero, 9, 14, 14);
+        Army* hero = AddArmy(game, ruin->x, ruin->y, side->index, armytype::kHero, 9, 14, 14);
         int gold0 = side->gold;
-        r = site::Search(g, {h, grunt}, ruin->x, ruin->y);
-        Ok(r->kind == "gold" || r->kind == "killed", "a hero gets a result: " + r->kind);
-        if (r->kind == "gold") {
-            Ok(r->gold >= 503 && r->gold <= 4000,
-               "the gold is in range: " + std::to_string(r->gold));
-            Eq(side->gold, gold0 + r->gold, "the gold was paid");
-            Eq(h->experience, 3, "searching is worth 3 experience");
+        result = site::Search(game, {hero, grunt}, ruin->x, ruin->y);
+        Ok(result->kind == "gold" || result->kind == "killed",
+           "a hero gets a result: " + result->kind);
+        if (result->kind == "gold") {
+            Ok(result->gold >= 503 && result->gold <= 4000,
+               "the gold is in range: " + std::to_string(result->gold));
+            Eq(side->gold, gold0 + result->gold, "the gold was paid");
+            Eq(hero->experience, 3, "searching is worth 3 experience");
         }
-        if (r->kind == "gold") {
+        if (result->kind == "gold") {
             Ok(ruin->searched, "a searched ruin is used up");
-            Ok(site::Search(g, {h}, ruin->x, ruin->y) == nullptr, "and cannot be searched again");
+            Ok(site::Search(game, {hero}, ruin->x, ruin->y) == nullptr,
+               "and cannot be searched again");
         } else {
             Ok(!ruin->searched, "a hero who dies leaves the ruin to be searched again");
         }
     }
     Site* temple = nullptr;
-    for (auto& s : g.map->sites)
-        if (!temple && s.content == site::kTemple && s.temple_index == 0) temple = &s;
+    for (auto& map_site : game.map->sites)
+        if (!temple && map_site.content == site::kTemple && map_site.temple_index == 0)
+            temple = &map_site;
     if (temple) {
-        Side* side = g.sides[0];
-        Army a;
-        a.x = temple->x;
-        a.y = temple->y;
-        a.owner = side->index;
-        a.type = 11;
-        a.strength = 3;
-        a.moves = 0;
-        Ok(site::Search(g, {&a}, temple->x, temple->y) == nullptr,
+        Side* side = game.sides[0];
+        Army army;
+        army.x = temple->x;
+        army.y = temple->y;
+        army.owner = side->index;
+        army.type = 11;
+        army.strength = 3;
+        army.moves = 0;
+        Ok(site::Search(game, {&army}, temple->x, temple->y) == nullptr,
            "searching needs a move left (6536:0000)");
-        a.moves = 10;
-        auto r = site::Search(g, {&a}, temple->x, temple->y, true);
-        Eq(r->kind, "temple", "with no hero a temple blesses at once, a human's too");
-        Eq(r->kind, "temple", "a temple blesses");
-        Eq(r->blessed, 1, "one army was blessed");
-        Eq(a.strength, 4, "the blessing adds a strength");
-        Eq(site::Search(g, {&a}, temple->x, temple->y)->blessed, 0,
+        army.moves = 10;
+        auto result = site::Search(game, {&army}, temple->x, temple->y, true);
+        Eq(result->kind, "temple", "with no hero a temple blesses at once, a human's too");
+        Eq(result->kind, "temple", "a temple blesses");
+        Eq(result->blessed, 1, "one army was blessed");
+        Eq(army.strength, 4, "the blessing adds a strength");
+        Eq(site::Search(game, {&army}, temple->x, temple->y)->blessed, 0,
            "the same temple does not bless twice");
-        a.strength = 9;
-        a.blessings.clear();
-        site::Search(g, {&a}, temple->x, temple->y);
-        Eq(a.strength, 9, "a blessing never passes 9");
+        army.strength = 9;
+        army.blessings.clear();
+        site::Search(game, {&army}, temple->x, temple->y);
+        Eq(army.strength, 9, "a blessing never passes 9");
     }
     Army strong, weak;
     strong.strength = 9;
     weak.strength = 1;
     int survived = 0, died = 0;
     for (int i = 0; i < 400; i++) {
-        if (site::SurvivesGuardian(g, strong, 3)) survived++;
-        if (!site::SurvivesGuardian(g, weak, 8)) died++;
+        if (site::SurvivesGuardian(game, strong, 3)) survived++;
+        if (!site::SurvivesGuardian(game, weak, 8)) died++;
     }
     Eq(survived, 400, "a strong hero always beats a weak guardian");
     Ok(died > 0, "a weak hero sometimes dies to a strong one");
 }
 
-// A stack that takes a city from the sea is still at sea until its side's
-// next turn begins, then ashore at no cost in movement (8cc6:089d); armies
-// left on water without a boat drown (1b62:0ea0).
+/**
+ * @brief Checks ships: a stack that takes a city from the sea is still at sea
+ * until its side's next turn begins, then ashore at no cost in movement;
+ * armies left on water without a boat drown.
+ */
 static void TestShips() {
     printf("ships\n");
-    auto gp = NewGame("ERYTHEA", Seed(3));
-    Game& g = *gp;
-    Side* side = game::Begin(g);
-    City* city = game::SideCities(g, *side)[0];
-    Army* sailor = AddArmy(g, city->x, city->y, side->index, 2, 3, 0, 14);
+    auto game_ptr = NewGame("ERYTHEA", Seed(3));
+    Game& game = *game_ptr;
+    Side* side = game::Begin(game);
+    City* city = game::SideCities(game, *side)[0];
+    Army* sailor = AddArmy(game, city->x, city->y, side->index, 2, 3, 0, 14);
     sailor->at_sea = true;
-    for (size_t i = 0; i < g.sides.size(); i++) EndTurn(g);
+    for (size_t i = 0; i < game.sides.size(); i++) EndTurn(game);
     Ok(!sailor->at_sea, "an army at sea in a city is ashore when its turn begins");
     Eq(sailor->moves, sailor->max_moves, "with its own movement, not the 20 at sea");
 
-    int wx = kNone, wy = kNone;
-    for (int y = 0; y < g.map->height && wx == kNone; y++) {
-        for (int x = 0; x < g.map->width && wx == kNone; x++) {
-            if (scn::TerrainAt(*g.map, x, y) == movement::kWater &&
-                !scn::IsCrossing(*g.map, x, y) && game::ArmiesAt(g, x, y).empty()) {
-                wx = x;
-                wy = y;
+    int water_x = kNone, water_y = kNone;
+    for (int y = 0; y < game.map->height && water_x == kNone; y++) {
+        for (int x = 0; x < game.map->width && water_x == kNone; x++) {
+            if (scn::TerrainAt(*game.map, x, y) == movement::kWater &&
+                !scn::IsCrossing(*game.map, x, y) && game::ArmiesAt(game, x, y).empty()) {
+                water_x = x;
+                water_y = y;
             }
         }
     }
-    auto at = [&](Army* a) {
-        return std::find(g.armies.begin(), g.armies.end(), a) != g.armies.end();
+    auto is_alive = [&](Army* army) {
+        return std::find(game.armies.begin(), game.armies.end(), army) != game.armies.end();
     };
-    Army* walker = AddArmy(g, wx, wy, side->index, 2, 3, 14, 14);
-    Army* boat = AddArmy(g, wx, wy, side->index, 2, 3, 14, 14);
+    Army* walker = AddArmy(game, water_x, water_y, side->index, 2, 3, 14, 14);
+    Army* boat = AddArmy(game, water_x, water_y, side->index, 2, 3, 14, 14);
     boat->at_sea = true;
-    Army* hero = AddArmy(g, wx, wy, side->index, armytype::kHero, 5, 14, 14);
-    Eq(game::SinkStranded(g, *side, wx, wy), 1, "on the water the army without a boat sinks");
-    Ok(!at(walker), "it is gone");
-    Ok(at(boat) && at(hero), "one at sea, and a hero, do not sink");
+    Army* hero = AddArmy(game, water_x, water_y, side->index, armytype::kHero, 5, 14, 14);
+    Eq(game::SinkStranded(game, *side, water_x, water_y), 1,
+       "on the water the army without a boat sinks");
+    Ok(!is_alive(walker), "it is gone");
+    Ok(is_alive(boat) && is_alive(hero), "one at sea, and a hero, do not sink");
     int flyer = kNone;
-    for (auto& t : g.types.all)
-        if (flyer == kNone && t.flies) flyer = t.id;
-    Army* bird = AddArmy(g, wx, wy, side->index, flyer, 3, 14, 14);
-    Army* walker2 = AddArmy(g, wx, wy, side->index, 2, 3, 14, 14);
-    Eq(game::SinkStranded(g, *side), 1, "as the turn opens every tile is looked at");
-    Ok(at(bird) && !at(walker2), "and only the army that can neither fly nor sail goes");
+    for (auto& army_type : game.types.all)
+        if (flyer == kNone && army_type.flies) flyer = army_type.id;
+    Army* bird = AddArmy(game, water_x, water_y, side->index, flyer, 3, 14, 14);
+    Army* walker2 = AddArmy(game, water_x, water_y, side->index, 2, 3, 14, 14);
+    Eq(game::SinkStranded(game, *side), 1, "as the turn opens every tile is looked at");
+    Ok(is_alive(bird) && !is_alive(walker2),
+       "and only the army that can neither fly nor sail goes");
     Item wings;
     wings.type = rules::kItemFlight;
     hero->items.push_back(&wings);
-    Army* carried = AddArmy(g, wx, wy, side->index, 2, 3, 14, 14);
-    Eq(game::SinkStranded(g, *side, wx, wy), 0, "a hero's flight item carries the whole stack");
+    Army* carried = AddArmy(game, water_x, water_y, side->index, 2, 3, 14, 14);
+    Eq(game::SinkStranded(game, *side, water_x, water_y), 0,
+       "a hero's flight item carries the whole stack");
     hero->items.clear();
-    Eq(game::SinkStranded(g, *side, wx, wy), 1, "without it the walker drowns");
-    Ok(!at(carried), "");
-    Army* ashore = AddArmy(g, city->x, city->y, side->index, 2, 3, 14, 14);
-    Eq(game::SinkStranded(g, *side, city->x, city->y), 0, "nothing sinks on land");
-    Ok(at(ashore), "");
+    Eq(game::SinkStranded(game, *side, water_x, water_y), 1, "without it the walker drowns");
+    Ok(!is_alive(carried), "");
+    Army* ashore = AddArmy(game, city->x, city->y, side->index, 2, 3, 14, 14);
+    Eq(game::SinkStranded(game, *side, city->x, city->y), 0, "nothing sinks on land");
+    Ok(is_alive(ashore), "");
 }
 
-// A step is taken while the walk's cost so far fits in the moves left
-// (1555:18be), with no floor; an attack is fought from beside the tile and
-// needs one move, then costs the tile's movement, 2 at least (67cc:0000).
+/**
+ * @brief Checks the last move point: a step is taken while the walk's cost so
+ * far fits in the moves left, with no floor; an attack is fought from beside
+ * the tile and needs one move, then costs the tile's movement, 2 at least.
+ */
 static void TestLastMove() {
     printf("the last move point\n");
-    auto gp = NewGame("ERYTHEA", Seed(11));
-    Game& g = *gp;
-    Side* side = game::Begin(g);
-    Army* army = game::SideArmies(g, *side)[0];
-    int rx = kNone, ry = kNone;
-    for (int y = 1; y < g.map->height - 1 && rx == kNone; y++) {
-        for (int x = 1; x < g.map->width - 1 && rx == kNone; x++) {
-            if (scn::RoadAt(*g.map, x, y) % 0x20 == 0 || scn::RoadAt(*g.map, x + 1, y) % 0x20 == 0)
+    auto game_ptr = NewGame("ERYTHEA", Seed(11));
+    Game& game = *game_ptr;
+    Side* side = game::Begin(game);
+    Army* army = game::SideArmies(game, *side)[0];
+    int road_x = kNone, road_y = kNone;
+    for (int y = 1; y < game.map->height - 1 && road_x == kNone; y++) {
+        for (int x = 1; x < game.map->width - 1 && road_x == kNone; x++) {
+            if (scn::RoadAt(*game.map, x, y) % 0x20 == 0 ||
+                scn::RoadAt(*game.map, x + 1, y) % 0x20 == 0)
                 continue;
-            if (game::CityAt(g, x, y) || game::CityAt(g, x + 1, y)) continue;
-            if (!game::ArmiesAt(g, x, y).empty() || !game::ArmiesAt(g, x + 1, y).empty()) continue;
-            rx = x;
-            ry = y;
+            if (game::CityAt(game, x, y) || game::CityAt(game, x + 1, y)) continue;
+            if (!game::ArmiesAt(game, x, y).empty() || !game::ArmiesAt(game, x + 1, y).empty())
+                continue;
+            road_x = x;
+            road_y = y;
         }
     }
-    Ok(rx != kNone, "found two road tiles side by side");
-    if (rx != kNone) {
-        army->x = rx;
-        army->y = ry;
+    Ok(road_x != kNone, "found two road tiles side by side");
+    if (road_x != kNone) {
+        army->x = road_x;
+        army->y = road_y;
         army->at_sea = false;
         army->moves = 1;
-        movement::Invalidate(g);
-        auto r = movement::MoveTo(g, {army}, rx + 1, ry);
-        Eq(r.steps, 1, "one move left still buys a step along a road");
-        Eq(army->x, rx + 1, "and the army is there");
+        movement::Invalidate(game);
+        auto walk_result = movement::MoveTo(game, {army}, road_x + 1, road_y);
+        Eq(walk_result.steps, 1, "one move left still buys a step along a road");
+        Eq(army->x, road_x + 1, "and the army is there");
         Eq(army->moves, 0, "with nothing left");
     }
     City* enemy = nullptr;
-    for (auto& c : g.map->cities)
-        if (!enemy && c.owner_index != side->index) enemy = &c;
-    Army* a = AddArmy(g, enemy->x, enemy->y - 1, side->index, 11, 3, 1, 20);
-    game::ChargeAttack(g, {a}, enemy->x, enemy->y);
-    Eq(a->moves, 0, "an attack takes the last move");
-    a->moves = 10;
-    game::ChargeAttack(g, {a}, enemy->x, enemy->y);
-    Eq(a->moves, 8, "a city costs 1 to enter but 2 to attack");
+    for (auto& city : game.map->cities)
+        if (!enemy && city.owner_index != side->index) enemy = &city;
+    Army* attacker = AddArmy(game, enemy->x, enemy->y - 1, side->index, 11, 3, 1, 20);
+    game::ChargeAttack(game, {attacker}, enemy->x, enemy->y);
+    Eq(attacker->moves, 0, "an attack takes the last move");
+    attacker->moves = 10;
+    game::ChargeAttack(game, {attacker}, enemy->x, enemy->y);
+    Eq(attacker->moves, 8, "a city costs 1 to enter but 2 to attack");
 }
 
 /**
@@ -3071,18 +3107,18 @@ static void TestMapEval() {
     for (auto shape :
          {scengen::Shape::kContinents, scengen::Shape::kPangaea, scengen::Shape::kIslands}) {
         for (int seed = 1; seed <= 3; seed++) {
-            Rng rng(seed), again(seed);
-            randommap::Options options;
-            options.data_dir = kData;
-            options.rng = &rng;
-            options.scenario = true;
-            options.world.shape = shape;
-            auto files = randommap::GenerateNow(options);
-            options.rng = &again;
-            Ok(files == randommap::GenerateNow(options),
+            Rng seeded_rng(seed), again(seed);
+            randommap::Options scengen_options;
+            scengen_options.data_dir = kData;
+            scengen_options.rng = &seeded_rng;
+            scengen_options.scenario = true;
+            scengen_options.world.shape = shape;
+            auto scengen_files = randommap::GenerateNow(scengen_options);
+            scengen_options.rng = &again;
+            Ok(scengen_files == randommap::GenerateNow(scengen_options),
                std::string("the scenario generator is deterministic: ") +
                        scengen::ShapeName(shape));
-            auto world = scn::LoadFromFiles(kData + "/RANDOM", "RANDOM", files);
+            auto world = scn::LoadFromFiles(kData + "/RANDOM", "RANDOM", scengen_files);
             auto evaluation = mapeval::Evaluate(
                     *world, std::string(scengen::ShapeName(shape)) + "#" + std::to_string(seed));
             std::string first;
@@ -3137,8 +3173,8 @@ static void TestMapEval() {
         fs::create_directories(root / "GEN7");
         fs::create_directories(root / "NOINFO");
         fs::copy_file(kData + "/DATA/SCENARIO.DAT", root / "DATA" / "SCENARIO.DAT");
-        scenarios::Entry made{"Continents 7", "GEN7", "A new world, seed 7", 80, 40, 8, true};
-        WriteFile((root / "GEN7" / "GEN7.INF").string(), scenarios::Info(made));
+        scenarios::Entry made_entry{"Continents 7", "GEN7", "A new world, seed 7", 80, 40, 8, true};
+        WriteFile((root / "GEN7" / "GEN7.INF").string(), scenarios::Info(made_entry));
         WriteFile((root / "GEN7" / "GEN7.SCN").string(), "");
         WriteFile((root / "NOINFO" / "NOINFO.SCN").string(), "");
         Ok(scenarios::Remember(root.string(), "NOINFO") &&
@@ -3155,15 +3191,15 @@ static void TestMapEval() {
            "the generated world after them, by its NAME.INF");
         Eq(list.back().cities, 80, "with its cities");
         Ok(list.back().generated && !list[0].generated, "and marked as generated");
-        auto parsed = scenarios::ParseInfo(scenarios::Info(made), "GEN7");
-        Ok(parsed && parsed->text == made.text && parsed->players == 8,
+        auto parsed = scenarios::ParseInfo(scenarios::Info(made_entry), "GEN7");
+        Ok(parsed && parsed->text == made_entry.text && parsed->players == 8,
            "NAME.INF reads back as written");
         fs::remove_all(root);
     }
     // the start menu's picture for a generated world: a .PCK the game reads
     {
-        auto map = scn::Load(kData + "/ERYTHEA", "ERYTHEA");
-        auto pic = preview::MenuPicture(*map, kData);
+        auto menu_map = scn::Load(kData + "/ERYTHEA", "ERYTHEA");
+        auto pic = preview::MenuPicture(*menu_map, kData);
         Eq(pic.w, 264, "the menu picture fills the frame's width");
         Eq(pic.h, 225, "and its height");
         std::string path =
@@ -3173,7 +3209,7 @@ static void TestMapEval() {
         Ok(read->w == pic.w && read->h == pic.h && read->px == pic.px,
            "the .PCK it is written as decodes to the same picture");
         std::filesystem::remove(path);
-        std::string png = preview::Png(*map, kData);
+        std::string png = preview::Png(*menu_map, kData);
         Ok(png.compare(0, 8, "\x89PNG\r\n\x1a\n") == 0, "the preview is a PNG");
     }
 }
@@ -3501,264 +3537,275 @@ static void TestEncampment() {
 
 // ------------------------------------------------------------- going to sea
 
+/** @brief Checks embarking and disembarking, flying over water, and port movement. */
 static void TestSea() {
     printf("going to sea\n");
-    auto gp = NewGame("ERYTHEA", Seed(81));
-    Game* g = gp.get();
-    int lx = kNone, ly = kNone, wx = kNone, wy = kNone;
-    for (int y = 1; y <= g->map->height - 2; y++) {
-        for (int x = 1; x <= g->map->width - 2; x++) {
-            int t2 = scn::TerrainAt(*g->map, x + 1, y);
-            if (lx == kNone && scn::TerrainAt(*g->map, x, y) == movement::kPlain &&
-                (t2 == movement::kWater || t2 == movement::kShore) &&
-                game::ArmiesAt(*g, x, y).empty() && game::ArmiesAt(*g, x + 1, y).empty()) {
-                lx = x;
-                ly = y;
-                wx = x + 1;
-                wy = y;
+    auto game_ptr = NewGame("ERYTHEA", Seed(81));
+    Game* game = game_ptr.get();
+    int land_x = kNone, land_y = kNone, water_x = kNone, water_y = kNone;
+    for (int y = 1; y <= game->map->height - 2; y++) {
+        for (int x = 1; x <= game->map->width - 2; x++) {
+            int next_terrain = scn::TerrainAt(*game->map, x + 1, y);
+            if (land_x == kNone && scn::TerrainAt(*game->map, x, y) == movement::kPlain &&
+                (next_terrain == movement::kWater || next_terrain == movement::kShore) &&
+                game::ArmiesAt(*game, x, y).empty() && game::ArmiesAt(*game, x + 1, y).empty()) {
+                land_x = x;
+                land_y = y;
+                water_x = x + 1;
+                water_y = y;
             }
         }
     }
-    Ok(lx != kNone, "Erythea has a plain beside the sea");
+    Ok(land_x != kNone, "Erythea has a plain beside the sea");
     const ArmyType* dragon = nullptr;
-    for (auto& t : g->types.all)
-        if (t.flies && Contains(t.name, "Dragon")) dragon = &t;
-    auto army = [&](int type_id) { return AddArmy(*g, lx, ly, 0, type_id, 5, 20, 20); };
+    for (auto& army_type : game->types.all)
+        if (army_type.flies && Contains(army_type.name, "Dragon")) dragon = &army_type;
+    auto army = [&](int type_id) { return AddArmy(*game, land_x, land_y, 0, type_id, 5, 20, 20); };
     Army* hero = army(armytype::kHero);
-    Army* d = army(dragon->id);
-    std::vector<Army*> stack = {hero, d};
-    Eq(movement::ModeOf(*g, stack), movement::kFlying, "a hero with a dragon flies");
-    movement::Walk(*g, stack, {movement::Step{wx, wy, 2}});
-    Eq(hero->x, wx, "and flies out over the water");
-    Ok(!d->at_sea && !hero->at_sea, "without either going to sea");
-    Eq(movement::ModeOf(*g, stack), movement::kFlying, "so it still flies");
-    movement::Walk(*g, stack, {movement::Step{lx, ly, 2}});
-    Eq(hero->x, lx, "and can come back to land");
+    Army* dragon_army = army(dragon->id);
+    std::vector<Army*> stack = {hero, dragon_army};
+    Eq(movement::ModeOf(*game, stack), movement::kFlying, "a hero with a dragon flies");
+    movement::Walk(*game, stack, {movement::Step{water_x, water_y, 2}});
+    Eq(hero->x, water_x, "and flies out over the water");
+    Ok(!dragon_army->at_sea && !hero->at_sea, "without either going to sea");
+    Eq(movement::ModeOf(*game, stack), movement::kFlying, "so it still flies");
+    movement::Walk(*game, stack, {movement::Step{land_x, land_y, 2}});
+    Eq(hero->x, land_x, "and can come back to land");
     Army* foot = army(1);
-    movement::SettleSea(*g, {foot}, wx, wy, movement::kLand, false);
+    movement::SettleSea(*game, {foot}, water_x, water_y, movement::kLand, false);
     Ok(foot->at_sea, "a land army ending on water is at sea");
-    movement::SettleSea(*g, {foot}, lx, ly, movement::kLand, true);
+    movement::SettleSea(*game, {foot}, land_x, land_y, movement::kLand, true);
     Ok(!foot->at_sea, "and ashore again on land");
-    movement::SettleSea(*g, {hero, d, foot}, wx, wy, movement::kLand, false);
-    Ok(!d->at_sea, "a flier never goes to sea");
+    movement::SettleSea(*game, {hero, dragon_army, foot}, water_x, water_y, movement::kLand, false);
+    Ok(!dragon_army->at_sea, "a flier never goes to sea");
     Ok(hero->at_sea && foot->at_sea, "the hero and the footman with it do");
     hero->at_sea = false;
     foot->at_sea = false;
-    movement::SettleSea(*g, {foot}, wx, wy, movement::kBoat, false);
+    movement::SettleSea(*game, {foot}, water_x, water_y, movement::kBoat, false);
     Ok(!foot->at_sea, "a boat move leaves the flag as it was");
-    hero->x = wx;
-    hero->y = wy;
-    d->x = wx;
-    d->y = wy;
+    hero->x = water_x;
+    hero->y = water_y;
+    dragon_army->x = water_x;
+    dragon_army->y = water_y;
     hero->at_sea = true;
-    d->at_sea = true;
-    g->Remove(foot);
-    auto g2 = save::Decode(save::Encode(*g), kData);
-    for (Army* a : g2->armies)
-        if (a->x == wx && a->y == wy) Ok(!a->at_sea, "a loaded flier and its hero are not at sea");
+    dragon_army->at_sea = true;
+    game->Remove(foot);
+    auto reloaded = save::Decode(save::Encode(*game), kData);
+    for (Army* loaded_army : reloaded->armies)
+        if (loaded_army->x == water_x && loaded_army->y == water_y)
+            Ok(!loaded_army->at_sea, "a loaded flier and its hero are not at sea");
 
-    auto gp2 = NewGame("ERYTHEA", Seed(81));
-    g = gp2.get();
+    auto game2_ptr = NewGame("ERYTHEA", Seed(81));
+    game = game2_ptr.get();
     City* mirea = nullptr;
-    for (auto& c : g->map->cities)
-        if (c.name == "Mirea") mirea = &c;
-    Ok(mirea && mirea->owner_index == 0 && movement::IsPort(*g, *mirea), "Mirea is side 0's port");
+    for (auto& city : game->map->cities)
+        if (city.name == "Mirea") mirea = &city;
+    Ok(mirea && mirea->owner_index == 0 && movement::IsPort(*game, *mirea),
+       "Mirea is side 0's port");
     if (!mirea) return;
-    auto& grid = movement::Grid(*g, 0);
-    auto byte = [&](int x, int y) { return grid[y * g->map->width + x]; };
-    Eq(scn::TerrainAt(*g->map, 86, 7), movement::kShore, "the shore runs past Mirea");
+    auto& grid = movement::Grid(*game, 0);
+    auto byte = [&](int x, int y) { return grid[y * game->map->width + x]; };
+    Eq(scn::TerrainAt(*game->map, 86, 7), movement::kShore, "the shore runs past Mirea");
     Ok(movement::Has(byte(86, 7), movement::kWaterF), "and a shore tile is water to a walker");
     Ok(!movement::StepCost(byte(83, 9), byte(82, 9), movement::kLand, false, false, 10).has_value(),
        "so a land stack cannot step onto it from a plain");
-    Army* sailor = AddArmy(*g, mirea->x, mirea->y, 0, 1, 5, 20, 20);
-    auto r = movement::MoveTo(*g, {sailor}, 86, 4);
+    Army* sailor = AddArmy(*game, mirea->x, mirea->y, 0, 1, 5, 20, 20);
+    auto walk_result = movement::MoveTo(*game, {sailor}, 86, 4);
     Eq(sailor->y, 7, "leaving port it stops on the first sea tile");
-    Eq(scn::TerrainAt(*g->map, sailor->x, sailor->y), movement::kShore, "the shore");
+    Eq(scn::TerrainAt(*game->map, sailor->x, sailor->y), movement::kShore, "the shore");
     Ok(sailor->at_sea, "at sea");
-    Eq(r.spent, movement::kCost[movement::kShore], "paying the tile's cost and no water charge");
+    Eq(walk_result.spent, movement::kCost[movement::kShore],
+       "paying the tile's cost and no water charge");
     Eq(sailor->moves, 0, "and going to sea uses up the rest of its move");
-    Eq(r.stopped, "out of moves", "which ends the walk");
+    Eq(walk_result.stopped, "out of moves", "which ends the walk");
     sailor->moves = 20;
-    r = movement::MoveTo(*g, {sailor}, 86, 4);
+    walk_result = movement::MoveTo(*game, {sailor}, 86, 4);
     Eq(sailor->y, 4, "next turn it sails out into open water");
     Ok(sailor->at_sea, "still at sea");
     Eq(sailor->moves, 20 - (7 - 4) * movement::kCost[movement::kWater], "paying 1 a tile");
-    auto p = movement::FindPath(*g, {sailor}, 86, 4, 86, 5);
-    Eq(p ? (*p)[0].cost : kNone, movement::kCost[movement::kWater],
+    auto path = movement::FindPath(*game, {sailor}, 86, 4, 86, 5);
+    Eq(path ? (*path)[0].cost : kNone, movement::kCost[movement::kWater],
        "sailing on costs no water charge either");
-    r = movement::MoveTo(*g, {sailor}, mirea->x, mirea->y);
+    walk_result = movement::MoveTo(*game, {sailor}, mirea->x, mirea->y);
     Eq(sailor->x * 1000 + sailor->y, mirea->x * 1000 + mirea->y, "it sails back into port");
     Ok(!sailor->at_sea, "and comes ashore there");
     Eq(sailor->moves, 0, "which uses up its move too");
     City* kuuria = nullptr;
-    for (auto& c : g->map->cities)
-        if (c.name == "Kuuria") kuuria = &c;
-    int sx = kNone, sy = kNone;
+    for (auto& city : game->map->cities)
+        if (city.name == "Kuuria") kuuria = &city;
+    int sea_x = kNone, sea_y = kNone;
     for (int x = kuuria->x - 1; x <= kuuria->x + 2; x++) {
         for (int y = kuuria->y - 1; y <= kuuria->y + 2; y++) {
-            int t = scn::TerrainAt(*g->map, x, y);
-            if (sx == kNone && (t == movement::kWater || t == movement::kShore) &&
-                !g->map->crossing[y * g->map->width + x] && game::ArmiesAt(*g, x, y).empty()) {
-                sx = x;
-                sy = y;
+            int terrain = scn::TerrainAt(*game->map, x, y);
+            if (sea_x == kNone && (terrain == movement::kWater || terrain == movement::kShore) &&
+                !game->map->crossing[y * game->map->width + x] &&
+                game::ArmiesAt(*game, x, y).empty()) {
+                sea_x = x;
+                sea_y = y;
             }
         }
     }
-    Ok(sx != kNone, "Kuuria has open water beside it");
-    sailor->x = sx;
-    sailor->y = sy;
+    Ok(sea_x != kNone, "Kuuria has open water beside it");
+    sailor->x = sea_x;
+    sailor->y = sea_y;
     sailor->at_sea = true;
     sailor->moves = 20;
-    Ok(movement::FindPath(*g, {sailor}, sx, sy, kuuria->x, kuuria->y).has_value(),
+    Ok(movement::FindPath(*game, {sailor}, sea_x, sea_y, kuuria->x, kuuria->y).has_value(),
        "a stack at sea can path into the port it attacks");
 }
 
 // --------------------------------------------------------------------- sound
 
-// Rules checked against WARLORD2.EXE in web-verification.md, one by one.
+/**
+ * @brief Checks rules verified against the original executable, one by one.
+ */
 static void TestVerified() {
     printf("verified against the original\n");
-    auto mk = [](Game& g, int x, int y, int owner, int type, int strength = kNone) {
-        const ArmyType* t = g.types.ById(type);
-        Army a;
-        a.x = x;
-        a.y = y;
-        a.owner = owner;
-        a.type = type;
-        a.name = t->name;
-        a.strength = strength != kNone ? strength : t->strength;
-        a.max_moves = t->move;
-        a.moves = t->move;
-        a.upkeep = 1;
-        return g.Add(a);
+    auto make_army = [](Game& game, int x, int y, int owner, int type, int strength = kNone) {
+        const ArmyType* army_type = game.types.ById(type);
+        Army army;
+        army.x = x;
+        army.y = y;
+        army.owner = owner;
+        army.type = type;
+        army.name = army_type->name;
+        army.strength = strength != kNone ? strength : army_type->strength;
+        army.max_moves = army_type->move;
+        army.moves = army_type->move;
+        army.upkeep = 1;
+        return game.Add(army);
     };
 
-    // the army table: the lowest free slot (1b62:0309), tiles read from the top
+    // the army table: the lowest free slot, tiles read from the top
     {
-        auto gp = NewGame("ERYTHEA", Seed(1));
-        Game& g = *gp;
-        size_t n = g.armies.size();
-        Army* third = g.armies[2];
-        g.Remove(third);
-        Army* a = mk(g, 0, 0, 0, 11);
-        Eq(a->slot, 2, "a new army takes the lowest free slot");
-        Eq(static_cast<int>(std::find(g.armies.begin(), g.armies.end(), a) - g.armies.begin()), 2,
-           "and stands in slot order");
-        Eq(g.armies.size(), n, "the table is as long as before");
-        Army* b = mk(g, 0, 0, 0, 11);
-        Eq(game::ArmiesAt(g, 0, 0)[0], b, "a tile is read from the top of the table down");
+        auto game_ptr = NewGame("ERYTHEA", Seed(1));
+        Game& game = *game_ptr;
+        size_t count_before = game.armies.size();
+        Army* third = game.armies[2];
+        game.Remove(third);
+        Army* first_added = make_army(game, 0, 0, 0, 11);
+        Eq(first_added->slot, 2, "a new army takes the lowest free slot");
+        Eq(static_cast<int>(std::find(game.armies.begin(), game.armies.end(), first_added) -
+                            game.armies.begin()),
+           2, "and stands in slot order");
+        Eq(game.armies.size(), count_before, "the table is as long as before");
+        Army* second_added = make_army(game, 0, 0, 0, 11);
+        Eq(game::ArmiesAt(game, 0, 0)[0], second_added,
+           "a tile is read from the top of the table down");
     }
 
     // P1: the production nudges are dice(1,100) < p
     {
-        Rng r(3);
+        Rng rng3(3);
         int hits = 0;
         for (int i = 0; i < 20000; i++)
-            if (r.Chance(10)) hits++;
+            if (rng3.Chance(10)) hits++;
         Ok(hits > 20000 * 0.08 && hits < 20000 * 0.10,
            "chance(10) is 9 in 100: " + std::to_string(hits));
-        Rng t(1);
+        Rng rng1(1);
         bool never = true;
         for (int i = 0; i < 5000; i++)
-            if (t.Chance(1)) never = false;
+            if (rng1.Chance(1)) never = false;
         Ok(never, "chance(1) never comes up");
     }
 
     // P2, P3, P5: no spilling round a full city; a city that cannot build
     // goes idle; a human's city that builds starts the next
     {
-        auto gp = NewGame("ERYTHEA", Seed(2));
-        Game& g = *gp;
-        Side* side = game::Begin(g);
+        auto game_ptr = NewGame("ERYTHEA", Seed(2));
+        Game& game = *game_ptr;
+        Side* side = game::Begin(game);
         City* city = side->capital;
-        game::SetProduction(g, *city, 0);
+        game::SetProduction(game, *city, 0);
         city->countdown = 1;
-        for (auto d : std::vector<std::pair<int, int>>{{0, 0}, {1, 0}, {0, 1}, {1, 1}}) {
-            while (game::ArmiesAt(g, city->x + d.first, city->y + d.second).size() < 8) {
-                mk(g, city->x + d.first, city->y + d.second, side->index, 11);
+        for (auto offset : std::vector<std::pair<int, int>>{{0, 0}, {1, 0}, {0, 1}, {1, 1}}) {
+            while (game::ArmiesAt(game, city->x + offset.first, city->y + offset.second).size() <
+                   8) {
+                make_army(game, city->x + offset.first, city->y + offset.second, side->index, 11);
             }
         }
-        size_t n = g.armies.size();
+        size_t count_before = game.armies.size();
         side->production_due = true;
-        g.turn = 2;
-        game::HumanProduction(g, *side);
-        Eq(g.armies.size(), n, "a full city builds nothing: no spilling round it");
+        game.turn = 2;
+        game::HumanProduction(game, *side);
+        Eq(game.armies.size(), count_before, "a full city builds nothing: no spilling round it");
         Eq(city->countdown, 0, "its countdown stays at 0");
         Eq(game::Producing(*city), false, "and it is idle");
-        for (Army* a : game::ArmiesAt(g, city->x + 1, city->y + 1)) g.Remove(a);
+        for (Army* occupant : game::ArmiesAt(game, city->x + 1, city->y + 1)) game.Remove(occupant);
         side->production_due = true;
-        game::HumanProduction(g, *side);
-        Eq(g.armies.size(), n - 8, "an idle city does not try again");
-        game::SetProduction(g, *city, 0);
+        game::HumanProduction(game, *side);
+        Eq(game.armies.size(), count_before - 8, "an idle city does not try again");
+        game::SetProduction(game, *city, 0);
         city->countdown = 1;
         side->production_due = true;
-        game::HumanProduction(g, *side);
-        Eq(g.armies.size(), n - 7, "set again, it builds");
-        Eq(static_cast<int>(game::ArmiesAt(g, city->x + 1, city->y + 1).size()), 1,
+        game::HumanProduction(game, *side);
+        Eq(game.armies.size(), count_before - 7, "set again, it builds");
+        Eq(static_cast<int>(game::ArmiesAt(game, city->x + 1, city->y + 1).size()), 1,
            "on the tile with room");
         Eq(city->countdown, city->slots[0].time, "and starts the next (6f8c:06bd)");
-        Army* built = game::ArmiesAt(g, city->x + 1, city->y + 1)[0];
+        Army* built = game::ArmiesAt(game, city->x + 1, city->y + 1)[0];
         Eq(built->moves, built->max_moves, "a new army has its full move (6f8c:0dd7)");
     }
 
     // P7: the city's tiles fill x first
     {
-        auto gp = NewGame("ERYTHEA", Seed(2));
-        Game& g = *gp;
-        City& city = g.map->cities[0];
-        for (Army* a : std::vector<Army*>(g.armies)) {
-            if (a->x >= city.x && a->x <= city.x + 1 && a->y >= city.y && a->y <= city.y + 1)
-                g.Remove(a);
+        auto game_ptr = NewGame("ERYTHEA", Seed(2));
+        Game& game = *game_ptr;
+        City& city = game.map->cities[0];
+        for (Army* army : std::vector<Army*>(game.armies)) {
+            if (army->x >= city.x && army->x <= city.x + 1 && army->y >= city.y &&
+                army->y <= city.y + 1)
+                game.Remove(army);
         }
-        for (int i = 0; i < 8; i++) mk(g, city.x, city.y, 0, 11);
-        auto [x, y] = game::FreeTileIn(g, city, false);
+        for (int i = 0; i < 8; i++) make_army(game, city.x, city.y, 0, 11);
+        auto [x, y] = game::FreeTileIn(game, city, false);
         Eq(x, city.x + 1, "after (x,y) comes (x+1,y)");
         Eq(y, city.y, "on the same row");
     }
 
     // T1: Random Turns shuffles the order at each round's end
     {
-        auto gp = NewGame("ERYTHEA", SeedWith(4, {{"randomTurns", 1}}));
-        Game& g = *gp;
-        for (Side* s : g.sides) s->computer = true;
-        Side* side = game::Begin(g);
+        auto game_ptr = NewGame("ERYTHEA", SeedWith(4, {{"randomTurns", 1}}));
+        Game& game = *game_ptr;
+        for (Side* player : game.sides) player->computer = true;
+        Side* side = game::Begin(game);
         const std::array<int, 8> plain{0, 1, 2, 3, 4, 5, 6, 7};
         bool shuffled = false;
-        while (side && g.turn <= 6) {
-            if (g.turn_order != plain) shuffled = true;
-            Eq(side->index, g.turn_order[g.order_at], "the side to play is the order's");
-            side = game::EndTurn(g);
+        while (side && game.turn <= 6) {
+            if (game.turn_order != plain) shuffled = true;
+            Eq(side->index, game.turn_order[game.order_at], "the side to play is the order's");
+            side = game::EndTurn(game);
         }
         Ok(shuffled, "with Random Turns the order is shuffled (8065:1732)");
-        auto sorted = g.turn_order;
+        auto sorted = game.turn_order;
         std::sort(sorted.begin(), sorted.end());
         Ok(sorted == plain, "it is still every side once");
-        auto g2p = NewGame("ERYTHEA", Seed(4));
-        Game& g2 = *g2p;
-        game::Begin(g2);
-        for (int i = 0; i < 30; i++) game::EndTurn(g2);
-        Ok(g2.turn_order == plain, "without it the order stays");
+        auto game2_ptr = NewGame("ERYTHEA", Seed(4));
+        Game& game2 = *game2_ptr;
+        game::Begin(game2);
+        for (int i = 0; i < 30; i++) game::EndTurn(game2);
+        Ok(game2.turn_order == plain, "without it the order stays");
     }
 
     // C7: a neutral city that beats off an attack builds, Neutral Cities >= 2
     {
-        auto gp = NewGame("ERYTHEA", SeedWith(5, {{"neutralCities", 2}}));
-        Game& g = *gp;
-        Side* side = game::Begin(g);
+        auto game_ptr = NewGame("ERYTHEA", SeedWith(5, {{"neutralCities", 2}}));
+        Game& game = *game_ptr;
+        Side* side = game::Begin(game);
         City* city = nullptr;
-        for (auto& c : g.map->cities)
-            if (!city && c.owner_index == kNone && !c.slots.empty()) city = &c;
-        for (Army* a : game::ArmiesAt(g, city->x, city->y)) a->strength = 9;
-        Army* weak = mk(g, city->x - 1, city->y, side->index, 11, 1);
-        Battle r = game::DecideAttack(g, {weak}, city->x, city->y);
+        for (auto& cand : game.map->cities)
+            if (!city && cand.owner_index == kNone && !cand.slots.empty()) city = &cand;
+        for (Army* defender : game::ArmiesAt(game, city->x, city->y)) defender->strength = 9;
+        Army* weak = make_army(game, city->x - 1, city->y, side->index, 11, 1);
+        Battle battle = game::DecideAttack(game, {weak}, city->x, city->y);
         Ok(city->attacked & (1 << side->index), "an attacked city is marked (67cc:02b1)");
-        if (!r.won) {
-            game::ApplyAttack(g, r);
-            size_t before = game::ArmiesAt(g, city->x, city->y).size();
-            for (size_t i = 0; i < 12 * g.sides.size(); i++) EndTurn(g);
-            Ok(game::ArmiesAt(g, city->x, city->y).size() > before,
+        if (!battle.won) {
+            game::ApplyAttack(game, battle);
+            size_t before = game::ArmiesAt(game, city->x, city->y).size();
+            for (size_t i = 0; i < 12 * game.sides.size(); i++) EndTurn(game);
+            Ok(game::ArmiesAt(game, city->x, city->y).size() > before,
                "the neutral city builds (6bd8:025a)");
-            Ok(game::ArmiesAt(g, city->x, city->y).size() <= 4 || before >= 4,
+            Ok(game::ArmiesAt(game, city->x, city->y).size() <= 4 || before >= 4,
                "while its tile holds fewer than 4");
         }
     }
@@ -3766,26 +3813,26 @@ static void TestVerified() {
     // C10: a medal now and then for a hero's stack that wins
     {
         int medals = 0;
-        for (int sd = 1; sd <= 60 && medals == 0; sd++) {
-            auto gp = NewGame("ERYTHEA", Seed(sd));
-            Game& g = *gp;
-            Side* side = game::Begin(g);
+        for (int seed = 1; seed <= 60 && medals == 0; seed++) {
+            auto game_ptr = NewGame("ERYTHEA", Seed(seed));
+            Game& game = *game_ptr;
+            Side* side = game::Begin(game);
             City* city = nullptr;
-            for (auto& c : g.map->cities)
-                if (!city && c.owner_index == kNone) city = &c;
-            for (Army* a : game::ArmiesAt(g, city->x, city->y)) a->strength = 1;
-            while (game::ArmiesAt(g, city->x, city->y).size() < 2)
-                mk(g, city->x, city->y, kNone, 11, 1);
+            for (auto& cand : game.map->cities)
+                if (!city && cand.owner_index == kNone) city = &cand;
+            for (Army* defender : game::ArmiesAt(game, city->x, city->y)) defender->strength = 1;
+            while (game::ArmiesAt(game, city->x, city->y).size() < 2)
+                make_army(game, city->x, city->y, kNone, 11, 1);
             std::vector<Army*> stack = {
-                mk(g, city->x - 1, city->y, side->index, armytype::kHero, 9),
-                mk(g, city->x - 1, city->y, side->index, 11, 9),
-                mk(g, city->x - 1, city->y, side->index, 11, 9)};
-            Battle b = game::DecideAttack(g, stack, city->x, city->y);
-            Battle& r = game::ApplyAttack(g, b);
-            if (r.medal) {
+                make_army(game, city->x - 1, city->y, side->index, armytype::kHero, 9),
+                make_army(game, city->x - 1, city->y, side->index, 11, 9),
+                make_army(game, city->x - 1, city->y, side->index, 11, 9)};
+            Battle decided = game::DecideAttack(game, stack, city->x, city->y);
+            Battle& applied = game::ApplyAttack(game, decided);
+            if (applied.medal) {
                 medals++;
-                Eq(r.medal->medals, 1, "a first medal");
-                Ok(r.medal->type != armytype::kHero, "for an ordinary army, not the hero");
+                Eq(applied.medal->medals, 1, "a first medal");
+                Ok(applied.medal->type != armytype::kHero, "for an ordinary army, not the hero");
             }
         }
         Ok(medals > 0, "a hero's stack wins medals (67cc:2274)");
@@ -3794,50 +3841,52 @@ static void TestVerified() {
     // S1: nothing guards an allies ruin
     {
         bool tried = false;
-        for (int sd = 1; sd <= 20 && !tried; sd++) {
-            auto gp = NewGame("ERYTHEA", Seed(sd));
-            Game& g = *gp;
-            Side* side = game::Begin(g);
-            Site* s = nullptr;
-            for (auto& x : g.map->sites)
-                if (!s && x.content == site::kAllies) s = &x;
-            if (!s) continue;
+        for (int seed = 1; seed <= 20 && !tried; seed++) {
+            auto game_ptr = NewGame("ERYTHEA", Seed(seed));
+            Game& game = *game_ptr;
+            Side* side = game::Begin(game);
+            Site* ally_site = nullptr;
+            for (auto& map_site : game.map->sites)
+                if (!ally_site && map_site.content == site::kAllies) ally_site = &map_site;
+            if (!ally_site) continue;
             tried = true;
-            Army* h = mk(g, s->x, s->y, side->index, armytype::kHero, 1);
-            auto r = site::Search(g, {h}, s->x, s->y, false);
-            Eq(r->kind, "allies", "a hero always comes out of an allies ruin with allies");
-            Ok(g.Alive(h), "alive");
+            Army* hero =
+                    make_army(game, ally_site->x, ally_site->y, side->index, armytype::kHero, 1);
+            auto search_res = site::Search(game, {hero}, ally_site->x, ally_site->y, false);
+            Eq(search_res->kind, "allies", "a hero always comes out of an allies ruin with allies");
+            Ok(game.Alive(hero), "alive");
         }
         Ok(tried, "found an allies ruin");
     }
 
     // Q1, Q4: a computer's quest types; Archons for a reward
     {
-        auto gp = NewGame("ERYTHEA", SeedWith(8, {{"quests", 1}}));
-        Game& g = *gp;
-        Side* side = game::Begin(g);
-        Army* h = mk(g, side->capital->x, side->capital->y, side->index, armytype::kHero);
+        auto game_ptr = NewGame("ERYTHEA", SeedWith(8, {{"quests", 1}}));
+        Game& game = *game_ptr;
+        Side* side = game::Begin(game);
+        Army* hero =
+                make_army(game, side->capital->x, side->capital->y, side->index, armytype::kHero);
         std::set<int> seen;
         for (int i = 0; i < 40; i++) {
             side->quest.reset();
-            seen.insert(quest::Assign(g, *side, h, true)->type);
+            seen.insert(quest::Assign(game, *side, hero, true)->type);
         }
         bool only = true;
-        for (int t : seen) {
-            if (t != quest::kOccupy && t != quest::kRaze && t != quest::kSlaughter &&
-                t != quest::kPillageGold)
+        for (int quest_type : seen) {
+            if (quest_type != quest::kOccupy && quest_type != quest::kRaze &&
+                quest_type != quest::kSlaughter && quest_type != quest::kPillageGold)
                 only = false;
         }
         Ok(only, "a computer only gets occupy, raze, slaughter or gold (quest_assign(1))");
         bool archons = false;
-        Quest q;
-        q.hero = h;
+        Quest quest_obj;
+        quest_obj.hero = hero;
         for (int i = 0; i < 60 && !archons; i++) {
             side->gold = 500;
-            auto r = quest::ChooseReward(g, *side, &q);
-            if (r->kind == "allies") {
+            auto reward = quest::ChooseReward(game, *side, &quest_obj);
+            if (reward->kind == "allies") {
                 archons = true;
-                Eq(r->type->id, quest::kRewardAlly, "a quest's allies are Archons");
+                Eq(reward->type->id, quest::kRewardAlly, "a quest's allies are Archons");
             }
         }
         Ok(archons, "a quest can give allies");
@@ -3845,53 +3894,56 @@ static void TestVerified() {
 
     // H1: no hero once the surrender has been offered
     {
-        auto gp = NewGame("ERYTHEA", Seed(9));
-        Game& g = *gp;
-        Side* side = game::Begin(g);
-        g.surrender_offered = true;
+        auto game_ptr = NewGame("ERYTHEA", Seed(9));
+        Game& game = *game_ptr;
+        Side* side = game::Begin(game);
+        game.surrender_offered = true;
         side->gold = 100000;
         bool any = false;
         for (int i = 0; i < 50; i++)
-            if (hero::Offer(g, *side)) any = true;
+            if (hero::Offer(game, *side)) any = true;
         Ok(!any, "no hero offers itself after the surrender is offered");
     }
 
     // M1: a cached route is taken by a stack standing on it
     {
-        auto gp = NewGame("ERYTHEA", Seed(1));
-        Game& g = *gp;
-        Side* side = game::Begin(g);
-        Army* a = game::SideArmies(g, *side)[0];
+        auto game_ptr = NewGame("ERYTHEA", Seed(1));
+        Game& game = *game_ptr;
+        Side* side = game::Begin(game);
+        Army* army = game::SideArmies(game, *side)[0];
         City* far = nullptr;
-        for (auto& c : g.map->cities)
-            if (!far && movement::Distance(c.x, c.y, a->x, a->y) > 20) far = &c;
-        auto p1 = movement::FindPath(g, {a}, a->x, a->y, far->x, far->y);
-        Ok(p1 && p1->size() > 3, "a long route");
+        for (auto& city : game.map->cities)
+            if (!far && movement::Distance(city.x, city.y, army->x, army->y) > 20) far = &city;
+        auto first_path = movement::FindPath(game, {army}, army->x, army->y, far->x, far->y);
+        Ok(first_path && first_path->size() > 3, "a long route");
         bool cached = false;
-        for (auto& e : g.path_cache->slots)
-            if (e && e->dx == far->x && e->dy == far->y) cached = true;
+        for (auto& entry : game.path_cache->slots)
+            if (entry && entry->dx == far->x && entry->dy == far->y) cached = true;
         Ok(cached, "is kept (1555:16f0)");
-        auto mid = (*p1)[2];
-        auto p2 = movement::FindPath(g, {a}, mid.x, mid.y, far->x, far->y);
-        Eq(p2->size(), p1->size() - 3, "from a tile on it the rest of it is taken");
+        auto mid = (*first_path)[2];
+        auto second_path = movement::FindPath(game, {army}, mid.x, mid.y, far->x, far->y);
+        Eq(second_path->size(), first_path->size() - 3,
+           "from a tile on it the rest of it is taken");
         bool same = true;
-        for (size_t i = 0; i < p2->size(); i++) {
-            if ((*p2)[i].x != (*p1)[i + 3].x || (*p2)[i].y != (*p1)[i + 3].y) same = false;
+        for (size_t i = 0; i < second_path->size(); i++) {
+            if ((*second_path)[i].x != (*first_path)[i + 3].x ||
+                (*second_path)[i].y != (*first_path)[i + 3].y)
+                same = false;
         }
         Ok(same, "step for step");
     }
 
     // A1: the computer's flood goes no further than its rounds
     {
-        auto gp = NewGame("ERYTHEA", Seed(1));
-        Game& g = *gp;
-        City& c = g.map->cities[0];
-        auto f = ai::core::FloodFrom(g, 0, c.x, c.y, 5, nullptr, kNone);
+        auto game_ptr = NewGame("ERYTHEA", Seed(1));
+        Game& game = *game_ptr;
+        City& city = game.map->cities[0];
+        auto flood = ai::core::FloodFrom(game, 0, city.x, city.y, 5, nullptr, kNone);
         bool beyond = false;
-        for (int y = 0; y < g.map->height; y++) {
-            for (int x = 0; x < g.map->width; x++) {
-                if (std::max(std::abs(x - c.x), std::abs(y - c.y)) > 5 &&
-                    ai::core::FloodAt(f, x, y) != ai::core::kUnreached) {
+        for (int y = 0; y < game.map->height; y++) {
+            for (int x = 0; x < game.map->width; x++) {
+                if (std::max(std::abs(x - city.x), std::abs(y - city.y)) > 5 &&
+                    ai::core::FloodAt(flood, x, y) != ai::core::kUnreached) {
                     beyond = true;
                 }
             }
@@ -3899,90 +3951,101 @@ static void TestVerified() {
         Ok(!beyond, "a flood of 5 rounds reaches no further than 5 (1555:0373)");
     }
 
-    // a walk that leaves fewer than 2 moves is out of moves (1a8b:09d1): the
-    // interface then puts the stack down
+    // a walk that leaves fewer than 2 moves is out of moves: the interface
+    // then puts the stack down
     {
-        auto gp = NewGame("ERYTHEA", Seed(1));
-        Game& g = *gp;
-        Side* side = game::Begin(g);
-        int fx = kNone, fy = kNone;
-        auto free_at = [&](int tx, int ty) {
-            return scn::TerrainAt(*g.map, tx, ty) == movement::kPlain && !game::CityAt(g, tx, ty) &&
-                   game::ArmiesAt(g, tx, ty).empty() && scn::RoadAt(*g.map, tx, ty) % 32 == 0;
+        auto game_ptr = NewGame("ERYTHEA", Seed(1));
+        Game& game = *game_ptr;
+        Side* side = game::Begin(game);
+        int free_x = kNone, free_y = kNone;
+        auto free_at = [&](int tile_x, int tile_y) {
+            return scn::TerrainAt(*game.map, tile_x, tile_y) == movement::kPlain &&
+                   !game::CityAt(game, tile_x, tile_y) &&
+                   game::ArmiesAt(game, tile_x, tile_y).empty() &&
+                   scn::RoadAt(*game.map, tile_x, tile_y) % 32 == 0;
         };
-        for (int y = 1; y < g.map->height - 1 && fx == kNone; y++)
-            for (int x = 1; x < g.map->width - 1 && fx == kNone; x++)
+        for (int y = 1; y < game.map->height - 1 && free_x == kNone; y++)
+            for (int x = 1; x < game.map->width - 1 && free_x == kNone; x++)
                 if (free_at(x, y) && free_at(x + 1, y)) {
-                    fx = x;
-                    fy = y;
+                    free_x = x;
+                    free_y = y;
                 }
-        Army* a = mk(g, fx, fy, side->index, 11);
-        int cost = (*movement::FindPath(g, {a}, a->x, a->y, fx + 1, fy))[0].cost;
-        a->moves = cost + 1;
-        Eq(movement::MoveTo(g, {a}, fx + 1, fy).out_of_moves, true,
+        Army* army = make_army(game, free_x, free_y, side->index, 11);
+        int cost =
+                (*movement::FindPath(game, {army}, army->x, army->y, free_x + 1, free_y))[0].cost;
+        army->moves = cost + 1;
+        Eq(movement::MoveTo(game, {army}, free_x + 1, free_y).out_of_moves, true,
            "one move left after the walk: out of moves");
-        a->moves = cost + 2;
-        Eq(movement::MoveTo(g, {a}, fx, fy).out_of_moves, false,
+        army->moves = cost + 2;
+        Eq(movement::MoveTo(game, {army}, free_x, free_y).out_of_moves, false,
            "two left after arriving: not out of moves");
     }
 
-    // a walk to sea is shown as it set off, on land, to its end (1a8b:04c8)
+    // a walk to sea is shown as it set off, on land, to its end
     {
-        auto gp = NewGame("ERYTHEA", Seed(1));
-        Game& g = *gp;
-        Side* side = game::Begin(g);
-        Army* a = mk(g, 71, 11, side->index, 4);
-        a->moves = 40;
-        auto r = movement::MoveTo(g, {a}, 70, 14);
-        Ok(a->x == 70 && a->y == 14, "over the bridge to the shore");
-        Eq(r.sea_before, false, "it set off on land, and is shown so");
-        Eq(a->at_sea, true, "and is at sea once the walk is done");
-        a->moves = 40;
-        Eq(movement::MoveTo(g, {a}, 71, 11).sea_before, true, "coming ashore it is shown at sea");
+        auto game_ptr = NewGame("ERYTHEA", Seed(1));
+        Game& game = *game_ptr;
+        Side* side = game::Begin(game);
+        Army* army = make_army(game, 71, 11, side->index, 4);
+        army->moves = 40;
+        auto walk_res = movement::MoveTo(game, {army}, 70, 14);
+        Ok(army->x == 70 && army->y == 14, "over the bridge to the shore");
+        Eq(walk_res.sea_before, false, "it set off on land, and is shown so");
+        Eq(army->at_sea, true, "and is at sea once the walk is done");
+        army->moves = 40;
+        Eq(movement::MoveTo(game, {army}, 71, 11).sea_before, true,
+           "coming ashore it is shown at sea");
     }
 
     // the item quest uncovers round its ruin two tiles out when the searching
-    // stack flies (8611:1298, DS:1e9c), one otherwise
+    // stack flies, one otherwise
     for (bool flying : {false, true}) {
-        auto gp = NewGame("ERYTHEA", SeedWith(2, {{"quests", 1}, {"hiddenMap", 1}}));
-        Game& g = *gp;
-        Side* side = game::Begin(g);
-        Site* s = nullptr;
-        for (auto& x : g.map->sites) {
-            if (s || x.content != site::kItem) continue;
-            for (auto& it : g.map->items)
-                if (it.index == x.item && !site::ItemReserved(it)) s = &x;
+        auto game_ptr = NewGame("ERYTHEA", SeedWith(2, {{"quests", 1}, {"hiddenMap", 1}}));
+        Game& game = *game_ptr;
+        Side* side = game::Begin(game);
+        Site* item_site = nullptr;
+        for (auto& map_site : game.map->sites) {
+            if (item_site || map_site.content != site::kItem) continue;
+            for (auto& item : game.map->items)
+                if (item.index == map_site.item && !site::ItemReserved(item)) item_site = &map_site;
         }
-        Army* h = mk(g, s->x, s->y, side->index, armytype::kHero);
+        Army* hero = make_army(game, item_site->x, item_site->y, side->index, armytype::kHero);
         side->quest.reset();
-        auto q = quest::Assign(g, *side, h, false, flying);
+        auto assigned = quest::Assign(game, *side, hero, false, flying);
         // a retrieve quest is not certain; take the first try that is one
-        for (int i = 0; i < 200 && q && q->type != quest::kRetrieveItem; i++) {
+        for (int i = 0; i < 200 && assigned && assigned->type != quest::kRetrieveItem; i++) {
             side->quest.reset();
-            q = quest::Assign(g, *side, h, false, flying);
+            assigned = quest::Assign(game, *side, hero, false, flying);
         }
-        if (!q || q->type != quest::kRetrieveItem) {
+        if (!assigned || assigned->type != quest::kRetrieveItem) {
             Ok(false, "an item quest was given");
             continue;
         }
-        Site* at = nullptr;
-        for (auto& x : g.map->sites)
-            if (x.content == site::kItem && x.item == q->item->index) at = &x;
+        Site* target_site = nullptr;
+        for (auto& map_site : game.map->sites)
+            if (map_site.content == site::kItem && map_site.item == assigned->item->index)
+                target_site = &map_site;
         int ring = 0, seen = 0;
         for (int dx = -2; dx <= 2; dx++)
             for (int dy = -2; dy <= 2; dy++)
                 if (std::max(std::abs(dx), std::abs(dy)) == 2) {
                     ring++;
-                    if (game::Seen(g, side->index, at->x + dx, at->y + dy)) seen++;
+                    if (game::Seen(game, side->index, target_site->x + dx, target_site->y + dy))
+                        seen++;
                 }
         if (flying)
             Eq(seen, ring, "a flier's quest uncovers two tiles round the ruin");
         else
-            Ok(game::Seen(g, side->index, at->x + 1, at->y + 1), "a walker's uncovers one");
+            Ok(game::Seen(game, side->index, target_site->x + 1, target_site->y + 1),
+               "a walker's uncovers one");
     }
 }
 
-// What plays when. The OPL synthesis is checked in the sound step.
+/**
+ * @brief Checks music and voice advisor cues.
+ *
+ * The OPL synthesis is checked in the sound step.
+ */
 static void TestSound() {
     printf("sound\n");
     auto files = uidata::LoadStrings(kData + "/DATA/FILE.DAT");
@@ -3997,135 +4060,143 @@ static void TestSound() {
     Eq(name, "INT2.XMI", "a computer's turn beside a human plays FILE.DAT group 11");
     Ok(!loop, "once");
     Eq(cues::Song(files, cues::kBegin, {}, first).first, "INT22.XMI", "the war begins to INT22");
-    Game g;
-    g.map = std::make_unique<Map>();
-    g.turn = 1;
+    Game game;
+    game.map = std::make_unique<Map>();
+    game.turn = 1;
     Side side;
     side.index = 0;
     side.gold = 500;
-    g.map->cities.resize(6);
-    for (auto& c : g.map->cities) c.owner_index = 0;
-    Eq(cues::AdvisorCue(g, side, first), kNone, "the advisor never speaks on turn 1");
+    game.map->cities.resize(6);
+    for (auto& city : game.map->cities) city.owner_index = 0;
+    Eq(cues::AdvisorCue(game, side, first), kNone, "the advisor never speaks on turn 1");
     Eq(side.advisor.mark, 5, "but he has marked six cities down as five");
-    g.turn = 2;
-    Eq(cues::AdvisorCue(g, side, first), kNone, "nothing new, not a seventh turn: silence");
-    for (int i = 0; i < 5; i++) g.map->cities[i].owner_index = 1;
-    Eq(cues::AdvisorCue(g, side, first), 40, "down to one city: 'Thy sorry efforts...' (VLOSE05)");
+    game.turn = 2;
+    Eq(cues::AdvisorCue(game, side, first), kNone, "nothing new, not a seventh turn: silence");
+    for (int i = 0; i < 5; i++) game.map->cities[i].owner_index = 1;
+    Eq(cues::AdvisorCue(game, side, first), 40,
+       "down to one city: 'Thy sorry efforts...' (VLOSE05)");
     Eq(side.advisor.dir, 2, "and he remembers saying so");
-    for (int i = 0; i < 5; i++) g.map->cities[i].owner_index = 0;
-    Eq(cues::AdvisorCue(g, side, first), 47, "back to six: 'Thou art doing well... so far!'");
-    g.turn = 7;
+    for (int i = 0; i < 5; i++) game.map->cities[i].owner_index = 0;
+    Eq(cues::AdvisorCue(game, side, first), 47, "back to six: 'Thou art doing well... so far!'");
+    game.turn = 7;
     side.gold = 50;
-    Eq(cues::AdvisorCue(g, side, first), 54, "on a seventh turn, short of gold: VGOLD00");
+    Eq(cues::AdvisorCue(game, side, first), 54, "on a seventh turn, short of gold: VGOLD00");
 }
 
+/**
+ * @brief Checks the Modern learnable AI, SideBelief, PolicyNetwork, and fair-information rules.
+ */
 static void TestModernAi() {
     printf("modern learnable AI & diplomacy\n");
 
     // 1. All 27 personality profiles exist and have bounded 10D traits
-    for (int lv = 0; lv < 3; lv++) {
-        for (int c = 0; c < 9; c++) {
-            const auto& p = ai::personality::ProfileFor(lv, c);
-            Ok(!p.name.empty() && !p.archetype.empty() && !p.motto.empty(),
+    for (int level = 0; level < 3; level++) {
+        for (int card = 0; card < 9; card++) {
+            const auto& profile = ai::personality::ProfileFor(level, card);
+            Ok(!profile.name.empty() && !profile.archetype.empty() && !profile.motto.empty(),
                "card profile has name, archetype, motto");
-            for (float t : p.traits) {
-                Ok(t >= -1.0F && t <= 1.0F, "trait in [-1, 1]");
+            for (float trait : profile.traits) {
+                Ok(trait >= -1.0F && trait <= 1.0F, "trait in [-1, 1]");
             }
         }
     }
 
     // 2. Fair-information fog-of-war pathblocking when classicAi == false
     {
-        auto gp = NewGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
-        Game& g = *gp;
-        Side* s0 = g.map->Side(0);
-        s0->computer = true;
-        s0->classic_ai = false;
-        int ux = kNone, uy = kNone;
-        for (int y = 5; y < g.map->height - 5 && ux == kNone; y++) {
-            for (int x = 5; x < g.map->width - 5 && ux == kNone; x++) {
-                if (!game::Seen(g, 0, x, y) && scn::TerrainAt(*g.map, x, y) == movement::kPlain) {
-                    ux = x;
-                    uy = y;
+        auto game_ptr = NewGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
+        Game& game = *game_ptr;
+        Side* side0 = game.map->Side(0);
+        side0->computer = true;
+        side0->classic_ai = false;
+        int unseen_x = kNone, unseen_y = kNone;
+        for (int y = 5; y < game.map->height - 5 && unseen_x == kNone; y++) {
+            for (int x = 5; x < game.map->width - 5 && unseen_x == kNone; x++) {
+                if (!game::Seen(game, 0, x, y) &&
+                    scn::TerrainAt(*game.map, x, y) == movement::kPlain) {
+                    unseen_x = x;
+                    unseen_y = y;
                 }
             }
         }
-        Ok(ux != kNone, "found unseen plain tile under hiddenMap");
-        auto grid = movement::Grid(g, 0);
-        auto prep = movement::Prepare(g, grid, 0, movement::kLand, 0, 0);
-        int idx = uy * g.map->width + ux;
+        Ok(unseen_x != kNone, "found unseen plain tile under hiddenMap");
+        auto grid = movement::Grid(game, 0);
+        auto prep = movement::Prepare(game, grid, 0, movement::kLand, 0, 0);
+        int idx = unseen_y * game.map->width + unseen_x;
         Eq(prep[idx], movement::kShut, "modern AI cannot pathfind through unseen fog tiles");
     }
 
     // 3. ALLIED shared fog-of-war vision, truce timers, tribute transfer, and joint war pact
     {
-        auto gp = NewGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}}));
-        Game& g = *gp;
-        int tx = 50, ty = 50;
-        Eq(game::Seen(g, 0, tx, ty), false, "side 0 has not seen (50,50)");
-        game::Reveal(g, 1, tx, ty, false);
-        Eq(game::Seen(g, 1, tx, ty), true, "side 1 sees (50,50)");
-        Eq(game::Seen(g, 0, tx, ty), false, "unallied side 0 still cannot see side 1's tile");
+        auto game_ptr = NewGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}}));
+        Game& game = *game_ptr;
+        int tile_x = 50, tile_y = 50;
+        Eq(game::Seen(game, 0, tile_x, tile_y), false, "side 0 has not seen (50,50)");
+        game::Reveal(game, 1, tile_x, tile_y, false);
+        Eq(game::Seen(game, 1, tile_x, tile_y), true, "side 1 sees (50,50)");
+        Eq(game::Seen(game, 0, tile_x, tile_y), false,
+           "unallied side 0 still cannot see side 1's tile");
 
-        int gold0_before = g.map->sides[0].gold;
-        int gold1_before = g.map->sides[1].gold;
-        diplomacy::Propose(g, 0, 1, diplomacy::kPeace);
-        diplomacy::ProposeAlliance(g, 0, 1, true);
-        diplomacy::SetGoldOffer(g, 0, 1, 50);
-        diplomacy::SetWarTarget(g, 0, 1, 2);
+        int gold0_before = game.map->sides[0].gold;
+        int gold1_before = game.map->sides[1].gold;
+        diplomacy::Propose(game, 0, 1, diplomacy::kPeace);
+        diplomacy::ProposeAlliance(game, 0, 1, true);
+        diplomacy::SetGoldOffer(game, 0, 1, 50);
+        diplomacy::SetWarTarget(game, 0, 1, 2);
 
-        diplomacy::Propose(g, 1, 0, diplomacy::kPeace);
-        diplomacy::ProposeAlliance(g, 1, 0, true);
-        diplomacy::Apply(g, g.map->sides[1]);
+        diplomacy::Propose(game, 1, 0, diplomacy::kPeace);
+        diplomacy::ProposeAlliance(game, 1, 0, true);
+        diplomacy::Apply(game, game.map->sides[1]);
 
-        Eq(diplomacy::IsAllied(g, 0, 1), true, "sides 0 and 1 are now ALLIED");
-        Eq(diplomacy::TruceTurns(g, 0, 1), 15, "15-turn alliance truce active");
-        Eq(g.map->sides[0].gold, gold0_before - 50, "tribute deducted from proposer");
-        Eq(g.map->sides[1].gold, gold1_before + 50, "tribute credited to recipient");
-        Eq(diplomacy::State(g, 1, 2), diplomacy::kWar, "joint war target activated");
-        Eq(game::Seen(g, 0, tx, ty), true, "ALLIED side 0 now shares side 1's fog-of-war vision");
+        Eq(diplomacy::IsAllied(game, 0, 1), true, "sides 0 and 1 are now ALLIED");
+        Eq(diplomacy::TruceTurns(game, 0, 1), 15, "15-turn alliance truce active");
+        Eq(game.map->sides[0].gold, gold0_before - 50, "tribute deducted from proposer");
+        Eq(game.map->sides[1].gold, gold1_before + 50, "tribute credited to recipient");
+        Eq(diplomacy::State(game, 1, 2), diplomacy::kWar, "joint war target activated");
+        Eq(game::Seen(game, 0, tile_x, tile_y), true,
+           "ALLIED side 0 now shares side 1's fog-of-war vision");
 
-        auto bd = diplomacy::ComputeAttitude(g, 1, 0);
-        Ok(!bd.factors.empty() && !bd.what_it_takes.empty(),
+        auto breakdown = diplomacy::ComputeAttitude(game, 1, 0);
+        Ok(!breakdown.factors.empty() && !breakdown.what_it_takes.empty(),
            "attitude ledger produces itemized factors and forecast");
     }
 
     // 4. SideBelief under viewEnemies == 0 and RNG preservation in estimateCombat
     {
-        auto gp = NewGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
-        Game& g = *gp;
-        Side& s0 = g.map->sides[0];
-        s0.computer = true;
-        s0.classic_ai = false;
-        ai::belief::Update(g, s0);
-        const SideBelief& b = ai::belief::Ensure(s0);
-        for (City* c : b.visible_cities) {
-            Ok(ai::belief::IsCityVisible(g, 0, *c),
+        auto game_ptr = NewGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
+        Game& game = *game_ptr;
+        Side& side0 = game.map->sides[0];
+        side0.computer = true;
+        side0.classic_ai = false;
+        ai::belief::Update(game, side0);
+        const SideBelief& belief = ai::belief::Ensure(side0);
+        for (City* city : belief.visible_cities) {
+            Ok(ai::belief::IsCityVisible(game, 0, *city),
                "all visibleCities in SideBelief are genuinely seen by side 0");
         }
-        uint32_t rng_before = g.rng.state;
-        std::vector<Army*> my_armies = game::SideArmies(g, s0);
-        if (!my_armies.empty() && !b.visible_cities.empty()) {
+        uint32_t rng_before = game.rng.state;
+        std::vector<Army*> my_armies = game::SideArmies(game, side0);
+        if (!my_armies.empty() && !belief.visible_cities.empty()) {
             std::vector<Army*> test_stack = {my_armies[0]};
-            auto est = ai::belief::EstimateCombat(g, s0, test_stack, b.visible_cities[0]->x,
-                                                  b.visible_cities[0]->y);
+            auto est =
+                    ai::belief::EstimateCombat(game, side0, test_stack, belief.visible_cities[0]->x,
+                                               belief.visible_cities[0]->y);
             Ok(est.win_prob >= 0.0F && est.win_prob <= 1.0F,
                "estimateCombat returns probability in [0, 1]");
         }
-        Eq(g.rng.state, rng_before, "estimateCombat never mutates Game::rng");
+        Eq(game.rng.state, rng_before, "estimateCombat never mutates Game::rng");
     }
 
     // 5. PolicyNetwork 4 heads and JSON serialization roundtrip
     {
         ai::ml::PolicyNetwork net;
-        auto gp = NewGame("TUTORIA", Seed(1));
-        Game& g = *gp;
-        Side& s0 = g.map->sides[0];
-        s0.classic_ai = false;
-        ai::belief::Update(g, s0);
-        auto ctx = ai::ml::BuildContext(g, s0);
-        float v = net.EvaluateValue(ctx, ai::ml::BuildCriticFeatures(g, s0));
-        Ok(std::isfinite(v) && std::abs(v) < 5.0F,
+        auto game_ptr = NewGame("TUTORIA", Seed(1));
+        Game& game = *game_ptr;
+        Side& side0 = game.map->sides[0];
+        side0.classic_ai = false;
+        ai::belief::Update(game, side0);
+        auto ctx = ai::ml::BuildContext(game, side0);
+        float board_val = net.EvaluateValue(ctx, ai::ml::BuildCriticFeatures(game, side0));
+        Ok(std::isfinite(board_val) && std::abs(board_val) < 5.0F,
            "linear value head gives a finite, small estimate at random init");
 
         auto flat1 = net.Flatten();
@@ -4152,23 +4223,24 @@ static void TestModernAi() {
             opts.sides[i].computer = true;
             opts.sides[i].level = 2;
         }
-        auto gp = NewGame("TUTORIA", opts);
-        Game& g = *gp;
-        for (auto& s : g.map->sides) {
-            if (s.in_use) s.classic_ai = false;
+        auto game_ptr = NewGame("TUTORIA", opts);
+        Game& game = *game_ptr;
+        for (auto& side : game.map->sides) {
+            if (side.in_use) side.classic_ai = false;
         }
-        Side* cur = game::Begin(g);
+        Side* cur = game::Begin(game);
         int turns_played = 0;
         int worst_stack = 0;
-        while (cur && !g.over && g.turn <= 8) {
-            ai::PlayTurn(g, *cur);
+        while (cur && !game.over && game.turn <= 8) {
+            ai::PlayTurn(game, *cur);
             turns_played++;
             std::map<int, int> per_tile;
-            for (Army* a : g.armies) {
-                if (a->x != kNone && !a->transit)
-                    worst_stack = std::max(worst_stack, ++per_tile[a->y * g.map->width + a->x]);
+            for (Army* army : game.armies) {
+                if (army->x != kNone && !army->transit)
+                    worst_stack =
+                            std::max(worst_stack, ++per_tile[army->y * game.map->width + army->x]);
             }
-            cur = game::EndTurn(g);
+            cur = game::EndTurn(game);
         }
         Ok(turns_played >= 4,
            "modern learnable AI plays multiple turns cleanly under hiddenMap + viewEnemies=0");
@@ -4180,41 +4252,43 @@ static void TestModernAi() {
     {
         ai::ml::PolicyNetwork fresh_net;
         float max_skip = 0.0F;
-        for (float w : fresh_net.mission_net.w_skip) max_skip = std::max(max_skip, std::abs(w));
+        for (float weight : fresh_net.mission_net.w_skip)
+            max_skip = std::max(max_skip, std::abs(weight));
         Ok(max_skip <= 0.25F, "PolicyNetwork starts tabula rasa with zero hand-coded skip priors");
 
-        auto gp =
+        auto game_ptr =
                 NewGame("ERYTHEA",
                         SeedWith(7, {{"hiddenMap", 1}, {"viewEnemies", 0}, {"neutralCities", 2}}));
-        Game& g = *gp;
-        Side& s7 = g.map->sides[7];
-        s7.computer = true;
-        s7.classic_ai = false;
+        Game& game = *game_ptr;
+        Side& side7 = game.map->sides[7];
+        side7.computer = true;
+        side7.classic_ai = false;
 
         // Reveal a neutral city's top-left (x, y) tile while leaving (x + 1, y + 1) unseen
         City* target_neutral = nullptr;
-        for (auto& c : g.map->cities) {
-            if (c.owner_index == kNone && !c.razed && !game::Seen(g, 7, c.x + 1, c.y + 1)) {
-                target_neutral = &c;
+        for (auto& city : game.map->cities) {
+            if (city.owner_index == kNone && !city.razed &&
+                !game::Seen(game, 7, city.x + 1, city.y + 1)) {
+                target_neutral = &city;
                 break;
             }
         }
         Ok(target_neutral != nullptr, "found unseen neutral city on ERYTHEA");
         if (target_neutral) {
             // Remove any garrison on (x, y) so (x, y) is visibly empty while (x+1, y+1) is in fog
-            for (Army* a : game::ArmiesAt(g, target_neutral->x, target_neutral->y)) {
-                a->x = kNone;
-                a->y = kNone;
+            for (Army* army : game::ArmiesAt(game, target_neutral->x, target_neutral->y)) {
+                army->x = kNone;
+                army->y = kNone;
             }
-            g.explored[7][target_neutral->y * g.map->width + target_neutral->x] = true;
-            Eq(game::Seen(g, 7, target_neutral->x, target_neutral->y), true,
+            game.explored[7][target_neutral->y * game.map->width + target_neutral->x] = true;
+            Eq(game::Seen(game, 7, target_neutral->x, target_neutral->y), true,
                "top-left neutral city tile is seen");
-            Eq(game::Seen(g, 7, target_neutral->x + 1, target_neutral->y + 1), false,
+            Eq(game::Seen(game, 7, target_neutral->x + 1, target_neutral->y + 1), false,
                "bottom-right neutral city tile is unseen");
-            ai::belief::Update(g, s7);
-            std::vector<Army*> my_armies = game::SideArmies(g, s7);
+            ai::belief::Update(game, side7);
+            std::vector<Army*> my_armies = game::SideArmies(game, side7);
             Ok(!my_armies.empty(), "side 7 has starting army");
-            auto est = ai::belief::EstimateCombat(g, s7, {my_armies[0]}, target_neutral->x,
+            auto est = ai::belief::EstimateCombat(game, side7, {my_armies[0]}, target_neutral->x,
                                                   target_neutral->y);
             Eq(est.estimated_defender_count, 0,
                "partially-seen neutral city with visibly empty (x,y) does not fabricate 3 phantom "
@@ -4223,28 +4297,29 @@ static void TestModernAi() {
 
         // With no rival cities or stacks visible to side 7, cityNearestEnemyDist should not treat
         // fog/neutrals as enemies
-        const SideBelief& b7 = ai::belief::Ensure(s7);
-        if (s7.capital && s7.capital->index < static_cast<int>(b7.city_nearest_enemy_dist.size())) {
-            Ok(b7.city_nearest_enemy_dist[s7.capital->index] > 50.0F,
+        const SideBelief& belief7 = ai::belief::Ensure(side7);
+        if (side7.capital &&
+            side7.capital->index < static_cast<int>(belief7.city_nearest_enemy_dist.size())) {
+            Ok(belief7.city_nearest_enemy_dist[side7.capital->index] > 50.0F,
                "cityNearestEnemyDist ignores neutral cities and fog frontiers when no rivals are "
                "visible");
         }
 
         // Reveal only side 7's home island land tiles (x < 27, y < 32) while surrounding sea
         // remains unseen
-        g.explored[7].assign(static_cast<size_t>(g.map->width) * g.map->height, false);
+        game.explored[7].assign(static_cast<size_t>(game.map->width) * game.map->height, false);
         for (int y = 0; y < 32; y++) {
             for (int x = 0; x < 27; x++) {
-                int terr = scn::TerrainAt(*g.map, x, y);
+                int terr = scn::TerrainAt(*game.map, x, y);
                 if (terr != movement::kWater && terr != movement::kShore) {
-                    game::Reveal(g, 7, x, y, false);
+                    game::Reveal(game, 7, x, y, false);
                 }
             }
         }
-        ai::belief::Update(g, s7);
+        ai::belief::Update(game, side7);
         bool has_water_frontier = false;
-        for (const auto& fc : ai::belief::Ensure(s7).fog_frontiers) {
-            if (fc.is_water) has_water_frontier = true;
+        for (const auto& frontier : ai::belief::Ensure(side7).fog_frontiers) {
+            if (frontier.is_water) has_water_frontier = true;
         }
         Ok(has_water_frontier,
            "island faction generates coastal/water fog frontiers after exploring local island "
@@ -4287,20 +4362,20 @@ static void TestModernAi() {
         // Hidden-map potential shaping strictly rewards revealing unseen castles, while capture
         // dominates discovery
         City* unseen_neutral = nullptr;
-        for (auto& c : g.map->cities) {
-            if (c.owner_index == kNone && !ai::belief::IsCityVisible(g, 7, c)) {
-                unseen_neutral = &c;
+        for (auto& city : game.map->cities) {
+            if (city.owner_index == kNone && !ai::belief::IsCityVisible(game, 7, city)) {
+                unseen_neutral = &city;
                 break;
             }
         }
         Ok(unseen_neutral != nullptr, "found an unseen neutral castle on hidden-map ERYTHEA");
         if (unseen_neutral) {
-            float phi_hidden = ai::ml::ComputeEmpireScore(g, 7);
-            game::Reveal(g, 7, unseen_neutral->x, unseen_neutral->y, false);
-            float phi_revealed = ai::ml::ComputeEmpireScore(g, 7);
+            float phi_hidden = ai::ml::ComputeEmpireScore(game, 7);
+            game::Reveal(game, 7, unseen_neutral->x, unseen_neutral->y, false);
+            float phi_revealed = ai::ml::ComputeEmpireScore(game, 7);
             int prev_owner = unseen_neutral->owner_index;
             unseen_neutral->owner_index = 7;
-            float phi_captured = ai::ml::ComputeEmpireScore(g, 7);
+            float phi_captured = ai::ml::ComputeEmpireScore(game, 7);
             unseen_neutral->owner_index = prev_owner;
 
             float discovery_gain = phi_revealed - phi_hidden;
@@ -4314,15 +4389,15 @@ static void TestModernAi() {
 
         // Recorded MissionStepRecord carries 16D StackVec with origin-city guard/threat
         // observability
-        s7.gold = 200;
-        for (Army* a : game::SideArmies(g, s7)) {
-            a->moves = a->max_moves;
-            a->ai_moved = false;
+        side7.gold = 200;
+        for (Army* army : game::SideArmies(game, side7)) {
+            army->moves = army->max_moves;
+            army->ai_moved = false;
         }
         ai::ml::RolloutSampler rec_sampler;
         ai::ml::TurnStepRecord rec_turn;
         rec_sampler.current_turn = &rec_turn;
-        ai::modern::PlayTurn(g, s7, nullptr, &fresh_net, &rec_sampler);
+        ai::modern::PlayTurn(game, side7, nullptr, &fresh_net, &rec_sampler);
         Ok(!rec_turn.mission_steps.empty() && !rec_turn.mission_steps[0].candidates.empty(),
            "RolloutSampler records joint (target, coalition) MissionStepRecord candidates");
 
@@ -4386,25 +4461,26 @@ static void TestModernAi() {
             GameOpts human_opts = SeedWith(11, {{"hiddenMap", 1}});
             for (int i = 0; i < 8; i++) human_opts.sides[i].computer = (i > 0);
             auto gp_human = NewGame("ERYTHEA", human_opts);
-            Game& gh = *gp_human;
-            Eq(game::HasActiveHuman(gh), true, "game with human player reports active human");
-            Eq(game::ViewerSide(gh, gh.sides[0]), gh.sides[0]->index,
+            Game& human_game = *gp_human;
+            Eq(game::HasActiveHuman(human_game), true,
+               "game with human player reports active human");
+            Eq(game::ViewerSide(human_game, human_game.sides[0]), human_game.sides[0]->index,
                "human viewerSide uses human side index");
-            Eq(game::Seen(gh, game::ViewerSide(gh, gh.sides[0]), 0, 0), false,
-               "human viewer still has fog-of-war on unseen corner");
+            Eq(game::Seen(human_game, game::ViewerSide(human_game, human_game.sides[0]), 0, 0),
+               false, "human viewer still has fog-of-war on unseen corner");
 
             GameOpts ai_opts = SeedWith(11, {{"hiddenMap", 1}});
             for (int i = 0; i < 8; i++) ai_opts.sides[i].computer = true;
             auto gp_ai = NewGame("ERYTHEA", ai_opts);
-            Game& ga = *gp_ai;
-            Eq(game::HasActiveHuman(ga), false, "all-AI game reports no active human");
-            Eq(game::ViewerSide(ga, ga.sides[0]), kNone,
+            Game& ai_game = *gp_ai;
+            Eq(game::HasActiveHuman(ai_game), false, "all-AI game reports no active human");
+            Eq(game::ViewerSide(ai_game, ai_game.sides[0]), kNone,
                "all-AI viewerSide returns NONE (spectator full map)");
-            Eq(game::Seen(ga, game::ViewerSide(ga, ga.sides[0]), 0, 0), true,
+            Eq(game::Seen(ai_game, game::ViewerSide(ai_game, ai_game.sides[0]), 0, 0), true,
                "spectator viewer sees unseen corner (0,0)");
-            Eq(game::FogCell(ga, game::ViewerSide(ga, ga.sides[0]), 0, 0), kNone,
+            Eq(game::FogCell(ai_game, game::ViewerSide(ai_game, ai_game.sides[0]), 0, 0), kNone,
                "spectator viewer draws no fog shroud");
-            Eq(game::Seen(ga, ga.sides[0]->index, 0, 0), false,
+            Eq(game::Seen(ai_game, ai_game.sides[0]->index, 0, 0), false,
                "individual AI side still obeys its own Hidden Map fog");
         }
 
@@ -4436,25 +4512,26 @@ static void TestModernAi() {
 
             // Mid-game live switch between Classic AI and Modern AI: alternate engines
             // turn by turn for several rounds and check the game stays legal
-            for (Side* s : decoded_modern->sides) s->computer = true;
+            for (Side* side : decoded_modern->sides) side->computer = true;
             Side* cur = game::Begin(*decoded_modern);
             Ok(cur != nullptr, "mid-game switch test game begins");
             int switched_turns = 0, worst_tile = 0;
             bool positions_valid = true;
             while (cur && !decoded_modern->over && decoded_modern->turn <= 6) {
                 bool classic = (decoded_modern->turn % 2 == 0);
-                for (auto& s : decoded_modern->map->sides) s.classic_ai = classic;
+                for (auto& side : decoded_modern->map->sides) side.classic_ai = classic;
                 ai::PlayTurn(*decoded_modern, *cur);
                 switched_turns++;
                 std::map<int, int> per_tile;
-                for (Army* a : decoded_modern->armies) {
-                    if (a->x == kNone || a->transit) continue;
-                    if (a->x < 0 || a->y < 0 || a->x >= decoded_modern->map->width ||
-                        a->y >= decoded_modern->map->height) {
+                for (Army* army : decoded_modern->armies) {
+                    if (army->x == kNone || army->transit) continue;
+                    if (army->x < 0 || army->y < 0 || army->x >= decoded_modern->map->width ||
+                        army->y >= decoded_modern->map->height) {
                         positions_valid = false;
                     } else {
-                        worst_tile = std::max(worst_tile,
-                                              ++per_tile[a->y * decoded_modern->map->width + a->x]);
+                        worst_tile = std::max(
+                                worst_tile,
+                                ++per_tile[army->y * decoded_modern->map->width + army->x]);
                     }
                 }
                 cur = game::EndTurn(*decoded_modern);
@@ -4470,49 +4547,50 @@ static void TestModernAi() {
         // Small-map scaling (activeSides + cropMargin) and thread-local in-memory random maps
         {
             Rng map_rng(4242.0);
-            randommap::Options ro;
-            ro.data_dir = kData;
-            ro.rng = &map_rng;
-            ro.sliders = {3, 3, 2, 3};
-            auto rfiles = randommap::GenerateNow(ro);
+            randommap::Options rand_opts;
+            rand_opts.data_dir = kData;
+            rand_opts.rng = &map_rng;
+            rand_opts.sliders = {3, 3, 2, 3};
+            auto rfiles = randommap::GenerateNow(rand_opts);
 
-            game::NewGameOptions so;
-            so.seed = 4242.0;
-            so.memory_files = &rfiles;
-            so.active_sides = 2;
-            so.crop_margin = 14;
-            so.options = {{"hiddenMap", 1}, {"diplomacy", 0}, {"neutralCities", 1}, {"quests", 1}};
+            game::NewGameOptions small_opts;
+            small_opts.seed = 4242.0;
+            small_opts.memory_files = &rfiles;
+            small_opts.active_sides = 2;
+            small_opts.crop_margin = 14;
+            small_opts.options = {
+                {"hiddenMap", 1}, {"diplomacy", 0}, {"neutralCities", 1}, {"quests", 1}};
             for (int i = 0; i < 8; i++) {
-                so.sides[i].computer = true;
-                so.sides[i].level = 2;
+                small_opts.sides[i].computer = true;
+                small_opts.sides[i].level = 2;
             }
-            auto gp_small = game::NewGame(kData, "RANDOM", so);
-            Game& gs = *gp_small;
-            Eq(static_cast<int>(gs.sides.size()), 2,
+            auto gp_small = game::NewGame(kData, "RANDOM", small_opts);
+            Game& small_game = *gp_small;
+            Eq(static_cast<int>(small_game.sides.size()), 2,
                "cropped 1v1 random map keeps exactly 2 active sides");
-            Ok(gs.map->cities.size() >= 2 && gs.map->cities.size() < 45,
+            Ok(small_game.map->cities.size() >= 2 && small_game.map->cities.size() < 45,
                "cropped 1v1 random map trims city count");
             bool cities_in_box = true;
-            for (const auto& c : gs.map->cities) {
-                if (c.x < gs.map->active_x0 || c.x + 1 > gs.map->active_x1 ||
-                    c.y < gs.map->active_y0 || c.y + 1 > gs.map->active_y1) {
+            for (const auto& city : small_game.map->cities) {
+                if (city.x < small_game.map->active_x0 || city.x + 1 > small_game.map->active_x1 ||
+                    city.y < small_game.map->active_y0 || city.y + 1 > small_game.map->active_y1) {
                     cities_in_box = false;
                 }
             }
             Ok(cities_in_box, "all cropped cities sit inside the active island box");
-            Eq(scn::TerrainAt(*gs.map, 0, 0), movement::kWater,
+            Eq(scn::TerrainAt(*small_game.map, 0, 0), movement::kWater,
                "outer cropped border tile (0,0) is converted to water");
-            Eq(game::Seen(gs, gs.sides[0]->index, 0, 0), true,
+            Eq(game::Seen(small_game, small_game.sides[0]->index, 0, 0), true,
                "outer cropped water is pre-marked seen under Hidden Map");
 
-            gs.sides[0]->classic_ai = false;
-            gs.sides[1]->classic_ai = true;
-            Side* cur = game::Begin(gs);
-            while (cur && !gs.over && !gs.won && gs.turn <= 10) {
-                if (cur->alive) ai::PlayTurn(gs, *cur);
-                cur = game::EndTurn(gs);
+            small_game.sides[0]->classic_ai = false;
+            small_game.sides[1]->classic_ai = true;
+            Side* cur = game::Begin(small_game);
+            while (cur && !small_game.over && !small_game.won && small_game.turn <= 10) {
+                if (cur->alive) ai::PlayTurn(small_game, *cur);
+                cur = game::EndTurn(small_game);
             }
-            Ok(gs.turn > 5 || gs.won || gs.over,
+            Ok(small_game.turn > 5 || small_game.won || small_game.over,
                "1v1 cropped random map runs Modern vs Classic cleanly");
         }
 
@@ -4535,110 +4613,124 @@ static void TestModernAi() {
             // the input columns an older format did not have
             ml::PolicyNetwork src;
             src.InitRandomWeights(7);
-            auto added_ctx = [](int c) { return c >= ml::kLegacyGlobalDim && c < ml::kGlobalDim; };
+            auto added_ctx = [](int col) {
+                return col >= ml::kLegacyGlobalDim && col < ml::kGlobalDim;
+            };
             auto narrow = [](const auto& mlp, auto dropped, std::vector<float>& out) {
                 using M = std::decay_t<decltype(mlp)>;
-                for (int r = 0; r < M::kOutDim; r++)
-                    for (int c = 0; c < M::kInDim; c++)
-                        if (!dropped(c)) out.push_back(mlp.w_skip[r * M::kInDim + c]);
-                for (int r = 0; r < M::kH1Dim; r++)
-                    for (int c = 0; c < M::kInDim; c++)
-                        if (!dropped(c)) out.push_back(mlp.w1[r * M::kInDim + c]);
+                for (int row = 0; row < M::kOutDim; row++)
+                    for (int col = 0; col < M::kInDim; col++)
+                        if (!dropped(col)) out.push_back(mlp.w_skip[row * M::kInDim + col]);
+                for (int row = 0; row < M::kH1Dim; row++)
+                    for (int col = 0; col < M::kInDim; col++)
+                        if (!dropped(col)) out.push_back(mlp.w1[row * M::kInDim + col]);
                 out.insert(out.end(), mlp.b1.begin(), mlp.b1.end());
                 out.insert(out.end(), mlp.w2.begin(), mlp.w2.end());
                 out.insert(out.end(), mlp.b2.begin(), mlp.b2.end());
                 out.insert(out.end(), mlp.w3.begin(), mlp.w3.end());
                 out.insert(out.end(), mlp.b3.begin(), mlp.b3.end());
             };
-            auto critic_dropped = [&](int in) {
-                return [&, in](int c) { return added_ctx(c) || c >= in - ml::kCriticDim; };
+            auto critic_dropped = [&](int in_dim) {
+                return [&, in_dim](int col) {
+                    return added_ctx(col) || col >= in_dim - ml::kCriticDim;
+                };
             };
-            std::vector<float> v5, v4;
-            for (auto* out : {&v5, &v4}) {
+            std::vector<float> vec_v5, vec_v4;
+            for (auto* out : {&vec_v5, &vec_v4}) {
                 narrow(src.diplo_net, added_ctx, *out);
                 narrow(src.mission_net, added_ctx, *out);
                 narrow(src.econ_net, added_ctx, *out);
             }
-            narrow(src.value_net, added_ctx, v5);
-            narrow(src.stack_value_net, added_ctx, v5);
-            narrow(src.value_net, critic_dropped(ml::kValueInDim), v4);
-            size_t v3_size = v4.size();
-            narrow(src.stack_value_net, critic_dropped(ml::kStackValueInDim), v4);
-            Eq(static_cast<int>(v5.size()), 8866, "synthesised v5 vector has 8866 parameters");
-            Eq(static_cast<int>(v4.size()), 8066, "synthesised v4 vector has 8066 parameters");
+            narrow(src.value_net, added_ctx, vec_v5);
+            narrow(src.stack_value_net, added_ctx, vec_v5);
+            narrow(src.value_net, critic_dropped(ml::kValueInDim), vec_v4);
+            size_t v3_size = vec_v4.size();
+            narrow(src.stack_value_net, critic_dropped(ml::kStackValueInDim), vec_v4);
+            Eq(static_cast<int>(vec_v5.size()), 8866, "synthesised v5 vector has 8866 parameters");
+            Eq(static_cast<int>(vec_v4.size()), 8066, "synthesised v4 vector has 8066 parameters");
             Eq(static_cast<int>(v3_size), 6729, "synthesised v3 prefix has 6729 parameters");
 
             // Inputs with the columns a format lacked set to zero: the migrated
             // network must compute exactly what the source network computes
-            ml::ContextVec cx{};
+            ml::ContextVec ctx_vec{};
             for (int i = 0; i < ml::kContextDim; i++)
-                cx[i] = added_ctx(i) ? 0.0F : 0.1F * static_cast<float>(i % 7) - 0.3F;
+                ctx_vec[i] = added_ctx(i) ? 0.0F : 0.1F * static_cast<float>(i % 7) - 0.3F;
             ml::CriticVec some_crit{}, zero_crit{};
             for (int i = 0; i < ml::kCriticDim; i++)
                 some_crit[i] = 0.05F * static_cast<float>(i + 1);
-            ml::StackVec sv{};
-            sv[3] = 0.4F;
-            ml::TargetVec tv{};
-            tv[2] = 1.0F;
-            tv[10] = 0.6F;
-            ml::EconVec ev{};
-            ev[1] = 1.0F;
-            ev[7] = 0.5F;
-            ml::RivalVec rv{};
-            rv[0] = 0.3F;
-            auto close = [](float a, float b) { return std::abs(a - b) < 1e-5F; };
+            ml::StackVec stack_vec{};
+            stack_vec[3] = 0.4F;
+            ml::TargetVec target_vec{};
+            target_vec[2] = 1.0F;
+            target_vec[10] = 0.6F;
+            ml::EconVec econ_vec{};
+            econ_vec[1] = 1.0F;
+            econ_vec[7] = 0.5F;
+            ml::RivalVec rival_vec{};
+            rival_vec[0] = 0.3F;
+            auto close = [](float lhs, float rhs) { return std::abs(lhs - rhs) < 1e-5F; };
 
-            ml::PolicyNetwork m5;
-            m5.InitRandomWeights(99);
-            Ok(!m5.Flatten().empty(), "scratch network");
-            m5.UnflattenLegacy(v5);
-            Ok(close(m5.ScoreMission(cx, sv, tv).utility, src.ScoreMission(cx, sv, tv).utility),
+            ml::PolicyNetwork migrated_v5;
+            migrated_v5.InitRandomWeights(99);
+            Ok(!migrated_v5.Flatten().empty(), "scratch network");
+            migrated_v5.UnflattenLegacy(vec_v5);
+            Ok(close(migrated_v5.ScoreMission(ctx_vec, stack_vec, target_vec).utility,
+                     src.ScoreMission(ctx_vec, stack_vec, target_vec).utility),
                "v5 MissionNet migrates function-preserving");
-            Ok(close(m5.ScoreEconomy(cx, ev), src.ScoreEconomy(cx, ev)),
+            Ok(close(migrated_v5.ScoreEconomy(ctx_vec, econ_vec),
+                     src.ScoreEconomy(ctx_vec, econ_vec)),
                "v5 EconNet migrates function-preserving");
-            Ok(close(m5.ScoreDiplomacy(cx, rv).stance_logits[3],
-                     src.ScoreDiplomacy(cx, rv).stance_logits[3]),
+            Ok(close(migrated_v5.ScoreDiplomacy(ctx_vec, rival_vec).stance_logits[3],
+                     src.ScoreDiplomacy(ctx_vec, rival_vec).stance_logits[3]),
                "v5 DiploNet migrates function-preserving");
-            Ok(close(m5.EvaluateValue(cx, some_crit), src.EvaluateValue(cx, some_crit)),
+            Ok(close(migrated_v5.EvaluateValue(ctx_vec, some_crit),
+                     src.EvaluateValue(ctx_vec, some_crit)),
                "v5 ValueNet (with privileged inputs) migrates function-preserving");
-            Ok(close(m5.EvaluateStackValue(ml::PackStackValueInput(cx, sv, some_crit)),
-                     src.EvaluateStackValue(ml::PackStackValueInput(cx, sv, some_crit))),
+            Ok(close(migrated_v5.EvaluateStackValue(
+                             ml::PackStackValueInput(ctx_vec, stack_vec, some_crit)),
+                     src.EvaluateStackValue(
+                             ml::PackStackValueInput(ctx_vec, stack_vec, some_crit))),
                "v5 StackValueNet migrates function-preserving");
-            ml::ContextVec cx_new = cx;
+            ml::ContextVec cx_new = ctx_vec;
             cx_new[ml::kLegacyGlobalDim] = 0.7F;
-            Ok(close(m5.ScoreMission(cx_new, sv, tv).utility, m5.ScoreMission(cx, sv, tv).utility),
+            Ok(close(migrated_v5.ScoreMission(cx_new, stack_vec, target_vec).utility,
+                     migrated_v5.ScoreMission(ctx_vec, stack_vec, target_vec).utility),
                "migrated network ignores the added context features until trained");
 
-            ml::PolicyNetwork m4;
-            m4.UnflattenLegacy(v4);
-            Ok(close(m4.ScoreMission(cx, sv, tv).utility, src.ScoreMission(cx, sv, tv).utility),
+            ml::PolicyNetwork migrated_v4;
+            migrated_v4.UnflattenLegacy(vec_v4);
+            Ok(close(migrated_v4.ScoreMission(ctx_vec, stack_vec, target_vec).utility,
+                     src.ScoreMission(ctx_vec, stack_vec, target_vec).utility),
                "v4 MissionNet migrates function-preserving");
-            Ok(close(m4.EvaluateValue(cx, some_crit), src.EvaluateValue(cx, zero_crit)),
+            Ok(close(migrated_v4.EvaluateValue(ctx_vec, some_crit),
+                     src.EvaluateValue(ctx_vec, zero_crit)),
                "v4 ValueNet ignores the privileged inputs until trained");
-            Ok(close(m4.EvaluateStackValue(ml::PackStackValueInput(cx, sv, some_crit)),
-                     src.EvaluateStackValue(ml::PackStackValueInput(cx, sv, zero_crit))),
+            Ok(close(migrated_v4.EvaluateStackValue(
+                             ml::PackStackValueInput(ctx_vec, stack_vec, some_crit)),
+                     src.EvaluateStackValue(
+                             ml::PackStackValueInput(ctx_vec, stack_vec, zero_crit))),
                "v4 StackValueNet ignores the privileged inputs until trained");
 
             // v3: no StackValueNet in the file -> zero-initialised
-            std::vector<float> v3(v4.begin(), v4.begin() + static_cast<long>(v3_size));
-            ml::PolicyNetwork m3;
-            m3.InitRandomWeights(99);
-            m3.UnflattenLegacy(v3);
+            std::vector<float> vec_v3(vec_v4.begin(), vec_v4.begin() + static_cast<long>(v3_size));
+            ml::PolicyNetwork migrated_v3;
+            migrated_v3.InitRandomWeights(99);
+            migrated_v3.UnflattenLegacy(vec_v3);
             ml::StackValueInVec zero_sv{};
-            Eq(m3.EvaluateStackValue(zero_sv), 0.0F,
+            Eq(migrated_v3.EvaluateStackValue(zero_sv), 0.0F,
                "legacy v3 weights zero-initialize StackValueNet");
 
             // At T = 0.5 with equal utilities (0.0), a singleton family and a 20-item family
             // with logMult = ln(20) receive equal 50/50 probability mass (z_i = u_i/T - logMult_i)
-            std::vector<float> u(21, 0.0F);
-            std::vector<float> lm(21, std::log(20.0F));
-            lm[0] = 0.0F;
+            std::vector<float> utilities(21, 0.0F);
+            std::vector<float> log_mults(21, std::log(20.0F));
+            log_mults[0] = 0.0F;
             ai::ml::RolloutSampler samp;
             samp.rng_state = 1234567U;
             samp.temperature = 0.5F;
             int picks0 = 0;
             for (int i = 0; i < 2000; i++) {
-                if (ai::ml::SelectFromLogits(u, &samp, nullptr, &lm) == 0) picks0++;
+                if (ai::ml::SelectFromLogits(utilities, &samp, nullptr, &log_mults) == 0) picks0++;
             }
             Ok(picks0 > 880 && picks0 < 1120,
                "multiplicity prior stays balanced across families at T = 0.5");
@@ -4648,6 +4740,7 @@ static void TestModernAi() {
 
 // --------------------------------------------------------------------- main
 
+/** @brief Runs the headless rules test suite. */
 int main() {
     if (!FileExists(kData + "/TERRAIN0/ARMYTYPE.DAT")) {
         printf("cannot find the game data in %s: run from the repository root\n", kData.c_str());
@@ -4657,8 +4750,8 @@ int main() {
     TestArmyTypes();
     TestProduction();
     TestBugFlags();
-    for (auto& s : kScenarios)
-        if (FileExists(kData + "/" + s + "/" + s + ".SCN")) TestGame(s);
+    for (auto& scenario : kScenarios)
+        if (FileExists(kData + "/" + scenario + "/" + scenario + ".SCN")) TestGame(scenario);
     TestTurnLoop("ERYTHEA");
     TestVectoring("ERYTHEA");
     TestBuyProduction("ERYTHEA");
