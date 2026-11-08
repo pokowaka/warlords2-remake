@@ -7,10 +7,12 @@ scenario folder the game can play like any other.
 
 ```bash
 cmake --build cpp/build --target w2scengen
-cpp/build/w2scengen --seed 7                       # writes original/GEN7/GEN7.*
+cpp/build/w2scengen --seed 7                       # writes original/GEN7/GEN7.* and GEN7.png
+cpp/build/w2scengen --seed 20 --count 6 --open     # six worlds, previews opened to look at
 cpp/build/w2scengen --seed 7 --shape pangaea --cities 100 --name BIGLAND
-cpp/build/warlords2 --window --scenario GEN7       # play it
-python3 tools/mapvote.py render gen7.png original/GEN7 original/ERYTHEA   # look at it
+cpp/build/warlords2 --window --scenario GEN7       # play the one you like
+cpp/build/w2scengen --preview ERYTHEA --open       # the same picture of any scenario
+python3 tools/mapvote.py render cmp.png original/GEN7 original/ERYTHEA   # side by side
 cpp/build/w2mapeval --generator scenario --shape islands --seeds 1-100    # score it
 ```
 
@@ -22,6 +24,15 @@ cpp/build/w2mapeval --generator scenario --shape islands --seeds 1-100    # scor
 | `--land F` | the share of land, e.g. 0.55; each shape has its own default |
 | `--name NAME` | folder and file name, at most 8 letters; the default is `GEN<seed>` |
 | `--tries N` | how many seeds to try if a world breaks a hard rule (default 20) |
+| `--count N` | make N worlds, from seeds N, N+1, and so on, each in its own `GEN<seed>` folder |
+| `--open` | open the preview pictures in the system's image viewer |
+| `--preview NAME` | only draw `NAME/NAME.png` for an existing scenario (any scenario, the originals too) |
+
+Every world gets a preview picture, `NAME/NAME.png`, so you can look at it
+before playing it. It shows the map in the game's own tiles at 5 pixels a
+tile, with roads, cities, capitals (in their sides' colours) and ruins and
+temples drawn over it (`cpp/src/warlords/preview.{hpp,cpp}`, a plain PNG with
+no image library needed).
 
 ## How a world is made
 
