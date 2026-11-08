@@ -1403,18 +1403,19 @@ int main(int argc, char** argv) {
     std::mt19937 shuffle_rng(12345);
 
     for (int iter = 1; iter <= cfg.iterations; iter++) {
-        auto t0 = std::chrono::steady_clock::now();
+        auto start_time = std::chrono::steady_clock::now();
         float progress =
                 static_cast<float>(iter - 1) / static_cast<float>(std::max(1, cfg.iterations - 1));
         float temperature = cfg.temp_start + (cfg.temp_end - cfg.temp_start) * progress;
-        float lr = cfg.lr_start + (cfg.lr_end - cfg.lr_start) * progress;
+        float learning_rate = cfg.lr_start + (cfg.lr_end - cfg.lr_start) * progress;
         float inv_t = 1.0F / temperature;
 
         // ---- rollouts
         std::vector<RolloutSummary> games(cfg.games_per_iter);
         std::atomic<int> next_game{0};
         std::vector<std::thread> pool;
-        for (unsigned int w = 0; w < std::min<unsigned int>(threads, cfg.games_per_iter); w++) {
+        for (unsigned int worker = 0; worker < std::min<unsigned int>(threads, cfg.games_per_iter);
+             worker++) {
             pool.emplace_back([&]() {
                 for (int gi; (gi = next_game.fetch_add(1)) < cfg.games_per_iter;) {
                     uint32_t seed =
@@ -1434,71 +1435,73 @@ int main(int argc, char** argv) {
                 }
             });
         }
-        for (auto& t : pool) t.join();
+        for (auto& thread : pool) thread.join();
 
         std::vector<SideEpisode> episodes;
         int cities = 0, sides = 0, neutrals = 0;
-        for (auto& gs : games) {
-            cities += gs.recorded_cities;
-            sides += gs.recorded_sides;
-            neutrals += gs.neutrals_left;
-            for (auto& ep : gs.episodes) episodes.push_back(std::move(ep));
+        for (auto& game_summary : games) {
+            cities += game_summary.recorded_cities;
+            sides += game_summary.recorded_sides;
+            neutrals += game_summary.neutrals_left;
+            for (auto& episode : game_summary.episodes) episodes.push_back(std::move(episode));
         }
         ComputeAdvantages(episodes, cfg.gamma, cfg.gae_lambda, cfg.local_weight,
                           cfg.departure_weight);
 
         std::vector<const ml::TurnStepRecord*> turns;
         std::vector<float> m_adv, e_adv, d_adv;
-        for (const auto& ep : episodes) {
-            for (const auto& tr : ep.turns) {
-                turns.push_back(&tr);
-                for (const auto& ms : tr.mission_steps) m_adv.push_back(ms.advantage);
-                if (!tr.econ_steps.empty()) e_adv.push_back(tr.advantage);
-                if (!tr.diplo_steps.empty()) d_adv.push_back(tr.advantage);
+        for (const auto& episode : episodes) {
+            for (const auto& turn : episode.turns) {
+                turns.push_back(&turn);
+                for (const auto& mission_step : turn.mission_steps)
+                    m_adv.push_back(mission_step.advantage);
+                if (!turn.econ_steps.empty()) e_adv.push_back(turn.advantage);
+                if (!turn.diplo_steps.empty()) d_adv.push_back(turn.advantage);
             }
         }
-        Normalizers nz{Normalizer::Fit(m_adv), Normalizer::Fit(e_adv), Normalizer::Fit(d_adv)};
+        Normalizers normalizers{Normalizer::Fit(m_adv), Normalizer::Fit(e_adv),
+                                Normalizer::Fit(d_adv)};
 
         // Explained variance of the critics' rollout-time predictions:
         // 1 - Var(target - prediction) / Var(target); 1 is perfect, <= 0 is useless.
         auto explained_variance = [](const std::vector<float>& target,
                                      const std::vector<float>& pred) {
             if (target.size() < 2) return 0.0;
-            double mt = 0.0, mr = 0.0;
+            double mean_target = 0.0, mean_residual = 0.0;
             for (size_t i = 0; i < target.size(); i++) {
-                mt += target[i];
-                mr += target[i] - pred[i];
+                mean_target += target[i];
+                mean_residual += target[i] - pred[i];
             }
-            mt /= target.size();
-            mr /= target.size();
-            double vt = 0.0, vr = 0.0;
+            mean_target /= target.size();
+            mean_residual /= target.size();
+            double var_target = 0.0, var_residual = 0.0;
             for (size_t i = 0; i < target.size(); i++) {
-                vt += (target[i] - mt) * (target[i] - mt);
-                double r = target[i] - pred[i] - mr;
-                vr += r * r;
+                var_target += (target[i] - mean_target) * (target[i] - mean_target);
+                double residual = target[i] - pred[i] - mean_residual;
+                var_residual += residual * residual;
             }
-            return vt > 1e-12 ? 1.0 - vr / vt : 0.0;
+            return var_target > 1e-12 ? 1.0 - var_residual / var_target : 0.0;
         };
         std::vector<float> v_target, v_pred, sv_target, sv_pred;
-        for (const auto* tr : turns) {
-            if (std::isnan(tr->return_target)) continue;
-            v_target.push_back(tr->return_target);
-            v_pred.push_back(tr->value_pred);
-            for (const auto& ms : tr->mission_steps) {
-                sv_target.push_back(ms.stack_return_target);
-                sv_pred.push_back(ms.stack_value_pred);
+        for (const auto* turn : turns) {
+            if (std::isnan(turn->return_target)) continue;
+            v_target.push_back(turn->return_target);
+            v_pred.push_back(turn->value_pred);
+            for (const auto& mission_step : turn->mission_steps) {
+                sv_target.push_back(mission_step.stack_return_target);
+                sv_pred.push_back(mission_step.stack_value_pred);
             }
         }
         const double ev_value = explained_variance(v_target, v_pred),
                      ev_stack = explained_variance(sv_target, sv_pred);
         // How often a move empties an own city, and how often that city then falls
         long vacated = 0, vacated_lost = 0, mission_moves = 0;
-        for (const auto* tr : turns) {
-            for (const auto& ms : tr->mission_steps) {
+        for (const auto* turn : turns) {
+            for (const auto& mission_step : turn->mission_steps) {
                 mission_moves++;
-                if (ms.vacated_city == kNone) continue;
+                if (mission_step.vacated_city == kNone) continue;
                 vacated++;
-                if (ms.vacated_loss > 0.0F) vacated_lost++;
+                if (mission_step.vacated_loss > 0.0F) vacated_lost++;
             }
         }
         // Critic warm-up: only the critics learn for the first --critic-warmup iterations
@@ -1514,33 +1517,35 @@ int main(int argc, char** argv) {
             for (size_t mb0 = 0; mb0 < turns.size(); mb0 += mb_size) {
                 size_t mb1 = std::min(turns.size(), mb0 + mb_size);
                 std::atomic<size_t> next_turn{mb0};
-                unsigned int gw = std::min<unsigned int>(
+                unsigned int grad_workers = std::min<unsigned int>(
                         threads, static_cast<unsigned int>(std::max<size_t>(1, mb1 - mb0)));
-                std::vector<ml::PolicyNetwork> grads(gw);
-                std::vector<HeadStats> stats(gw);
+                std::vector<ml::PolicyNetwork> grads(grad_workers);
+                std::vector<HeadStats> stats(grad_workers);
                 std::vector<std::thread> gpool;
-                for (unsigned int w = 0; w < gw; w++) {
-                    grads[w].Zero();
-                    gpool.emplace_back([&, w]() {
-                        std::vector<float> u, d_u;
+                for (unsigned int worker = 0; worker < grad_workers; worker++) {
+                    grads[worker].Zero();
+                    gpool.emplace_back([&, worker]() {
+                        std::vector<float> scores, d_scores;
                         for (size_t ti; (ti = next_turn.fetch_add(1)) < mb1;) {
-                            AccumulateTurn(learner, *turns[ti], nz, inv_t, cfg, grads[w], stats[w],
-                                           u, d_u);
+                            AccumulateTurn(learner, *turns[ti], normalizers, inv_t, cfg,
+                                           grads[worker], stats[worker], scores, d_scores);
                         }
                     });
                 }
-                for (auto& t : gpool) t.join();
+                for (auto& thread : gpool) thread.join();
 
                 HeadStats mb_stats;
-                std::vector<float> g(param_count, 0.0F);
-                for (unsigned int w = 0; w < gw; w++) {
-                    auto fg = grads[w].Flatten();
-                    for (size_t d = 0; d < param_count; d++) g[d] += fg[d];
-                    mb_stats.Add(stats[w]);
+                std::vector<float> total_grad(param_count, 0.0F);
+                for (unsigned int worker = 0; worker < grad_workers; worker++) {
+                    auto flat_grad = grads[worker].Flatten();
+                    for (size_t param_idx = 0; param_idx < param_count; param_idx++)
+                        total_grad[param_idx] += flat_grad[param_idx];
+                    mb_stats.Add(stats[worker]);
                 }
                 // Each head's loss is a mean over its own decisions; the critic's over turns
-                auto scale = [&](size_t a, size_t b, float s) {
-                    for (size_t d = a; d < b; d++) g[d] *= s;
+                auto scale = [&](size_t begin_idx, size_t end_idx, float factor) {
+                    for (size_t param_idx = begin_idx; param_idx < end_idx; param_idx++)
+                        total_grad[param_idx] *= factor;
                 };
                 scale(off_diplo, off_mission, warmup ? 0.0F : 1.0F / std::max(1, mb_stats.diplo));
                 scale(off_mission, off_econ, warmup ? 0.0F : 1.0F / std::max(1, mb_stats.mission));
@@ -1549,33 +1554,36 @@ int main(int argc, char** argv) {
                 scale(off_stack_value, param_count,
                       cfg.value_coef / std::max(1, mb_stats.stack_values));
                 double norm = 0.0;
-                for (float x : g) norm += static_cast<double>(x) * x;
+                for (float x : total_grad) norm += static_cast<double>(x) * x;
                 float clip = std::sqrt(norm) > cfg.max_grad_norm
                                      ? cfg.max_grad_norm / static_cast<float>(std::sqrt(norm))
                                      : 1.0F;
                 adam_step++;
                 float bc1 = 1.0F - std::pow(0.9F, static_cast<float>(adam_step)),
                       bc2 = 1.0F - std::pow(0.999F, static_cast<float>(adam_step));
-                for (size_t d = 0; d < param_count; d++) {
-                    float gd = g[d] * clip;
-                    adam_m[d] = 0.9F * adam_m[d] + 0.1F * gd;
-                    adam_v[d] = 0.999F * adam_v[d] + 0.001F * gd * gd;
-                    params[d] -= lr * (adam_m[d] / bc1) / (std::sqrt(adam_v[d] / bc2) + 1e-8F);
+                for (size_t param_idx = 0; param_idx < param_count; param_idx++) {
+                    float clipped_grad = total_grad[param_idx] * clip;
+                    adam_m[param_idx] = 0.9F * adam_m[param_idx] + 0.1F * clipped_grad;
+                    adam_v[param_idx] =
+                            0.999F * adam_v[param_idx] + 0.001F * clipped_grad * clipped_grad;
+                    params[param_idx] -= learning_rate * (adam_m[param_idx] / bc1) /
+                                         (std::sqrt(adam_v[param_idx] / bc2) + 1e-8F);
                 }
                 learner.Unflatten(params);
                 epoch_stats.Add(mb_stats);
             }
             last_epoch = epoch_stats;
             epochs_run++;
-            double kl = epoch_stats.kl / std::max(1, epoch_stats.kl_samples);
-            if (kl > cfg.target_kl)
+            double epoch_kl = epoch_stats.kl / std::max(1, epoch_stats.kl_samples);
+            if (epoch_kl > cfg.target_kl)
                 break;  // the policy has moved far enough from the one that played
         }
 
-        double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time)
+                             .count();
         double ent = last_epoch.entropy / std::max(1, last_epoch.ent_samples);
         double vloss = last_epoch.value_loss / std::max(1, last_epoch.turns);
-        double kl = last_epoch.kl / std::max(1, last_epoch.kl_samples);
+        double mean_kl = last_epoch.kl / std::max(1, last_epoch.kl_samples);
         float avg_cities = static_cast<float>(cities) / static_cast<float>(std::max(1, sides));
         float avg_neutrals = static_cast<float>(neutrals) / static_cast<float>(cfg.games_per_iter);
         size_t decisions = m_adv.size() + e_adv.size() + d_adv.size();
@@ -1584,8 +1592,8 @@ int main(int argc, char** argv) {
                 "vloss %.4f | "
                 "ev %.2f/%.2f | kl %.4f (%d ep) | %zu turns | emptied %.1f%% of moves, %.0f%% "
                 "fell%s\n",
-                iter, sec, temperature, lr, avg_cities, avg_neutrals, ent, vloss, ev_value,
-                ev_stack, kl, epochs_run, turns.size(),
+                iter, sec, temperature, learning_rate, avg_cities, avg_neutrals, ent, vloss,
+                ev_value, ev_stack, mean_kl, epochs_run, turns.size(),
                 100.0 * vacated / std::max(1L, mission_moves),
                 100.0 * vacated_lost / std::max(1L, vacated), warmup ? " | critic warm-up" : "");
         std::fflush(stdout);
@@ -1617,10 +1625,10 @@ int main(int argc, char** argv) {
             }
         }
         if (logf) {
-            std::fprintf(logf,
-                         "%d,%.2f,%.3f,%.2e,%.3f,%.2f,%.4f,%.5f,%.5f,%d,%zu,%.4f,%.4f,%.4f,%.4f\n",
-                         iter, sec, temperature, lr, avg_cities, avg_neutrals, ent, vloss, kl,
-                         epochs_run, decisions, sel_share, sel_ci, ev_value, ev_stack);
+            std::fprintf(
+                    logf, "%d,%.2f,%.3f,%.2e,%.3f,%.2f,%.4f,%.5f,%.5f,%d,%zu,%.4f,%.4f,%.4f,%.4f\n",
+                    iter, sec, temperature, learning_rate, avg_cities, avg_neutrals, ent, vloss,
+                    mean_kl, epochs_run, decisions, sel_share, sel_ci, ev_value, ev_stack);
             std::fflush(logf);
         }
     }

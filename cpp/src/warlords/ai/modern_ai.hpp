@@ -1,11 +1,14 @@
-// Clean-slate 100% learnable Fair-Information AI turn engine.
-//
-// Architectural Role: Executes a computer player's turn using human-equivalent
-// fair observations (SideBelief) and the 4-head differentiable PolicyNetwork
-// (ml_policy). Rules code computes only normalized physical observables and
-// executes legal actions without strategic heuristics, fake feature injections,
-// or actuator vetoes. Supports stochastic rollout recording via RolloutSampler
-// for Proximal Policy Optimization (PPO) self-play training.
+/**
+ * @file
+ * @brief Clean-slate learnable fair-information AI turn engine.
+ *
+ * Executes a computer player's turn using human-equivalent fair observations
+ * (SideBelief) and the differentiable PolicyNetwork (ml_policy). Rules code
+ * computes only normalized physical observables and executes legal actions
+ * without strategic heuristics, fake feature injections, or actuator vetoes.
+ * Supports stochastic rollout recording via RolloutSampler for Proximal Policy
+ * Optimization (PPO) self-play training.
+ */
 #pragma once
 
 #include <functional>
@@ -16,52 +19,53 @@
 
 namespace w2::ai::modern {
 
+/** @brief Optional callback invoked between turn phases to pace UI updates. */
 using PauseCallback = std::function<void(const char*)>;
 
 /**
- * Plays a full turn for `side` using `customPolicy` (or activePolicy() when null)
+ * @brief Plays a full turn for `side` using `custom_policy` (or ActivePolicy() when null)
  * under strict human-equivalent fog-of-war and stack visibility rules.
  *
- * @param g Active game state.
+ * @param game Active game state.
  * @param side Computer side whose turn is executing.
  * @param pause Optional UI pacing hook invoked between turn phases.
- * @param customPolicy Optional policy network override (used during arena evaluation/training).
- * @param sampler Optional stochastic rollout sampler & trajectory recorder for PPO training.
+ * @param custom_policy Optional policy network override (used during arena evaluation/training).
+ * @param sampler Optional stochastic rollout sampler and trajectory recorder for PPO training.
  */
-void PlayTurn(Game& g, Side& side, const PauseCallback& pause = nullptr,
+void PlayTurn(Game& game, Side& side, const PauseCallback& pause = nullptr,
               const ml::PolicyNetwork* custom_policy = nullptr,
               ml::RolloutSampler* sampler = nullptr);
 
 /**
- * The mission options the Modern AI would weigh for one army group: one entry
- * per (target, coalition size) option, as MissionNet sees them. Used to label
- * another player's moves for imitation learning.
+ * @brief The mission options the Modern AI would weigh for one army group: one entry
+ * per (target, coalition size) option, as MissionNet sees them.
+ *
+ * Used to label another player's moves for imitation learning.
  */
 struct MissionSnapshot {
-    std::vector<ml::MissionInVec> candidates;
-    std::vector<float> log_mult;
-    std::vector<int>
-            kind;  // TargetKind per option (0 hold, 1 neutral city, 2 enemy city, 3 enemy stack,
-                   // 4 ruin/sage, 5 temple/item, 6 fog frontier, 7 reinforce own city)
-    std::vector<int> city_index;        // the target city per option, or NONE
-    std::vector<int> tx, ty;            // the target tile per option
-    std::vector<int> stack_size;        // coalition size per option
-    std::uintptr_t seed = 0;            // the group's first army (Game::pool address)
-    std::vector<std::uintptr_t> group;  // every army of the group
-    int start_x = 0, start_y = 0, start_city = kNone;
+    std::vector<ml::MissionInVec> candidates;  ///< MissionNet input per option.
+    std::vector<float> log_mult;               ///< Log multiplicity prior per option.
+    std::vector<int> kind;              ///< TargetKind per option (0 hold .. 7 reinforce own city).
+    std::vector<int> city_index;        ///< Target city index per option, or kNone.
+    std::vector<int> tx, ty;            ///< Target tile coordinates per option.
+    std::vector<int> stack_size;        ///< Coalition size per option.
+    std::uintptr_t seed = 0;            ///< The group's first army (Game::pool address).
+    std::vector<std::uintptr_t> group;  ///< Every army in the group.
+    int start_x = 0, start_y = 0;       ///< Group starting tile coordinates.
+    int start_city = kNone;             ///< Owned city index at the start tile, or kNone.
 };
 
 /**
- * Builds, without moving anything, the first mission decision the Modern AI
+ * @brief Builds, without moving anything, the first mission decision the Modern AI
  * would face for every army group of `side` this turn (fair information).
  */
-std::vector<MissionSnapshot> SnapshotMissions(Game& g, Side& side, const ml::PolicyNetwork& policy);
+std::vector<MissionSnapshot> SnapshotMissions(Game& game, Side& side,
+                                              const ml::PolicyNetwork& policy);
 
 /**
- * Selects which owned city a newly hired hero should appear in, scored by the
- * neural policy's economy head.
+ * @brief Selects which owned city a newly hired hero should appear in.
  */
-City* SelectHeroCity(Game& g, Side& side, City* dflt,
+City* SelectHeroCity(Game& game, Side& side, City* default_city,
                      const ml::PolicyNetwork* custom_policy = nullptr);
 
 }  // namespace w2::ai::modern
