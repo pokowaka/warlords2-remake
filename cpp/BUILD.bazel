@@ -120,12 +120,12 @@ cc_library(
         "src/warlords/mapeval.cpp",
         "src/warlords/randommap.cpp",
         "src/warlords/scengen.cpp",
-    ],
+    ] + glob(["src/warlords/worldgen/*.cpp"]),
     hdrs = [
         "src/warlords/mapeval.hpp",
         "src/warlords/randommap.hpp",
         "src/warlords/scengen.hpp",
-    ],
+    ] + glob(["src/warlords/worldgen/*.hpp"]),
     includes = ["src"],
     deps = [
         ":formats",
