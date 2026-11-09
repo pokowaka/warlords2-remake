@@ -2,45 +2,54 @@
 
 #include <algorithm>
 #include <cmath>
-#include <map>
-#include <optional>
 
 #include <SDL.h>
+
+#include "absl/base/no_destructor.h"
 
 namespace pad {
 
 namespace {
-/**
- * @brief State for an open `SDL_GameController` and its trigger hysteresis.
- */
-struct Pad {
-    SDL_GameController* controller = nullptr;  ///< Underlying SDL game controller handle.
-    bool left_trig = false;                    ///< True while left trigger is held past threshold.
-    bool right_trig = false;                   ///< True while right trigger is held past threshold.
-};
-std::map<SDL_JoystickID, Pad> pads;
-std::optional<Sticks> scripted;
 
-const double kDead = 0.15;               // Radial thumbstick dead zone.
-const double kPull = 0.5, kLetGo = 0.3;  // Trigger press and release thresholds.
+constexpr double kDeadZone = 0.15;
+constexpr double kPullThreshold = 0.5;
+constexpr double kReleaseThreshold = 0.3;
 
-/**
- * @brief Reads one thumbstick, removes its radial dead zone, and rescales the
- * remaining range smoothly over `0..1`.
- */
-void Stick(SDL_GameController* controller, SDL_GameControllerAxis axis_x,
-           SDL_GameControllerAxis axis_y, double& x, double& y) {
+/** @brief Reads one thumbstick, removes its radial dead zone, and rescales over `0..1`. */
+void AccumulateStick(SDL_GameController* controller, SDL_GameControllerAxis axis_x,
+                     SDL_GameControllerAxis axis_y, double& x, double& y) {
     double stick_x = SDL_GameControllerGetAxis(controller, axis_x) / 32767.0;
     double stick_y = SDL_GameControllerGetAxis(controller, axis_y) / 32767.0;
     double mag = std::hypot(stick_x, stick_y);
-    if (mag <= kDead) return;
-    double scale = std::min(1.0, (mag - kDead) / (1 - kDead)) / mag;
+    if (mag <= kDeadZone) return;
+    double scale = std::min(1.0, (mag - kDeadZone) / (1.0 - kDeadZone)) / mag;
     x += stick_x * scale;
     y += stick_y * scale;
 }
+
 }  // namespace
 
-void Hints() {
+GamepadInput::~GamepadInput() {
+    Shutdown();
+}
+
+void GamepadInput::Shutdown() {
+    for (auto& [joy_id, slot] : controllers_) {
+        (void)joy_id;
+        if (slot.controller != nullptr) {
+            SDL_GameControllerClose(slot.controller);
+        }
+    }
+    controllers_.clear();
+    scripted_sticks_.reset();
+    pending_warps_.clear();
+    cursor_x_ = 0.0;
+    cursor_y_ = 0.0;
+    last_window_x_ = 0.0;
+    last_window_y_ = 0.0;
+}
+
+void GamepadInput::ApplyHints() {
     // Disable SDL's direct Steam Deck HID driver so Steam Input's virtual pad
     // and desktop trackpad mouse mode both work as expected.
     SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_STEAMDECK, "0");
@@ -50,20 +59,32 @@ void Hints() {
     SDL_SetHint(SDL_HINT_RETURN_KEY_HIDES_IME, "1");
 }
 
-bool TranslateEvent(const SDL_Event& event, int& button, bool& down) {
+int GamepadInput::ButtonFromName(std::string_view name) {
+    if (name == "lefttrigger") return kLeftTrigger;
+    if (name == "righttrigger") return kRightTrigger;
+    std::string name_str(name);
+    return SDL_GameControllerGetButtonFromString(name_str.c_str());
+}
+
+bool GamepadInput::TranslateEvent(const SDL_Event& event, int& button, bool& down) {
     switch (event.type) {
     case SDL_CONTROLLERDEVICEADDED: {
         SDL_GameController* controller = SDL_GameControllerOpen(event.cdevice.which);
-        if (controller)
-            pads[SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller))] =
-                    Pad{controller};
+        if (controller != nullptr) {
+            int32_t joy_id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
+            auto existing = controllers_.find(joy_id);
+            if (existing != controllers_.end() && existing->second.controller != nullptr) {
+                SDL_GameControllerClose(existing->second.controller);
+            }
+            controllers_[joy_id] = ControllerSlot{controller, false, false};
+        }
         return false;
     }
     case SDL_CONTROLLERDEVICEREMOVED: {
-        auto pad_it = pads.find(event.cdevice.which);
-        if (pad_it != pads.end()) {
+        auto pad_it = controllers_.find(event.cdevice.which);
+        if (pad_it != controllers_.end()) {
             SDL_GameControllerClose(pad_it->second.controller);
-            pads.erase(pad_it);
+            controllers_.erase(pad_it);
         }
         return false;
     }
@@ -72,20 +93,21 @@ bool TranslateEvent(const SDL_Event& event, int& button, bool& down) {
         button = event.cbutton.button;
         down = event.type == SDL_CONTROLLERBUTTONDOWN;
         return true;
+    default:
+        break;
     }
     return false;
 }
 
-bool Trigger(int& button, bool& down) {
-    for (auto& [joy_id, pad_entry] : pads) {
+bool GamepadInput::PollTrigger(int& button, bool& down) {
+    for (auto& [joy_id, slot] : controllers_) {
         (void)joy_id;
         for (int trig = 0; trig < 2; trig++) {
-            bool& was_down = trig == 0 ? pad_entry.left_trig : pad_entry.right_trig;
-            double val = SDL_GameControllerGetAxis(pad_entry.controller,
-                                                   trig == 0 ? SDL_CONTROLLER_AXIS_TRIGGERLEFT
-                                                             : SDL_CONTROLLER_AXIS_TRIGGERRIGHT) /
-                         32767.0;
-            if (was_down ? val < kLetGo : val > kPull) {
+            bool& was_down = trig == 0 ? slot.left_trig : slot.right_trig;
+            SDL_GameControllerAxis axis =
+                    trig == 0 ? SDL_CONTROLLER_AXIS_TRIGGERLEFT : SDL_CONTROLLER_AXIS_TRIGGERRIGHT;
+            double val = SDL_GameControllerGetAxis(slot.controller, axis) / 32767.0;
+            if (was_down ? val < kReleaseThreshold : val > kPullThreshold) {
                 was_down = !was_down;
                 button = trig == 0 ? kLeftTrigger : kRightTrigger;
                 down = was_down;
@@ -96,15 +118,15 @@ bool Trigger(int& button, bool& down) {
     return false;
 }
 
-Sticks ReadSticks() {
-    if (scripted) return *scripted;
+Sticks GamepadInput::ReadSticks() const {
+    if (scripted_sticks_.has_value()) return *scripted_sticks_;
     Sticks sticks;
-    for (const auto& [joy_id, pad_entry] : pads) {
+    for (const auto& [joy_id, slot] : controllers_) {
         (void)joy_id;
-        Stick(pad_entry.controller, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY, sticks.lx,
-              sticks.ly);
-        Stick(pad_entry.controller, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY,
-              sticks.rx, sticks.ry);
+        AccumulateStick(slot.controller, SDL_CONTROLLER_AXIS_LEFTX, SDL_CONTROLLER_AXIS_LEFTY,
+                        sticks.lx, sticks.ly);
+        AccumulateStick(slot.controller, SDL_CONTROLLER_AXIS_RIGHTX, SDL_CONTROLLER_AXIS_RIGHTY,
+                        sticks.rx, sticks.ry);
     }
     sticks.lx = std::clamp(sticks.lx, -1.0, 1.0);
     sticks.ly = std::clamp(sticks.ly, -1.0, 1.0);
@@ -113,17 +135,50 @@ Sticks ReadSticks() {
     return sticks;
 }
 
-void Script(const Sticks& sticks) {
-    if (sticks.lx == 0 && sticks.ly == 0 && sticks.rx == 0 && sticks.ry == 0)
-        scripted.reset();
-    else
-        scripted = sticks;
+void GamepadInput::SetScriptedSticks(const Sticks& sticks) {
+    if (sticks.lx == 0.0 && sticks.ly == 0.0 && sticks.rx == 0.0 && sticks.ry == 0.0) {
+        scripted_sticks_.reset();
+    } else {
+        scripted_sticks_ = sticks;
+    }
 }
 
+void GamepadInput::RecordWarp(int win_x, int win_y) {
+    if (pending_warps_.size() >= kMaxPendingWarps) {
+        pending_warps_.erase(pending_warps_.begin());
+    }
+    pending_warps_.emplace_back(win_x, win_y);
+}
+
+bool GamepadInput::ConsumeWarp(int win_x, int win_y) {
+    auto found = std::find(pending_warps_.begin(), pending_warps_.end(), WindowWarp{win_x, win_y});
+    if (found == pending_warps_.end()) return false;
+    pending_warps_.erase(pending_warps_.begin(), found + 1);
+    return true;
+}
+
+GamepadInput& DefaultGamepad() {
+    static absl::NoDestructor<GamepadInput> instance;
+    return *instance;
+}
+
+void Hints() {
+    GamepadInput::ApplyHints();
+}
+bool TranslateEvent(const SDL_Event& event, int& button, bool& down) {
+    return DefaultGamepad().TranslateEvent(event, button, down);
+}
+bool Trigger(int& button, bool& down) {
+    return DefaultGamepad().PollTrigger(button, down);
+}
+Sticks ReadSticks() {
+    return DefaultGamepad().ReadSticks();
+}
+void Script(const Sticks& sticks) {
+    DefaultGamepad().SetScriptedSticks(sticks);
+}
 int FromName(const std::string& name) {
-    if (name == "lefttrigger") return kLeftTrigger;
-    if (name == "righttrigger") return kRightTrigger;
-    return SDL_GameControllerGetButtonFromString(name.c_str());
+    return GamepadInput::ButtonFromName(name);
 }
 
 }  // namespace pad

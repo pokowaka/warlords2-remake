@@ -224,20 +224,43 @@ cc_library(
     visibility = ["//cpp:__subpackages__"],
 )
 
-# Layer 7: Platform abstraction over SDL2, Vorbis audio, and user preferences.
+# Layer 6b: User preferences store persisted as JSON.
+cc_library(
+    name = "config",
+    copts = W2_COPTS,
+    srcs = ["src/config/preferences_store.cpp"],
+    hdrs = ["src/config/preferences_store.hpp"],
+    includes = ["src"],
+    deps = [
+        ":util",
+        "@abseil-cpp//absl/status",
+        "@nlohmann_json//:json",
+        "@sdl2",
+        "@sdl2//:sdl2_headers_flat",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 7: Platform RAII abstractions over SDL2, OpenGL, Vorbis audio, and AI turn monitor.
 cc_library(
     name = "platform",
     copts = W2_COPTS,
-    srcs = glob(["src/platform/*.cpp"]) + ["src/front/prefs.cpp"],
-    hdrs = glob(["src/platform/*.hpp"]) + ["src/front/prefs.hpp"],
+    srcs = glob(["src/platform/*.cpp"]),
+    hdrs = glob(["src/platform/*.hpp"]),
     defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
         ":formats",
+        ":model",
         ":util",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/base:no_destructor",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/log:absl_check",
         "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
-        "@nlohmann_json//:json",
+        "@abseil-cpp//absl/synchronization",
         "@sdl2",
         "@sdl2//:sdl2_headers_flat",
         "@vorbis//:vorbisfile",
@@ -249,29 +272,21 @@ cc_library(
 cc_library(
     name = "ui_front",
     copts = W2_COPTS,
-    srcs = glob(
-        [
-            "src/ui/*.cpp",
-            "src/front/*.cpp",
-        ],
-        exclude = [
-            "src/front/prefs.cpp",
-        ],
-    ),
-    hdrs = glob(
-        [
-            "src/ui/*.hpp",
-            "src/front/*.hpp",
-        ],
-        exclude = [
-            "src/front/prefs.hpp",
-        ],
-    ),
+    srcs = glob([
+        "src/ui/*.cpp",
+        "src/front/*.cpp",
+    ]),
+    hdrs = glob([
+        "src/ui/*.hpp",
+        "src/front/*.hpp",
+    ]),
     defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
+        ":config",
         ":platform",
         ":w2core",
+        "@abseil-cpp//absl/base:no_destructor",
         "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/strings:str_format",
@@ -487,6 +502,29 @@ test_suite(
         ":rules_movement_and_sea_test",
         ":rules_setup_and_turn_test",
         ":worldgen_test",
+    ],
+)
+
+# Hermetic GoogleTest suite for PreferencesStore, AiTurnRunner, and SDL2 RAII classes.
+cc_test(
+    name = "platform_raii_test",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/platform_raii_test.cpp"],
+    data = DATA,
+    env = {
+        "SDL_AUDIODRIVER": "dummy",
+        "SDL_RENDER_DRIVER": "software",
+        "SDL_VIDEODRIVER": "dummy",
+    },
+    deps = [
+        ":config",
+        ":platform",
+        ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+        "@sdl2",
+        "@sdl2//:sdl2_headers_flat",
     ],
 )
 

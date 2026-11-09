@@ -2,101 +2,76 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 
 #include <SDL.h>
+
+#include "absl/base/no_destructor.h"
 
 namespace gfx {
 
 namespace {
-SDL_Renderer* active_renderer = nullptr;
-Color color;
-/**
- * @brief 2D scale-and-translate transform (`x' = sx * x + tx` in device pixels).
- */
-struct Transform {
-    double sx = 1;  ///< Horizontal scale factor.
-    double sy = 1;  ///< Vertical scale factor.
-    double tx = 0;  ///< Horizontal translation in device pixels.
-    double ty = 0;  ///< Vertical translation in device pixels.
-};
-Transform cur_transform;
-std::vector<Transform> stack;
-bool clipped = false;
-SDL_Rect clip{};
 
 /** @brief Rounds `val` to the nearest integer device pixel. */
-inline int Dev(double val) {
+int RoundDevicePx(double val) {
     return static_cast<int>(std::floor(val + 0.5));
 }
 
-/** @brief Applies the active colour and alpha modulation to `tex`. */
-void ApplyColor(SDL_Texture* tex) {
-    auto to_u8 = [](float val) {
-        return static_cast<Uint8>(std::clamp(static_cast<int>(std::lround(val * 255)), 0, 255));
-    };
-    SDL_SetTextureColorMod(tex, to_u8(color.r), to_u8(color.g), to_u8(color.b));
-    SDL_SetTextureAlphaMod(tex, to_u8(color.a));
+/** @brief Clamps normalized float channel `val` (`0..1`) to an 8-bit SDL colour component. */
+Uint8 ChannelToU8(float val) {
+    return static_cast<Uint8>(std::clamp(static_cast<int>(std::lround(val * 255.0F)), 0, 255));
 }
 
-/** @brief Applies the active draw colour and blend mode to `active_renderer`. */
-void SetDrawColor() {
-    auto to_u8 = [](float val) {
-        return static_cast<Uint8>(std::clamp(static_cast<int>(std::lround(val * 255)), 0, 255));
-    };
-    SDL_SetRenderDrawColor(active_renderer, to_u8(color.r), to_u8(color.g), to_u8(color.b),
-                           to_u8(color.a));
-    SDL_SetRenderDrawBlendMode(active_renderer,
-                               color.a < 1 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
-}
-
-/** @brief Maps `(x, y, width, height)` through `cur_transform` onto integer device pixels. */
-SDL_Rect DevRect(double x, double y, double width, double height) {
-    double left_x = cur_transform.sx * x + cur_transform.tx;
-    double top_y = cur_transform.sy * y + cur_transform.ty;
-    double right_x = cur_transform.sx * (x + width) + cur_transform.tx;
-    double bot_y = cur_transform.sy * (y + height) + cur_transform.ty;
-    int ix1 = Dev(std::min(left_x, right_x)), iy1 = Dev(std::min(top_y, bot_y));
-    int ix2 = Dev(std::max(left_x, right_x)), iy2 = Dev(std::max(top_y, bot_y));
-    return SDL_Rect{ix1, iy1, ix2 - ix1, iy2 - iy1};
-}
-
-/** @brief Copies sub-rectangle `(src_x, src_y, src_w, src_h)` of `img` to `(dx, dy)`. */
-void Blit(const Image* img, int src_x, int src_y, int src_w, int src_h, double dx, double dy) {
-    if (src_w <= 0 || src_h <= 0) return;
-    SDL_Rect src{src_x, src_y, src_w, src_h};
-    SDL_Rect dst = DevRect(dx, dy, src_w, src_h);
-    if (dst.w <= 0 || dst.h <= 0) return;
-    SDL_RenderCopy(active_renderer, img->tex, &src, &dst);
-}
 }  // namespace
 
-// Once the renderer is shut down its textures are already freed; any Image
-// destroyed afterwards (such as a global at process exit) leaves `tex` alone.
 Image::~Image() {
-    if (tex && active_renderer) SDL_DestroyTexture(tex);
+    if (tex == nullptr) return;
+    if (auto slot = renderer_ref.lock(); slot && *slot != nullptr) {
+        SDL_DestroyTexture(tex);
+    }
 }
 
-void Init(SDL_Renderer* ren) {
-    active_renderer = ren;
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+Renderer::Renderer() : alive_slot_(std::make_shared<SDL_Renderer*>(nullptr)) {}
+
+Renderer::Renderer(SDL_Renderer* sdl_renderer, bool take_ownership) : Renderer() {
+    Init(sdl_renderer, take_ownership);
 }
 
-void Shutdown() {
-    active_renderer = nullptr;
+Renderer::~Renderer() {
+    Shutdown();
 }
 
-SDL_Renderer* Renderer() {
-    return active_renderer;
+void Renderer::Init(SDL_Renderer* sdl_renderer, bool take_ownership) {
+    Shutdown();
+    sdl_renderer_ = sdl_renderer;
+    owns_sdl_renderer_ = take_ownership;
+    alive_slot_ = std::make_shared<SDL_Renderer*>(sdl_renderer_);
+    if (sdl_renderer_ != nullptr) {
+        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "nearest");
+    }
 }
 
-ImageP NewImageRgba(int width, int height, const uint8_t* rgba) {
+void Renderer::Shutdown() {
+    if (alive_slot_) {
+        *alive_slot_ = nullptr;
+    }
+    if (owns_sdl_renderer_ && sdl_renderer_ != nullptr) {
+        SDL_DestroyRenderer(sdl_renderer_);
+    }
+    sdl_renderer_ = nullptr;
+    owns_sdl_renderer_ = false;
+    clipped_ = false;
+}
+
+ImageP Renderer::NewImageRgba(int width, int height, const uint8_t* rgba) {
     auto img = std::make_shared<Image>();
     img->w = width;
     img->h = height;
-    if (width <= 0 || height <= 0 || !active_renderer) return img;
-    img->tex = SDL_CreateTexture(active_renderer, SDL_PIXELFORMAT_ABGR8888,
-                                 SDL_TEXTUREACCESS_STATIC, width, height);
-    if (img->tex) {
+    img->renderer_ref = alive_slot_;
+    if (width <= 0 || height <= 0 || sdl_renderer_ == nullptr || rgba == nullptr) return img;
+    img->tex = SDL_CreateTexture(sdl_renderer_, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STATIC,
+                                 width, height);
+    if (img->tex != nullptr) {
         SDL_UpdateTexture(img->tex, nullptr, rgba, width * 4);
         SDL_SetTextureBlendMode(img->tex, SDL_BLENDMODE_BLEND);
         SDL_SetTextureScaleMode(img->tex, SDL_ScaleModeNearest);
@@ -104,117 +79,188 @@ ImageP NewImageRgba(int width, int height, const uint8_t* rgba) {
     return img;
 }
 
-void Begin() {
+void Renderer::Begin() {
     SetScissor();
-    cur_transform = Transform{};
-    stack.clear();
-    SetColor(1, 1, 1);
+    cur_transform_ = Transform{};
+    transform_stack_.clear();
+    SetColor(1.0F, 1.0F, 1.0F, 1.0F);
 }
 
-void Clear(float red, float green, float blue) {
-    SDL_RenderSetClipRect(active_renderer, nullptr);
-    SDL_SetRenderDrawBlendMode(active_renderer, SDL_BLENDMODE_NONE);
-    SDL_SetRenderDrawColor(active_renderer, static_cast<Uint8>(red * 255),
-                           static_cast<Uint8>(green * 255), static_cast<Uint8>(blue * 255), 255);
-    SDL_RenderClear(active_renderer);
-    if (clipped) SDL_RenderSetClipRect(active_renderer, &clip);
+void Renderer::Clear(float red, float green, float blue) {
+    if (sdl_renderer_ == nullptr) return;
+    SDL_RenderSetClipRect(sdl_renderer_, nullptr);
+    SDL_SetRenderDrawBlendMode(sdl_renderer_, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(sdl_renderer_, static_cast<Uint8>(red * 255.0F),
+                           static_cast<Uint8>(green * 255.0F), static_cast<Uint8>(blue * 255.0F),
+                           255);
+    SDL_RenderClear(sdl_renderer_);
+    if (clipped_) {
+        SDL_Rect clip_rect{clip_x_, clip_y_, clip_w_, clip_h_};
+        SDL_RenderSetClipRect(sdl_renderer_, &clip_rect);
+    }
 }
 
-void Push() {
-    stack.push_back(cur_transform);
+void Renderer::Push() {
+    transform_stack_.push_back(cur_transform_);
 }
-void Pop() {
-    if (stack.empty()) {
-        cur_transform = Transform{};
+
+void Renderer::Pop() {
+    if (transform_stack_.empty()) {
+        cur_transform_ = Transform{};
         return;
     }
-    cur_transform = stack.back();
-    stack.pop_back();
+    cur_transform_ = transform_stack_.back();
+    transform_stack_.pop_back();
 }
-void Origin() {
-    cur_transform = Transform{};
+
+void Renderer::Origin() {
+    cur_transform_ = Transform{};
 }
-void Translate(double x, double y) {
-    cur_transform.tx += cur_transform.sx * x;
-    cur_transform.ty += cur_transform.sy * y;
+
+void Renderer::Translate(double x, double y) {
+    cur_transform_.tx += cur_transform_.sx * x;
+    cur_transform_.ty += cur_transform_.sy * y;
 }
-void Scale(double factor) {
+
+void Renderer::Scale(double factor) {
     Scale(factor, factor);
 }
-void Scale(double scale_x, double scale_y) {
-    cur_transform.sx *= scale_x;
-    cur_transform.sy *= scale_y;
-}
-void TransformPoint(double x, double y, double& out_x, double& out_y) {
-    out_x = cur_transform.sx * x + cur_transform.tx;
-    out_y = cur_transform.sy * y + cur_transform.ty;
-}
-void InverseTransformPoint(double x, double y, double& out_x, double& out_y) {
-    out_x = (x - cur_transform.tx) / cur_transform.sx;
-    out_y = (y - cur_transform.ty) / cur_transform.sy;
+
+void Renderer::Scale(double scale_x, double scale_y) {
+    cur_transform_.sx *= scale_x;
+    cur_transform_.sy *= scale_y;
 }
 
-void SetColor(float red, float green, float blue, float alpha) {
-    color = Color{red, green, blue, alpha};
-}
-void SetColor(const Color& col) {
-    color = col;
-}
-Color GetColor() {
-    return color;
+void Renderer::TransformPoint(double x, double y, double& out_x, double& out_y) const {
+    out_x = cur_transform_.sx * x + cur_transform_.tx;
+    out_y = cur_transform_.sy * y + cur_transform_.ty;
 }
 
-void SetScissor(double x, double y, double width, double height) {
-    clip = DevRect(x, y, width, height);
-    clipped = true;
-    SDL_RenderSetClipRect(active_renderer, &clip);
-}
-void SetScissor() {
-    clipped = false;
-    if (active_renderer) SDL_RenderSetClipRect(active_renderer, nullptr);
+void Renderer::InverseTransformPoint(double x, double y, double& out_x, double& out_y) const {
+    out_x = (x - cur_transform_.tx) / cur_transform_.sx;
+    out_y = (y - cur_transform_.ty) / cur_transform_.sy;
 }
 
-void Rectangle(Mode mode, double x, double y, double width, double height) {
+void Renderer::SetColor(float red, float green, float blue, float alpha) {
+    color_ = Color{red, green, blue, alpha};
+}
+
+void Renderer::SetColor(const Color& col) {
+    color_ = col;
+}
+
+void Renderer::SetScissor(double x, double y, double width, double height) {
+    MapRectToDevice(x, y, width, height, clip_x_, clip_y_, clip_w_, clip_h_);
+    clipped_ = true;
+    if (sdl_renderer_ != nullptr) {
+        SDL_Rect clip_rect{clip_x_, clip_y_, clip_w_, clip_h_};
+        SDL_RenderSetClipRect(sdl_renderer_, &clip_rect);
+    }
+}
+
+void Renderer::SetScissor() {
+    clipped_ = false;
+    if (sdl_renderer_ != nullptr) {
+        SDL_RenderSetClipRect(sdl_renderer_, nullptr);
+    }
+}
+
+void Renderer::ApplyColor(SDL_Texture* tex) const {
+    SDL_SetTextureColorMod(tex, ChannelToU8(color_.r), ChannelToU8(color_.g),
+                           ChannelToU8(color_.b));
+    SDL_SetTextureAlphaMod(tex, ChannelToU8(color_.a));
+}
+
+void Renderer::SetDrawColor() const {
+    if (sdl_renderer_ == nullptr) return;
+    SDL_SetRenderDrawColor(sdl_renderer_, ChannelToU8(color_.r), ChannelToU8(color_.g),
+                           ChannelToU8(color_.b), ChannelToU8(color_.a));
+    SDL_SetRenderDrawBlendMode(sdl_renderer_,
+                               color_.a < 1.0F ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
+}
+
+void Renderer::MapRectToDevice(double x, double y, double width, double height, int& out_x,
+                               int& out_y, int& out_w, int& out_h) const {
+    double left_x = cur_transform_.sx * x + cur_transform_.tx;
+    double top_y = cur_transform_.sy * y + cur_transform_.ty;
+    double right_x = cur_transform_.sx * (x + width) + cur_transform_.tx;
+    double bot_y = cur_transform_.sy * (y + height) + cur_transform_.ty;
+    int ix1 = RoundDevicePx(std::min(left_x, right_x));
+    int iy1 = RoundDevicePx(std::min(top_y, bot_y));
+    int ix2 = RoundDevicePx(std::max(left_x, right_x));
+    int iy2 = RoundDevicePx(std::max(top_y, bot_y));
+    out_x = ix1;
+    out_y = iy1;
+    out_w = ix2 - ix1;
+    out_h = iy2 - iy1;
+}
+
+void Renderer::Blit(const Image* img, int src_x, int src_y, int src_w, int src_h, double dx,
+                    double dy) const {
+    if (sdl_renderer_ == nullptr || src_w <= 0 || src_h <= 0) return;
+    SDL_Rect src{src_x, src_y, src_w, src_h};
+    SDL_Rect dst{};
+    MapRectToDevice(dx, dy, src_w, src_h, dst.x, dst.y, dst.w, dst.h);
+    if (dst.w <= 0 || dst.h <= 0) return;
+    SDL_RenderCopy(sdl_renderer_, img->tex, &src, &dst);
+}
+
+void Renderer::Rectangle(Mode mode, double x, double y, double width, double height) {
+    if (sdl_renderer_ == nullptr) return;
     SetDrawColor();
     if (mode == kFill) {
-        SDL_Rect rect = DevRect(x, y, width, height);
-        if (rect.w > 0 && rect.h > 0) SDL_RenderFillRect(active_renderer, &rect);
+        SDL_Rect rect{};
+        MapRectToDevice(x, y, width, height, rect.x, rect.y, rect.w, rect.h);
+        if (rect.w > 0 && rect.h > 0) SDL_RenderFillRect(sdl_renderer_, &rect);
         return;
     }
-    SDL_Rect edges[4] = {
-        DevRect(x - 0.5, y - 0.5, width + 1, 1), DevRect(x - 0.5, y + height - 0.5, width + 1, 1),
-        DevRect(x - 0.5, y - 0.5, 1, height + 1), DevRect(x + width - 0.5, y - 0.5, 1, height + 1)};
-    for (auto& edge : edges)
-        if (edge.w > 0 && edge.h > 0) SDL_RenderFillRect(active_renderer, &edge);
-}
-
-void Line(double from_x, double from_y, double to_x, double to_y) {
-    if (from_y == to_y) {
-        Rectangle(kFill, std::min(from_x, to_x), from_y - 0.5, std::fabs(to_x - from_x), 1);
-    } else if (from_x == to_x) {
-        Rectangle(kFill, from_x - 0.5, std::min(from_y, to_y), 1, std::fabs(to_y - from_y));
-    } else {
-        SetDrawColor();
-        double dev_x1, dev_y1, dev_x2, dev_y2;
-        TransformPoint(from_x, from_y, dev_x1, dev_y1);
-        TransformPoint(to_x, to_y, dev_x2, dev_y2);
-        SDL_RenderDrawLine(active_renderer, Dev(dev_x1), Dev(dev_y1), Dev(dev_x2), Dev(dev_y2));
+    SDL_Rect edges[4]{};
+    MapRectToDevice(x - 0.5, y - 0.5, width + 1.0, 1.0, edges[0].x, edges[0].y, edges[0].w,
+                    edges[0].h);
+    MapRectToDevice(x - 0.5, y + height - 0.5, width + 1.0, 1.0, edges[1].x, edges[1].y, edges[1].w,
+                    edges[1].h);
+    MapRectToDevice(x - 0.5, y - 0.5, 1.0, height + 1.0, edges[2].x, edges[2].y, edges[2].w,
+                    edges[2].h);
+    MapRectToDevice(x + width - 0.5, y - 0.5, 1.0, height + 1.0, edges[3].x, edges[3].y, edges[3].w,
+                    edges[3].h);
+    for (const auto& edge : edges) {
+        if (edge.w > 0 && edge.h > 0) SDL_RenderFillRect(sdl_renderer_, &edge);
     }
 }
 
-void Draw(const Image* img, double x, double y) {
-    if (!img || !img->tex) return;
+void Renderer::Line(double from_x, double from_y, double to_x, double to_y) {
+    if (sdl_renderer_ == nullptr) return;
+    if (from_y == to_y) {
+        Rectangle(kFill, std::min(from_x, to_x), from_y - 0.5, std::fabs(to_x - from_x), 1.0);
+    } else if (from_x == to_x) {
+        Rectangle(kFill, from_x - 0.5, std::min(from_y, to_y), 1.0, std::fabs(to_y - from_y));
+    } else {
+        SetDrawColor();
+        double dev_x1 = 0.0;
+        double dev_y1 = 0.0;
+        double dev_x2 = 0.0;
+        double dev_y2 = 0.0;
+        TransformPoint(from_x, from_y, dev_x1, dev_y1);
+        TransformPoint(to_x, to_y, dev_x2, dev_y2);
+        SDL_RenderDrawLine(sdl_renderer_, RoundDevicePx(dev_x1), RoundDevicePx(dev_y1),
+                           RoundDevicePx(dev_x2), RoundDevicePx(dev_y2));
+    }
+}
+
+void Renderer::Draw(const Image* img, double x, double y) {
+    if (img == nullptr || img->tex == nullptr || sdl_renderer_ == nullptr) return;
     ApplyColor(img->tex);
     Blit(img, 0, 0, img->w, img->h, x, y);
 }
 
-void Draw(const Image* img, const Quad& quad, double x, double y) {
-    if (!img || !img->tex) return;
+void Renderer::Draw(const Image* img, const Quad& quad, double x, double y) {
+    if (img == nullptr || img->tex == nullptr || sdl_renderer_ == nullptr) return;
     ApplyColor(img->tex);
-    int quad_x = static_cast<int>(quad.x), quad_y = static_cast<int>(quad.y),
-        quad_w = static_cast<int>(quad.w), quad_h = static_cast<int>(quad.h);
+    int quad_x = static_cast<int>(quad.x);
+    int quad_y = static_cast<int>(quad.y);
+    int quad_w = static_cast<int>(quad.w);
+    int quad_h = static_cast<int>(quad.h);
     if (img->wrap && (quad_x + quad_w > img->w || quad_y + quad_h > img->h)) {
-        // Tile repeating images when the quad extends past the texture bounds.
         for (int tile_y = 0; tile_y < quad_h; tile_y += img->h) {
             for (int tile_x = 0; tile_x < quad_w; tile_x += img->w) {
                 int part_w = std::min(img->w, quad_w - tile_x);
@@ -224,35 +270,127 @@ void Draw(const Image* img, const Quad& quad, double x, double y) {
         }
         return;
     }
-    // Clip the source quad to the image bounds.
-    int src_x = std::max(0, quad_x), src_y = std::max(0, quad_y);
+    int src_x = std::max(0, quad_x);
+    int src_y = std::max(0, quad_y);
     int src_w = std::min(img->w, quad_x + quad_w) - src_x;
     int src_h = std::min(img->h, quad_y + quad_h) - src_y;
     Blit(img, src_x, src_y, src_w, src_h, x + (src_x - quad_x), y + (src_y - quad_y));
 }
 
-std::vector<uint8_t> ReadPixels(int& width, int& height) {
-    if (SDL_Texture* target = SDL_GetRenderTarget(active_renderer))
+ByteBuffer Renderer::ReadPixels(int& width, int& height) {
+    width = 0;
+    height = 0;
+    if (sdl_renderer_ == nullptr) return {};
+    if (SDL_Texture* target = SDL_GetRenderTarget(sdl_renderer_)) {
         SDL_QueryTexture(target, nullptr, nullptr, &width, &height);
-    else
-        SDL_GetRendererOutputSize(active_renderer, &width, &height);
-    std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
-    SDL_RenderSetClipRect(active_renderer, nullptr);
-    SDL_RenderReadPixels(active_renderer, nullptr, SDL_PIXELFORMAT_ABGR8888, pixels.data(),
+    } else {
+        SDL_GetRendererOutputSize(sdl_renderer_, &width, &height);
+    }
+    if (width <= 0 || height <= 0) return {};
+    ByteBuffer pixels(static_cast<size_t>(width) * static_cast<size_t>(height) * 4UZ);
+    SDL_RenderSetClipRect(sdl_renderer_, nullptr);
+    SDL_RenderReadPixels(sdl_renderer_, nullptr, SDL_PIXELFORMAT_ABGR8888, pixels.data(),
                          width * 4);
-    if (clipped) SDL_RenderSetClipRect(active_renderer, &clip);
+    if (clipped_) {
+        SDL_Rect clip_rect{clip_x_, clip_y_, clip_w_, clip_h_};
+        SDL_RenderSetClipRect(sdl_renderer_, &clip_rect);
+    }
     return pixels;
 }
 
-void SaveShot(const std::string& file) {
-    int width, height;
-    auto pixels = ReadPixels(width, height);
+void Renderer::SaveShot(const std::filesystem::path& file_path) {
+    int width = 0;
+    int height = 0;
+    ByteBuffer pixels = ReadPixels(width, height);
+    if (pixels.empty()) return;
     SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormatFrom(pixels.data(), width, height, 32,
                                                            width * 4, SDL_PIXELFORMAT_ABGR8888);
-    if (surf) {
-        SDL_SaveBMP(surf, file.c_str());
+    if (surf != nullptr) {
+        std::string path_str = file_path.string();
+        SDL_SaveBMP(surf, path_str.c_str());
         SDL_FreeSurface(surf);
     }
+}
+
+Renderer& DefaultRenderer() {
+    static absl::NoDestructor<Renderer> instance;
+    return *instance;
+}
+
+void Init(SDL_Renderer* sdl_renderer) {
+    DefaultRenderer().Init(sdl_renderer, false);
+}
+void Shutdown() {
+    DefaultRenderer().Shutdown();
+}
+SDL_Renderer* ActiveSdlRenderer() {
+    return DefaultRenderer().SdlRenderer();
+}
+ImageP NewImageRgba(int width, int height, const uint8_t* rgba) {
+    return DefaultRenderer().NewImageRgba(width, height, rgba);
+}
+void Begin() {
+    DefaultRenderer().Begin();
+}
+void Clear(float red, float green, float blue) {
+    DefaultRenderer().Clear(red, green, blue);
+}
+void Push() {
+    DefaultRenderer().Push();
+}
+void Pop() {
+    DefaultRenderer().Pop();
+}
+void Origin() {
+    DefaultRenderer().Origin();
+}
+void Translate(double x, double y) {
+    DefaultRenderer().Translate(x, y);
+}
+void Scale(double factor) {
+    DefaultRenderer().Scale(factor);
+}
+void Scale(double scale_x, double scale_y) {
+    DefaultRenderer().Scale(scale_x, scale_y);
+}
+void TransformPoint(double x, double y, double& out_x, double& out_y) {
+    DefaultRenderer().TransformPoint(x, y, out_x, out_y);
+}
+void InverseTransformPoint(double x, double y, double& out_x, double& out_y) {
+    DefaultRenderer().InverseTransformPoint(x, y, out_x, out_y);
+}
+void SetColor(float red, float green, float blue, float alpha) {
+    DefaultRenderer().SetColor(red, green, blue, alpha);
+}
+void SetColor(const Color& col) {
+    DefaultRenderer().SetColor(col);
+}
+Color GetColor() {
+    return DefaultRenderer().GetColor();
+}
+void SetScissor(double x, double y, double width, double height) {
+    DefaultRenderer().SetScissor(x, y, width, height);
+}
+void SetScissor() {
+    DefaultRenderer().SetScissor();
+}
+void Rectangle(Mode mode, double x, double y, double width, double height) {
+    DefaultRenderer().Rectangle(mode, x, y, width, height);
+}
+void Line(double from_x, double from_y, double to_x, double to_y) {
+    DefaultRenderer().Line(from_x, from_y, to_x, to_y);
+}
+void Draw(const Image* img, double x, double y) {
+    DefaultRenderer().Draw(img, x, y);
+}
+void Draw(const Image* img, const Quad& quad, double x, double y) {
+    DefaultRenderer().Draw(img, quad, x, y);
+}
+ByteBuffer ReadPixels(int& width, int& height) {
+    return DefaultRenderer().ReadPixels(width, height);
+}
+void SaveShot(const std::filesystem::path& file_path) {
+    DefaultRenderer().SaveShot(file_path);
 }
 
 }  // namespace gfx

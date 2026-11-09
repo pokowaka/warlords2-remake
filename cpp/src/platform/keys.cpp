@@ -1,35 +1,35 @@
 #include "platform/keys.hpp"
 
-#include <set>
-
 #include <SDL.h>
+
+#include "absl/base/no_destructor.h"
 
 namespace keys {
 
-namespace {
-std::set<std::string> down;
+void KeyboardState::Press(std::string_view name) {
+    held_keys_.emplace(name);
 }
 
-void Press(const std::string& name) {
-    down.insert(name);
-}
-void Release(const std::string& name) {
-    down.erase(name);
-}
-void Clear() {
-    down.clear();
+void KeyboardState::Release(std::string_view name) {
+    held_keys_.erase(name);
 }
 
-bool IsDown(std::initializer_list<const char*> names) {
-    for (const char* name : names)
-        if (down.count(name)) return true;
+void KeyboardState::Clear() {
+    held_keys_.clear();
+}
+
+bool KeyboardState::IsDown(KeyNameList names) const {
+    for (const char* name : names) {
+        if (held_keys_.contains(name)) return true;
+    }
     return false;
 }
-bool IsDown(const std::string& name) {
-    return down.count(name) > 0;
+
+bool KeyboardState::IsDown(std::string_view name) const {
+    return held_keys_.contains(name);
 }
 
-std::string LoveName(int sdl_keycode) {
+std::string KeyboardState::LoveName(int sdl_keycode) {
     switch (sdl_keycode) {
     case SDLK_LSHIFT:
         return "lshift";
@@ -118,14 +118,39 @@ std::string LoveName(int sdl_keycode) {
     default:
         break;
     }
-    if (sdl_keycode >= SDLK_F1 && sdl_keycode <= SDLK_F12)
+    if (sdl_keycode >= SDLK_F1 && sdl_keycode <= SDLK_F12) {
         return "f" + std::to_string(sdl_keycode - SDLK_F1 + 1);
+    }
     if (sdl_keycode >= 32 && sdl_keycode < 127) {
         char chr = static_cast<char>(sdl_keycode);
         if (chr >= 'A' && chr <= 'Z') chr = static_cast<char>(chr - 'A' + 'a');
         return std::string(1, chr);
     }
     return "";
+}
+
+KeyboardState& DefaultKeyboard() {
+    static absl::NoDestructor<KeyboardState> instance;
+    return *instance;
+}
+
+void Press(const std::string& name) {
+    DefaultKeyboard().Press(name);
+}
+void Release(const std::string& name) {
+    DefaultKeyboard().Release(name);
+}
+void Clear() {
+    DefaultKeyboard().Clear();
+}
+bool IsDown(KeyNameList names) {
+    return DefaultKeyboard().IsDown(names);
+}
+bool IsDown(const std::string& name) {
+    return DefaultKeyboard().IsDown(name);
+}
+std::string LoveName(int sdl_keycode) {
+    return KeyboardState::LoveName(sdl_keycode);
 }
 
 }  // namespace keys

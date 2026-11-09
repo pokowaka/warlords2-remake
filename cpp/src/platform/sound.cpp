@@ -1,30 +1,18 @@
-// The game's music, sound effects, and advisor voice, mixed in a single SDL
-// audio callback (ported from love2d/sound.lua and love2d/musicthread.lua).
-//
-// Three switches in Game > Settings (stored in DATA/OPTIONS.SND as three '1'
-// or '0' characters) control Music, Effects, and Speech.
-//
-// Sound effects and speech are 11000 Hz unsigned 8-bit mono DIGPAK samples
-// queued one after another. AdLib music is synthesized live from S-prefixed
-// .XMI files through the AIL driver and emulated OPL2 (`warlords/ailfm`).
-// MT-32 and Sound Canvas songs stream from `pre-rendered-sound/<M|R><song>.ogg`
-// via libvorbisfile, looping at the XMI sequence's tick length while the
-// previous iteration's reverb tail rings out underneath.
 #include "platform/sound.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
-#include <deque>
-#include <map>
-#include <memory>
-#include <random>
+#include <cstddef>
 
 #include <SDL.h>
 
-#include "front/prefs.hpp"
+#include "absl/base/no_destructor.h"
+
 #include "util/util.hpp"
 #include "warlords/ailfm.hpp"
 #include "warlords/cues.hpp"
+#include "warlords/types.hpp"
 #include "warlords/xmi.hpp"
 
 #ifdef W2_VORBIS
@@ -36,9 +24,7 @@ namespace sound {
 namespace {
 
 constexpr int kSampleRate = 11000;
-// The 9-voice OPL2 chip peaks around one-fifth of full scale (~10 dB below
-// the digital samples); doubling the gain balances FM music with effects.
-constexpr float kFmGain = 2.0F / 32768;
+constexpr float kFmGain = 2.0F / 32768.0F;
 
 /** @brief Returns the single-letter asset filename prefix (`'S'`, `'M'`, or `'R'`) for `synth`. */
 char SynthPrefix(SynthKind synth) {
@@ -53,389 +39,184 @@ char SynthPrefix(SynthKind synth) {
     return 'S';
 }
 
-// Logical effect names mapped to (group, index) in FILE.DAT.
-const std::map<std::string, std::pair<int, int>> kEffect = {
-    {"army", {64, 0}},  {"army2", {64, 5}},    {"ding", {64, 1}},
-    {"chord", {64, 2}}, {"dramatic", {37, 0}}, {"orch", {37, 1}},
-    {"war", {38, 0}},   {"splash", {39, 0}},   {"turn", {63, 0}}};
+/** @brief Resolves a logical effect token to its `(group, index)` entry in `FILE.DAT`. */
+std::optional<std::pair<int, int>> FindEffectEntry(std::string_view name) {
+    using Entry = std::pair<std::string_view, std::pair<int, int>>;
+    constexpr std::array<Entry, 9> kEffects = {{
+        {"army", {64, 0}},
+        {"army2", {64, 5}},
+        {"ding", {64, 1}},
+        {"chord", {64, 2}},
+        {"dramatic", {37, 0}},
+        {"orch", {37, 1}},
+        {"war", {38, 0}},
+        {"splash", {39, 0}},
+        {"turn", {63, 0}},
+    }};
+    for (const auto& [key, loc] : kEffects) {
+        if (key == name) return loc;
+    }
+    return std::nullopt;
+}
 
-using Pcm = std::shared_ptr<std::vector<float>>;
+/** @brief Scoped RAII lock over an open `SDL_AudioDeviceID`. */
+class ScopedDeviceLock {
+  public:
+    explicit ScopedDeviceLock(uint32_t device_id) : device_id_(device_id) {
+        if (device_id_ != 0) SDL_LockAudioDevice(device_id_);
+    }
+    ~ScopedDeviceLock() {
+        if (device_id_ != 0) SDL_UnlockAudioDevice(device_id_);
+    }
+    ScopedDeviceLock(const ScopedDeviceLock&) = delete;
+    ScopedDeviceLock& operator=(const ScopedDeviceLock&) = delete;
 
-/**
- * @brief A queued digital sample and its completion callback on the main thread.
- */
-struct Queued {
-    Pcm pcm;                     ///< Normalized float PCM samples at `kSampleRate`.
-    std::function<void()> done;  ///< Callback invoked on `Update()` once playback ends.
-    double ends_at = 0;          ///< Wall-clock fallback deadline in case audio stalls.
+  private:
+    uint32_t device_id_ = 0;
 };
 
+}  // namespace
+
+struct AudioEngine::VorbisStream {
 #ifdef W2_VORBIS
-/**
- * @brief Streaming Ogg Vorbis decoder state for pre-rendered MT-32 / SC-55 music.
- */
-struct Stream {
-    OggVorbis_File vorbis{};  ///< libvorbisfile handle.
-    bool open = false;        ///< True when `vorbis` has been opened.
-    bool eof = false;         ///< True once the end of the Ogg stream is reached.
-    int channels = 1;         ///< Source channel count (1 or 2).
-    double step = 1;          ///< Source frames per output mixer frame.
-    std::vector<float> buf;   ///< Decoded interleaved stereo frames.
-    size_t frames = 0;        ///< Number of stereo frames currently in `buf`.
-    double pos = 0;           ///< Fractional read cursor into `buf` (in frames).
-    double played = 0;        ///< Total seconds of audio mixed so far.
-    ~Stream() {
+    OggVorbis_File vorbis{};
+    bool open = false, eof = false;
+    int channels = 1;
+    double step = 1.0, pos = 0.0, played = 0.0;
+    std::vector<float> buf;
+    size_t frames = 0;
+
+    ~VorbisStream() {
         if (open) ov_clear(&vorbis);
     }
-    /** @brief Decodes additional Vorbis packets until at least `need` frames lie ahead of `pos`. */
+
+    static std::unique_ptr<VorbisStream> Open(const std::filesystem::path& path, int mixer_rate) {
+        auto stream = std::make_unique<VorbisStream>();
+        std::string resolved = w2::ResolvePath(path).string();
+        if (resolved.empty() || ov_fopen(resolved.c_str(), &stream->vorbis) != 0) return nullptr;
+        stream->open = true;
+        vorbis_info* info = ov_info(&stream->vorbis, -1);
+        stream->channels = info->channels;
+        stream->step = static_cast<double>(info->rate) / mixer_rate;
+        return stream;
+    }
+
     void Fill(size_t need) {
         size_t consumed = static_cast<size_t>(pos);
         if (consumed > 0) {
-            buf.erase(buf.begin(), buf.begin() + std::min(buf.size(), consumed * 2));
+            buf.erase(buf.begin(), buf.begin() + std::min(buf.size(), consumed * 2UZ));
             frames -= std::min(frames, consumed);
-            pos -= consumed;
+            pos -= static_cast<double>(consumed);
         }
-        while (!eof && frames < need + 2) {
-            float** pcm;
-            int section;
+        while (!eof && frames < need + 2UZ) {
+            float** pcm = nullptr;
+            int section = 0;
             long count = ov_read_float(&vorbis, &pcm, 4096, &section);
             if (count <= 0) {
                 eof = true;
                 break;
             }
             for (long i = 0; i < count; i++) {
-                float left = pcm[0][i];
-                float right = channels > 1 ? pcm[1][i] : left;
-                buf.push_back(left);
-                buf.push_back(right);
+                buf.push_back(pcm[0][i]);
+                buf.push_back(channels > 1 ? pcm[1][i] : pcm[0][i]);
             }
-            frames += count;
+            frames += static_cast<size_t>(count);
         }
     }
-    /** @brief True once all frames have been decoded and consumed. */
-    bool Done() const { return eof && pos + 1 >= frames; }
-};
-#endif
 
-/**
- * @brief State shared with the SDL audio callback (guarded by `SDL_LockAudioDevice`).
- */
-struct Mixer {
-    int rate = 44100;                           ///< Output device sample rate in Hz.
-    Pcm sample;                                 ///< Currently playing `.8SN` sample.
-    double sample_pos = 0;                      ///< Read cursor into `sample`.
-    bool sample_ended = true;                   ///< True when `sample` has finished playing.
-    std::unique_ptr<w2::AilFm> fm_synth;        ///< Live AdLib OPL2 synthesizer.
-    std::shared_ptr<w2::xmi::Sequence> fm_seq;  ///< Active XMI sequence playing on `fm_synth`.
-    std::vector<int16_t> fm_buf;                ///< Buffered OPL2 samples at `Opl::kRate`.
-    double fm_pos = 0;                          ///< Read cursor into `fm_buf`.
-    bool fm_was_playing = false;  ///< True when `fm_synth` was playing on the last callback.
-    bool fm_ended = false;        ///< Latched when a non-looping FM song finishes.
-#ifdef W2_VORBIS
-    std::unique_ptr<Stream> rec;  ///< Active pre-rendered music stream.
-    std::vector<std::unique_ptr<Stream>>
-            tails;  ///< Fading reverb tails from previous loop iterations.
-#endif
-};
+    bool Done() const { return eof && pos + 1.0 >= static_cast<double>(frames); }
 
-/**
- * @brief Module-wide audio subsystem state owned by the main thread.
- */
-struct State {
-    std::filesystem::path data_dir;                    ///< Path to `original/`.
-    std::filesystem::path rec_dir;                     ///< Path to `pre-rendered-sound/`.
-    w2::uidata::Strings files;                         ///< `FILE.DAT` string table.
-    Options enabled{false, false, false};              ///< User-toggled audio switches.
-    SDL_AudioDeviceID dev = 0;                         ///< Open SDL audio device ID (0 if none).
-    Mixer mix;                                         ///< Audio thread mixer state.
-    std::map<std::string, Pcm> samples;                ///< Cache of decoded `.8SN` samples.
-    std::deque<Queued> queue;                          ///< Pending sample queue.
-    std::optional<Queued> playing;                     ///< Currently playing sample entry.
-    int cue = w2::kNone;                               ///< Currently playing music cue ID.
-    std::optional<std::pair<std::string, bool>> song;  ///< Active `(filename, loop)` pair.
-    bool song_playing = false;                         ///< True while a song is actively playing.
-    SynthKind synth = SynthKind::kFm;                  ///< Active music synthesizer backend.
-    std::vector<uint8_t> adv;                          ///< Contents of `ADLIB.ADV`.
-    std::vector<uint8_t> ad_bank;                      ///< Contents of `MIDPAK.AD`.
-    double rec_at = 0;                                 ///< Loop point in seconds for `mix.rec`.
-    bool rec_loop = false;  ///< True when `mix.rec` should loop at `rec_at`.
-};
-State sound_state;
-
-std::mt19937 dice{std::random_device{}()};
-/** @brief Returns a random integer in `1..n` for selecting among variant clips/songs. */
-int Roll(int n) {
-    return static_cast<int>(dice() % static_cast<unsigned>(std::max(1, n))) + 1;
-}
-
-/** @brief RAII guard locking the SDL audio device while mutating `sound_state.mix`. */
-struct Lock {
-    Lock() {
-        if (sound_state.dev) SDL_LockAudioDevice(sound_state.dev);
+    void MixInto(float* out, int out_frames, int rate) {
+        if (Done()) return;
+        Fill(static_cast<size_t>(std::ceil(out_frames * step)) + 2UZ);
+        for (int i = 0; i < out_frames; i++) {
+            size_t idx = static_cast<size_t>(pos);
+            if (idx + 1UZ >= frames) {
+                if (eof) break;
+                Fill(static_cast<size_t>(std::ceil((out_frames - i) * step)) + 2UZ);
+                idx = static_cast<size_t>(pos);
+                if (idx + 1UZ >= frames) break;
+            }
+            double frac = pos - static_cast<double>(idx);
+            out[static_cast<std::ptrdiff_t>(i) * 2] +=
+                    static_cast<float>(buf[idx * 2] * (1.0 - frac) + buf[idx * 2 + 2] * frac);
+            out[i * 2 + 1] +=
+                    static_cast<float>(buf[idx * 2 + 1] * (1.0 - frac) + buf[idx * 2 + 3] * frac);
+            pos += step;
+        }
+        played += static_cast<double>(out_frames) / rate;
     }
-    ~Lock() {
-        if (sound_state.dev) SDL_UnlockAudioDevice(sound_state.dev);
-    }
+#endif
 };
 
-// ------------------------------------------------------------- the callback
+struct AudioEngine::MixerState {
+    using StreamPtr = std::unique_ptr<VorbisStream>;
+    using TailList = std::vector<StreamPtr>;
+    using SharedSequence = std::shared_ptr<w2::xmi::Sequence>;
 
-/** @brief Mixes the active `.8SN` digital sample into stereo `out` (`n` frames). */
-void MixSample(float* out, int n) {
-    Mixer& mix = sound_state.mix;
-    if (!mix.sample || mix.sample_ended) return;
-    const auto& pcm = *mix.sample;
-    double step = static_cast<double>(kSampleRate) / mix.rate;
-    for (int i = 0; i < n; i++) {
-        size_t idx = static_cast<size_t>(mix.sample_pos);
-        if (idx >= pcm.size()) {
-            mix.sample_ended = true;
+    int rate = 44100;
+    SharedPcm sample;
+    double sample_pos = 0.0, fm_pos = 0.0;
+    bool sample_ended = true, fm_was_playing = false, fm_ended = false;
+    std::unique_ptr<w2::AilFm> fm_synth;
+    SharedSequence fm_seq;
+    std::vector<int16_t> fm_buf;
+    StreamPtr rec;
+    TailList tails;
+
+    void MixSample(float* out, int frames) {
+        if (!sample || sample_ended) return;
+        const PcmBuffer& pcm = *sample;
+        double step = static_cast<double>(kSampleRate) / rate;
+        for (int i = 0; i < frames; i++) {
+            size_t idx = static_cast<size_t>(sample_pos);
+            if (idx >= pcm.size()) {
+                sample_ended = true;
+                return;
+            }
+            double frac = sample_pos - static_cast<double>(idx);
+            float next_val = idx + 1UZ < pcm.size() ? pcm[idx + 1UZ] : 0.0F;
+            float val = static_cast<float>(pcm[idx] * (1.0 - frac) + next_val * frac);
+            out[static_cast<std::ptrdiff_t>(i) * 2] += val;
+            out[i * 2 + 1] += val;
+            sample_pos += step;
+        }
+    }
+
+    void MixFm(float* out, int frames) {
+        if (!fm_synth || fm_synth->Idle()) {
+            if (fm_was_playing) fm_ended = true;
+            fm_was_playing = false;
             return;
         }
-        double frac = mix.sample_pos - idx;
-        float val = static_cast<float>(pcm[idx] * (1 - frac) +
-                                       (idx + 1 < pcm.size() ? pcm[idx + 1] : 0) * frac);
-        out[static_cast<std::ptrdiff_t>(i) * 2] += val;
-        out[i * 2 + 1] += val;
-        mix.sample_pos += step;
-    }
-}
-
-/** @brief Renders and mixes live OPL2 FM music into stereo `out` (`n` frames). */
-void MixFm(float* out, int n) {
-    Mixer& mix = sound_state.mix;
-    if (!mix.fm_synth || mix.fm_synth->Idle()) {
-        if (mix.fm_was_playing) mix.fm_ended = true;
-        mix.fm_was_playing = false;
-        return;
-    }
-    double step = w2::Opl::kRate / mix.rate;
-    size_t need = static_cast<size_t>(std::ceil(mix.fm_pos + n * step)) + 2;
-    size_t keep = static_cast<size_t>(mix.fm_pos);
-    if (keep > 0) {
-        mix.fm_buf.erase(mix.fm_buf.begin(),
-                         mix.fm_buf.begin() + std::min(keep, mix.fm_buf.size()));
-        mix.fm_pos -= keep;
-        need -= keep;
-    }
-    if (mix.fm_buf.size() < need) {
-        size_t from = mix.fm_buf.size();
-        mix.fm_buf.resize(need);
-        mix.fm_synth->Render(mix.fm_buf.data() + from, static_cast<int>(need - from));
-    }
-    for (int i = 0; i < n; i++) {
-        size_t idx = static_cast<size_t>(mix.fm_pos);
-        double frac = mix.fm_pos - idx;
-        float val = static_cast<float>((mix.fm_buf[idx] * (1 - frac) + mix.fm_buf[idx + 1] * frac) *
-                                       kFmGain);
-        val = std::clamp(val, -1.0F, 1.0F);
-        out[static_cast<std::ptrdiff_t>(i) * 2] += val;
-        out[i * 2 + 1] += val;
-        mix.fm_pos += step;
-    }
-    bool playing_now = mix.fm_synth->Playing();
-    if (mix.fm_was_playing && !playing_now) mix.fm_ended = true;
-    mix.fm_was_playing = playing_now;
-}
-
-#ifdef W2_VORBIS
-/** @brief Decodes and mixes `stream` into stereo `out` (`n` frames at `rate` Hz). */
-void MixStream(Stream& stream, float* out, int n, int rate) {
-    if (stream.Done()) return;
-    stream.Fill(static_cast<size_t>(std::ceil(n * stream.step)) + 2);
-    for (int i = 0; i < n; i++) {
-        size_t idx = static_cast<size_t>(stream.pos);
-        if (idx + 1 >= stream.frames) {
-            if (stream.eof) break;
-            stream.Fill(static_cast<size_t>(std::ceil((n - i) * stream.step)) + 2);
-            idx = static_cast<size_t>(stream.pos);
-            if (idx + 1 >= stream.frames) break;
+        double step = w2::Opl::kRate / rate;
+        size_t need = static_cast<size_t>(std::ceil(fm_pos + frames * step)) + 2UZ;
+        size_t keep = static_cast<size_t>(fm_pos);
+        if (keep > 0) {
+            fm_buf.erase(fm_buf.begin(), fm_buf.begin() + std::min(keep, fm_buf.size()));
+            fm_pos -= static_cast<double>(keep);
+            need -= keep;
         }
-        double frac = stream.pos - idx;
-        out[static_cast<std::ptrdiff_t>(i) * 2] += static_cast<float>(
-                stream.buf[idx * 2] * (1 - frac) + stream.buf[idx * 2 + 2] * frac);
-        out[i * 2 + 1] += static_cast<float>(stream.buf[idx * 2 + 1] * (1 - frac) +
-                                             stream.buf[idx * 2 + 3] * frac);
-        stream.pos += stream.step;
-    }
-    stream.played += static_cast<double>(n) / rate;
-}
-#endif
-
-/** @brief SDL audio callback mixing FM/streamed music and digital samples. */
-void Callback(void*, Uint8* stream, int len) {
-    float* out = reinterpret_cast<float*>(stream);
-    int frames = len / static_cast<int>(sizeof(float) * 2);
-    std::fill(out, out + static_cast<std::ptrdiff_t>(frames) * 2, 0.0F);
-    MixFm(out, frames);
-#ifdef W2_VORBIS
-    Mixer& mix = sound_state.mix;
-    if (mix.rec) MixStream(*mix.rec, out, frames, mix.rate);
-    for (auto& tail : mix.tails) MixStream(*tail, out, frames, mix.rate);
-#endif
-    MixSample(out, frames);
-    for (int i = 0; i < frames * 2; i++) out[i] = std::clamp(out[i], -1.0F, 1.0F);
-}
-
-// ------------------------------------------------------------- helpers
-
-/** @brief Converts a DOS relative asset path (e.g. `"SOUND\\army.8SN"`) to a path under `data_dir`.
- */
-std::filesystem::path DataPath(const std::string& name) {
-    std::string rel = name;
-    std::replace(rel.begin(), rel.end(), '\\', '/');
-    return sound_state.data_dir / rel;
-}
-
-/** @brief Loads and caches an 8-bit unsigned `.8SN` sample as normalized float PCM. */
-Pcm SampleData(const std::string& name) {
-    auto found_it = sound_state.samples.find(name);
-    if (found_it != sound_state.samples.end()) return found_it->second;
-    Pcm pcm;
-    if (auto bytes = w2::ReadBytes(DataPath(name)); bytes.ok() && !bytes->empty()) {
-        pcm = std::make_shared<std::vector<float>>(bytes->size());
-        for (size_t i = 0; i < bytes->size(); i++) {
-            (*pcm)[i] = (static_cast<int>((*bytes)[i]) - 128) / 128.0F;
+        if (fm_buf.size() < need) {
+            size_t from = fm_buf.size();
+            fm_buf.resize(need);
+            fm_synth->Render(fm_buf.data() + from, static_cast<int>(need - from));
         }
-    }
-    sound_state.samples[name] = pcm;
-    return pcm;
-}
-
-/** @brief Writes the three audio toggle flags to `DATA/OPTIONS.SND`. */
-void SaveOptionsFile() {
-    std::string content;
-    content += sound_state.enabled.music ? '1' : '0';
-    content += sound_state.enabled.effects ? '1' : '0';
-    content += sound_state.enabled.speech ? '1' : '0';
-    w2::WriteFile(sound_state.data_dir / "DATA/OPTIONS.SND", content).IgnoreError();
-}
-
-/** @brief Builds the path to a pre-rendered `.ogg` recording for `synth` and XMI `name`. */
-std::filesystem::path RecordingPath(SynthKind synth, const std::string& name) {
-    std::string base = w2::Upper(name);
-    if (base.ends_with(".XMI")) base = base.substr(0, base.size() - 4);
-    return sound_state.rec_dir / (std::string(1, SynthPrefix(synth)) + base + ".ogg");
-}
-
-#ifdef W2_VORBIS
-/** @brief Opens an Ogg Vorbis file at `path` for streaming, or returns nullptr. */
-std::unique_ptr<Stream> OpenStream(const std::filesystem::path& path) {
-    auto stream = std::make_unique<Stream>();
-    std::string real = w2::ResolvePath(path).string();
-    if (real.empty() || ov_fopen(real.c_str(), &stream->vorbis) != 0) return nullptr;
-    stream->open = true;
-    vorbis_info* info = ov_info(&stream->vorbis, -1);
-    stream->channels = info->channels;
-    stream->step = static_cast<double>(info->rate) / sound_state.mix.rate;
-    return stream;
-}
-
-/** @brief Main-thread check that seamlessly loops `mix.rec` at `rec_at` and prunes finished reverb
- * tails. */
-void StepRecording() {
-    Lock lock;
-    Mixer& mix = sound_state.mix;
-    auto& rec = mix.rec;
-    if (rec && (rec->played >= sound_state.rec_at || rec->Done())) {
-        mix.tails.push_back(std::move(rec));
-        if (sound_state.rec_loop && sound_state.song)
-            rec = OpenStream(RecordingPath(sound_state.synth, sound_state.song->first));
-        else
-            sound_state.song_playing = false;
-    }
-    mix.tails.erase(std::remove_if(mix.tails.begin(), mix.tails.end(),
-                                   [](auto& tail) { return tail->Done(); }),
-                    mix.tails.end());
-    if (mix.tails.size() > 4) mix.tails.erase(mix.tails.begin(), mix.tails.end() - 4);
-}
-#endif
-
-/** @brief Stops and releases any active Vorbis streams outside the audio lock. */
-void StopRecordings() {
-#ifdef W2_VORBIS
-    std::unique_ptr<Stream> rec;
-    std::vector<std::unique_ptr<Stream>> tails;
-    {
-        Lock lock;
-        rec = std::move(sound_state.mix.rec);
-        tails = std::move(sound_state.mix.tails);
-        sound_state.mix.tails.clear();
-    }
-#endif
-}
-
-/** @brief Stops live OPL2 FM playback. */
-void StopFm() {
-    Lock lock;
-    if (sound_state.mix.fm_synth) sound_state.mix.fm_synth->Stop();
-    sound_state.mix.fm_was_playing = false;
-    sound_state.mix.fm_ended = false;
-}
-
-/** @brief Starts playing song `name` (looping when `loop` is true) on the selected synthesizer. */
-bool StartSong(const std::string& name, bool loop) {
-    if (!sound_state.dev) return false;
-#ifdef W2_VORBIS
-    if (sound_state.synth != SynthKind::kFm) {
-        // Read the XMI sequence alongside the recording to determine its exact loop tick length.
-        auto bytes =
-                w2::ReadBytes(sound_state.data_dir / "SOUND" /
-                              (std::string(1, SynthPrefix(sound_state.synth)) + w2::Upper(name)));
-        auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
-        auto stream = seq ? OpenStream(RecordingPath(sound_state.synth, name)) : nullptr;
-        if (stream) {
-            StopFm();
-            StopRecordings();
-            Lock lock;
-            sound_state.mix.rec = std::move(stream);
-            sound_state.rec_at = (seq->length + 1.0) / w2::xmi::kTickRate;
-            sound_state.rec_loop = loop;
-            sound_state.song = std::make_pair(name, loop);
-            sound_state.song_playing = true;
-            return true;
+        for (int i = 0; i < frames; i++) {
+            size_t idx = static_cast<size_t>(fm_pos);
+            double frac = fm_pos - static_cast<double>(idx);
+            float val = static_cast<float>((fm_buf[idx] * (1.0 - frac) + fm_buf[idx + 1UZ] * frac) *
+                                           kFmGain);
+            val = std::clamp(val, -1.0F, 1.0F);
+            out[static_cast<std::ptrdiff_t>(i) * 2] += val;
+            out[i * 2 + 1] += val;
+            fm_pos += step;
         }
+        bool playing_now = fm_synth->Playing();
+        if (fm_was_playing && !playing_now) fm_ended = true;
+        fm_was_playing = playing_now;
     }
-#endif
-    // AdLib FM songs use the 'S'-prefixed XMI files (e.g. SINT12.XMI).
-    if (sound_state.adv.empty() || sound_state.ad_bank.empty()) return false;
-    auto bytes = w2::ReadBytes(sound_state.data_dir / "SOUND" / ("S" + w2::Upper(name)));
-    auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
-    if (!seq) return false;
-    StopRecordings();
-    auto shared = std::make_shared<w2::xmi::Sequence>(std::move(*seq));
-    std::shared_ptr<w2::xmi::Sequence> old;
-    {
-        Lock lock;
-        if (!sound_state.mix.fm_synth)
-            sound_state.mix.fm_synth =
-                    std::make_unique<w2::AilFm>(sound_state.adv, sound_state.ad_bank);
-        old = sound_state.mix.fm_seq;
-        sound_state.mix.fm_seq = shared;
-        sound_state.mix.fm_synth->Play(shared.get(), loop);
-        sound_state.mix.fm_was_playing = true;
-        sound_state.mix.fm_ended = false;
-    }
-    sound_state.song = std::make_pair(name, loop);
-    sound_state.song_playing = true;
-    return true;
-}
-
-/** @brief Appends sample `name` to the playback queue and returns its duration in seconds. */
-double Enqueue(const std::string& name, std::function<void()> done) {
-    Pcm pcm = sound_state.dev ? SampleData(name) : nullptr;
-    if (!pcm) {
-        if (done) done();
-        return 0;
-    }
-    sound_state.queue.push_back(Queued{pcm, std::move(done)});
-    Update();
-    return static_cast<double>(pcm->size()) / kSampleRate;
-}
-
-}  // namespace
-
-// ------------------------------------------------------------- the interface
+};
 
 std::string_view SynthName(SynthKind synth) {
     switch (synth) {
@@ -449,103 +230,236 @@ std::string_view SynthName(SynthKind synth) {
     return "fm";
 }
 
-std::optional<SynthKind> ParseSynthKind(std::string_view name) {
+OptionalSynthKind ParseSynthKind(std::string_view name) {
     if (name == "fm") return SynthKind::kFm;
     if (name == "mt32") return SynthKind::kMt32;
     if (name == "sc55") return SynthKind::kSc55;
     return std::nullopt;
 }
 
-void Init(const std::filesystem::path& data_dir, const w2::uidata::Strings& files) {
-    sound_state.data_dir = data_dir;
-    sound_state.files = files;
-    sound_state.rec_dir = w2::FileExists("pre-rendered-sound")
-                                  ? std::filesystem::path("pre-rendered-sound")
-                                  : data_dir / "../pre-rendered-sound";
+AudioEngine::AudioEngine() : mixer_(std::make_unique<MixerState>()) {}
+AudioEngine::~AudioEngine() {
+    Shutdown();
+}
+
+void AudioEngine::AudioCallback(void* userdata, uint8_t* stream, int byte_len) {
+    auto* self = static_cast<AudioEngine*>(userdata);
+    self->MixOutput(reinterpret_cast<float*>(stream),
+                    byte_len / static_cast<int>(sizeof(float) * 2));
+}
+
+void AudioEngine::MixOutput(float* out, int frames) {
+    std::fill(out, out + static_cast<std::ptrdiff_t>(frames) * 2, 0.0F);
+    mixer_->MixFm(out, frames);
+#ifdef W2_VORBIS
+    if (mixer_->rec) mixer_->rec->MixInto(out, frames, mixer_->rate);
+    for (auto& tail : mixer_->tails) tail->MixInto(out, frames, mixer_->rate);
+#endif
+    mixer_->MixSample(out, frames);
+    for (int i = 0; i < frames * 2; i++) out[i] = std::clamp(out[i], -1.0F, 1.0F);
+}
+
+int AudioEngine::RollDie(int sides) {
+    return static_cast<int>(rng_() % static_cast<unsigned>(std::max(1, sides))) + 1;
+}
+
+std::filesystem::path AudioEngine::DataPath(std::string_view relative_name) const {
+    std::string rel(relative_name);
+    std::replace(rel.begin(), rel.end(), '\\', '/');
+    return data_dir_ / rel;
+}
+
+std::filesystem::path AudioEngine::RecordingPath(SynthKind synth, std::string_view xmi_name) const {
+    std::string base = w2::Upper(xmi_name);
+    if (base.ends_with(".XMI")) base = base.substr(0, base.size() - 4);
+    return rec_dir_ / (std::string(1, SynthPrefix(synth)) + base + ".ogg");
+}
+
+AudioEngine::SharedPcm AudioEngine::LoadSample(std::string_view relative_name) {
+    std::string key(relative_name);
+    if (auto found = samples_.find(key); found != samples_.end()) return found->second;
+    SharedPcm pcm;
+    if (auto bytes = w2::ReadBytes(DataPath(key)); bytes.ok() && !bytes->empty()) {
+        pcm = std::make_shared<PcmBuffer>(bytes->size());
+        for (size_t i = 0; i < bytes->size(); i++) {
+            (*pcm)[i] = static_cast<float>(static_cast<int>((*bytes)[i]) - 128) / 128.0F;
+        }
+    }
+    samples_.emplace(std::move(key), pcm);
+    return pcm;
+}
+
+void AudioEngine::StepRecording() {
+#ifdef W2_VORBIS
+    ScopedDeviceLock dev_lock(device_id_);
+    MixerState::StreamPtr& rec = mixer_->rec;
+    if (rec && (rec->played >= rec_loop_at_ || rec->Done())) {
+        mixer_->tails.push_back(std::move(rec));
+        if (rec_loop_ && song_.has_value()) {
+            rec = VorbisStream::Open(RecordingPath(synth_, song_->first), mixer_->rate);
+        } else {
+            song_playing_ = false;
+        }
+    }
+    auto& tails = mixer_->tails;
+    tails.erase(std::remove_if(tails.begin(), tails.end(),
+                               [](const auto& tail) { return tail->Done(); }),
+                tails.end());
+    if (tails.size() > 4UZ) tails.erase(tails.begin(), tails.end() - 4);
+#endif
+}
+
+void AudioEngine::StopStreams() {
+    MixerState::StreamPtr old_rec;
+    MixerState::TailList old_tails;
+    ScopedDeviceLock dev_lock(device_id_);
+    if (mixer_->fm_synth) mixer_->fm_synth->Stop();
+    mixer_->fm_was_playing = mixer_->fm_ended = false;
+    old_rec = std::move(mixer_->rec);
+    old_tails = std::move(mixer_->tails);
+    mixer_->tails.clear();
+}
+
+bool AudioEngine::StartSong(const std::string& name, bool loop) {
+    if (device_id_ == 0) return false;
+#ifdef W2_VORBIS
+    if (synth_ != SynthKind::kFm) {
+        auto bytes = w2::ReadBytes(data_dir_ / "SOUND" /
+                                   (std::string(1, SynthPrefix(synth_)) + w2::Upper(name)));
+        auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
+        auto stream = seq ? VorbisStream::Open(RecordingPath(synth_, name), mixer_->rate) : nullptr;
+        if (stream) {
+            StopStreams();
+            ScopedDeviceLock dev_lock(device_id_);
+            mixer_->rec = std::move(stream);
+            rec_loop_at_ = (seq->length + 1.0) / w2::xmi::kTickRate;
+            rec_loop_ = loop;
+            song_ = std::make_pair(name, loop);
+            song_playing_ = true;
+            return true;
+        }
+    }
+#endif
+    if (adv_.empty() || ad_bank_.empty()) return false;
+    auto bytes = w2::ReadBytes(data_dir_ / "SOUND" / ("S" + w2::Upper(name)));
+    auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
+    if (!seq) return false;
+    StopStreams();
+    auto shared_seq = std::make_shared<w2::xmi::Sequence>(std::move(*seq));
+    MixerState::SharedSequence prev_seq;
+    {
+        ScopedDeviceLock dev_lock(device_id_);
+        if (!mixer_->fm_synth) mixer_->fm_synth = std::make_unique<w2::AilFm>(adv_, ad_bank_);
+        prev_seq = mixer_->fm_seq;
+        mixer_->fm_seq = shared_seq;
+        mixer_->fm_synth->Play(shared_seq.get(), loop);
+        mixer_->fm_was_playing = true;
+        mixer_->fm_ended = false;
+    }
+    song_ = std::make_pair(name, loop);
+    song_playing_ = true;
+    return true;
+}
+
+double AudioEngine::EnqueueSample(std::string_view relative_name, CompletionCallback done) {
+    SharedPcm pcm = device_id_ != 0 ? LoadSample(relative_name) : nullptr;
+    if (!pcm) {
+        if (done) done();
+        return 0.0;
+    }
+    queue_.push_back(QueuedSample{pcm, std::move(done), 0.0});
+    Update();
+    return static_cast<double>(pcm->size()) / kSampleRate;
+}
+
+void AudioEngine::Init(const std::filesystem::path& data_dir, const w2::uidata::Strings& files,
+                       OptionalSynthKind preferred_synth) {
+    Shutdown();
+    data_dir_ = data_dir;
+    files_ = files;
+    rec_dir_ = w2::FileExists("pre-rendered-sound") ? std::filesystem::path("pre-rendered-sound")
+                                                    : data_dir / "../pre-rendered-sound";
     std::string opts = w2::ReadFile(data_dir / "DATA/OPTIONS.SND").value_or("111");
-    while (opts.size() < 3) opts += '1';
-    sound_state.enabled.music = opts[0] == '1';
-    sound_state.enabled.effects = opts[1] == '1';
-    sound_state.enabled.speech = opts[2] != '0';
-    // Default to MT-32 recordings when available, falling back to live AdLib FM.
-    std::string pref_synth = prefs::Get("music");
-    SynthKind desired = pref_synth.empty() ? SynthKind::kMt32
-                                           : ParseSynthKind(pref_synth).value_or(SynthKind::kFm);
-    if (SynthAvailable(desired)) sound_state.synth = desired;
-    sound_state.adv = w2::ReadBytes(data_dir / "ADLIB.ADV").value_or(std::vector<uint8_t>{});
-    sound_state.ad_bank = w2::ReadBytes(data_dir / "MIDPAK.AD").value_or(std::vector<uint8_t>{});
+    while (opts.size() < 3UZ) opts += '1';
+    options_ = Options{opts[0] == '1', opts[1] == '1', opts[2] != '0'};
+
+    SynthKind desired = preferred_synth.value_or(SynthKind::kMt32);
+    synth_ = SynthAvailable(desired) ? desired : SynthKind::kFm;
+    adv_ = w2::ReadBytes(data_dir / "ADLIB.ADV").value_or(ByteData{});
+    ad_bank_ = w2::ReadBytes(data_dir / "MIDPAK.AD").value_or(ByteData{});
+
     SDL_AudioSpec want{}, have{};
     want.freq = 44100;
     want.format = AUDIO_F32SYS;
     want.channels = 2;
     want.samples = 1024;
-    want.callback = Callback;
-    sound_state.dev =
-            SDL_OpenAudioDevice(nullptr, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
-    if (!sound_state.dev) return;
-    sound_state.mix.rate = have.freq;
-    SDL_PauseAudioDevice(sound_state.dev, 0);
+    want.callback = &AudioEngine::AudioCallback;
+    want.userdata = this;
+    device_id_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+    if (device_id_ == 0) return;
+    mixer_->rate = have.freq;
+    SDL_PauseAudioDevice(device_id_, 0);
 }
 
-void Shutdown() {
-    if (!sound_state.dev) return;
-    SDL_CloseAudioDevice(sound_state.dev);
-    sound_state.dev = 0;
-#ifdef W2_VORBIS
-    sound_state.mix.rec.reset();
-    sound_state.mix.tails.clear();
-#endif
-    sound_state.mix.fm_synth.reset();
+void AudioEngine::Shutdown() {
+    if (device_id_ != 0) SDL_CloseAudioDevice(device_id_);
+    device_id_ = 0;
+    mixer_ = std::make_unique<MixerState>();
+    samples_.clear();
+    queue_.clear();
+    playing_.reset();
+    cue_ = w2::kNone;
+    song_.reset();
+    song_playing_ = false;
 }
 
-Options& MutableOptions() {
-    return sound_state.enabled;
-}
-void SaveOptions() {
-    SaveOptionsFile();
+void AudioEngine::SaveOptions() const {
+    if (data_dir_.empty()) return;
+    std::string content = {options_.music ? '1' : '0', options_.effects ? '1' : '0',
+                           options_.speech ? '1' : '0'};
+    w2::WriteFile(data_dir_ / "DATA/OPTIONS.SND", content).IgnoreError();
 }
 
-void Toggle(AudioChannel channel) {
+void AudioEngine::Toggle(AudioChannel channel) {
     switch (channel) {
     case AudioChannel::kMusic:
-        sound_state.enabled.music = !sound_state.enabled.music;
-        if (sound_state.enabled.music) {
-            sound_state.cue = w2::kNone;
+        options_.music = !options_.music;
+        if (options_.music) {
+            cue_ = w2::kNone;
             Music(w2::cues::kPlay);
         } else {
             StopMusic();
         }
         break;
     case AudioChannel::kEffects:
-        sound_state.enabled.effects = !sound_state.enabled.effects;
+        options_.effects = !options_.effects;
         break;
     case AudioChannel::kSpeech:
-        sound_state.enabled.speech = !sound_state.enabled.speech;
+        options_.speech = !options_.speech;
         break;
     }
-    SaveOptionsFile();
+    SaveOptions();
 }
 
-void Music(int cue, const std::vector<w2::Side*>& sides) {
-    if (!sound_state.enabled.music) return;
-    if (cue == sound_state.cue && sound_state.song_playing) return;
-    auto [name, loop] = w2::cues::Song(sound_state.files, cue, sides, Roll);
-    if (!name.empty() && StartSong(name, loop)) sound_state.cue = cue;
+void AudioEngine::Music(int cue, bool has_active_human) {
+    if (!options_.music || (cue == cue_ && song_playing_)) return;
+    w2::Side synthetic_human{};
+    synthetic_human.in_use = synthetic_human.alive = true;
+    SidePtrList cue_sides;
+    if (has_active_human) cue_sides.push_back(&synthetic_human);
+    auto [name, loop] =
+            w2::cues::Song(files_, cue, cue_sides, [this](int n) { return RollDie(n); });
+    if (!name.empty() && StartSong(name, loop)) cue_ = cue;
 }
 
-void StopMusic() {
-    sound_state.cue = w2::kNone;
-    sound_state.song.reset();
-    sound_state.song_playing = false;
-    StopFm();
-    StopRecordings();
+void AudioEngine::StopMusic() {
+    cue_ = w2::kNone;
+    song_.reset();
+    song_playing_ = false;
+    StopStreams();
 }
 
-SynthKind Synth() {
-    return sound_state.synth;
-}
-
-bool SynthAvailable(SynthKind synth) {
+bool AudioEngine::SynthAvailable(SynthKind synth) const {
     if (synth == SynthKind::kFm) return true;
 #ifdef W2_VORBIS
     return w2::FileExists(RecordingPath(synth, "STARTUP.XMI"));
@@ -554,82 +468,83 @@ bool SynthAvailable(SynthKind synth) {
 #endif
 }
 
-void SetSynth(SynthKind synth) {
-    if (synth == sound_state.synth) return;
-    sound_state.synth = synth;
-    prefs::Set("music", std::string(SynthName(synth)));
-    if (sound_state.enabled.music && sound_state.song && sound_state.song_playing) {
-        auto song = *sound_state.song;
-        StartSong(song.first, song.second);
+void AudioEngine::SetSynth(SynthKind synth) {
+    if (synth == synth_) return;
+    synth_ = synth;
+    if (options_.music && song_.has_value() && song_playing_) {
+        SongSpec current_song = *song_;
+        StartSong(current_song.first, current_song.second);
     }
 }
 
-double Effect(const std::string& name) {
-    if (!sound_state.enabled.effects || sound_state.files.empty()) return 0;
-    auto effect_it = kEffect.find(name);
-    if (effect_it == kEffect.end()) return 0;
-    auto [group, index] = effect_it->second;
-    if (group >= static_cast<int>(sound_state.files.size()) ||
-        index >= static_cast<int>(sound_state.files[group].size()))
-        return 0;
-    const std::string& file_name = sound_state.files[group][index];
-    if (file_name.empty()) return 0;
-    return Enqueue(file_name, nullptr);
+double AudioEngine::Effect(std::string_view name) {
+    if (!options_.effects || files_.empty()) return 0.0;
+    auto entry = FindEffectEntry(name);
+    if (!entry.has_value()) return 0.0;
+    auto [group, index] = *entry;
+    if (group < 0 || group >= static_cast<int>(files_.size()) || index < 0 ||
+        index >= static_cast<int>(files_[group].size())) {
+        return 0.0;
+    }
+    const std::string& file_name = files_[group][index];
+    return file_name.empty() ? 0.0 : EnqueueSample(file_name, nullptr);
 }
 
-bool Speak(int group, std::function<void()> after) {
-    if (!sound_state.enabled.speech || sound_state.files.empty()) return false;
-    auto [name, subtitle] = w2::cues::Clip(sound_state.files, group, Roll);
+bool AudioEngine::Speak(int group, CompletionCallback after) {
+    if (!options_.speech || files_.empty()) return false;
+    auto [sample_name, subtitle] =
+            w2::cues::Clip(files_, group, [this](int n) { return RollDie(n); });
     (void)subtitle;
-    if (name.empty() || !sound_state.dev || !SampleData(name)) return false;
-    Enqueue(name, std::move(after));
+    if (sample_name.empty() || device_id_ == 0 || !LoadSample(sample_name)) return false;
+    EnqueueSample(sample_name, std::move(after));
     return true;
 }
 
-bool SpeechOn() {
-    return sound_state.enabled.speech;
-}
-
-bool Busy() {
-    return sound_state.playing.has_value() || !sound_state.queue.empty();
-}
-
-void Update() {
-    if (sound_state.playing) {
-        bool ended;
-        {
-            Lock lock;
-            ended = sound_state.mix.sample_ended;
-        }
-        if (ended || w2::Now() >= sound_state.playing->ends_at) {
-            auto done = std::move(sound_state.playing->done);
-            sound_state.playing.reset();
+void AudioEngine::Update() {
+    if (playing_.has_value()) {
+        bool ended = [this]() {
+            ScopedDeviceLock dev_lock(device_id_);
+            return mixer_->sample_ended;
+        }();
+        if (ended || w2::Now() >= playing_->ends_at) {
+            CompletionCallback done = std::move(playing_->done);
+            playing_.reset();
             if (done) done();
         }
     }
-    if (!sound_state.playing && !sound_state.queue.empty()) {
-        Queued next_clip = std::move(sound_state.queue.front());
-        sound_state.queue.pop_front();
+    if (!playing_.has_value() && !queue_.empty()) {
+        QueuedSample next_clip = std::move(queue_.front());
+        queue_.pop_front();
         next_clip.ends_at =
                 w2::Now() + static_cast<double>(next_clip.pcm->size()) / kSampleRate + 0.25;
         {
-            Lock lock;
-            sound_state.mix.sample = next_clip.pcm;
-            sound_state.mix.sample_pos = 0;
-            sound_state.mix.sample_ended = false;
+            ScopedDeviceLock dev_lock(device_id_);
+            mixer_->sample = next_clip.pcm;
+            mixer_->sample_pos = 0.0;
+            mixer_->sample_ended = false;
         }
-        sound_state.playing = std::move(next_clip);
+        playing_ = std::move(next_clip);
     }
     {
-        Lock lock;
-        if (sound_state.mix.fm_ended) {
-            sound_state.mix.fm_ended = false;
-            if (sound_state.song && !sound_state.song->second) sound_state.song_playing = false;
+        ScopedDeviceLock dev_lock(device_id_);
+        if (mixer_->fm_ended) {
+            mixer_->fm_ended = false;
+            if (song_.has_value() && !song_->second) song_playing_ = false;
         }
     }
-#ifdef W2_VORBIS
     StepRecording();
-#endif
+}
+
+AudioEngine& DefaultAudio() {
+    static absl::NoDestructor<AudioEngine> instance;
+    return *instance;
+}
+
+void Music(int cue, const SidePtrList& sides) {
+    bool has_human = std::any_of(sides.begin(), sides.end(), [](const w2::Side* side) {
+        return side != nullptr && side->alive && !side->computer;
+    });
+    DefaultAudio().Music(cue, has_human);
 }
 
 }  // namespace sound
