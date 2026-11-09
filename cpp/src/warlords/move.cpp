@@ -810,6 +810,26 @@ std::string SettleSea(Game& game, const Stack& stack, int x, int y, int mode, bo
     return "";
 }
 
+std::string_view WalkStopName(WalkStop stop) {
+    switch (stop) {
+    case WalkStop::kNone:
+        return "";
+    case WalkStop::kArrived:
+        return "arrived";
+    case WalkStop::kOutOfMoves:
+        return "out of moves";
+    case WalkStop::kAttack:
+        return "attack";
+    case WalkStop::kAtPeace:
+        return "at peace";
+    case WalkStop::kBlocked:
+        return "blocked";
+    case WalkStop::kNoRoute:
+        return "no route";
+    }
+    return "";
+}
+
 namespace {
 /**
  * @brief Whether the walk leaves the stack out of moves.
@@ -823,10 +843,10 @@ namespace {
  *
  * @param landed The steps to where it stopped.
  */
-bool OutOfMoves(const Stack& stack, const Path& path, int landed, const std::string& stopped) {
+bool OutOfMoves(const Stack& stack, const Path& path, int landed, WalkStop stopped) {
     int moves_left = StackMoves(stack);
     if (moves_left < 2) return true;
-    if (landed == 0 || stopped == "attack" || stopped == "at peace") return false;
+    if (landed == 0 || stopped == WalkStop::kAttack || stopped == WalkStop::kAtPeace) return false;
     if (landed >= static_cast<int>(path.size())) return false;
     int total = 0;
     for (int i = 0; i <= landed; i++) total += path[i].cost;
@@ -839,7 +859,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
     int side = stack.empty() ? kNone : stack[0]->owner;
     int left = StackMoves(stack);
     WalkResult result;
-    result.stopped = "arrived";
+    result.stopped = WalkStop::kArrived;
     for (Army* army : stack)
         if (army->at_sea) result.sea_before = true;
     int last_ok = 0, cumulative = 0;
@@ -850,23 +870,23 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
         // a step is taken while what the walk has cost so far fits in the moves
         // left: there is no floor, so one move still buys a road
         if (step.cost > left) {
-            result.stopped = "out of moves";
+            result.stopped = WalkStop::kOutOfMoves;
             break;
         }
         City* city = game.map->city_tile[step.y * game.map->width + step.x];
         auto here = game::ArmiesAt(game, step.x, step.y);
         if (city && !city->razed && city->owner_index != side) {
             if (!diplomacy::MayAttack(game, side, city->owner_index)) {
-                result.stopped = "at peace";
+                result.stopped = WalkStop::kAtPeace;
                 break;
             }
-            result.stopped = "attack";
+            result.stopped = WalkStop::kAttack;
             result.attack = Attack{step.x, step.y, city};
             break;
         }
         bool theirs = !here.empty() && here[0]->owner != side;
         if (theirs && diplomacy::MayAttack(game, side, here[0]->owner)) {
-            result.stopped = "attack";
+            result.stopped = WalkStop::kAttack;
             result.attack = Attack{step.x, step.y, nullptr};
             break;
         }
@@ -881,7 +901,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
     }
 
     if (last_ok == 0) {
-        if (result.stopped == "arrived") result.stopped = "blocked";
+        if (result.stopped == WalkStop::kArrived) result.stopped = WalkStop::kBlocked;
         result.out_of_moves = OutOfMoves(stack, path, 0, result.stopped);
         return result;
     }
@@ -890,8 +910,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
     const Step& dest = path[last_ok - 1];
     Mode movement = StackMode(game, stack);
     for (Army* army : stack) {
-        army->x = dest.x;
-        army->y = dest.y;
+        game.armies.Relocate(army, TilePos(dest.x, dest.y));
         army->moves = std::max(0, army->moves - cost);
     }
     std::string change = SettleSea(game, stack, dest.x, dest.y, movement.mode, movement.at_sea);
@@ -899,7 +918,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
         for (Army* army : stack) {
             if (army->at_sea == (change == "to sea")) army->moves = 0;
         }
-        result.stopped = "out of moves";
+        result.stopped = WalkStop::kOutOfMoves;
         result.attack.reset();
     }
 
@@ -918,8 +937,8 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
     result.steps = last_ok;
     result.spent = cost;
     for (int i = 0; i < last_ok; i++) result.walked.emplace_back(path[i].x, path[i].y);
-    if (last_ok < static_cast<int>(path.size()) && result.stopped == "arrived")
-        result.stopped = "blocked";
+    if (last_ok < static_cast<int>(path.size()) && result.stopped == WalkStop::kArrived)
+        result.stopped = WalkStop::kBlocked;
     // going to sea or coming ashore ends the move as running out does
     result.out_of_moves = !change.empty() || OutOfMoves(stack, path, last_ok, result.stopped);
     return result;
@@ -936,16 +955,16 @@ WalkResult Walk(Game& game, const Stack& stack, const Path& path) {
 WalkResult MoveTo(Game& game, const Stack& stack, int x, int y) {
     WalkResult result;
     if (stack.empty()) {
-        result.stopped = "blocked";
+        result.stopped = WalkStop::kBlocked;
         return result;
     }
     auto path = FindPath(game, stack, stack[0]->x, stack[0]->y, x, y);
     if (!path) {
-        result.stopped = "no route";
+        result.stopped = WalkStop::kNoRoute;
         return result;
     }
     if (path->empty()) {
-        result.stopped = "arrived";
+        result.stopped = WalkStop::kArrived;
         return result;
     }
     return Walk(game, stack, *path);

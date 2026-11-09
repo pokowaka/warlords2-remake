@@ -497,9 +497,9 @@ StepResult Step(Game& game, Sel& sel, int target_x, int target_y) {
     if (walk.steps > 0) Walked(game, sel.armies, walk);
     Refresh(game, sel);
     PickUp(game, sel);
-    if (walk.stopped == "attack") {
+    if (walk.stopped == move::WalkStop::kAttack) {
         return {walk.attack->city ? 5 : 3, walk.attack->x, walk.attack->y};
-    } else if (walk.stopped == "at peace") {
+    } else if (walk.stopped == move::WalkStop::kAtPeace) {
         // Stopped by a side it is at peace with: a city there is still a city
         // to attack.
         if (walk.steps < static_cast<int>(path->size())) {
@@ -507,7 +507,7 @@ StepResult Step(Game& game, Sel& sel, int target_x, int target_y) {
             if (CityAt(game, ahead.x, ahead.y)) return {5, ahead.x, ahead.y};
         }
         return {2};
-    } else if (walk.stopped == "arrived") {
+    } else if (walk.stopped == move::WalkStop::kArrived) {
         return {4};
     }
     return {2};

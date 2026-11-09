@@ -585,7 +585,8 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                 sampler.current_turn = nullptr;
                 for (int rollout = 0; rollout < cfg.search_r; rollout++) {
                     auto copy = CopyGame(cfg, *candidate_game);
-                    copy->rng.state ^= static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U);
+                    copy->rng.SetState(copy->rng.State() ^
+                                       static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U));
                     values[candidate] += rollout_value(*copy);
                 }
                 values[candidate] /= cfg.search_r;

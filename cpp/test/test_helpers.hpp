@@ -129,18 +129,20 @@ std::shared_ptr<Quest> MakeItemQuest(Army* hero, Item* item);
 std::shared_ptr<Quest> MakeSlayHeroQuest(Army* hero, Army* prey);
 
 /**
- * @brief RAII guard that snapshots `rules::bugs` on construction and restores it on scope exit.
+ * @brief RAII guard that snapshots `game.RulesBugs()` on construction and restores it on scope
+ * exit.
  */
 class ScopedBugFlags {
   public:
-    ScopedBugFlags();
+    explicit ScopedBugFlags(Game& game);
     ~ScopedBugFlags();
 
     ScopedBugFlags(const ScopedBugFlags&) = delete;
     ScopedBugFlags& operator=(const ScopedBugFlags&) = delete;
 
   private:
-    rules::Bugs saved_bugs_;  ///< Snapshot of `rules::bugs` prior to test mutation.
+    Game& game_;              ///< Game instance whose bug flags are guarded.
+    rules::Bugs saved_bugs_;  ///< Snapshot of `game_.RulesBugs()` prior to test mutation.
 };
 
 /**

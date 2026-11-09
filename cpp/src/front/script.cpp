@@ -193,14 +193,13 @@ void StepScript() {
         } else if (cmd == "spawn" && g_app.g) {
             int tile_x, tile_y, owner, type;
             stream >> tile_x >> tile_y >> owner >> type;
-            auto army = std::make_unique<Army>();
-            army->x = tile_x;
-            army->y = tile_y;
-            army->owner = owner;
-            army->type = type;
-            army->moves = 10;
-            g_app.g->armies.push_back(army.get());
-            g_app.g->pool.push_back(std::move(army));
+            Army army;
+            army.x = tile_x;
+            army.y = tile_y;
+            army.owner = owner;
+            army.type = type;
+            army.moves = 10;
+            g_app.g->Add(army);
         } else if (cmd == "advise") {
             int x, y;
             stream >> x >> y;

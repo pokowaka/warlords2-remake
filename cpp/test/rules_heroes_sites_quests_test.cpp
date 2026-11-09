@@ -93,7 +93,7 @@ TEST(SageTest, RichSiteDiscoveryGemPayoutAndHiddenMapPatch) {
     EXPECT_EQ(side->gold, gold_before + gem);
 
     game.map->options.hidden_map = 1;
-    game.explored.clear();
+    game.explored.Clear();
     auto patch = site::SageMap(game, *side, 3, 3);
     EXPECT_EQ(patch[0], 0);
     EXPECT_TRUE(patch[2] >= 16 && patch[2] <= 25 && patch[3] >= 16 && patch[3] <= 25);
@@ -276,9 +276,9 @@ TEST(HeroesTest, RecruitmentPromotionsAlliesCapsAndItemDrops) {
 }
 
 TEST(HeroExperienceTest, BugCompatibilityFlagAndBattleAwards) {
-    ScopedBugFlags bug_guard;
     auto game_ptr = SetupGame("ERYTHEA", Seed(41));
     Game& game = *game_ptr;
+    ScopedBugFlags bug_guard(game);
     auto defender_xp = [&]() {
         Army def_hero;
         Army attacker;
@@ -292,11 +292,11 @@ TEST(HeroExperienceTest, BugCompatibilityFlagAndBattleAwards) {
         hero::BattleExperience(game, {&attacker}, {&def_hero}, battle, false);
         return def_hero.experience;
     };
-    rules::bugs.hero_experience_reads_attacker_types = true;
+    game.RulesBugs().hero_experience_reads_attacker_types = true;
     EXPECT_EQ(defender_xp(), 0);
-    rules::bugs.hero_experience_reads_attacker_types = false;
+    game.RulesBugs().hero_experience_reads_attacker_types = false;
     EXPECT_EQ(defender_xp(), 1);
-    rules::bugs.hero_experience_reads_attacker_types = true;
+    game.RulesBugs().hero_experience_reads_attacker_types = true;
 
     Army hero;
     hero.type = armytype::kHero;
@@ -445,8 +445,8 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     Army* hero = AddArmy(game, side->capital->x, side->capital->y, side->index, armytype::kHero, 5);
     auto assigned = quest::Assign(game, *side, hero);
     ASSERT_NE(assigned, nullptr);
-    EXPECT_TRUE(assigned->type >= 0 && assigned->type <= 6 && assigned->HasTarget());
-    EXPECT_FALSE(quest::Describe(*assigned).empty());
+    EXPECT_TRUE(assigned->Type() >= 0 && assigned->Type() <= 6 && assigned->HasTarget());
+    EXPECT_FALSE(quest::Describe(game, *assigned).empty());
     EXPECT_EQ(quest::Assign(game, *side, hero), nullptr);
 
     std::map<int, int> table_counts;
@@ -520,19 +520,19 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     battle_ev.stack = {hero};
     battle_ev.killed = {&slain_a, &slain_b};
     EXPECT_EQ(quest::Notify(game, *side, "battle", battle_ev), nullptr);
-    EXPECT_EQ(side->quest->done, 2);
+    EXPECT_EQ(side->quest->Done(), 2);
     result = quest::Notify(game, *side, "battle", battle_ev);
     EXPECT_TRUE(result && result->failed.empty());
 
     side->quest = MakeSlaughterQuest(hero, victim, 2);
     battle_ev.stack.clear();
     quest::Notify(game, *side, "battle", battle_ev);
-    EXPECT_EQ(side->quest->done, 0);
+    EXPECT_EQ(side->quest->Done(), 0);
 
     side->quest = MakePillageQuest(hero, 100);
     quest::Event pillage_ev{.stack = {hero}, .gold = 60};
     quest::Notify(game, *side, "pillage", pillage_ev);
-    EXPECT_EQ(side->quest->done, 60);
+    EXPECT_EQ(side->quest->Done(), 60);
     result = quest::Notify(game, *side, "pillage", pillage_ev);
     EXPECT_TRUE(result && result->failed.empty());
 
@@ -545,11 +545,12 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     EXPECT_EQ(std::find(hero->items.begin(), hero->items.end(), &quest_item), hero->items.end());
     EXPECT_EQ(quest_item.status, 0);
 
-    Army prey;
-    prey.type = armytype::kHero;
-    prey.owner = victim->index;
-    side->quest = MakeSlayHeroQuest(hero, &prey);
-    quest::Event slay_ev{.killed = {&prey}};
+    Army prey_proto;
+    prey_proto.type = armytype::kHero;
+    prey_proto.owner = victim->index;
+    Army* prey = game.Make(prey_proto);
+    side->quest = MakeSlayHeroQuest(hero, prey);
+    quest::Event slay_ev{.killed = {prey}};
     EXPECT_EQ(quest::Notify(game, *side, "battle", slay_ev), nullptr);
     slay_ev.stack = {hero};
     result = quest::Notify(game, *side, "battle", slay_ev);
@@ -562,8 +563,7 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     EXPECT_TRUE(result && !result->failed.empty());
 
     side->gold = 50;
-    Quest with_hero;
-    with_hero.hero = hero;
+    Quest with_hero(quest::kPillageGold, hero->id, std::monostate{}, 100, 100);
     auto gold_reward = quest::ChooseReward(game, *side, &with_hero);
     EXPECT_TRUE(gold_reward->kind == "gold" && gold_reward->gold >= 1002 &&
                 gold_reward->gold <= 3000);
@@ -575,9 +575,10 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
 }
 
 TEST(BugFlagsTest, DefaultFlagsAreEnabledAndReadByEngineSources) {
-    EXPECT_TRUE(rules::bugs.hero_experience_reads_attacker_types);
+    Game default_game;
+    EXPECT_TRUE(default_game.RulesBugs().hero_experience_reads_attacker_types);
     std::set<std::string> used;
-    std::regex flag_read("rules::bugs\\.(\\w+)");
+    std::regex flag_read("(?:RulesBugs\\(\\)|\\.bugs)\\.(\\w+)");
     for (const char* module : {"hero", "combat", "game", "move", "ai", "site", "quest"}) {
         auto text = ReadFile(std::filesystem::path("cpp/src/warlords") /
                              (std::string(module) + ".cpp"));

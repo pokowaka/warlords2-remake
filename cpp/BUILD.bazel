@@ -9,7 +9,9 @@ package(default_visibility = ["//visibility:private"])
 cc_library(
     name = "util",
     copts = W2_COPTS,
-    srcs = glob(["src/util/*.cpp"]),
+    srcs = glob(["src/util/*.cpp"]) + [
+        "src/warlords/rng.cpp",
+    ],
     hdrs = glob(["src/util/*.hpp"]) + [
         "src/warlords/bytes.hpp",
         "src/warlords/rng.hpp",
@@ -33,15 +35,19 @@ cc_library(
     visibility = ["//cpp:__subpackages__"],
 )
 
-# Layer 2: Domain model headers (ArmyType, City, Side, Army, Map, Game, ...).
+# Layer 2: Domain model entities, strong IDs, and encapsulated state subsystems.
 cc_library(
     name = "model",
     copts = W2_COPTS,
+    srcs = glob(["src/warlords/model/*.cpp"]),
     hdrs = glob(["src/warlords/model/*.hpp"]) + ["src/warlords/types.hpp"],
     includes = ["src"],
     deps = [
         ":util",
         "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/types:span",
     ],
     visibility = ["//cpp:__subpackages__"],
 )
@@ -328,6 +334,8 @@ cc_test(
     data = DATA,
     deps = [
         ":w2core",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
         "@googletest//:gtest_main",
     ],
 )

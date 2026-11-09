@@ -137,7 +137,7 @@ void StartAssault(int x, int y, const w2::Battle& result) {
     assault.atk_slots = LineSlots(static_cast<int>(lines.attackers.size()), {kAsAtkRow});
     assault.def_side = lines.defenders.empty() ? 8 : OwnerOr8(lines.defenders[0]->owner);
     assault.atk_side = lines.attackers.empty() ? 8 : OwnerOr8(lines.attackers[0]->owner);
-    assault.phase = "cloud";
+    assault.phase = AssaultPhase::kCloud;
     assault.at = w2::Now();
     // On a human's turn, hold the cloud while WAR.8SN plays.
     assault.cloud_time = (g_app.g->side && !g_app.g->side->computer) ? sound::Effect("war") : 0;
@@ -163,21 +163,21 @@ void CloseAssault() {
 static void AdvanceAssault() {
     Assault& assault = *g_app.assault;
     double now = w2::Now();
-    if (assault.phase == "cloud") {
+    if (assault.phase == AssaultPhase::kCloud) {
         if (now - assault.at >= std::max(kAsCloudTime, assault.cloud_time)) {
             // a computer's battle nobody is to see: the cloud was all of it
             if (assault.computer && !assault.window) {
                 CloseAssault();
                 return;
             }
-            assault.phase = "battle";
+            assault.phase = AssaultPhase::kBattle;
             assault.at = now;
             // Wait five ticks on the drawn-up lines before a computer's fight.
             if (assault.computer) assault.at = now + 5 / 18.2;
         }
         return;
     }
-    if (assault.phase == "over" && assault.computer) {
+    if (assault.phase == AssaultPhase::kOver && assault.computer) {
         if (assault.close_at == 0) {
             assault.close_at = now + 15 / 18.2;
             if (g_app.ai_status) g_app.ai_status->text = assault.outcome;
@@ -186,7 +186,7 @@ static void AdvanceAssault() {
         }
         return;
     }
-    if (assault.phase != "battle") return;
+    if (assault.phase != AssaultPhase::kBattle) return;
     double each = assault.fast ? kAsFellFast : kAsFellTime;
     const auto& log = assault.result.log;
     while (assault.step < log.size() && now >= assault.at) {
@@ -205,7 +205,7 @@ static void AdvanceAssault() {
         if (!assault.fast) sound::Effect(log[assault.step - 1] == 1 ? "army" : "army2");
         assault.at += each;
     }
-    if (assault.step >= log.size() && now >= assault.at) assault.phase = "over";
+    if (assault.step >= log.size() && now >= assault.at) assault.phase = AssaultPhase::kOver;
 }
 
 /** @brief Handles a key or click during an assault: hurries playback or closes a finished battle.
@@ -213,7 +213,7 @@ static void AdvanceAssault() {
 void PressAssault() {
     if (!g_app.assault) return;
     Assault& assault = *g_app.assault;
-    if (assault.phase != "over") {
+    if (assault.phase != AssaultPhase::kOver) {
         assault.fast = true;
         assault.at = std::min(assault.at, w2::Now() + kAsFellFast);
         AdvanceAssault();
@@ -301,7 +301,7 @@ static void DrawBattle() {
                    assault.def_fell);
     DrawBattleLine(assault.atk, assault.atk_slots, assault.atk_side, assault.atk_down,
                    assault.atk_fell);
-    if (assault.phase == "over") {
+    if (assault.phase == AssaultPhase::kOver) {
         int y = kAsTextY;
         gfx::SetColor(1, 1, 1);
         for (auto& line : assault.message) {
@@ -315,7 +315,7 @@ static void DrawBattle() {
 void DrawAssault() {
     AdvanceAssault();
     if (!g_app.assault) return;
-    if (g_app.assault->phase != "cloud") DrawBattle();
+    if (g_app.assault->phase != AssaultPhase::kCloud) DrawBattle();
 }
 
 /**
@@ -353,10 +353,10 @@ void PresentVictory(City* city, const std::string& victor) {
                 break;
             }
     }
-    if (g_app.g->map->options.quests != 0 && quest && hero && hero == quest->hero) {
-        if (quest->type == w2::quest::kRaze && quest->city == city)
+    if (g_app.g->map->options.quests != 0 && quest && hero && hero->id == quest->HeroId()) {
+        if (quest->Type() == w2::quest::kRaze && quest->TargetCityId() == w2::CityId(city->index))
             g_app.victory->enter = kAsRaze;
-        else if (quest->type == w2::quest::kPillageGold) {
+        else if (quest->Type() == w2::quest::kPillageGold) {
             if (sack_gold != 0)
                 g_app.victory->enter = kAsSack;
             else if (pillage_gold != 0)

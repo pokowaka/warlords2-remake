@@ -194,9 +194,9 @@ TEST(CaptureTest, WalkAssaultDecideAndIdempotentApplyPlusLootShares) {
         far->y = target->y + off_y;
         far->moves = 20;
         walk = movement::MoveTo(game, {far}, target->x, target->y);
-        if (walk.stopped == "attack") break;
+        if (walk.stopped == movement::WalkStop::kAttack) break;
     }
-    EXPECT_EQ(walk.stopped, "attack");
+    EXPECT_EQ(walk.stopped, movement::WalkStop::kAttack);
     ASSERT_TRUE(walk.attack.has_value());
     EXPECT_TRUE(walk.attack->x == target->x && walk.attack->y == target->y &&
                 walk.attack->city == target);
@@ -376,7 +376,7 @@ TEST(VerifiedRulesTest, ArmySlotsProductionRandomTurnsCombatMedalsAndPathCache) 
     {
         auto game = SetupGame("ERYTHEA", Seed(2));
         City& city = game->map->cities[0];
-        for (Army* army : std::vector<Army*>(game->armies)) {
+        for (Army* army : std::vector<Army*>(game->armies.begin(), game->armies.end())) {
             if (city.ContainsTile(army->x, army->y)) game->Remove(army);
         }
         for (int i = 0; i < 8; ++i) AddTypedArmy(*game, city.x, city.y, 0, 11);
@@ -389,19 +389,19 @@ TEST(VerifiedRulesTest, ArmySlotsProductionRandomTurnsCombatMedalsAndPathCache) 
         constexpr std::array<int, 8> kPlainOrder{0, 1, 2, 3, 4, 5, 6, 7};
         bool shuffled = false;
         while (side != nullptr && game->turn <= 6) {
-            if (game->turn_order != kPlainOrder) shuffled = true;
-            EXPECT_EQ(side->index, game->turn_order[game->order_at]);
+            if (game->turn_schedule.Order() != kPlainOrder) shuffled = true;
+            EXPECT_EQ(SideId(side->index), game->turn_schedule.CurrentSideId());
             side = game::EndTurn(*game);
         }
         EXPECT_TRUE(shuffled);
-        auto sorted = game->turn_order;
+        auto sorted = game->turn_schedule.Order();
         std::sort(sorted.begin(), sorted.end());
         EXPECT_EQ(sorted, kPlainOrder);
 
         auto fixed = SetupGame("ERYTHEA", Seed(4));
         game::Begin(*fixed);
         for (int i = 0; i < 30; ++i) game::EndTurn(*fixed);
-        EXPECT_EQ(fixed->turn_order, kPlainOrder);
+        EXPECT_EQ(fixed->turn_schedule.Order(), kPlainOrder);
     }
     {
         auto game = SetupGame("ERYTHEA", SeedWith(5, {{"neutralCities", 2}}));
@@ -468,13 +468,12 @@ TEST(VerifiedRulesTest, AlliesRuinQuestsSurrenderCacheFloodAndMovementFlags) {
                                   armytype::kHero);
         for (int i = 0; i < 40; ++i) {
             side->quest.reset();
-            int quest_type = quest::Assign(*game, *side, hero, true)->type;
+            int quest_type = quest::Assign(*game, *side, hero, true)->Type();
             EXPECT_TRUE(quest_type == quest::kOccupy || quest_type == quest::kRaze ||
                         quest_type == quest::kSlaughter || quest_type == quest::kPillageGold);
         }
         bool archons = false;
-        Quest quest_obj;
-        quest_obj.hero = hero;
+        Quest quest_obj(quest::kPillageGold, hero->id, std::monostate{}, 500, 500);
         for (int i = 0; i < 60 && !archons; ++i) {
             side->gold = 500;
             auto reward = quest::ChooseReward(*game, *side, &quest_obj);
@@ -565,14 +564,15 @@ TEST(VerifiedRulesTest, AlliesRuinQuestsSurrenderCacheFloodAndMovementFlags) {
         }
         Army* hero = AddTypedArmy(*game, item_site->x, item_site->y, side->index, armytype::kHero);
         std::shared_ptr<Quest> assigned;
-        for (int i = 0; i < 200 && (!assigned || assigned->type != quest::kRetrieveItem); ++i) {
+        for (int i = 0; i < 200 && (!assigned || assigned->Type() != quest::kRetrieveItem); ++i) {
             side->quest.reset();
             assigned = quest::Assign(*game, *side, hero, false, flying);
         }
-        ASSERT_TRUE(assigned && assigned->type == quest::kRetrieveItem);
+        ASSERT_TRUE(assigned && assigned->Type() == quest::kRetrieveItem);
         Site* target_site = nullptr;
         for (auto& map_site : game->map->sites) {
-            if (map_site.content == site::kItem && map_site.item == assigned->item->index)
+            if (map_site.content == site::kItem &&
+                map_site.item == assigned->TargetItemId().Value())
                 target_site = &map_site;
         }
         ASSERT_NE(target_site, nullptr);

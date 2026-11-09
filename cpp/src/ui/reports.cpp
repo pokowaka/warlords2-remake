@@ -157,15 +157,20 @@ struct Reports : kit::Modal {
             gfx::SetColor(1, 1, 1);
             font.Draw(absl::StrFormat("%d", top_row + i + 1), 312, y);
             kit::Army(entry.type, g_app.player->index, 328, 170 + 30 * i, 1);
-            w2::City* city = entry.city != w2::kNone ? g_app.g->map->City(entry.city) : nullptr;
+            w2::City* city = g_app.g->map->City(entry.city);
             std::string name = entry.standard ? "Standard" : (city ? city->name : "");
             std::string text;
-            if (entry.kind == "sent")
-                text = name + " ...";
-            else if (entry.kind == "arrived")
-                text = "... " + name;
-            else
+            switch (entry.kind) {
+            case w2::ProducedKind::kBuilt:
                 text = name;
+                break;
+            case w2::ProducedKind::kSent:
+                text = name + " ...";
+                break;
+            case w2::ProducedKind::kArrived:
+                text = "... " + name;
+                break;
+            }
             gfx::SetColor(1, 1, 1);
             font.Draw(text, 368, y);
         }

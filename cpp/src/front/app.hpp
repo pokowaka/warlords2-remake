@@ -68,6 +68,13 @@ struct Fell {
     double burn = 0;  ///< How long the blast shows.
 };
 
+/** @brief Playback stage of an animated map/window battle (`Assault`). */
+enum class AssaultPhase {
+    kCloud,   ///< Initial war-cry cloud over the assaulted tile.
+    kBattle,  ///< Casualty-by-casualty combat playback in the battle window.
+    kOver,    ///< Outcome summary displayed while awaiting dismissal or auto-close.
+};
+
 /** @brief A battle being shown: the cloud, the armies falling one by one, the result. */
 struct Assault {
     int x = 0;                                   ///< The tile fought over, across.
@@ -84,7 +91,7 @@ struct Assault {
     int atk_down = 0;                            ///< Attackers fallen so far.
     std::vector<Fell> def_fell;                  ///< Each fallen defender's blast.
     std::vector<Fell> atk_fell;                  ///< Each fallen attacker's blast.
-    std::string phase = "cloud";                 ///< "cloud", "battle" or "over".
+    AssaultPhase phase = AssaultPhase::kCloud;   ///< Current playback stage.
     double at = 0;                               ///< When the phase or the last round began.
     double cloud_time = 0;                       ///< How long the war cry lasts.
     double close_at = 0;                         ///< When a computer's battle closes itself.

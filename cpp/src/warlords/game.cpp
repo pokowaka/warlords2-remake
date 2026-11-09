@@ -30,39 +30,23 @@ Game::Game() = default;
 Game::~Game() = default;
 
 Army* Game::Make(const Army& army) {
-    pool.push_back(std::make_unique<Army>(army));
-    return pool.back().get();
+    return armies.Make(army);
 }
 
 Army* Game::Add(const Army& army) {
-    std::set<int> used;
-    for (Army* existing : armies) used.insert(existing->slot);
-    int slot = 0;
-    while (used.count(slot)) slot++;
-    Army* added = Make(army);
-    added->slot = slot;
-    size_t pos = armies.size();
-    while (pos > 0 && armies[pos - 1]->slot > slot) pos--;
-    armies.insert(armies.begin() + pos, added);
-    return added;
+    return armies.Add(army);
 }
 
 bool Game::Alive(const Army* army) const {
-    return army && std::find(armies.begin(), armies.end(), army) != armies.end();
+    return armies.Alive(army);
 }
 
 void Game::Remove(const Army* army) {
-    auto pos = std::find(armies.begin(), armies.end(), army);
-    if (pos != armies.end()) armies.erase(pos);
+    armies.Remove(army);
 }
 
 std::vector<Army*> Game::ArmiesOnTile(int x, int y) const {
-    std::vector<Army*> out;
-    for (int i = static_cast<int>(armies.size()) - 1; i >= 0; i--) {
-        Army* army = armies[i];
-        if (!army->transit && army->x == x && army->y == y) out.push_back(army);
-    }
-    return out;
+    return armies.ArmiesOnTile(x, y);
 }
 
 int Game::LivingSideCount() const {
@@ -502,11 +486,13 @@ absl::StatusOr<std::unique_ptr<Game>> NewGame(const std::filesystem::path& data_
                 bx1 = std::min(kMapW - 1, game.map->active_x1 + 2);
             int by0 = std::max(0, game.map->active_y0 - 2),
                 by1 = std::min(kMapH - 1, game.map->active_y1 + 2);
-            auto& mask = game.explored[side->index];
-            if (static_cast<int>(mask.size()) == kMapW * kMapH) {
+            SideId side_id(side->index);
+            if (game.explored.HasMask(side_id)) {
                 for (int y = 0; y < kMapH; y++) {
                     for (int x = 0; x < kMapW; x++) {
-                        if (x < bx0 || x > bx1 || y < by0 || y > by1) mask[y * kMapW + x] = 1;
+                        if (x < bx0 || x > bx1 || y < by0 || y > by1) {
+                            game.explored.MarkExplored(side_id, kMapW, kMapH, x, y);
+                        }
                     }
                 }
             }
@@ -516,9 +502,8 @@ absl::StatusOr<std::unique_ptr<Game>> NewGame(const std::filesystem::path& data_
 
     // The turn order (see docs/formats/scenario.md), as the scenario gives it;
     // Random Turns shuffles it at each round's end.
-    game.turn_order = {0, 1, 2, 3, 4, 5, 6, 7};
-    game.order_at = -1;  // the place in it of the side to play
-    game.current = 0;    // index into game.sides
+    game.turn_schedule.Reset();
+    game.current = 0;  // index into game.sides
     game.side = game.sides.empty() ? nullptr : game.sides[0];
     game.path_cache = move::NewPathCache();
     return game_ptr;
@@ -543,12 +528,7 @@ static Fallen Eliminate(Game& game, Side& side, bool boxed) {
     side.alive = false;
     side.gold = 0;
     // Matches the reference: every pair with the fallen side, its pair with itself too.
-    for (int other = 0; other < 8; other++) {
-        for (int pair_idx : {side.index * 8 + other, other * 8 + side.index}) {
-            game.diplomacy.state[pair_idx] = diplomacy::kIntermediate;
-            game.diplomacy.proposal[pair_idx] = diplomacy::kIntermediate;
-        }
-    }
+    game.diplomacy.ResetFallenSide(SideId(side.index), diplomacy::kIntermediate);
     return Fallen{&side, line, boxed};
 }
 
@@ -588,10 +568,9 @@ static bool Deliver(Game& game, Army* army, City& city) {
         army->transit = Transit{kTransitTurns, home ? home->index : kNone};
         return true;
     }
-    army->x = x;
-    army->y = y;
     army->transit.reset();
     army->returning = false;
+    game.armies.Relocate(army, TilePos(x, y));
     return true;
 }
 
@@ -618,10 +597,10 @@ static std::vector<Produced> RunProduction(Game& game, Side& side) {
                     army->transit.reset();
                     if (std_x != kNone &&
                         static_cast<int>(ArmiesAt(game, std_x, std_y).size()) < rules::kMaxStack) {
-                        army->x = std_x;
-                        army->y = std_y;
                         army->returning = false;
-                        arrived.push_back(Produced{"arrived", army->type, kNone, true});
+                        game.armies.Relocate(army, TilePos(std_x, std_y));
+                        arrived.push_back(
+                                Produced{ProducedKind::kArrived, army->type, CityId::None(), true});
                     } else {
                         army->returning = true;
                         army->transit = Transit{kTransitTurns, army->home_city};
@@ -632,7 +611,8 @@ static std::vector<Produced> RunProduction(Game& game, Side& side) {
                     if (!dest || !Deliver(game, army, *dest))
                         army->disbanded = true;
                     else if (!army->transit)
-                        arrived.push_back(Produced{"arrived", army->type, dest->index, false});
+                        arrived.push_back(Produced{ProducedKind::kArrived, army->type,
+                                                   CityId(dest->index), false});
                 }
             }
         }
@@ -660,17 +640,16 @@ static std::vector<Produced> RunProduction(Game& game, Side& side) {
                             army.y = kNone;
                         }
                         game.Add(army);
-                        built.push_back(Produced{vectored ? "sent" : "built", army.type,
-                                                 city->index, false});
+                        built.push_back(
+                                Produced{vectored ? ProducedKind::kSent : ProducedKind::kBuilt,
+                                         army.type, CityId(city->index), false});
                     }
                 }
             }
         }
     }
 
-    for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
-        if (game.armies[i]->disbanded) game.armies.erase(game.armies.begin() + i);
-    }
+    game.armies.RemoveDisbanded();
     side.produced = arrived;
     for (auto& entry : built) side.produced.push_back(entry);
     return built;
@@ -862,30 +841,14 @@ bool Producing(const City& city) {
     return city.producing != kNone && city.countdown > 0;
 }
 
-/**
- * @brief Sets the turn order for the next round.
- *
- * With Random Turns enabled, performs 20 swaps of two sides picked by dice.
- */
-static void TurnOrder(Game& game) {
-    game.turn_order = {0, 1, 2, 3, 4, 5, 6, 7};
-    if (game.map->options.random_turns != 0) {
-        for (int i = 0; i < 20; i++) {
-            int first = game.rng.Dice(1, 8, -1), second = game.rng.Dice(1, 8, -1);
-            std::swap(game.turn_order[first], game.turn_order[second]);
-        }
-    }
-}
-
 /** @brief Advances to and starts the turn of the next living side in the turn order. */
 static Side* NextSide(Game& game, Side* leaving) {
     for (int step = 0; step < 3 * 8 + 1; step++) {
-        if (game.order_at >= 7) {
-            game.order_at = -1;
+        if (game.turn_schedule.AtRoundEnd()) {
             game.turn++;
             // the round's end: the order, the fallen put out of the game, the end
             // looked for, the neutral cities' production, then the history
-            TurnOrder(game);
+            game.turn_schedule.StartNewRound(game.map->options.random_turns != 0, game.rng);
             EndRound(game, leaving);
             if (game.ending.over) {
                 game.side = nullptr;
@@ -893,8 +856,8 @@ static Side* NextSide(Game& game, Side* leaving) {
             }
             history::Record(game);
         }
-        game.order_at++;
-        Side* side = game.map->Side(game.turn_order[game.order_at]);
+        SideId scheduled_side = game.turn_schedule.Advance();
+        Side* side = game.map->Side(scheduled_side);
         if (side && side->in_use && side->alive) {
             game.side = side;
             game.current = static_cast<int>(std::find(game.sides.begin(), game.sides.end(), side) -
@@ -916,14 +879,14 @@ Side* EndTurn(Game& game) {
 }
 
 Side* Begin(Game& game) {
-    game.order_at = -1;
+    game.turn_schedule.RewindCursor();
     game.ending = Ending{};
     return NextSide(game, nullptr);
 }
 
 Side* NextHuman(Game& game) {
-    for (int i = std::max(game.order_at, 0); i <= 7; i++) {
-        Side* side = game.map->Side(game.turn_order[i]);
+    for (int i = std::max(game.turn_schedule.Cursor(), 0); i <= 7; i++) {
+        Side* side = game.map->Side(game.turn_schedule.SideAt(i));
         if (side && side->in_use && side->alive && !side->computer) return side;
     }
     for (Side* side : game.sides)
@@ -933,10 +896,7 @@ Side* NextHuman(Game& game) {
 
 /** @brief Erases every army in `dead` from `game.armies`. */
 static void RemoveArmies(Game& game, const std::vector<Army*>& dead) {
-    std::set<const Army*> gone(dead.begin(), dead.end());
-    for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
-        if (gone.count(game.armies[i])) game.armies.erase(game.armies.begin() + i);
-    }
+    game.armies.RemoveAll(dead);
 }
 
 /**
@@ -996,7 +956,9 @@ void Disband(Game& game, Side& side, const std::vector<Army*>& armies) {
     for (Army* army : armies) {
         if (army->type == armytype::kHero) {
             hero::DropItems(game, army, army->x, army->y, side.index);
-            if (side.quest && side.quest->hero == army) side.quest.reset();
+            if (side.quest && army->id.IsValid() && side.quest->HeroId() == army->id) {
+                side.quest.reset();
+            }
         }
     }
     RemoveArmies(game, armies);
@@ -1178,8 +1140,7 @@ Battle& ApplyAttack(Game& game, Battle& result) {
         int room = rules::kMaxStack - static_cast<int>(ArmiesAt(game, x, y).size());
         for (Army* attacker : result.attackers) {
             if (room <= 0) break;
-            attacker->x = x;
-            attacker->y = y;
+            game.armies.Relocate(attacker, TilePos(x, y));
             room--;
         }
         // And the winner sees round what it took: the tile fought for, then each
@@ -1352,21 +1313,8 @@ void Resign(Game& game, Side& side) {
     }
     Disband(game, side, SideArmies(game, side));
     if (game.map->options.hidden_map != 0) {
-        game.explored[side.index].assign(static_cast<size_t>(game.map->width) * game.map->height,
-                                         1);
+        game.explored.ResetSide(SideId(side.index), game.map->width, game.map->height, true);
     }
-}
-
-// Tiles a side has seen: a mask per side.
-
-/** @brief Returns the explored-tile mask for `side`, creating it when `make` is true. */
-static std::vector<uint8_t>* MaskFor(Game& game, int side, bool make) {
-    auto mask_it = game.explored.find(side);
-    if (mask_it != game.explored.end()) return &mask_it->second;
-    if (!make) return nullptr;
-    auto& mask = game.explored[side];
-    mask.assign(static_cast<size_t>(game.map->width) * game.map->height, 0);
-    return &mask;
 }
 
 bool HasActiveHuman(const Game& game) {
@@ -1385,14 +1333,16 @@ bool Seen(const Game& game, int side, int x, int y) {
     if (game.map->options.hidden_map == 0) return true;
     if (x < 0 || y < 0 || x >= game.map->width || y >= game.map->height) return false;
     if (side == kNone) return true;
-    int idx = y * game.map->width + x;
-    auto side_it = game.explored.find(side);
-    if (side_it != game.explored.end() && side_it->second[idx] == 1) return true;
+    int map_width = game.map->width;
+    int map_height = game.map->height;
+    SideId side_id(side);
+    if (game.explored.IsExplored(side_id, map_width, map_height, x, y)) return true;
     if (side >= 0 && side < 8) {
         for (int ally = 0; ally < 8; ally++) {
-            if (ally != side && game.diplomacy.allied[side * 8 + ally]) {
-                auto ally_it = game.explored.find(ally);
-                if (ally_it != game.explored.end() && ally_it->second[idx] == 1) return true;
+            SideId ally_id(ally);
+            if (ally != side && game.diplomacy.AlliedFlag(side_id, ally_id) &&
+                game.explored.IsExplored(ally_id, map_width, map_height, x, y)) {
+                return true;
             }
         }
     }
@@ -1401,20 +1351,18 @@ bool Seen(const Game& game, int side, int x, int y) {
 
 int Reveal(Game& game, int side, int x, int y, bool flying) {
     if (game.map->options.hidden_map == 0) return 0;
-    auto& mask = *MaskFor(game, side, true);
-    bool on_city = x >= 0 && y >= 0 && x < game.map->width && y < game.map->height &&
-                   game.map->city_tile[y * game.map->width + x];
+    int map_width = game.map->width;
+    int map_height = game.map->height;
+    SideId side_id(side);
+    game.explored.EnsureSide(side_id, map_width, map_height);
+    bool on_city = x >= 0 && y >= 0 && x < map_width && y < map_height &&
+                   game.map->city_tile[y * map_width + x];
     int radius = (flying || on_city) ? 2 : 1;
     int found = 0;
     for (int tile_y = y - radius; tile_y <= y + radius; tile_y++) {
         for (int tile_x = x - radius; tile_x <= x + radius; tile_x++) {
-            if (tile_x >= 0 && tile_y >= 0 && tile_x < game.map->width &&
-                tile_y < game.map->height) {
-                int key = tile_y * game.map->width + tile_x;
-                if (!mask[key]) {
-                    mask[key] = 1;
-                    found++;
-                }
+            if (game.explored.MarkExplored(side_id, map_width, map_height, tile_x, tile_y)) {
+                found++;
             }
         }
     }
@@ -1455,21 +1403,22 @@ int FogCell(const Game& game, int side, int x, int y) {
 
 void TidyExplored(Game& game, int side) {
     if (game.map->options.hidden_map == 0) return;
-    auto& mask = *MaskFor(game, side, true);
     int map_width = game.map->width, map_height = game.map->height;
+    SideId side_id(side);
+    game.explored.EnsureSide(side_id, map_width, map_height);
     for (int pass = 0; pass < 2; pass++) {
         for (int x = 0; x < map_width; x++) {
             for (int y = 0; y < map_height; y++) {
-                int key = y * map_width + x;
-                if (!mask[key]) {
+                if (!game.explored.IsExplored(side_id, map_width, map_height, x, y)) {
                     int bits = 0;
                     for (int i = 0; i < 8; i++) {
                         int nbr_x = x + kFogDx[i], nbr_y = y + kFogDy[i];
-                        if (nbr_x < 0 || nbr_y < 0 || nbr_x >= map_width || nbr_y >= map_height ||
-                            !mask[nbr_y * map_width + nbr_x])
+                        if (!game.explored.IsExplored(side_id, map_width, map_height, nbr_x, nbr_y))
                             bits += 1 << i;
                     }
-                    if (kFogCell[bits] == kFogNone) mask[key] = 1;
+                    if (kFogCell[bits] == kFogNone) {
+                        game.explored.MarkExplored(side_id, map_width, map_height, x, y);
+                    }
                 }
             }
         }

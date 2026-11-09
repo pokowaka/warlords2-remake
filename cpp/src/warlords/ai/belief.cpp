@@ -30,7 +30,7 @@ bool IsCityVisible(const Game& game, int side_index, const City& city) {
         }
     }
     const Side* viewer = game.map->Side(side_index);
-    if (viewer && viewer->quest && viewer->quest->city == &city) return true;
+    if (viewer && viewer->quest && viewer->quest->TargetCityId() == CityId(city.index)) return true;
     return false;
 }
 
@@ -519,11 +519,12 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
     }
 
     // Save RNG state so combat estimation is 100% side-effect free
-    uint32_t saved_rng = game.rng.state;
-    game.rng.state =
+    uint32_t saved_rng = game.rng.State();
+    uint32_t sim_seed =
             saved_rng ^ static_cast<uint32_t>(target_x * 73856093 ^ target_y * 19349663 ^
                                               static_cast<int>(attackers.size()) * 83492791);
-    if (game.rng.state == 0) game.rng.state = 1;
+    if (sim_seed == 0) sim_seed = 1;
+    game.rng.SetState(sim_seed);
 
     constexpr int kSimulations = 8;
     int wins = 0;
@@ -546,7 +547,7 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
         total_enemy_dead += static_cast<int>(battle.dead_defenders.size());
     }
 
-    game.rng.state = saved_rng;
+    game.rng.SetState(saved_rng);
     estimate.win_prob = static_cast<float>(wins) / static_cast<float>(kSimulations);
     estimate.expected_survivors =
             static_cast<float>(total_survivors) / static_cast<float>(kSimulations);

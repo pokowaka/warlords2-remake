@@ -32,10 +32,6 @@ const std::vector<int>& RatingRanks(int n) {
     return kRanks[n];
 }
 
-/** @brief Index of the ordered pair (from_side, to_side) in the 8x8 diplomacy tables. */
-static int Key(int from_side, int to_side) {
-    return from_side * 8 + to_side;
-}
 /** @brief Whether both are real side indices (0-7) and different from each other. */
 static bool ValidPair(int from_side, int to_side) {
     return from_side >= 0 && to_side >= 0 && from_side < 8 && to_side < 8 && from_side != to_side;
@@ -43,26 +39,11 @@ static bool ValidPair(int from_side, int to_side) {
 
 void Init(Game& game) {
     int start_state = game.map->options.diplomacy != 0 ? kPeace : kWar;
-    game.diplomacy.allied.fill(false);
-    game.diplomacy.propose_allied.fill(false);
-    game.diplomacy.truce_turns.fill(0);
-    game.diplomacy.gold_offer.fill(0);
-    game.diplomacy.war_target.fill(kNone);
-    game.diplomacy.trust.fill(0);
-    game.diplomacy.allied_target_city.fill(kNone);
-    for (int from_side = 0; from_side < 8; from_side++) {
-        for (int to_side = 0; to_side < 8; to_side++) {
-            int pair_state = start_state;
-            game.diplomacy.state[Key(from_side, to_side)] = pair_state;
-            game.diplomacy.proposal[Key(from_side, to_side)] = pair_state;
-        }
-    }
+    game.diplomacy.Reset(start_state);
 }
 
 int State(const Game& game, int from_side, int to_side) {
-    if (from_side < 0 || to_side < 0 || from_side > 7 || to_side > 7) return kWar;
-    int stored = game.diplomacy.state[Key(from_side, to_side)];
-    return stored == kNone ? kWar : stored;
+    return game.diplomacy.State(SideId(from_side), SideId(to_side));
 }
 
 bool MayAttack(const Game& game, int from_side, int to_side) {
@@ -71,103 +52,67 @@ bool MayAttack(const Game& game, int from_side, int to_side) {
 }
 
 void Propose(Game& game, int from_side, int to_side, int proposed_state) {
-    if (!ValidPair(from_side, to_side)) return;
-    game.diplomacy.proposal[Key(from_side, to_side)] = proposed_state;
-    if (proposed_state != kPeace) {
-        game.diplomacy.propose_allied[Key(from_side, to_side)] = false;
-    }
+    game.diplomacy.Propose(SideId(from_side), SideId(to_side), proposed_state);
 }
 
 int Proposal(const Game& game, int from_side, int to_side) {
-    if (from_side < 0 || to_side < 0 || from_side > 7 || to_side > 7)
-        return State(game, from_side, to_side);
-    int proposed = game.diplomacy.proposal[Key(from_side, to_side)];
-    if (proposed == kNone) proposed = State(game, from_side, to_side);
-    return proposed;
+    return game.diplomacy.Proposal(SideId(from_side), SideId(to_side));
 }
 
 bool IsAllied(const Game& game, int from_side, int to_side) {
-    if (!ValidPair(from_side, to_side)) return false;
-    return State(game, from_side, to_side) == kPeace &&
-           game.diplomacy.allied[Key(from_side, to_side)];
+    return game.diplomacy.IsAllied(SideId(from_side), SideId(to_side));
 }
 
 void SetAllied(Game& game, int from_side, int to_side, bool allied) {
-    if (!ValidPair(from_side, to_side)) return;
-    if (allied) {
-        game.diplomacy.state[Key(from_side, to_side)] = kPeace;
-        game.diplomacy.state[Key(to_side, from_side)] = kPeace;
-        game.diplomacy.proposal[Key(from_side, to_side)] = kPeace;
-        game.diplomacy.proposal[Key(to_side, from_side)] = kPeace;
-    }
-    game.diplomacy.allied[Key(from_side, to_side)] = allied;
-    game.diplomacy.allied[Key(to_side, from_side)] = allied;
-    game.diplomacy.propose_allied[Key(from_side, to_side)] = allied;
-    game.diplomacy.propose_allied[Key(to_side, from_side)] = allied;
+    game.diplomacy.SetAllied(SideId(from_side), SideId(to_side), allied);
 }
 
 bool ProposalAllied(const Game& game, int from_side, int to_side) {
-    if (!ValidPair(from_side, to_side)) return false;
-    return game.diplomacy.propose_allied[Key(from_side, to_side)];
+    return game.diplomacy.ProposalAllied(SideId(from_side), SideId(to_side));
 }
 
 void ProposeAlliance(Game& game, int from_side, int to_side, bool propose) {
-    if (!ValidPair(from_side, to_side)) return;
-    game.diplomacy.propose_allied[Key(from_side, to_side)] = propose;
-    if (propose) game.diplomacy.proposal[Key(from_side, to_side)] = kPeace;
+    game.diplomacy.ProposeAlliance(SideId(from_side), SideId(to_side), propose);
 }
 
 int TruceTurns(const Game& game, int from_side, int to_side) {
-    if (!ValidPair(from_side, to_side)) return 0;
-    return game.diplomacy.truce_turns[Key(from_side, to_side)];
+    return game.diplomacy.TruceTurns(SideId(from_side), SideId(to_side));
 }
 
 void SetTruce(Game& game, int from_side, int to_side, int turns) {
-    if (!ValidPair(from_side, to_side)) return;
-    int clamped_turns = std::max(0, turns);
-    game.diplomacy.truce_turns[Key(from_side, to_side)] = clamped_turns;
-    game.diplomacy.truce_turns[Key(to_side, from_side)] = clamped_turns;
+    game.diplomacy.SetTruce(SideId(from_side), SideId(to_side), turns);
 }
 
 int GoldOffer(const Game& game, int from_side, int to_side) {
-    if (!ValidPair(from_side, to_side)) return 0;
-    return game.diplomacy.gold_offer[Key(from_side, to_side)];
+    return game.diplomacy.GoldOffer(SideId(from_side), SideId(to_side));
 }
 
 void SetGoldOffer(Game& game, int from_side, int to_side, int gold) {
-    if (!ValidPair(from_side, to_side)) return;
-    game.diplomacy.gold_offer[Key(from_side, to_side)] = gold;
+    game.diplomacy.SetGoldOffer(SideId(from_side), SideId(to_side), gold);
 }
 
 int WarTarget(const Game& game, int from_side, int to_side) {
-    if (!ValidPair(from_side, to_side)) return kNone;
-    return game.diplomacy.war_target[Key(from_side, to_side)];
+    return game.diplomacy.WarTarget(SideId(from_side), SideId(to_side)).Value();
 }
 
 void SetWarTarget(Game& game, int from_side, int to_side, int target_side) {
-    if (!ValidPair(from_side, to_side)) return;
-    game.diplomacy.war_target[Key(from_side, to_side)] = target_side;
+    game.diplomacy.SetWarTarget(SideId(from_side), SideId(to_side), SideId(target_side));
 }
 
 int Trust(const Game& game, int from_side, int to_side) {
-    if (!ValidPair(from_side, to_side)) return 0;
-    return game.diplomacy.trust[Key(from_side, to_side)];
+    return game.diplomacy.Trust(SideId(from_side), SideId(to_side));
 }
 
 void AddTrust(Game& game, int from_side, int to_side, int delta) {
-    if (!ValidPair(from_side, to_side)) return;
-    game.diplomacy.trust[Key(from_side, to_side)] =
-            std::clamp(game.diplomacy.trust[Key(from_side, to_side)] + delta, -100, 100);
+    game.diplomacy.AddTrust(SideId(from_side), SideId(to_side), delta);
 }
 
 int AlliedTargetCity(const Game& game, int side) {
-    if (side < 0 || side >= 8) return kNone;
-    return game.diplomacy.allied_target_city[side];
+    return game.diplomacy.AlliedTargetCity(SideId(side)).Value();
 }
 
 void SetAlliedTargetCity(Game& game, int side, int city_index) {
-    if (side < 0 || side >= 8) return;
-    game.diplomacy.allied_target_city[side] = city_index;
+    game.diplomacy.SetAlliedTargetCity(SideId(side), CityId(city_index));
 }
 
 namespace {
@@ -207,10 +152,8 @@ void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::s
         war_target != other_index && game.map->sides[war_target].alive) {
         for (int participant : {side_index, other_index}) {
             if (State(game, participant, war_target) != kWar) {
-                game.diplomacy.state[Key(participant, war_target)] = kWar;
-                game.diplomacy.state[Key(war_target, participant)] = kWar;
-                game.diplomacy.proposal[Key(participant, war_target)] = kWar;
-                game.diplomacy.proposal[Key(war_target, participant)] = kWar;
+                game.diplomacy.SetSymmetricState(SideId(participant), SideId(war_target), kWar);
+                game.diplomacy.SetSymmetricProposal(SideId(participant), SideId(war_target), kWar);
                 SetAllied(game, participant, war_target, false);
                 messages.push_back(absl::StrFormat("%s joined the war against %s!",
                                                    game.map->sides[participant].name,
@@ -242,10 +185,10 @@ std::vector<std::string> Apply(Game& game, Side& side) {
                     int truce_left = TruceTurns(game, side_index, other_index);
                     SetAllied(game, side_index, other_index, false);
                     SetTruce(game, side_index, other_index, 0);
-                    game.diplomacy.state[Key(side_index, other_index)] = wanted;
-                    game.diplomacy.state[Key(other_index, side_index)] = wanted;
+                    game.diplomacy.SetSymmetricState(SideId(side_index), SideId(other_index),
+                                                     wanted);
                     if (Proposal(game, other_index, side_index) < wanted)
-                        game.diplomacy.proposal[Key(other_index, side_index)] = wanted;
+                        game.diplomacy.SetProposal(SideId(other_index), SideId(side_index), wanted);
                     if (!side.classic_ai && (was_allied || (truce_left > 0 && wanted == kWar))) {
                         // Breaking an alliance or a truce: the victim and every
                         // onlooker trust the breaker less.
@@ -262,8 +205,8 @@ std::vector<std::string> Apply(Game& game, Side& side) {
                     }
                 } else if (Proposal(game, other_index, side_index) <= wanted) {
                     // de-escalation: only when both sides want it
-                    game.diplomacy.state[Key(side_index, other_index)] = wanted;
-                    game.diplomacy.state[Key(other_index, side_index)] = wanted;
+                    game.diplomacy.SetSymmetricState(SideId(side_index), SideId(other_index),
+                                                     wanted);
                     if (wanted == kPeace) {
                         history::RecordDeed(game, &side, DeedType::kAtPeace, side_index,
                                             other_index, "");
@@ -316,10 +259,8 @@ void AttackAnyway(Game& game, int from_side, int to_side) {
         if (bystander != from_side && bystander != to_side)
             AddTrust(game, bystander, from_side, -25);
     }
-    for (int pair_key : {Key(from_side, to_side), Key(to_side, from_side)}) {
-        game.diplomacy.state[pair_key] = kWar;
-        game.diplomacy.proposal[pair_key] = kWar;
-    }
+    game.diplomacy.SetSymmetricState(SideId(from_side), SideId(to_side), kWar);
+    game.diplomacy.SetSymmetricProposal(SideId(from_side), SideId(to_side), kWar);
     history::RecordDeed(game, side, DeedType::kTreachery, from_side, to_side, "");
 }
 

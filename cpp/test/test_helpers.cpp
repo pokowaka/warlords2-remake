@@ -177,56 +177,38 @@ void FillCityFootprint(Game& game, const City& city, int owner, int type) {
 }
 
 std::shared_ptr<Quest> MakeCityQuest(int type, Army* hero, City* target) {
-    auto city_quest = std::make_shared<Quest>();
-    city_quest->type = type;
-    city_quest->hero = hero;
-    city_quest->target_kind = "city";
-    city_quest->city = target;
-    city_quest->done = 0;
-    return city_quest;
+    ArmyId hero_id = hero ? hero->id : ArmyId::None();
+    CityId city_id = target ? CityId(target->index) : CityId::None();
+    return std::make_shared<Quest>(type, hero_id, city_id);
 }
 
 std::shared_ptr<Quest> MakeSlaughterQuest(Army* hero, Side* target_side, int required) {
-    auto slaughter_quest = std::make_shared<Quest>();
-    slaughter_quest->type = quest::kSlaughter;
-    slaughter_quest->hero = hero;
-    slaughter_quest->target_kind = "side";
-    slaughter_quest->side = target_side;
-    slaughter_quest->required = required;
-    return slaughter_quest;
+    ArmyId hero_id = hero ? hero->id : ArmyId::None();
+    SideId side_id = target_side ? SideId(target_side->index) : SideId::None();
+    return std::make_shared<Quest>(quest::kSlaughter, hero_id, side_id, required, 0);
 }
 
 std::shared_ptr<Quest> MakePillageQuest(Army* hero, int required) {
-    auto pillage_quest = std::make_shared<Quest>();
-    pillage_quest->type = quest::kPillageGold;
-    pillage_quest->hero = hero;
-    pillage_quest->target_kind = "none";
-    pillage_quest->required = required;
-    return pillage_quest;
+    ArmyId hero_id = hero ? hero->id : ArmyId::None();
+    return std::make_shared<Quest>(quest::kPillageGold, hero_id, std::monostate{}, required, 0);
 }
 
 std::shared_ptr<Quest> MakeItemQuest(Army* hero, Item* item) {
-    auto item_quest = std::make_shared<Quest>();
-    item_quest->type = quest::kRetrieveItem;
-    item_quest->hero = hero;
-    item_quest->target_kind = "item";
-    item_quest->item = item;
-    return item_quest;
+    ArmyId hero_id = hero ? hero->id : ArmyId::None();
+    ItemId item_id = item ? ItemId(item->index) : ItemId::None();
+    return std::make_shared<Quest>(quest::kRetrieveItem, hero_id, item_id);
 }
 
 std::shared_ptr<Quest> MakeSlayHeroQuest(Army* hero, Army* prey) {
-    auto slay_quest = std::make_shared<Quest>();
-    slay_quest->type = quest::kSlayHero;
-    slay_quest->hero = hero;
-    slay_quest->target_kind = "army";
-    slay_quest->army = prey;
-    return slay_quest;
+    ArmyId hero_id = hero ? hero->id : ArmyId::None();
+    ArmyId prey_id = prey ? prey->id : ArmyId::None();
+    return std::make_shared<Quest>(quest::kSlayHero, hero_id, prey_id);
 }
 
-ScopedBugFlags::ScopedBugFlags() : saved_bugs_(rules::bugs) {}
+ScopedBugFlags::ScopedBugFlags(Game& game) : game_(game), saved_bugs_(game.RulesBugs()) {}
 
 ScopedBugFlags::~ScopedBugFlags() {
-    rules::bugs = saved_bugs_;
+    game_.RulesBugs() = saved_bugs_;
 }
 
 ScopedDefaultAi::ScopedDefaultAi() : saved_classic_ai_(ai::DefaultClassicAi()) {}

@@ -51,6 +51,12 @@ struct TilePos {
 
     /** @brief Three-way comparison in row-major order `(y, x)`. */
     constexpr auto operator<=>(const TilePos& other) const = default;
+
+    /** @brief Abseil hash integration for spatial `TilePos` tables. */
+    template <typename HashState>
+    friend HashState AbslHashValue(HashState hash_state, TilePos tile_pos) {
+        return HashState::combine(std::move(hash_state), tile_pos.x, tile_pos.y);
+    }
 };
 
 }  // namespace w2

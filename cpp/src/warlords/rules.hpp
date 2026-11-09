@@ -16,14 +16,7 @@
 
 namespace w2::rules {
 
-/** @brief Deliberate faults in the original, reproduced by default. */
-struct Bugs {
-    /// Post-battle hero experience checks the *attacker's* type array when
-    /// deciding whether a surviving defender was a hero. Used by
-    /// hero::BattleExperience.
-    bool hero_experience_reads_attacker_types = true;
-};
-extern Bugs bugs;  ///< The faults in force; tests may switch them off.
+using w2::Bugs;
 
 constexpr int kNeutral = 15;         ///< The owner byte used for neutral cities.
 constexpr int kMaxStack = 8;         ///< Armies on one tile.

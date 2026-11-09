@@ -46,7 +46,7 @@ static void Trace(const Game& game, const Side& side) {
                                               : '.';
     }
     printf("%d %d gold=%d armies=%d rng=%u h=%lld %s\n", game.turn, side.index, side.gold,
-           static_cast<int>(game.armies.size()), game.rng.state, hash, owners.c_str());
+           static_cast<int>(game.armies.size()), game.rng.State(), hash, owners.c_str());
 }
 
 /**

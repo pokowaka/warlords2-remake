@@ -40,7 +40,18 @@ constexpr int kSampleRate = 11000;
 // the digital samples); doubling the gain balances FM music with effects.
 constexpr float kFmGain = 2.0F / 32768;
 
-const std::map<std::string, char> kPrefix = {{"fm", 'S'}, {"mt32", 'M'}, {"sc55", 'R'}};
+/** @brief Returns the single-letter asset filename prefix (`'S'`, `'M'`, or `'R'`) for `synth`. */
+char SynthPrefix(SynthKind synth) {
+    switch (synth) {
+    case SynthKind::kFm:
+        return 'S';
+    case SynthKind::kMt32:
+        return 'M';
+    case SynthKind::kSc55:
+        return 'R';
+    }
+    return 'S';
+}
 
 // Logical effect names mapped to (group, index) in FILE.DAT.
 const std::map<std::string, std::pair<int, int>> kEffect = {
@@ -143,11 +154,11 @@ struct State {
     int cue = w2::kNone;                               ///< Currently playing music cue ID.
     std::optional<std::pair<std::string, bool>> song;  ///< Active `(filename, loop)` pair.
     bool song_playing = false;                         ///< True while a song is actively playing.
-    std::string synth = "fm";      ///< Active synthesizer (`"fm"`, `"mt32"`, `"sc55"`).
-    std::vector<uint8_t> adv;      ///< Contents of `ADLIB.ADV`.
-    std::vector<uint8_t> ad_bank;  ///< Contents of `MIDPAK.AD`.
-    double rec_at = 0;             ///< Loop point in seconds for `mix.rec`.
-    bool rec_loop = false;         ///< True when `mix.rec` should loop at `rec_at`.
+    SynthKind synth = SynthKind::kFm;                  ///< Active music synthesizer backend.
+    std::vector<uint8_t> adv;                          ///< Contents of `ADLIB.ADV`.
+    std::vector<uint8_t> ad_bank;                      ///< Contents of `MIDPAK.AD`.
+    double rec_at = 0;                                 ///< Loop point in seconds for `mix.rec`.
+    bool rec_loop = false;  ///< True when `mix.rec` should loop at `rec_at`.
 };
 State sound_state;
 
@@ -301,10 +312,10 @@ void SaveOptionsFile() {
 }
 
 /** @brief Builds the path to a pre-rendered `.ogg` recording for `synth` and XMI `name`. */
-std::filesystem::path RecordingPath(const std::string& synth, const std::string& name) {
+std::filesystem::path RecordingPath(SynthKind synth, const std::string& name) {
     std::string base = w2::Upper(name);
     if (base.ends_with(".XMI")) base = base.substr(0, base.size() - 4);
-    return sound_state.rec_dir / (kPrefix.at(synth) + base + ".ogg");
+    return sound_state.rec_dir / (std::string(1, SynthPrefix(synth)) + base + ".ogg");
 }
 
 #ifdef W2_VORBIS
@@ -366,10 +377,11 @@ void StopFm() {
 bool StartSong(const std::string& name, bool loop) {
     if (!sound_state.dev) return false;
 #ifdef W2_VORBIS
-    if (sound_state.synth != "fm") {
+    if (sound_state.synth != SynthKind::kFm) {
         // Read the XMI sequence alongside the recording to determine its exact loop tick length.
-        auto bytes = w2::ReadBytes(sound_state.data_dir / "SOUND" /
-                                   (kPrefix.at(sound_state.synth) + w2::Upper(name)));
+        auto bytes =
+                w2::ReadBytes(sound_state.data_dir / "SOUND" /
+                              (std::string(1, SynthPrefix(sound_state.synth)) + w2::Upper(name)));
         auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
         auto stream = seq ? OpenStream(RecordingPath(sound_state.synth, name)) : nullptr;
         if (stream) {
@@ -425,6 +437,25 @@ double Enqueue(const std::string& name, std::function<void()> done) {
 
 // ------------------------------------------------------------- the interface
 
+std::string_view SynthName(SynthKind synth) {
+    switch (synth) {
+    case SynthKind::kFm:
+        return "fm";
+    case SynthKind::kMt32:
+        return "mt32";
+    case SynthKind::kSc55:
+        return "sc55";
+    }
+    return "fm";
+}
+
+std::optional<SynthKind> ParseSynthKind(std::string_view name) {
+    if (name == "fm") return SynthKind::kFm;
+    if (name == "mt32") return SynthKind::kMt32;
+    if (name == "sc55") return SynthKind::kSc55;
+    return std::nullopt;
+}
+
 void Init(const std::filesystem::path& data_dir, const w2::uidata::Strings& files) {
     sound_state.data_dir = data_dir;
     sound_state.files = files;
@@ -437,9 +468,10 @@ void Init(const std::filesystem::path& data_dir, const w2::uidata::Strings& file
     sound_state.enabled.effects = opts[1] == '1';
     sound_state.enabled.speech = opts[2] != '0';
     // Default to MT-32 recordings when available, falling back to live AdLib FM.
-    std::string synth = prefs::Get("music");
-    if (synth.empty()) synth = "mt32";
-    if (kPrefix.count(synth) && SynthAvailable(synth)) sound_state.synth = synth;
+    std::string pref_synth = prefs::Get("music");
+    SynthKind desired = pref_synth.empty() ? SynthKind::kMt32
+                                           : ParseSynthKind(pref_synth).value_or(SynthKind::kFm);
+    if (SynthAvailable(desired)) sound_state.synth = desired;
     sound_state.adv = w2::ReadBytes(data_dir / "ADLIB.ADV").value_or(std::vector<uint8_t>{});
     sound_state.ad_bank = w2::ReadBytes(data_dir / "MIDPAK.AD").value_or(std::vector<uint8_t>{});
     SDL_AudioSpec want{}, have{};
@@ -473,20 +505,23 @@ void SaveOptions() {
     SaveOptionsFile();
 }
 
-void Toggle(const std::string& which) {
-    if (which == "music")
+void Toggle(AudioChannel channel) {
+    switch (channel) {
+    case AudioChannel::kMusic:
         sound_state.enabled.music = !sound_state.enabled.music;
-    else if (which == "effects")
-        sound_state.enabled.effects = !sound_state.enabled.effects;
-    else if (which == "speech")
-        sound_state.enabled.speech = !sound_state.enabled.speech;
-    if (which == "music") {
         if (sound_state.enabled.music) {
             sound_state.cue = w2::kNone;
             Music(w2::cues::kPlay);
         } else {
             StopMusic();
         }
+        break;
+    case AudioChannel::kEffects:
+        sound_state.enabled.effects = !sound_state.enabled.effects;
+        break;
+    case AudioChannel::kSpeech:
+        sound_state.enabled.speech = !sound_state.enabled.speech;
+        break;
     }
     SaveOptionsFile();
 }
@@ -506,23 +541,23 @@ void StopMusic() {
     StopRecordings();
 }
 
-std::string Synth() {
+SynthKind Synth() {
     return sound_state.synth;
 }
 
-bool SynthAvailable(const std::string& synth_name) {
-    if (synth_name == "fm") return true;
+bool SynthAvailable(SynthKind synth) {
+    if (synth == SynthKind::kFm) return true;
 #ifdef W2_VORBIS
-    return kPrefix.count(synth_name) && w2::FileExists(RecordingPath(synth_name, "STARTUP.XMI"));
+    return w2::FileExists(RecordingPath(synth, "STARTUP.XMI"));
 #else
     return false;
 #endif
 }
 
-void SetSynth(const std::string& synth_name) {
-    if (!kPrefix.count(synth_name) || synth_name == sound_state.synth) return;
-    sound_state.synth = synth_name;
-    prefs::Set("music", synth_name);
+void SetSynth(SynthKind synth) {
+    if (synth == sound_state.synth) return;
+    sound_state.synth = synth;
+    prefs::Set("music", std::string(SynthName(synth)));
     if (sound_state.enabled.music && sound_state.song && sound_state.song_playing) {
         auto song = *sound_state.song;
         StartSong(song.first, song.second);

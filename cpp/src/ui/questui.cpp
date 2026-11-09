@@ -68,7 +68,7 @@ QuestText DescribeQuest(const w2::Game& game, const w2::Side& side, const w2::Qu
     auto text_line = [](int group, int line) { return kit::Text(group, line); };
     QuestText out;
     auto add = [&](int y, const std::string& text) { out.lines.emplace_back(y, text); };
-    w2::Army* hero = quest.hero;
+    const w2::Army* hero = quest.ResolveHero(game);
     // a city the side has not seen is told of as one only heard of: the
     // original tests (x, y) twice -- (x+1, y) never -- then (x+1, y+1) and
     // (x, y+1)
@@ -78,8 +78,13 @@ QuestText DescribeQuest(const w2::Game& game, const w2::Side& side, const w2::Qu
                !seen(city->x + 1, city->y + 1) && !seen(city->x, city->y + 1);
     };
     using namespace w2::quest;
-    if (quest.type == kSlayHero && quest.army) {
-        w2::Army* foe = quest.army;
+    int type = quest.Type();
+    const w2::Army* foe = quest.ResolveTargetArmy(game);
+    const w2::Item* item = quest.ResolveItem(game);
+    const w2::ArmyType* army_type = quest.ResolveArmyType(game);
+    const w2::Side* target_side = quest.ResolveSide(game);
+    const w2::City* city = quest.ResolveCity(game);
+    if (type == kSlayHero && foe && hero) {
         add(175, text_line(0x15, 0));
         add(195, text_line(0x15, 1));
         const w2::Side* foe_side = game.map->Side(foe->owner);
@@ -89,29 +94,28 @@ QuestText DescribeQuest(const w2::Game& game, const w2::Side& side, const w2::Qu
         out.target_x = foe->x;
         out.target_y = foe->y;
         add(285, kCompass[Direction(hero->x, hero->y, out.target_x, out.target_y)]);
-    } else if (quest.type == kRetrieveItem && quest.item) {
+    } else if (type == kRetrieveItem && item && hero) {
         add(175, text_line(0x16, 0));
         add(195, text_line(0x16, 1));
-        add(215, quest.item->name);
+        add(215, item->name);
         add(245, text_line(0x16, 2));
-        auto [item_x, item_y] = ItemPlace(game, quest.item);
+        auto [item_x, item_y] = ItemPlace(game, item);
         out.target_x = item_x;
         out.target_y = item_y;
         if (item_x != w2::kNone) add(265, kCompass[Direction(hero->x, hero->y, item_x, item_y)]);
-    } else if (quest.type == kSlayType && quest.army_type) {
+    } else if (type == kSlayType && army_type) {
         add(175, text_line(0x17, 0));
         add(195, text_line(0x17, 1));
         add(215, text_line(0x17, 2));
-        add(235, quest.army_type->name);
-    } else if (quest.type == kSlaughter && quest.side) {
+        add(235, army_type->name);
+    } else if (type == kSlaughter && target_side) {
         add(175, text_line(0x18, 0));
-        add(195, Format(text_line(0x18, 1), quest.required));
-        add(215, quest.side->name);
+        add(195, Format(text_line(0x18, 1), quest.Required()));
+        add(215, target_side->name);
         add(245, text_line(0x18, 2));
-        add(265, Format(text_line(0x18, 3), quest.done));
-    } else if ((quest.type == kOccupy || quest.type == kRaze) && quest.city) {
-        int group = quest.type == kOccupy ? 0x19 : 0x1a;
-        const w2::City* city = quest.city;
+        add(265, Format(text_line(0x18, 3), quest.Done()));
+    } else if ((type == kOccupy || type == kRaze) && city && hero) {
+        int group = type == kOccupy ? 0x19 : 0x1a;
         add(175, text_line(group, 0));
         add(195, Format(text_line(group, fabled(city) ? 2 : 1), city->name));
         add(215, text_line(group, 3));
@@ -120,13 +124,13 @@ QuestText DescribeQuest(const w2::Game& game, const w2::Side& side, const w2::Qu
         out.target_x = city->x;
         out.target_y = city->y;
         add(285, kCompass[Direction(hero->x, hero->y, out.target_x, out.target_y)]);
-    } else if (quest.type == kPillageGold) {
+    } else if (type == kPillageGold) {
         add(175, text_line(0x1b, 0));
-        add(195, Format(text_line(0x1b, 1), quest.required));
+        add(195, Format(text_line(0x1b, 1), quest.Required()));
         add(215, text_line(0x1b, 2));
         add(235, text_line(0x1b, 3));
         add(265, text_line(0x1b, 4));
-        add(285, Format(text_line(0x1b, 5), quest.done));
+        add(285, Format(text_line(0x1b, 5), quest.Done()));
     }
     return out;
 }
@@ -143,15 +147,18 @@ struct QuestDialog : kit::Modal {
      */
     void MapMarks(int target_x, int target_y) {
         using namespace w2::quest;
+        int type = quest->Type();
         gfx::SetScissor(kMapX, kMapY, 224, 312);
-        if (quest->type == kSlayType || quest->type == kSlaughter) {
+        if (type == kSlayType || type == kSlaughter) {
             std::set<int> marked_tiles;
             int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
+            int target_type_id = quest->TargetArmyTypeId().Value();
+            int target_side_id = quest->TargetSideId().Value();
             for (w2::Army* army : g_app.g->armies) {
-                bool match = (quest->type == kSlayType && quest->army_type &&
-                              army->type == quest->army_type->id) ||
-                             (quest->type == kSlaughter && quest->side &&
-                              army->owner == quest->side->index);
+                bool match = (type == kSlayType && target_type_id != w2::kNone &&
+                              army->type == target_type_id) ||
+                             (type == kSlaughter && target_side_id != w2::kNone &&
+                              army->owner == target_side_id);
                 if (match && army->x != w2::kNone && army->owner != g_app.player->index &&
                     !marked_tiles.count(army->x + army->y * 1000) &&
                     w2::game::Seen(*g_app.g, viewer, army->x, army->y)) {
@@ -165,26 +172,28 @@ struct QuestDialog : kit::Modal {
             }
         }
         gfx::SetScissor();
-        if (target_x != w2::kNone && quest->type != kSlayType && quest->type != kSlaughter)
-            kit::MapTarget(kMapX, kMapY, quest->hero->x, quest->hero->y, target_x, target_y);
+        const w2::Army* hero = quest->ResolveHero(*g_app.g);
+        if (hero && target_x != w2::kNone && type != kSlayType && type != kSlaughter)
+            kit::MapTarget(kMapX, kMapY, hero->x, hero->y, target_x, target_y);
     }
     void Draw() override {
         kit::Popup(kPopupRect);
         front::DrawStrategicMap(kMapX, kMapY, nullptr, true);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), "Quest", 432, 62);
-        if (!quest) {
+        const w2::Army* hero = quest ? quest->ResolveHero(*g_app.g) : nullptr;
+        if (!quest || !hero) {
             kit::Centred(kit::GetFont(2), no_quest, 432, 134);
         } else {
             gfx::Draw(g_app.scroll_pic, 304, 95);
             const Font& font = kit::GetFont(2).Colours(0, 7);
-            kit::Centred(font, quest->hero->name + "'s Quest", 432, 145);
+            kit::Centred(font, hero->name + "'s Quest", 432, 145);
             kit::SetPal(0);
             gfx::Rectangle(gfx::kFill, 360, 165, 160, 1);
             QuestText text = DescribeQuest(*g_app.g, *g_app.player, *quest);
             for (auto& line : text.lines) kit::Centred(font, line.second, 432, line.first);
             MapMarks(text.target_x, text.target_y);
-            front::DrawHeroFigure(kMapX, kMapY, quest->hero->x, quest->hero->y);
+            front::DrawHeroFigure(kMapX, kMapY, hero->x, hero->y);
         }
         kit::DrawControls(dialog_view);
     }
@@ -208,8 +217,10 @@ void Open() {
     dialog->view = &dialog->dialog_view;
     dialog->dialog_view.state[kDone] = w2::uidata::kNormal;
     auto quest = g_app.player->quest;
-    if (quest && quest->hero && g_app.g->Alive(quest->hero) && quest->hero->x != w2::kNone)
-        dialog->quest = quest;
+    if (quest) {
+        w2::Army* hero = quest->ResolveHero(*g_app.g);
+        if (hero && g_app.g->Alive(hero) && hero->x != w2::kNone) dialog->quest = quest;
+    }
     dialog->no_quest = kit::Text(0x14, g_app.g->rng.Dice(1, 4, -1));
     kit::Push(dialog);
 }

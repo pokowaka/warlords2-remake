@@ -102,8 +102,8 @@ int RaidEmptyCities(Game& game, Side& side) {
             if (!path || path->empty()) continue;
             move::WalkResult walk = move::Walk(game, {raider}, *path);
             if (walk.steps > 0) ai::Walked(game, {raider}, walk);
-            if (walk.stopped == "attack" && walk.attack && walk.attack->city == target &&
-                game.Alive(raider)) {
+            if (walk.stopped == move::WalkStop::kAttack && walk.attack &&
+                walk.attack->city == target && game.Alive(raider)) {
                 ai::core::Sel sel = ai::core::Select(game, {raider});
                 if (!sel.armies.empty()) ai::core::Fight(game, sel, walk.attack->x, walk.attack->y);
             }

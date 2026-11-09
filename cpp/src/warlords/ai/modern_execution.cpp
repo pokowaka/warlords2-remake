@@ -264,11 +264,11 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
 
         int attack_x = kNone, attack_y = kNone;
         City* att_city = nullptr;
-        if (walk_result.stopped == "attack" && walk_result.attack && !stage_near) {
+        if (walk_result.stopped == move::WalkStop::kAttack && walk_result.attack && !stage_near) {
             attack_x = walk_result.attack->x;
             attack_y = walk_result.attack->y;
             att_city = walk_result.attack->city;
-        } else if (walk_result.stopped == "at peace" && !stage_near &&
+        } else if (walk_result.stopped == move::WalkStop::kAtPeace && !stage_near &&
                    walk_result.steps < static_cast<int>(walk_steps.size())) {
             const move::Step& ahead = walk_steps[walk_result.steps];
             attack_x = ahead.x;
@@ -343,8 +343,9 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             }
         }
 
-        if (walk_result.steps == 0 || walk_result.stopped == "out of moves" ||
-            walk_result.stopped == "blocked" || walk_result.stopped == "at peace") {
+        if (walk_result.steps == 0 || walk_result.stopped == move::WalkStop::kOutOfMoves ||
+            walk_result.stopped == move::WalkStop::kBlocked ||
+            walk_result.stopped == move::WalkStop::kAtPeace) {
             if (stage_near && walk_result.steps > 0) {
                 // Arrived at or advanced toward staging position
                 made_progress = true;

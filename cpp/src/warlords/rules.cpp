@@ -7,8 +7,6 @@
 
 namespace w2::rules {
 
-Bugs bugs;
-
 const Purpose& PurposeOf(int purpose) {
     // Indexed by purpose; purposes 3, 4 and 5 weigh alike, 4 only takes fliers.
     static const Purpose kTable[7] = {

@@ -1037,7 +1037,7 @@ void Draw() {
         auto [cam_x, cam_y] = CamDev();
         display::PushMap(map_r.x, map_r.y, cam_x, cam_y, g_app.zoom);
         DrawMap();
-        if (g_app.assault && g_app.assault->phase == "cloud") DrawCloud();
+        if (g_app.assault && g_app.assault->phase == AssaultPhase::kCloud) DrawCloud();
         gfx::Pop();
         gfx::SetScissor();
         DrawStrategic();

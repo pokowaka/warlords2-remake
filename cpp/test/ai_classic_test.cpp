@@ -199,8 +199,7 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     auto greatest = SetupGame("ERYTHEA", greatest_opts);
     EXPECT_GT(greatest->map->sides[0].diplo_score, 400);
     EXPECT_LE(greatest->map->sides[1].diplo_score, 8);
-    greatest->diplomacy.state[1 * 8 + 0] = diplomacy::kWar;
-    greatest->diplomacy.state[0 * 8 + 1] = diplomacy::kWar;
+    greatest->diplomacy.SetSymmetricState(SideId(1), SideId(0), diplomacy::kWar);
     auto fights = ai::groups::FightingHumans(*greatest);
     EXPECT_TRUE(fights[1]);
     ai::diplo::Phase(*greatest, greatest->map->sides[1]);
@@ -269,14 +268,14 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     grp->active = 2;
     grp->target = 1;
     grp->rally = warlord.capital->index;
-    grp->staged[2] = game.armies.back();
+    grp->staged[2] = game.armies[game.armies.size() - 1];
 
     auto reloaded = *save::Decode(save::Encode(game), kData);
     ASSERT_NE(reloaded, nullptr);
     const auto& reloaded_ai = *reloaded->map->sides[warlord.index].ai;
     EXPECT_EQ(reloaded_ai.max_groups, warlord.ai->max_groups);
     EXPECT_EQ(reloaded_ai.groups[1]->rally, warlord.capital->index);
-    EXPECT_EQ(reloaded_ai.groups[1]->staged[2], reloaded->armies.back());
+    EXPECT_EQ(reloaded_ai.groups[1]->staged[2], reloaded->armies[reloaded->armies.size() - 1]);
     EXPECT_EQ(reloaded->map->cities[4].claim, game.map->cities[4].claim);
 }
 

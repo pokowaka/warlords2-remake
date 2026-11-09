@@ -108,12 +108,14 @@ void MoveSelection(int x, int y) {
     OrderTo(sel.stack, x, y);
     g_app.route = move::PreviewRoute(*g_app.g, sel.stack, x, y);
     auto walk_result = move::MoveTo(*g_app.g, sel.stack, x, y);
-    if (walk_result.stopped == "attack") walk_result.stopped = "blocked";
-    if (walk_result.stopped == "no route") {
+    if (walk_result.stopped == move::WalkStop::kAttack) {
+        walk_result.stopped = move::WalkStop::kBlocked;
+    }
+    if (walk_result.stopped == move::WalkStop::kNoRoute) {
         Say("There is no way there.");
         sound::Effect("chord");
     } else if (walk_result.steps == 0) {
-        Say("They cannot move: " + walk_result.stopped + ".");
+        Say(absl::StrFormat("They cannot move: %s.", move::WalkStopName(walk_result.stopped)));
     } else {
         auto walked = sel.stack;
         sel.x = sel.stack[0]->x;

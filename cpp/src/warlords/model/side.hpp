@@ -1,6 +1,6 @@
 /**
  * @file
- * @brief Side (player/faction), Quest, Advisor, Promotion, AIThought, and DiplomaticMissive
+ * @brief Side (player/faction), Produced, Advisor, Promotion, AIThought, and DiplomaticMissive
  * structs.
  */
 #pragma once
@@ -11,6 +11,8 @@
 #include <vector>
 
 #include "warlords/model/army_type.hpp"
+#include "warlords/model/ids.hpp"
+#include "warlords/model/quest.hpp"
 #include "warlords/model/tile_pos.hpp"
 
 namespace w2 {
@@ -25,30 +27,19 @@ struct HeroOffer;
 struct AIData;
 struct SideBelief;
 
-/** @brief What a side's turn start produced, for the report (side.produced). */
-struct Produced {
-    std::string kind;       ///< "built", "sent" or "arrived".
-    int type = 0;           ///< The army type.
-    int city = kNone;       ///< The city it concerns.
-    bool standard = false;  ///< It went to the side's standard.
+/** @brief Outcome category for an army produced or delivered at the start of a side's turn. */
+enum class ProducedKind {
+    kBuilt,    ///< Built in place inside its producing city.
+    kSent,     ///< Built and dispatched onto road transit toward a vector target.
+    kArrived,  ///< Completed road transit and arrived at its destination city or standard.
 };
 
-/** @brief A quest (quest.lua). The target is one of the pointers, as target_kind says. */
-struct Quest {
-    int type = 0;                         ///< The kind of quest.
-    Army* hero = nullptr;                 ///< The hero on the quest.
-    std::string target_kind;              ///< "city", "side", "item", "armytype", "army", "none".
-    City* city = nullptr;                 ///< The target city.
-    Side* side = nullptr;                 ///< The target side.
-    Item* item = nullptr;                 ///< The target item.
-    const ArmyType* army_type = nullptr;  ///< The target army type.
-    Army* army = nullptr;                 ///< The target army.
-    int required = kNone;                 ///< How many are needed, for a counting quest.
-    int done = 0;                         ///< How many are done so far.
-    /** @brief Does the quest still have its target? */
-    bool HasTarget() const {
-        return target_kind == "none" || city || side || item || army_type || army;
-    }
+/** @brief What a side's turn start produced, for the report (`side.produced`). */
+struct Produced {
+    ProducedKind kind = ProducedKind::kBuilt;  ///< Whether built, sent, or arrived.
+    int type = 0;                              ///< The army type id.
+    CityId city = CityId::None();              ///< The city it concerns, or `CityId::None()`.
+    bool standard = false;                     ///< It went to the side's standard.
 };
 
 /** @brief The advisor's marks (cues.lua). */

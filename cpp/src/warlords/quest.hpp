@@ -36,9 +36,14 @@ struct QuestResult {
 
 namespace quest {
 
-/// The quest types (Quest::type).
-constexpr int kSlayHero = 0, kRetrieveItem = 1, kSlayType = 2;
-constexpr int kSlaughter = 3, kOccupy = 4, kRaze = 5, kPillageGold = 6;
+/// The quest types (Quest::Type()).
+constexpr int kSlayHero = Quest::kSlayHero;
+constexpr int kRetrieveItem = Quest::kRetrieveItem;
+constexpr int kSlayType = Quest::kSlayType;
+constexpr int kSlaughter = Quest::kSlaughter;
+constexpr int kOccupy = Quest::kOccupy;
+constexpr int kRaze = Quest::kRaze;
+constexpr int kPillageGold = Quest::kPillageGold;
 
 /// The original's quest type table, rolled with 1d10: types 4, 5 and 6 come
 /// up twice as often.
@@ -48,9 +53,6 @@ extern const char* const kDescriptions[7];
 /// How far a target may be from the hero: a human's, a computer's.
 constexpr int kItemRange = 50, kCityRange = 60;
 constexpr int kAiItemRange = 30, kAiCityRange = 40, kRazeRange = 60;
-/// What a quest's target *is*, by quest type, so it can be saved and restored
-/// by reference.
-extern const char* const kTargetKind[7];
 constexpr int kExperience = 10;  ///< Experience a hero gains for finishing a quest.
 /// The allies a quest gives are always Archons (army type 19), as in the
 /// original.
@@ -69,8 +71,8 @@ constexpr int kRewardAlly = 19;
  */
 std::shared_ptr<Quest> Assign(Game& game, Side& side, Army* hero, bool computer = false,
                               bool flying = false);
-/** @brief A line of prose for a quest. */
-std::string Describe(const Quest& quest);
+/** @brief A line of prose for `quest`, resolving city or army-type names via `game`. */
+std::string Describe(const Game& game, const Quest& quest);
 
 /** @brief What just happened, for Notify(). */
 struct Event {

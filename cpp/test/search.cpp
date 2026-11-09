@@ -187,7 +187,7 @@ std::vector<CandidateResult> ScoreCandidates(const Game& game, int side_index,
                                              const Settings& settings,
                                              const std::string& data_dir) {
     std::vector<CandidateResult> out;
-    const uint32_t base_seed = static_cast<uint32_t>(game.rng.state * 2654435761U) ^
+    const uint32_t base_seed = static_cast<uint32_t>(game.rng.State() * 2654435761U) ^
                                static_cast<uint32_t>(game.turn * 40503U);
     for (int candidate = 0; candidate <= settings.candidates; candidate++) {
         CandidateResult result;
@@ -197,14 +197,17 @@ std::vector<CandidateResult> ScoreCandidates(const Game& game, int side_index,
             PlayCandidate(*result.after, side_index, candidate, base_seed, settings);
             for (int rollout = 0; rollout < settings.rollouts; rollout++) {
                 auto copy = CopyGame(*result.after, data_dir);
-                copy->rng.state ^= static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U);
+                copy->rng.SetState(copy->rng.State() ^
+                                   static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U));
                 scores.push_back(Rollout(*copy, side_index, settings.horizon, *settings.policy));
             }
         } else {
             for (int rollout = 0; rollout < settings.rollouts; rollout++) {
                 auto copy = CopyGame(game, data_dir);
-                copy->rng.state ^= static_cast<uint32_t>(
-                        (rollout + 1) * 0x9e3779b9U);  // fresh dice, also for the candidate turn
+                copy->rng.SetState(
+                        copy->rng.State() ^
+                        static_cast<uint32_t>((rollout + 1) *
+                                              0x9e3779b9U));  // fresh dice, also for candidate
                 if (settings.judge == Judge::kFair) RestrictToView(*copy, side_index);
                 PlayCandidate(*copy, side_index, candidate, base_seed, settings);
                 scores.push_back(Rollout(*copy, side_index, settings.horizon, *settings.policy));

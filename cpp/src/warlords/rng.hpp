@@ -10,61 +10,80 @@
  */
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace w2 {
 
 /**
- * @brief The game's random number generator: a 32-bit linear congruential one.
+ * @brief Deterministic 32-bit linear congruential random number generator.
  *
- * Uses Numerical Recipes' constants, as the Lua and JavaScript ports do, so a
- * seed plays the same in every port.
+ * Uses Numerical Recipes' constants (`1664525`, `1013904223`), matching the
+ * Lua and JavaScript ports bit-for-bit so any given seed produces the exact
+ * same game and generated worlds across every port.
+ *
+ * Not thread-safe without external synchronization; each `Game` or generator
+ * instance owns its own `Rng` value.
  */
 class Rng {
   public:
-    /** @brief Starts the sequence from a seed, wrapped into 32 bits. */
-    explicit Rng(double seed = 0) {
-        // ((seed % M) + M) % M, on the double the Lua and JS hold
-        long long whole_seed = static_cast<long long>(seed);
-        long long modulus = 0x100000000LL;
-        state = static_cast<uint32_t>(((whole_seed % modulus) + modulus) % modulus);
-    }
-
-    /** @brief A uniform integer in [0, n). */
-    int Below(int n) {
-        state = state * 1664525U + 1013904223U;
-        // take the high bits: the low ones of an LCG cycle far too visibly
-        return static_cast<int>((state >> 16) % static_cast<uint32_t>(n));
-    }
-
-    /** @brief The sum of `n` rolls of a `sides`-sided die, plus `bonus`. */
-    int Dice(int n, int sides, int bonus = 0) {
-        int total = bonus;
-        if (sides <= 0) return total;
-        for (int i = 0; i < n; i++) total += Below(sides) + 1;
-        return total;
-    }
+    /**
+     * @brief Initializes the sequence from `seed`, wrapped modulo $2^{32}$.
+     * @param seed Floating-point seed matching Lua/JS numeric representation.
+     */
+    explicit Rng(double seed = 0.0);
 
     /**
-     * @brief The game's `dice(1,100,0) < percent`.
-     *
-     * True (percent - 1) times in 100, as the original writes its
-     * percentages.
+     * @brief Draws a uniform integer in `[0, n)`.
+     * @param n Exclusive positive upper bound.
+     * @return Sampled integer in `0..n-1`.
      */
-    bool Chance(int percent) { return Dice(1, 100, 0) < percent; }
+    int Below(int n);
 
-    /** @brief A random index into a list of `n`, or -1 for an empty one (no draw). */
-    int PickIndex(size_t n) { return n == 0 ? -1 : Below(static_cast<int>(n)); }
+    /**
+     * @brief Rolls `n` dice of `sides` faces each and adds `bonus`.
+     * @param n Number of dice to roll.
+     * @param sides Faces per die (`<= 0` performs no rolls and returns `bonus`).
+     * @param bonus Flat modifier added to the sum.
+     * @return Sum of rolls plus `bonus`.
+     */
+    int Dice(int n, int sides, int bonus = 0);
 
-    /** @brief A random element of a list, or `none` if it is empty. */
+    /**
+     * @brief Evaluates the original game's `dice(1, 100, 0) < percent` check.
+     *
+     * True `(percent - 1)` times in 100, matching how the 1993 engine encodes
+     * percentage thresholds.
+     * @param percent Strict upper bound compared against `1d100`.
+     * @return True when the `1..100` roll is strictly below `percent`.
+     */
+    bool Chance(int percent);
+
+    /**
+     * @brief Picks a uniform index into a list of size `n`, or `-1` when `n == 0` (no draw).
+     * @param n Number of elements in the candidate collection.
+     * @return Chosen `0`-based index, or `-1` if empty.
+     */
+    int PickIndex(size_t n);
+
+    /**
+     * @brief Picks a uniform element from `list`, or returns `none` without drawing when empty.
+     * @param list Candidate elements.
+     * @param none Fallback returned when `list` is empty.
+     * @return Sampled element or `none`.
+     */
     template <class T>
     T Pick(const std::vector<T>& list, T none = T()) {
         int index = PickIndex(list.size());
         return index < 0 ? none : list[index];
     }
 
-    /** @brief Shuffles a list in place (Fisher-Yates), in the Lua's order of draws exactly. */
+    /**
+     * @brief Shuffles `list` in place (Fisher-Yates) in the exact draw order of the Lua port.
+     * @param list Mutable vector to permute in place.
+     */
     template <class T>
     void Shuffle(std::vector<T>& list) {
         for (int i = static_cast<int>(list.size()); i >= 2; i--) {
@@ -73,7 +92,17 @@ class Rng {
         }
     }
 
-    uint32_t state = 0;  ///< The generator's whole state.
+    /** @brief Returns the current 32-bit internal LCG state word. */
+    uint32_t State() const { return state_; }
+
+    /**
+     * @brief Restores the 32-bit internal LCG state word directly (e.g. when loading a save).
+     * @param state Exact 32-bit LCG state word to install.
+     */
+    void SetState(uint32_t state) { state_ = state; }
+
+  private:
+    uint32_t state_ = 0;  ///< Current 32-bit LCG state word.
 };
 
 }  // namespace w2

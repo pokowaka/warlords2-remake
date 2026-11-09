@@ -63,6 +63,10 @@ struct Map {
     const struct Side* Side(int index) const {
         return index >= 0 && index < 8 ? &sides[index] : nullptr;
     }
+    /** @brief The side identified by `side_id`, or null. */
+    struct Side* Side(SideId side_id) { return Side(side_id.Value()); }
+    /** @brief The side identified by `side_id` (const), or null. */
+    const struct Side* Side(SideId side_id) const { return Side(side_id.Value()); }
     /** @brief The city with this index, or null. */
     struct City* City(int index) {
         return index >= 0 && index < static_cast<int>(cities.size()) ? &cities[index] : nullptr;
@@ -70,6 +74,30 @@ struct Map {
     /** @brief The city with this index (const), or null. */
     const struct City* City(int index) const {
         return index >= 0 && index < static_cast<int>(cities.size()) ? &cities[index] : nullptr;
+    }
+    /** @brief The city identified by `city_id`, or null. */
+    struct City* City(CityId city_id) { return City(city_id.Value()); }
+    /** @brief The city identified by `city_id` (const), or null. */
+    const struct City* City(CityId city_id) const { return City(city_id.Value()); }
+    /** @brief The site identified by `site_id`, or null. */
+    struct Site* SiteById(SiteId site_id) {
+        int index = site_id.Value();
+        return index >= 0 && index < static_cast<int>(sites.size()) ? &sites[index] : nullptr;
+    }
+    /** @brief The site identified by `site_id` (const), or null. */
+    const struct Site* SiteById(SiteId site_id) const {
+        int index = site_id.Value();
+        return index >= 0 && index < static_cast<int>(sites.size()) ? &sites[index] : nullptr;
+    }
+    /** @brief The item identified by `item_id`, or null. */
+    struct Item* ItemById(ItemId item_id) {
+        int index = item_id.Value();
+        return index >= 0 && index < static_cast<int>(items.size()) ? &items[index] : nullptr;
+    }
+    /** @brief The item identified by `item_id` (const), or null. */
+    const struct Item* ItemById(ItemId item_id) const {
+        int index = item_id.Value();
+        return index >= 0 && index < static_cast<int>(items.size()) ? &items[index] : nullptr;
     }
     /** @brief True if `(x, y)` lies inside the full map dimensions `(0..width-1, 0..height-1)`. */
     bool InBounds(int x, int y) const { return x >= 0 && x < width && y >= 0 && y < height; }

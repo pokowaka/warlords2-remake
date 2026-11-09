@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <optional>
+#include <variant>
 
 #include "util/util.hpp"
 #include "warlords/armytype.hpp"
@@ -23,25 +25,23 @@ const char* const kDescriptions[7] = {
     "conquer a city and raze it",
     "sack and pillage %d gold",
 };
-const char* const kTargetKind[7] = {"army", "item", "armytype", "side", "city", "city", "none"};
 
 namespace {
 /** @brief Straight-line distance between two tiles, rounded down. */
 int StraightLineDistance(int from_x, int from_y, int to_x, int to_y) {
-    double dx = from_x - to_x, dy = from_y - to_y;
+    double dx = from_x - to_x;
+    double dy = from_y - to_y;
     return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
 }
 
 /**
- * @brief Picks a target for a quest of this type into `quest` (part of the
- * original's quest_assign).
+ * @brief Picks a target for a quest of `type` (part of the original's quest_assign).
  * @param computer For a computer player: shorter ranges.
- * @param flying Whether the searching stack flies (uncovers more round a
- *     retrieve-item quest's site).
- * @return false if there is no target.
+ * @param flying Whether the searching stack flies (uncovers more round a retrieve-item site).
+ * @return The chosen `Quest::Target`, or `std::nullopt` when no eligible target exists.
  */
-bool PickTarget(Game& game, const Side& side, int type, Army* hero, Quest& quest, bool computer,
-                bool flying) {
+std::optional<Quest::Target> PickTarget(Game& game, const Side& side, int type, const Army* hero,
+                                        bool computer, bool flying) {
     if (type == kSlayHero) {
         // another side's hero, counted from the top of the army table down
         std::vector<Army*> heroes;
@@ -49,9 +49,9 @@ bool PickTarget(Game& game, const Side& side, int type, Army* hero, Quest& quest
             Army* army = game.armies[i];
             if (army->type == armytype::kHero && army->owner != side.index) heroes.push_back(army);
         }
-        if (heroes.empty()) return false;
-        quest.army = heroes[game.rng.Dice(1, static_cast<int>(heroes.size()), -1)];
-        return true;
+        if (heroes.empty()) return std::nullopt;
+        Army* chosen = heroes[game.rng.Dice(1, static_cast<int>(heroes.size()), -1)];
+        return Quest::Target{chosen->id};
     } else if (type == kRetrieveItem) {
         // an ordinary item still hidden in a ruin, less than 50 (30) away each way
         int range = computer ? kAiItemRange : kItemRange;
@@ -70,14 +70,13 @@ bool PickTarget(Game& game, const Side& side, int type, Army* hero, Quest& quest
                     choices.emplace_back(&item, ruin);
             }
         }
-        if (choices.empty()) return false;
+        if (choices.empty()) return std::nullopt;
         auto& pick = choices[game.rng.Dice(1, static_cast<int>(choices.size()), -1)];
         // the priests show the side where it lies, uncovering round it as the
         // original does: two tiles out when the searching stack flies
         pick.second->revealed |= 1 << side.index;
         game::Reveal(game, side.index, pick.second->x, pick.second->y, flying);
-        quest.item = pick.first;
-        return true;
+        return Quest::Target{ItemId(pick.first->index)};
     } else if (type == kSlayType) {
         // up to five magical types, one of which some other army on the map is
         for (int attempt = 0; attempt < 5; attempt++) {
@@ -86,26 +85,24 @@ bool PickTarget(Game& game, const Side& side, int type, Army* hero, Quest& quest
                 Army* army = game.armies[i];
                 if (army->type == want->id && army->owner != side.index && !army->transit &&
                     army->x != kNone) {
-                    quest.army_type = want;
-                    return true;
+                    return Quest::Target{ArmyTypeId(want->id)};
                 }
             }
         }
-        return false;
+        return std::nullopt;
     } else if (type == kSlaughter) {
-        if (game.won) return false;
+        if (game.won) return std::nullopt;
         for (int attempt = 0; attempt < 200; attempt++) {
             Side* other = game.map->Side(game.rng.Dice(1, 8, -1));
             if (other && other->index != side.index && other->in_use && other->alive) {
-                quest.side = other;
-                return true;
+                return Quest::Target{SideId(other->index)};
             }
         }
-        return false;
+        return std::nullopt;
     } else if (type == kOccupy || type == kRaze) {
         // any standing city not the side's, near the hero -- after a hundred
         // tries, anywhere
-        if (game.won) return false;
+        if (game.won) return std::nullopt;
         int range = type == kRaze ? kRazeRange : (computer ? kAiCityRange : kCityRange);
         for (int attempt = 0; attempt < 200; attempt++) {
             City* city =
@@ -113,15 +110,14 @@ bool PickTarget(Game& game, const Side& side, int type, Army* hero, Quest& quest
             if (city && city->owner_index != side.index && !city->razed &&
                 (StraightLineDistance(hero->x, hero->y, city->x, city->y) <= range ||
                  attempt > 99)) {
-                quest.city = city;
-                return true;
+                return Quest::Target{CityId(city->index)};
             }
         }
-        return false;
+        return std::nullopt;
     } else if (type == kPillageGold) {
-        return true;  // no target, just a count
+        return Quest::Target{std::monostate{}};  // no target entity, just a count
     }
-    return false;
+    return std::nullopt;
 }
 
 /**
@@ -137,9 +133,12 @@ int QuestType(Game& game, int attempt, bool computer) {
     return kPillageGold;
 }
 
-/** @brief Whether the quest's hero is in the stack. */
+/** @brief Whether the quest's hero is present in `stack`. */
 bool HeroInStack(const Quest& quest, const std::vector<Army*>& stack) {
-    return std::find(stack.begin(), stack.end(), quest.hero) != stack.end();
+    if (!quest.HeroId().IsValid()) return false;
+    return std::any_of(stack.begin(), stack.end(), [&quest](const Army* member) {
+        return member && member->id == quest.HeroId();
+    });
 }
 
 /**
@@ -158,9 +157,9 @@ std::shared_ptr<QuestResult> Finish(Game& game, Side& side, const std::string& r
     auto out = std::make_shared<QuestResult>();
     out->quest = quest;
     if (reason == "done") {
-        history::RecordDeed(game, &side, DeedType::kQuestCompleted, 0, 0,
-                            quest->hero ? quest->hero->name : "");
-        hero::AddExperience(game, quest->hero, kExperience);
+        Army* hero = quest->ResolveHero(game);
+        history::RecordDeed(game, &side, DeedType::kQuestCompleted, 0, 0, hero ? hero->name : "");
+        if (hero) hero::AddExperience(game, hero, kExperience);
         out->reward = ChooseReward(game, side, quest.get());
     } else {
         out->failed = reason;
@@ -177,29 +176,30 @@ std::shared_ptr<Quest> Assign(Game& game, Side& side, Army* hero, bool computer,
     history::RecordDeed(game, &side, DeedType::kQuestReceived, 0, 0, hero ? hero->name : "");
     for (int attempt = 1;; attempt++) {
         int type = QuestType(game, attempt, computer);
-        Quest quest;
-        if (PickTarget(game, side, type, hero, quest, computer, flying)) {
-            quest.type = type;
-            quest.hero = hero;
-            quest.done = 0;
-            quest.target_kind = kTargetKind[type];
+        if (auto target = PickTarget(game, side, type, hero, computer, flying)) {
+            int required = kNone;
             if (type == kSlaughter)
-                quest.required = game.rng.Dice(1, 12, 10);
+                required = game.rng.Dice(1, 12, 10);
             else if (type == kPillageGold)
-                quest.required = game.rng.Dice(3, 300, 500);
-            side.quest = std::make_shared<Quest>(quest);
+                required = game.rng.Dice(3, 300, 500);
+            ArmyId hero_id = hero ? hero->id : ArmyId::None();
+            side.quest = std::make_shared<Quest>(type, hero_id, *target, required, 0);
             return side.quest;
         }
     }
 }
 
-std::string Describe(const Quest& quest) {
-    const char* text = kDescriptions[quest.type];
-    if (quest.required != kNone) return Format(text, quest.required);
-    if (quest.type == kOccupy || quest.type == kRaze)
-        return std::string(text) + ": " + (quest.city ? quest.city->name : "");
-    if (quest.type == kSlayType)
-        return std::string(text) + ": " + (quest.army_type ? quest.army_type->name : "");
+std::string Describe(const Game& game, const Quest& quest) {
+    const char* text = kDescriptions[quest.Type()];
+    if (quest.Required() != kNone) return Format(text, quest.Required());
+    if (quest.Type() == kOccupy || quest.Type() == kRaze) {
+        const City* city = quest.ResolveCity(game);
+        return std::string(text) + ": " + (city ? city->name : "");
+    }
+    if (quest.Type() == kSlayType) {
+        const ArmyType* army_type = quest.ResolveArmyType(game);
+        return std::string(text) + ": " + (army_type ? army_type->name : "");
+    }
     return text;
 }
 
@@ -208,43 +208,56 @@ std::shared_ptr<QuestResult> Notify(Game& game, Side& side, const std::string& e
     auto active = side.quest;
     if (!active) return nullptr;
     Quest& quest = *active;
+    int type = quest.Type();
 
     if (event == "turn") {
-        bool alive = false;
-        for (Army* army : game.armies)
-            if (army == quest.hero && army->owner == side.index) alive = true;
+        Army* hero = game.armies.FindAlive(quest.HeroId());
+        bool alive = hero != nullptr && hero->owner == side.index;
         if (!alive) return Finish(game, side, "the hero is lost", 0x20);
-        if (quest.type == kOccupy || quest.type == kRaze) {
-            if (quest.city->razed) return Finish(game, side, "the city is ruins", 0x21);
-            if (quest.city->owner_index == side.index)
+        if (type == kOccupy || type == kRaze) {
+            const City* city = quest.ResolveCity(game);
+            if (!city || city->razed) return Finish(game, side, "the city is ruins", 0x21);
+            if (city->owner_index == side.index)
                 return Finish(game, side, "another took the city", 0x2a);
-        } else if (quest.type == kSlaughter) {
-            if (!quest.side->alive) return Finish(game, side, "that side is gone", 0x27);
-        } else if (quest.type == kSlayHero) {
-            if (!game.Alive(quest.army)) return Finish(game, side, "the quarry is gone", 0x29);
-        } else if (quest.type == kRetrieveItem) {
-            if (quest.item->status == 0) return Finish(game, side, "the item is lost", 0x28);
+        } else if (type == kSlaughter) {
+            const Side* target_side = quest.ResolveSide(game);
+            if (!target_side || !target_side->alive)
+                return Finish(game, side, "that side is gone", 0x27);
+        } else if (type == kSlayHero) {
+            if (!game.armies.Alive(quest.TargetArmyId()))
+                return Finish(game, side, "the quarry is gone", 0x29);
+        } else if (type == kRetrieveItem) {
+            const Item* item = quest.ResolveItem(game);
+            if (!item || item->status == 0) return Finish(game, side, "the item is lost", 0x28);
         }
         return nullptr;
     }
 
     if (event == "battle") {
         if (!HeroInStack(quest, data.stack)) return nullptr;
-        if (quest.type == kSlayHero) {
+        if (type == kSlayHero) {
+            ArmyId target_army = quest.TargetArmyId();
             for (Army* victim : data.killed)
-                if (victim == quest.army) return Finish(game, side, "done");
-        } else if (quest.type == kSlayType) {
+                if (victim && target_army.IsValid() && victim->id == target_army)
+                    return Finish(game, side, "done");
+        } else if (type == kSlayType) {
+            int want_type = quest.TargetArmyTypeId().Value();
             for (Army* victim : data.killed)
-                if (victim->type == quest.army_type->id) return Finish(game, side, "done");
-        } else if (quest.type == kSlaughter) {
+                if (victim && victim->type == want_type) return Finish(game, side, "done");
+        } else if (type == kSlaughter) {
+            int target_owner = quest.TargetSideId().Value();
             for (Army* victim : data.killed)
-                if (victim->owner == quest.side->index) quest.done++;
-            if (quest.done >= quest.required) return Finish(game, side, "done");
+                if (victim && victim->owner == target_owner) quest.AddProgress(1);
+            if (quest.Done() >= quest.Required()) return Finish(game, side, "done");
         }
     } else if (event == "item") {
-        if (quest.type == kRetrieveItem && quest.hero) {
-            auto& items = quest.hero->items;
-            auto carried = std::find(items.begin(), items.end(), quest.item);
+        Army* hero = quest.ResolveHero(game);
+        ItemId want_item = quest.TargetItemId();
+        if (type == kRetrieveItem && hero && want_item.IsValid()) {
+            auto& items = hero->items;
+            auto carried = std::find_if(items.begin(), items.end(), [want_item](const Item* item) {
+                return item && item->index == want_item.Value();
+            });
             if (carried != items.end()) {
                 Item* item = *carried;
                 items.erase(carried);  // the priests take it away
@@ -253,24 +266,28 @@ std::shared_ptr<QuestResult> Notify(Game& game, Side& side, const std::string& e
             }
         }
     } else if (event == "pillage") {
-        if (quest.type == kPillageGold && HeroInStack(quest, data.stack)) {
-            quest.done += data.gold;
-            if (quest.done >= quest.required) return Finish(game, side, "done");
-        } else if ((quest.type == kOccupy || quest.type == kRaze) && data.city == quest.city) {
+        CityId target_city = quest.TargetCityId();
+        if (type == kPillageGold && HeroInStack(quest, data.stack)) {
+            quest.AddProgress(data.gold);
+            if (quest.Done() >= quest.Required()) return Finish(game, side, "done");
+        } else if ((type == kOccupy || type == kRaze) && data.city &&
+                   CityId(data.city->index) == target_city) {
             return Finish(game, side, "that was not to pillage", 0x24);
         }
     } else if (event == "occupy") {
-        if (quest.type == kOccupy && data.city == quest.city) {
+        CityId target_city = quest.TargetCityId();
+        if (type == kOccupy && data.city && CityId(data.city->index) == target_city) {
             if (HeroInStack(quest, data.stack)) return Finish(game, side, "done");
             return Finish(game, side, "the hero was not there", 0x22);
-        } else if (quest.type == kRaze && data.city == quest.city) {
+        } else if (type == kRaze && data.city && CityId(data.city->index) == target_city) {
             return Finish(game, side, "the quest was to raze it", 0x23);
         }
     } else if (event == "raze") {
-        if (quest.type == kRaze && data.city == quest.city) {
+        CityId target_city = quest.TargetCityId();
+        if (type == kRaze && data.city && CityId(data.city->index) == target_city) {
             if (HeroInStack(quest, data.stack)) return Finish(game, side, "done");
             return Finish(game, side, "the hero was not there", 0x25);
-        } else if (quest.type == kOccupy && data.city == quest.city) {
+        } else if (type == kOccupy && data.city && CityId(data.city->index) == target_city) {
             return Finish(game, side, "the quest was to keep it", 0x26);
         }
     }
@@ -280,7 +297,7 @@ std::shared_ptr<QuestResult> Notify(Game& game, Side& side, const std::string& e
 std::shared_ptr<Reward> ChooseReward(Game& game, Side& side, const Quest* quest) {
     int cities = static_cast<int>(game::SideCities(game, side).size());
 
-    Army* hero = quest ? quest->hero : nullptr;
+    Army* hero = quest ? quest->ResolveHero(game) : nullptr;
 
     // Archons, on the quest hero's tile (the original's create_ally_army)
     auto give_allies = [&](int count) {

@@ -153,7 +153,7 @@ TEST(TurnLoopTest, MoveRefreshCarryoverProductionAndCitylessElimination) {
     Side* victim = game.sides.back();
     for (City* victim_city : game::SideCities(game, *victim)) victim_city->owner_index = kNone;
     victim->gold = 500;
-    game.diplomacy.state[static_cast<size_t>(victim->index) * 8] = diplomacy::kWar;
+    game.diplomacy.SetState(SideId(victim->index), SideId(0), diplomacy::kWar);
     EXPECT_FALSE(game::SideArmies(game, *victim).empty());
     int round_of = game.turn;
     while (game.turn == round_of) {
@@ -194,7 +194,7 @@ TEST(VectoringTest, TwoTurnTransitFourSenderCapAndSelfLift) {
         AdvanceRounds(game, 1);
         bool any_sent = false;
         for (const auto& entry : side->produced) {
-            if (entry.kind == "sent") any_sent = true;
+            if (entry.kind == ProducedKind::kSent) any_sent = true;
         }
         if (!any_sent) continue;
         for (Army* army : game.armies) {
@@ -329,8 +329,8 @@ TEST(ReportsAndDisbandTest, ReportFiguresStackDisbandSignpostsAndResignation) {
         if (report_game.side == side) break;
     }
     ASSERT_FALSE(side->produced.empty());
-    EXPECT_EQ(side->produced[0].city, capital->index);
-    EXPECT_EQ(side->produced[0].kind, "built");
+    EXPECT_EQ(side->produced[0].city, CityId(capital->index));
+    EXPECT_EQ(side->produced[0].kind, ProducedKind::kBuilt);
     EXPECT_EQ(report::ComputeFigures(report_game, *side, report::kProduction).result,
               static_cast<int>(side->produced.size()));
 
@@ -510,8 +510,8 @@ TEST(EndGameTest, TriumphEliminationMajorityVictoryAndSurrenderOffer) {
     Side* doomed = fall_game->sides[1];
     Side* other = fall_game->sides[2];
     for (City* city : game::SideCities(*fall_game, *doomed)) city->owner_index = other->index;
-    fall_game->diplomacy.state[doomed->index * 8 + other->index] = diplomacy::kWar;
-    fall_game->diplomacy.state[other->index * 8 + doomed->index] = diplomacy::kWar;
+    fall_game->diplomacy.SetSymmetricState(SideId(doomed->index), SideId(other->index),
+                                           diplomacy::kWar);
     EXPECT_FALSE(game::SideArmies(*fall_game, *doomed).empty());
     EndTurn(*fall_game);
     EXPECT_TRUE(fall_game->side == other && doomed->alive);

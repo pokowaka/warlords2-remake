@@ -60,7 +60,7 @@ TEST(PersistenceTest, SaveAndLoadPreservesFullGameStateAndPlaysOn) {
     EXPECT_EQ(loaded.turn, game.turn);
     EXPECT_EQ(loaded.current, game.current);
     ASSERT_EQ(loaded.armies.size(), game.armies.size());
-    EXPECT_EQ(loaded.rng.state, game.rng.state);
+    EXPECT_EQ(loaded.rng.State(), game.rng.State());
 
     for (size_t i = 0; i < game.armies.size(); ++i) {
         const Army* saved = game.armies[i];
@@ -103,11 +103,11 @@ TEST(PersistenceTest, SaveAndLoadPreservesFullGameStateAndPlaysOn) {
     Side* restored_owner = loaded.map->Side(owner->index);
     ASSERT_NE(restored_owner, nullptr);
     ASSERT_NE(restored_owner->quest, nullptr);
-    EXPECT_EQ(restored_owner->quest->type, quest::kOccupy);
-    EXPECT_EQ(restored_owner->quest->city != nullptr ? restored_owner->quest->city->index : kNone,
-              game.map->cities[4].index);
-    ASSERT_NE(restored_owner->quest->hero, nullptr);
-    EXPECT_EQ(restored_owner->quest->hero->type, armytype::kHero);
+    EXPECT_EQ(restored_owner->quest->Type(), quest::kOccupy);
+    EXPECT_EQ(restored_owner->quest->TargetCityId(), CityId(game.map->cities[4].index));
+    const Army* restored_hero = restored_owner->quest->ResolveHero(loaded);
+    ASSERT_NE(restored_hero, nullptr);
+    EXPECT_EQ(restored_hero->type, armytype::kHero);
 
     bool any_carried = false;
     for (const Army* army : loaded.armies) {

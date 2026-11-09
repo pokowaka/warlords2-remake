@@ -50,7 +50,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         float threat = city->index < static_cast<int>(belief.city_threat2_turn.size())
                                ? belief.city_threat2_turn[city->index]
                                : 0.0F;
-        bool is_quest_or_own = (side.capital == city) || (side.quest && side.quest->city == city);
+        bool is_quest_or_own = (side.capital == city) ||
+                               (side.quest && side.quest->TargetCityId() == CityId(city->index));
         bool is_enemy_cap = false;
         for (int side_idx = 0; side_idx < 8; side_idx++) {
             if (side_idx != our_side && game.map->sides[side_idx].capital == city)
@@ -147,7 +148,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         stack_target.owner = obs.owner;
         stack_target.value = static_cast<float>(obs.visible_count) * 4.0F;
         stack_target.is_quest_or_own_cap =
-                (side.quest && side.quest->side && side.quest->side->index == obs.owner);
+                (side.quest && side.quest->TargetSideId() == SideId(obs.owner));
         stack_target.label = absl::StrFormat("Intercept stack (%d,%d)", obs.x, obs.y);
         targets.push_back(std::move(stack_target));
     }
@@ -177,7 +178,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         ground_target.y = item->y;
         ground_target.item = item;
         ground_target.value = 20.0F;
-        ground_target.is_quest_or_own_cap = (side.quest && side.quest->item == item);
+        ground_target.is_quest_or_own_cap =
+                (side.quest && side.quest->TargetItemId() == ItemId(item->index));
         ground_target.label = "Pick up " + item->name;
         targets.push_back(std::move(ground_target));
     }

@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "warlords/model/army_type.hpp"
+#include "warlords/model/ids.hpp"
 #include "warlords/model/tile_pos.hpp"
 
 namespace w2 {
@@ -25,21 +26,22 @@ struct Transit {
 
 /** @brief One army: a unit, a hero, or a ruin's allies. */
 struct Army {
-    int slot = 0;           ///< Its place in the army table.
-    int x = kNone;          ///< Column; kNone while in transit.
-    int y = kNone;          ///< Row; kNone while in transit.
-    int owner = kNone;      ///< The side owning it; kNone for neutral.
-    int type = 0;           ///< The army type id.
-    std::string name;       ///< Its name.
-    bool female = false;    ///< A heroine.
-    int strength = 0;       ///< Fighting strength.
-    int moves = 0;          ///< Movement points left this turn.
-    int max_moves = 0;      ///< Movement points per turn.
-    int upkeep = 0;         ///< Gold it costs each turn.
-    int home_city = kNone;  ///< The city that built it.
-    int medals = 0;         ///< Medals won in battle.
-    bool at_sea = false;    ///< Aboard a ship.
-    int group = 0;          ///< The bottom bar's group it belongs to; 0 ungrouped.
+    ArmyId id = ArmyId::None();  ///< Stable monotonic identifier assigned by `ArmyRegistry`.
+    int slot = 0;                ///< Its place in the army table.
+    int x = kNone;               ///< Column; kNone while in transit.
+    int y = kNone;               ///< Row; kNone while in transit.
+    int owner = kNone;           ///< The side owning it; kNone for neutral.
+    int type = 0;                ///< The army type id.
+    std::string name;            ///< Its name.
+    bool female = false;         ///< A heroine.
+    int strength = 0;            ///< Fighting strength.
+    int moves = 0;               ///< Movement points left this turn.
+    int max_moves = 0;           ///< Movement points per turn.
+    int upkeep = 0;              ///< Gold it costs each turn.
+    int home_city = kNone;       ///< The city that built it.
+    int medals = 0;              ///< Medals won in battle.
+    bool at_sea = false;         ///< Aboard a ship.
+    int group = 0;               ///< The bottom bar's group it belongs to; 0 ungrouped.
     std::optional<std::pair<int, int>> target;  ///< Where it is walking to.
     bool fortified = false;                     ///< Fortified: left out of the cycle.
     // heroes

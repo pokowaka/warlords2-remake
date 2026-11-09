@@ -29,14 +29,14 @@ TEST(DiplomacyTest, MustDeclareAndAttackAnywayTransitionsToWar) {
     EXPECT_TRUE(diplomacy::MustDeclare(*ask_game, 0, 1, nullptr));
     EXPECT_FALSE(diplomacy::MustDeclare(*ask_game, 0, kNone, city));
 
-    ask_game->diplomacy.state[0 * 8 + 1] = diplomacy::kIntermediate;
+    ask_game->diplomacy.SetState(SideId(0), SideId(1), diplomacy::kIntermediate);
     EXPECT_FALSE(diplomacy::MustDeclare(*ask_game, 0, 1, nullptr))
             << "armies of an uneasy side do not require war declaration";
     EXPECT_TRUE(diplomacy::MustDeclare(*ask_game, 0, 1, city));
     EXPECT_FALSE(diplomacy::MustDeclare(*ask_game, 0, 1, &ask_game->map->cities[0]))
             << "city 0 reproduces the original's > 0 check";
 
-    ask_game->diplomacy.state[0 * 8 + 1] = diplomacy::kPeace;
+    ask_game->diplomacy.SetState(SideId(0), SideId(1), diplomacy::kPeace);
     int score_before = ask_game->sides[0]->diplo_score;
     diplomacy::AttackAnyway(*ask_game, 0, 1);
     int cost = ask_game->sides[0]->diplo_score - score_before;
@@ -76,7 +76,7 @@ TEST(DiplomacyTest, WarDeclarationsAndMutualPeaceTreaties) {
     Game& peace_game = *peace_game_ptr;
     diplomacy::Propose(peace_game, 0, 1, diplomacy::kWar);
     diplomacy::Apply(peace_game, *peace_game.sides[0]);
-    peace_game.diplomacy.proposal[1 * 8 + 0] = kNone;
+    peace_game.diplomacy.SetProposal(SideId(1), SideId(0), kNone);
     diplomacy::Propose(peace_game, 0, 1, diplomacy::kPeace);
     diplomacy::Apply(peace_game, *peace_game.sides[0]);
     EXPECT_EQ(diplomacy::State(peace_game, 0, 1), diplomacy::kWar)
@@ -139,7 +139,7 @@ TEST(DiplomacyTest, PeacefulMovementOverStacksAndCombatOnRazedRuins) {
     auto path = movement::FindPath(walk_game, {army}, army->x, army->y, city->x, city->y);
     if (path && !path->empty()) {
         auto into_city = movement::Walk(walk_game, {army}, *path);
-        EXPECT_EQ(into_city.stopped, "at peace");
+        EXPECT_EQ(into_city.stopped, movement::WalkStop::kAtPeace);
         EXPECT_EQ(army->x, city->x);
     }
 
@@ -170,13 +170,13 @@ TEST(DiplomacyTest, PeacefulMovementOverStacksAndCombatOnRazedRuins) {
     auto past_walk = movement::Walk(walk_game, {walker}, steps);
     EXPECT_EQ(walker->x, start_x + 2);
     EXPECT_EQ(walker->moves, 16);
-    EXPECT_EQ(past_walk.stopped, "arrived");
+    EXPECT_EQ(past_walk.stopped, movement::WalkStop::kArrived);
 
     walker->x = start_x;
     walker->moves = 20;
-    walk_game.diplomacy.state[side->index * 8 + other->index] = diplomacy::kWar;
+    walk_game.diplomacy.SetState(SideId(side->index), SideId(other->index), diplomacy::kWar);
     auto war_walk = movement::Walk(walk_game, {walker}, steps);
-    EXPECT_EQ(war_walk.stopped, "attack");
+    EXPECT_EQ(war_walk.stopped, movement::WalkStop::kAttack);
     EXPECT_EQ(walker->x, start_x);
 
     City* ruin = nullptr;
@@ -197,7 +197,7 @@ TEST(DiplomacyTest, PeacefulMovementOverStacksAndCombatOnRazedRuins) {
     for (Army* occupant : on_ruin) {
         walk_game.Remove(occupant);
     }
-    walk_game.diplomacy.state[side->index * 8 + other->index] = diplomacy::kWar;
+    walk_game.diplomacy.SetState(SideId(side->index), SideId(other->index), diplomacy::kWar);
     AddArmy(walk_game, ruin->x, ruin->y, other->index, 11, 1, 20, 20);
     AddArmy(walk_game, ruin->x + 1, ruin->y + 1, other->index, 11, 1, 20, 20);
     std::vector<Army*> strike;

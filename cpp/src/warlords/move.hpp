@@ -12,6 +12,7 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "warlords/types.hpp"
@@ -232,12 +233,25 @@ struct Attack {
     City* city = nullptr;  ///< The city attacked, or nullptr for a stack.
 };
 
+/** @brief Reason a stack's path walk terminated. */
+enum class WalkStop {
+    kNone,        ///< Walk has not yet executed.
+    kArrived,     ///< Reached the end of the path.
+    kOutOfMoves,  ///< Next step exceeds remaining moves, or shore crossing ended movement.
+    kAttack,      ///< Stopped adjacent to an attackable enemy city or stack.
+    kAtPeace,     ///< Stopped adjacent to an enemy city protected by a peace treaty.
+    kBlocked,     ///< Destination or remaining tiles had no room to stop.
+    kNoRoute,     ///< Pathfinder found no valid route to the destination.
+};
+
+/** @brief Returns the human-readable status phrase for `stop` (e.g. `"blocked"`). */
+std::string_view WalkStopName(WalkStop stop);
+
 /** @brief What became of a walk. */
 struct WalkResult {
-    int steps = 0;  ///< The steps walked.
-    int spent = 0;  ///< The moves they cost.
-    /// Why it stopped: "arrived", "out of moves", "attack", "at peace", "blocked" or "no route".
-    std::string stopped;
+    int steps = 0;                            ///< The steps walked.
+    int spent = 0;                            ///< The moves they cost.
+    WalkStop stopped = WalkStop::kNone;       ///< Why the walk terminated.
     std::optional<Attack> attack;             ///< The attack it stopped for, if any.
     std::vector<std::pair<int, int>> walked;  ///< The tiles walked over, in order.
     bool out_of_moves = false;  ///< The walk left the stack out of moves: a human's is put down.

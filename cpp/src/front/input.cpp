@@ -731,9 +731,11 @@ static std::map<std::string, std::function<void()>>& MenuDoes() {
     menu_actions["screen 4:3"] = []() { SetOriginalSize(true); };
     menu_actions["screen fit"] = []() { SetOriginalSize(false); };
     menu_actions["screen crt"] = ToggleCrt;
-    for (const char* synth_name : {"fm", "mt32", "sc55"}) {
-        std::string synth = synth_name;
-        menu_actions["music " + synth] = [synth]() { sound::SetSynth(synth); };
+    for (sound::SynthKind synth :
+         {sound::SynthKind::kFm, sound::SynthKind::kMt32, sound::SynthKind::kSc55}) {
+        menu_actions["music " + std::string(sound::SynthName(synth))] = [synth]() {
+            sound::SetSynth(synth);
+        };
     }
     menu_actions["ai modern"] = []() { SetAiMode(false); };
     menu_actions["ai classic"] = []() { SetAiMode(true); };
@@ -753,7 +755,10 @@ bool MenuEnabled(const std::string& menu_key) {
     if (menu_key.empty() || !menu_actions.count(menu_key)) return false;
     bool music = menu_key.starts_with("music ");
     bool ai_opt = menu_key.starts_with("ai ");
-    if (music && !sound::SynthAvailable(menu_key.substr(6))) return false;
+    if (music) {
+        auto synth = sound::ParseSynthKind(menu_key.substr(6));
+        if (!synth || !sound::SynthAvailable(*synth)) return false;
+    }
     // On the start screens every menu is greyed except Quit, Load, and display/audio/AI settings.
     if (g_app.starting || !g_app.g) {
         return menu_key == "^Q" || (menu_key == "alt L" && savegame::Used() > 0) ||

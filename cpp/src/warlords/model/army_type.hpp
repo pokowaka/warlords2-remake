@@ -8,10 +8,9 @@
 #include <string>
 #include <vector>
 
-namespace w2 {
+#include "warlords/model/ids.hpp"
 
-/// "Nothing": the Lua reference's nil for an index or a coordinate.
-constexpr int kNone = -1;
+namespace w2 {
 
 /** @brief An army type as ARMYTYPE.DAT gives it (docs/formats/armytype.md). */
 struct ArmyType {
@@ -51,6 +50,8 @@ struct Types {
     const ArmyType* ById(int type_id) const {
         return type_id >= 0 && type_id < 64 ? ids[type_id] : nullptr;
     }
+    /** @brief The type with strong identifier `type_id`, or null for an unknown one. */
+    const ArmyType* ById(ArmyTypeId type_id) const { return ById(type_id.Value()); }
     /** @brief Every type, in file order. */
     std::vector<const ArmyType*> List() const {
         std::vector<const ArmyType*> out;

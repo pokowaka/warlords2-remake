@@ -38,7 +38,7 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
     ml::RolloutSampler deploy_sampler;
     if (!sampler) {
         deploy_sampler.temperature = ml::DeployTemperature();
-        deploy_sampler.rng_state = (game.rng.state * 2654435761U) ^
+        deploy_sampler.rng_state = (game.rng.State() * 2654435761U) ^
                                    static_cast<uint32_t>(game.turn * 40503U) ^
                                    static_cast<uint32_t>((side.index + 1) * 2246822519U);
         sampler = &deploy_sampler;

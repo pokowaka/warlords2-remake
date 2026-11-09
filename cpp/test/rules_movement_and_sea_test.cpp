@@ -149,7 +149,7 @@ TEST_P(MovementScenarioTest, StepCostsPathfindingAttacksAndRoutePreview) {
     auto attack_path = movement::FindPath(game, stack, army->x, army->y, enemy->x, enemy->y);
     if (attack_path && !attack_path->empty()) {
         auto walk = movement::Walk(game, stack, *attack_path);
-        EXPECT_EQ(walk.stopped, "attack");
+        EXPECT_EQ(walk.stopped, movement::WalkStop::kAttack);
         EXPECT_TRUE(walk.attack && walk.attack->city == enemy);
         EXPECT_EQ(army->x, enemy->x);
         EXPECT_EQ(army->y, enemy->y - 1);
@@ -342,16 +342,7 @@ TEST(MovementTest, HiddenMapSightRadiiPathBlockingAndNextHumanScreen) {
     ASSERT_NE(unseen, nullptr);
     EXPECT_FALSE(movement::FindPath(game, {army}, army->x, army->y, unseen->x, unseen->y));
 
-    auto count_seen = [&]() {
-        int count = 0;
-        auto explored = game.explored.find(side->index);
-        if (explored != game.explored.end()) {
-            for (uint8_t tile_seen : explored->second) {
-                if (tile_seen != 0) ++count;
-            }
-        }
-        return count;
-    };
+    auto count_seen = [&]() { return game.explored.ExploredCount(SideId(side->index)); };
     int seen_before = count_seen();
     for (int dx = -3; dx <= 3; ++dx) {
         bool walked = false;
@@ -519,7 +510,7 @@ TEST(MovementTest, EmbarkingDisembarkingFlyingOverWaterAndPortSailing) {
     EXPECT_TRUE(sailor->at_sea);
     EXPECT_EQ(walk_result.spent, movement::kCost[movement::kShore]);
     EXPECT_EQ(sailor->moves, 0);
-    EXPECT_EQ(walk_result.stopped, "out of moves");
+    EXPECT_EQ(walk_result.stopped, movement::WalkStop::kOutOfMoves);
 
     sailor->moves = 20;
     walk_result = movement::MoveTo(*game, {sailor}, 86, 4);

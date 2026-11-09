@@ -1123,14 +1123,14 @@ struct MissiveModal : kit::Modal {
                 dip::SetTruce(game, viewer, m.from_side, 15);
                 dip::AddTrust(game, m.from_side, viewer, 18);
             } else if (m.proposed_state == dip::kPeace) {
-                game.diplomacy.state[viewer * 8 + m.from_side] = dip::kPeace;
-                game.diplomacy.state[m.from_side * 8 + viewer] = dip::kPeace;
+                game.diplomacy.SetSymmetricState(w2::SideId(viewer), w2::SideId(m.from_side),
+                                                 dip::kPeace);
                 dip::SetTruce(game, viewer, m.from_side, 10);
                 dip::AddTrust(game, m.from_side, viewer, 10);
             }
             if (m.joint_war_target != w2::kNone && Playing(game, m.joint_war_target)) {
-                game.diplomacy.state[viewer * 8 + m.joint_war_target] = dip::kWar;
-                game.diplomacy.state[m.joint_war_target * 8 + viewer] = dip::kWar;
+                game.diplomacy.SetSymmetricState(w2::SideId(viewer), w2::SideId(m.joint_war_target),
+                                                 dip::kWar);
                 dip::Propose(game, viewer, m.joint_war_target, dip::kWar);
             }
             front::StratDirty();

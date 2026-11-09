@@ -293,7 +293,8 @@ bool MenuTicked(const std::string& key) {
            key == std::string("screen ") + (display::state.windowed ? "window" : "full") ||
            (key == "screen 4:3" && display::state.wanted) ||
            (key == "screen fit" && !display::state.wanted) ||
-           (key == "screen crt" && display::state.crt) || key == "music " + sound::Synth() ||
+           (key == "screen crt" && display::state.crt) ||
+           key == "music " + std::string(sound::SynthName(sound::Synth())) ||
            key == (ActiveClassicAi() ? "ai classic" : "ai modern");
 }
 

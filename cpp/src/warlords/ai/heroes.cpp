@@ -306,9 +306,10 @@ bool QuestGo(Game& game, Side& side, size_t hero_index, Info& info) {
     AIData& data = Data(game, side);
     Army* hero = info.heroes[hero_index];
     auto side_quest = side.quest;
-    if (!(side_quest && (side_quest->type == quest::kOccupy || side_quest->type == quest::kRaze)))
+    if (!(side_quest &&
+          (side_quest->Type() == quest::kOccupy || side_quest->Type() == quest::kRaze)))
         return false;
-    City* city = side_quest->city;
+    City* city = side_quest->ResolveCity(game);
     if (!city || Cflag(data, *city, kCfUnseen)) return false;
     int need = (city->owner_index == kNone || game.turn < 8) ? 1 : 2;
     auto list = Collect(game, side.index, hero->x, hero->y, 8);
@@ -328,17 +329,17 @@ void Phase(Game& game, Side& side) {
     data.quest_city = kNone;
     auto side_quest = side.quest;
     if (game.map->options.quests != 0 && side_quest &&
-        (side_quest->type == quest::kOccupy || side_quest->type == quest::kRaze) &&
-        side_quest->city) {
-        data.quest_city = side_quest->city->index;
+        (side_quest->Type() == quest::kOccupy || side_quest->Type() == quest::kRaze)) {
+        City* quest_city = side_quest->ResolveCity(game);
+        if (quest_city) data.quest_city = quest_city->index;
     }
     Info info = Survey(game, side);
     for (int hero_index = static_cast<int>(info.heroes.size()) - 1; hero_index >= 0; hero_index--) {
         Army* hero = info.heroes[hero_index];
         if (hero && Alive(game, hero) && hero->owner == side.index && IsHero(hero)) {
             if (info.city[hero_index]) cities::Garrison(game, side, *info.city[hero_index], true);
-            bool skip = game.map->options.quests != 0 && side.quest && side.quest->hero == hero &&
-                        QuestGo(game, side, hero_index, info);
+            bool skip = game.map->options.quests != 0 && side.quest &&
+                        side.quest->HeroId() == hero->id && QuestGo(game, side, hero_index, info);
             if (!skip && Alive(game, hero)) {
                 // A hero sent at a site goes on there while it is still worth
                 // it; otherwise its stack forgets the order.

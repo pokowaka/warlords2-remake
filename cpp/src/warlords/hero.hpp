@@ -1,7 +1,7 @@
 // Heroes: offers, recruitment, experience, promotion and death.
 //
 // See docs/rules.md > Heroes. This is where the first of the original's bugs
-// shows up: see BattleExperience() and rules::bugs.
+// shows up: see BattleExperience() and Game::RulesBugs().
 #pragma once
 
 #include <string>
@@ -105,7 +105,7 @@ std::vector<Promotion> CheckPromotions(Game& game, const Side& side);
  *
  * **Original bug**: a surviving defending hero is credited only when the
  * attacker at the same place in the line is a hero
- * (rules::bugs.hero_experience_reads_attacker_types).
+ * (`Game::RulesBugs().hero_experience_reads_attacker_types`).
  */
 void BattleExperience(Game& game, const std::vector<Army*>& attackers,
                       const std::vector<Army*>& defenders, const Battle& result, bool was_city);

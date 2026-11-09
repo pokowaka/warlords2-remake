@@ -25,16 +25,17 @@ const int kObserve = 268;                       ///< First of the eight Observe 
 const int kSound = 276;                         ///< First of the three sound boxes.
 /// The computer's levels, as the Human column words them.
 const char* const kLevels[3] = {"Knight", "Lord", "Warlord"};
-/** @brief One of the sound boxes: where it is, its label and its option. */
+/** @brief One of the sound boxes: where it is, its label and its channel. */
 struct SoundBox {
-    int x;              ///< Left edge of the box.
-    int y;              ///< Top edge of the box.
-    const char* label;  ///< The words beside it.
-    const char* key;    ///< The sound option it toggles.
+    int x;                        ///< Left edge of the box.
+    int y;                        ///< Top edge of the box.
+    const char* label;            ///< The words beside it.
+    sound::AudioChannel channel;  ///< The audio channel it toggles.
 };
 /// Music, Effects and Speech, in control order.
-const SoundBox kSounds[3] = {
-    {152, 340, "Music", "music"}, {152, 370, "Effects", "effects"}, {256, 340, "Speech", "speech"}};
+const SoundBox kSounds[3] = {{152, 340, "Music", sound::AudioChannel::kMusic},
+                             {152, 370, "Effects", sound::AudioChannel::kEffects},
+                             {256, 340, "Speech", sound::AudioChannel::kSpeech}};
 
 /** @brief The settings dialog: who plays each side, and the sounds. */
 struct Settings : kit::Modal {
@@ -123,7 +124,7 @@ struct Settings : kit::Modal {
             w2::Side& side = g_app.g->map->sides[control_id - kObserve];
             if (side.computer) side.observe = !side.observe;
         } else if (control_id >= kSound && control_id < kSound + 3) {
-            sound::Toggle(kSounds[control_id - kSound].key);
+            sound::Toggle(kSounds[control_id - kSound].channel);
         }
         Refresh();
     }

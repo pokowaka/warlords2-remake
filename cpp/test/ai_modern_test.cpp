@@ -115,7 +115,7 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
         for (const City* city : belief.visible_cities) {
             EXPECT_TRUE(ai::belief::IsCityVisible(*game, 0, *city));
         }
-        uint32_t rng_before = game->rng.state;
+        uint32_t rng_before = game->rng.State();
         auto my_armies = game::SideArmies(*game, side0);
         if (!my_armies.empty() && !belief.visible_cities.empty()) {
             auto est = ai::belief::EstimateCombat(*game, side0, {my_armies[0]},
@@ -123,7 +123,7 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
                                                   belief.visible_cities[0]->y);
             EXPECT_TRUE(est.win_prob >= 0.0F && est.win_prob <= 1.0F);
         }
-        EXPECT_EQ(game->rng.state, rng_before);
+        EXPECT_EQ(game->rng.State(), rng_before);
     }
 
     {
@@ -200,10 +200,10 @@ TEST(ModernAiTest, PartialVisibilityFrontiersGradientsPotentialAndSampling) {
     }
     ASSERT_NE(target_neutral, nullptr);
     for (Army* army : game::ArmiesAt(game, target_neutral->x, target_neutral->y)) {
-        army->x = kNone;
-        army->y = kNone;
+        game.armies.Relocate(army, TilePos());
     }
-    game.explored[7][target_neutral->y * game.map->width + target_neutral->x] = true;
+    game.explored.MarkExplored(SideId(7), game.map->width, game.map->height, target_neutral->x,
+                               target_neutral->y);
     EXPECT_TRUE(game::Seen(game, 7, target_neutral->x, target_neutral->y));
     EXPECT_FALSE(game::Seen(game, 7, target_neutral->x + 1, target_neutral->y + 1));
     ai::belief::Update(game, side7);
@@ -219,7 +219,7 @@ TEST(ModernAiTest, PartialVisibilityFrontiersGradientsPotentialAndSampling) {
         EXPECT_GT(belief7.city_nearest_enemy_dist[side7.capital->index], 50.0F);
     }
 
-    game.explored[7].assign(static_cast<size_t>(game.map->width) * game.map->height, false);
+    game.explored.ResetSide(SideId(7), game.map->width, game.map->height, false);
     for (int y = 0; y < 32; ++y) {
         for (int x = 0; x < 27; ++x) {
             int terr = scn::TerrainAt(*game.map, x, y);

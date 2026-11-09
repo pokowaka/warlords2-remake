@@ -163,7 +163,7 @@ int OptField(const Json& obj, std::string_view key) {
  * @brief Compresses a side's fog-of-war exploration mask into run-length
  * counts of alternating unseen (starting at 0) and seen tiles.
  */
-Json PackMask(const std::vector<uint8_t>& mask) {
+Json PackMask(absl::Span<const uint8_t> mask) {
     Json runs = Json::array();
     int cur = 0;
     int run_len = 0;
@@ -487,21 +487,33 @@ std::string Encode(const Game& game) {
         if (side->quest) {
             const Quest& quest = *side->quest;
             Json quest_json = Json::object();
-            quest_json["type"] = quest.type;
-            quest_json["hero"] = id_of(quest.hero);
-            quest_json["done"] = quest.done;
-            quest_json["required"] = OptInt(quest.required);
-            quest_json["targetKind"] = Latin1ToUtf8(quest.target_kind);
-            if (quest.target_kind == "army")
-                quest_json["target"] = id_of(quest.army);
-            else if (quest.target_kind == "armytype" && quest.army_type)
-                quest_json["target"] = quest.army_type->id;
-            else if (quest.target_kind == "city" && quest.city)
-                quest_json["target"] = quest.city->index;
-            else if (quest.target_kind == "side" && quest.side)
-                quest_json["target"] = quest.side->index;
-            else if (quest.target_kind == "item" && quest.item)
-                quest_json["target"] = quest.item->index;
+            quest_json["type"] = quest.Type();
+            quest_json["hero"] = id_of(quest.ResolveHero(game));
+            quest_json["done"] = quest.Done();
+            quest_json["required"] = OptInt(quest.Required());
+            std::visit(
+                    [&](const auto& target_val) {
+                        using TargetType = std::decay_t<decltype(target_val)>;
+                        if constexpr (std::is_same_v<TargetType, std::monostate>) {
+                            quest_json["targetKind"] = "none";
+                        } else if constexpr (std::is_same_v<TargetType, CityId>) {
+                            quest_json["targetKind"] = "city";
+                            if (target_val.IsValid()) quest_json["target"] = target_val.Value();
+                        } else if constexpr (std::is_same_v<TargetType, SideId>) {
+                            quest_json["targetKind"] = "side";
+                            if (target_val.IsValid()) quest_json["target"] = target_val.Value();
+                        } else if constexpr (std::is_same_v<TargetType, ItemId>) {
+                            quest_json["targetKind"] = "item";
+                            if (target_val.IsValid()) quest_json["target"] = target_val.Value();
+                        } else if constexpr (std::is_same_v<TargetType, ArmyTypeId>) {
+                            quest_json["targetKind"] = "armytype";
+                            if (target_val.IsValid()) quest_json["target"] = target_val.Value();
+                        } else if constexpr (std::is_same_v<TargetType, ArmyId>) {
+                            quest_json["targetKind"] = "army";
+                            quest_json["target"] = id_of(quest.ResolveTargetArmy(game));
+                        }
+                    },
+                    quest.GetTarget());
             obj["quest"] = std::move(quest_json);
         }
         sides.push_back(std::move(obj));
@@ -566,8 +578,8 @@ std::string Encode(const Game& game) {
     Json towers = Json::array();
     for (int tile_key : game.towers) towers.push_back(tile_key);
     Json explored = Json::object();
-    for (const auto& [side_idx, mask] : game.explored) {
-        explored[std::to_string(side_idx)] = PackMask(mask);
+    for (SideId side_id : game.explored.SidesWithMasks()) {
+        explored[std::to_string(side_id.Value())] = PackMask(game.explored.MaskFor(side_id));
     }
 
     Json opts = Json::object();
@@ -576,26 +588,28 @@ std::string Encode(const Game& game) {
     }
 
     Json dip = Json::object();
-    dip["state"] = IntArray(game.diplomacy.state);
-    dip["proposal"] = IntArray(game.diplomacy.proposal);
+    dip["state"] = IntArray(game.diplomacy.StateTable());
+    dip["proposal"] = IntArray(game.diplomacy.ProposalTable());
     auto has_non_default = [](const auto& arr, int dflt) {
         for (int val : arr) {
             if (val != dflt) return true;
         }
         return false;
     };
-    if (has_non_default(game.diplomacy.allied, 0)) dip["allied"] = IntArray(game.diplomacy.allied);
-    if (has_non_default(game.diplomacy.propose_allied, 0))
-        dip["proposeAllied"] = IntArray(game.diplomacy.propose_allied);
-    if (has_non_default(game.diplomacy.truce_turns, 0))
-        dip["truceTurns"] = IntArray(game.diplomacy.truce_turns);
-    if (has_non_default(game.diplomacy.gold_offer, 0))
-        dip["goldOffer"] = IntArray(game.diplomacy.gold_offer);
-    if (has_non_default(game.diplomacy.war_target, kNone))
-        dip["warTarget"] = IntArray(game.diplomacy.war_target);
-    if (has_non_default(game.diplomacy.trust, 0)) dip["trust"] = IntArray(game.diplomacy.trust);
-    if (has_non_default(game.diplomacy.allied_target_city, kNone))
-        dip["alliedTargetCity"] = IntArray(game.diplomacy.allied_target_city);
+    if (has_non_default(game.diplomacy.AlliedTable(), 0))
+        dip["allied"] = IntArray(game.diplomacy.AlliedTable());
+    if (has_non_default(game.diplomacy.ProposeAlliedTable(), 0))
+        dip["proposeAllied"] = IntArray(game.diplomacy.ProposeAlliedTable());
+    if (has_non_default(game.diplomacy.TruceTurnsTable(), 0))
+        dip["truceTurns"] = IntArray(game.diplomacy.TruceTurnsTable());
+    if (has_non_default(game.diplomacy.GoldOfferTable(), 0))
+        dip["goldOffer"] = IntArray(game.diplomacy.GoldOfferTable());
+    if (has_non_default(game.diplomacy.WarTargetTable(), kNone))
+        dip["warTarget"] = IntArray(game.diplomacy.WarTargetTable());
+    if (has_non_default(game.diplomacy.TrustTable(), 0))
+        dip["trust"] = IntArray(game.diplomacy.TrustTable());
+    if (has_non_default(game.diplomacy.AlliedTargetCityTable(), kNone))
+        dip["alliedTargetCity"] = IntArray(game.diplomacy.AlliedTargetCityTable());
 
     Json fight = Json::array();
     for (const auto& row : game.map->fight_order) {
@@ -649,12 +663,12 @@ std::string Encode(const Game& game) {
     out["scenario"] = Latin1ToUtf8(game.map->name);
     out["turn"] = game.turn;
     out["current"] = game.current;
-    out["seed"] = static_cast<double>(game.rng.state);
+    out["seed"] = static_cast<double>(game.rng.State());
     {
         Json order = Json::array();
-        for (int val : game.turn_order) order.push_back(val);
+        for (int val : game.turn_schedule.Order()) order.push_back(val);
         out["turnOrder"] = std::move(order);
-        out["orderAt"] = game.order_at;
+        out["orderAt"] = game.turn_schedule.Cursor();
         if (game.ai_neighbours) {
             Json nbrs = Json::object();
             for (size_t i = 0; i < game.ai_neighbours->by_city.size(); i++) {
@@ -778,14 +792,16 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     auto game_ptr = game::NewGame(data_dir, scenario, opts);
     if (!game_ptr.ok()) return game_ptr.status();
     Game& game = **game_ptr;
-    game.armies.clear();
+    game.armies.ClearActive();
     game.turn = IntField(state, "turn", 1);
     game.current = IntField(state, "current", 0);
     const Json& turn_order = Field(state, "turnOrder");
     if (turn_order.is_array()) {
+        std::array<int, 8> loaded_order = game.turn_schedule.Order();
         for (size_t i = 0; i < 8 && i < turn_order.size(); i++) {
-            game.turn_order[i] = IntOf(turn_order[i]);
+            loaded_order[i] = IntOf(turn_order[i]);
         }
+        game.turn_schedule.SetOrder(loaded_order);
     }
     const Json& ai_nbrs = Field(state, "aiNeighbours");
     if (ai_nbrs.is_object()) {
@@ -813,7 +829,7 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     }
     const Json& seed_val = Field(state, "seed");
     if (seed_val.is_number()) {
-        game.rng.state = static_cast<uint32_t>(seed_val.get<double>());
+        game.rng.SetState(static_cast<uint32_t>(seed_val.get<double>()));
     }
     game.won = BoolField(state, "won");
     game.over = BoolField(state, "over");
@@ -822,20 +838,51 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     game.no_humans_said = BoolField(state, "noHumansSaid");
     game.greatest = BoolField(state, "greatest");
     const Json& dip = Field(state, "diplomacy");
-    ReadIntArray(Field(dip, "state"), game.diplomacy.state);
-    ReadIntArray(Field(dip, "proposal"), game.diplomacy.proposal);
-    if (HasField(dip, "allied")) ReadIntArray(Field(dip, "allied"), game.diplomacy.allied);
-    if (HasField(dip, "proposeAllied"))
-        ReadIntArray(Field(dip, "proposeAllied"), game.diplomacy.propose_allied);
-    if (HasField(dip, "truceTurns"))
-        ReadIntArray(Field(dip, "truceTurns"), game.diplomacy.truce_turns);
-    if (HasField(dip, "goldOffer"))
-        ReadIntArray(Field(dip, "goldOffer"), game.diplomacy.gold_offer);
-    if (HasField(dip, "warTarget"))
-        ReadIntArray(Field(dip, "warTarget"), game.diplomacy.war_target);
-    if (HasField(dip, "trust")) ReadIntArray(Field(dip, "trust"), game.diplomacy.trust);
-    if (HasField(dip, "alliedTargetCity"))
-        ReadIntArray(Field(dip, "alliedTargetCity"), game.diplomacy.allied_target_city);
+    {
+        auto state_table = game.diplomacy.StateTable();
+        ReadIntArray(Field(dip, "state"), state_table);
+        game.diplomacy.SetStateTable(state_table);
+
+        auto proposal_table = game.diplomacy.ProposalTable();
+        ReadIntArray(Field(dip, "proposal"), proposal_table);
+        game.diplomacy.SetProposalTable(proposal_table);
+
+        if (HasField(dip, "allied")) {
+            auto allied_table = game.diplomacy.AlliedTable();
+            ReadIntArray(Field(dip, "allied"), allied_table);
+            game.diplomacy.SetAlliedTable(allied_table);
+        }
+        if (HasField(dip, "proposeAllied")) {
+            auto propose_allied_table = game.diplomacy.ProposeAlliedTable();
+            ReadIntArray(Field(dip, "proposeAllied"), propose_allied_table);
+            game.diplomacy.SetProposeAlliedTable(propose_allied_table);
+        }
+        if (HasField(dip, "truceTurns")) {
+            auto truce_table = game.diplomacy.TruceTurnsTable();
+            ReadIntArray(Field(dip, "truceTurns"), truce_table);
+            game.diplomacy.SetTruceTurnsTable(truce_table);
+        }
+        if (HasField(dip, "goldOffer")) {
+            auto gold_table = game.diplomacy.GoldOfferTable();
+            ReadIntArray(Field(dip, "goldOffer"), gold_table);
+            game.diplomacy.SetGoldOfferTable(gold_table);
+        }
+        if (HasField(dip, "warTarget")) {
+            auto war_table = game.diplomacy.WarTargetTable();
+            ReadIntArray(Field(dip, "warTarget"), war_table);
+            game.diplomacy.SetWarTargetTable(war_table);
+        }
+        if (HasField(dip, "trust")) {
+            auto trust_table = game.diplomacy.TrustTable();
+            ReadIntArray(Field(dip, "trust"), trust_table);
+            game.diplomacy.SetTrustTable(trust_table);
+        }
+        if (HasField(dip, "alliedTargetCity")) {
+            auto target_city_table = game.diplomacy.AlliedTargetCityTable();
+            ReadIntArray(Field(dip, "alliedTargetCity"), target_city_table);
+            game.diplomacy.SetAlliedTargetCityTable(target_city_table);
+        }
+    }
     game.log.clear();
     const Json& log_json = Field(state, "log");
     if (log_json.is_array()) {
@@ -988,13 +1035,14 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             }
         }
     }
-    game.explored.clear();
+    game.explored.Clear();
     const Json& explored_json = Field(state, "explored");
     if (explored_json.is_object()) {
         for (const auto& [side_key, runs] : explored_json.items()) {
             if (auto side_idx = ToInt(side_key)) {
-                game.explored[static_cast<int>(*side_idx)] =
-                        UnpackMask(runs, static_cast<size_t>(game.map->width) * game.map->height);
+                game.explored.SetMask(
+                        SideId(static_cast<int>(*side_idx)),
+                        UnpackMask(runs, static_cast<size_t>(game.map->width) * game.map->height));
             }
         }
     }
@@ -1057,9 +1105,7 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             armies.push_back(game.Make(army));
         }
     }
-    game.armies = armies;
-    std::stable_sort(game.armies.begin(), game.armies.end(),
-                     [](Army* lhs, Army* rhs) { return lhs->slot < rhs->slot; });
+    game.armies.RestoreActive(armies);
 
     if (saved_sides.is_array()) {
         for (const auto& saved : saved_sides) {
@@ -1096,29 +1142,32 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             side->quest.reset();
             const Json& quest_json = Field(saved, "quest");
             if (quest_json.is_object()) {
-                auto quest = std::make_shared<Quest>();
-                quest->type = IntField(quest_json, "type");
-                quest->done = IntField(quest_json, "done");
-                quest->required = OptField(quest_json, "required");
-                int hero = IntField(quest_json, "hero", -1);
-                quest->hero = hero >= 0 && hero < static_cast<int>(armies.size())
-                                      ? armies[static_cast<size_t>(hero)]
-                                      : nullptr;
-                quest->target_kind = StrField(quest_json, "targetKind");
+                int quest_type = IntField(quest_json, "type");
+                int quest_done = IntField(quest_json, "done");
+                int quest_req = OptField(quest_json, "required");
+                int hero_idx = IntField(quest_json, "hero", -1);
+                Army* hero_ptr = hero_idx >= 0 && hero_idx < static_cast<int>(armies.size())
+                                         ? armies[static_cast<size_t>(hero_idx)]
+                                         : nullptr;
+                ArmyId hero_id = hero_ptr ? hero_ptr->id : ArmyId::None();
+                std::string target_kind = StrField(quest_json, "targetKind");
                 int ref = IntField(quest_json, "target", -1);
-                if (quest->target_kind == "city")
-                    quest->city = game.map->City(ref);
-                else if (quest->target_kind == "side")
-                    quest->side = game.map->Side(ref);
-                else if (quest->target_kind == "item")
-                    quest->item = item_by_index.count(ref) ? item_by_index[ref] : nullptr;
-                else if (quest->target_kind == "armytype")
-                    quest->army_type = game.types.ById(ref);
-                else if (quest->target_kind == "army")
-                    quest->army = ref >= 0 && ref < static_cast<int>(armies.size())
-                                          ? armies[static_cast<size_t>(ref)]
-                                          : nullptr;
-                if (quest->hero && quest->HasTarget()) side->quest = quest;
+                Quest::Target target = std::monostate{};
+                if (target_kind == "city" && game.map->City(ref)) {
+                    target = CityId(ref);
+                } else if (target_kind == "side" && game.map->Side(ref)) {
+                    target = SideId(ref);
+                } else if (target_kind == "item" && item_by_index.count(ref)) {
+                    target = ItemId(ref);
+                } else if (target_kind == "armytype" && game.types.ById(ref)) {
+                    target = ArmyTypeId(ref);
+                } else if (target_kind == "army" && ref >= 0 &&
+                           ref < static_cast<int>(armies.size())) {
+                    target = armies[static_cast<size_t>(ref)]->id;
+                }
+                auto quest =
+                        std::make_shared<Quest>(quest_type, hero_id, target, quest_req, quest_done);
+                if (hero_id.IsValid() && quest->HasTarget()) side->quest = quest;
             }
         }
     }
@@ -1153,16 +1202,10 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     // older saves that did not record `orderAt`.
     const Json& order_at = Field(state, "orderAt");
     if (order_at.is_number()) {
-        game.order_at = order_at.get<int>();
+        game.turn_schedule.SetCursor(order_at.get<int>());
     } else {
         int cur_side = game.side ? game.side->index : 0;
-        game.order_at = -1;
-        for (int i = 0; i < 8; i++) {
-            if (game.turn_order[static_cast<size_t>(i)] == cur_side) {
-                game.order_at = i;
-                break;
-            }
-        }
+        game.turn_schedule.SyncCursorToSide(SideId(cur_side));
     }
     move::Invalidate(game);
     return game_ptr;

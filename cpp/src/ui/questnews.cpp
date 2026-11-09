@@ -40,7 +40,7 @@ struct Reward : kit::Modal {
     void Draw() override {
         const w2::Quest& quest = *news->quest;
         const w2::Reward& reward = *news->reward;
-        w2::Army* hero = quest.hero;
+        const w2::Army* hero = g_app.g ? quest.ResolveHero(*g_app.g) : nullptr;
         kit::Popup(kPopupRect);
         front::DrawStrategicMap(kMapX, kMapY, nullptr, true);
         if (reward.kind == "revealed" && reward.site && hero && hero->x != w2::kNone)

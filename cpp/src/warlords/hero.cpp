@@ -246,7 +246,7 @@ void BattleExperience(Game& game, const std::vector<Army*>& attackers,
         Army* defender = defenders[i];
         if (!result.dead_by_army.count(defender)) {
             bool counts;
-            if (rules::bugs.hero_experience_reads_attacker_types) {
+            if (game.RulesBugs().hero_experience_reads_attacker_types) {
                 Army* same_slot = i < attackers.size() ? attackers[i]
                                                        : nullptr;  // the wrong line, on purpose
                 counts = same_slot && same_slot->type == armytype::kHero;

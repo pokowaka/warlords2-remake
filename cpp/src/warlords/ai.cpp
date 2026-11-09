@@ -210,8 +210,9 @@ void ShareOutCities(Game& game) {
 void TurnSetup(Game& game, Side& side) {
     AIData& data = core::Data(game, side);
     // the side is at peace with itself, state and proposal
-    game.diplomacy.state[static_cast<size_t>(side.index) * 9] = 0;
-    game.diplomacy.proposal[static_cast<size_t>(side.index) * 9] = 0;
+    SideId self_id(side.index);
+    game.diplomacy.SetState(self_id, self_id, 0);
+    game.diplomacy.SetProposal(self_id, self_id, 0);
     side.ai_solidarity = data.solidarity;
     bool quick = game.map->options.quick_start != 0 && game.map->options.hidden_map != 0;
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
@@ -356,13 +357,20 @@ City* HeroCity(Game& game, Side& side, City* fallback) {
 
 bool QuestCapture(Game& game, Side& side, City& city, const std::vector<Army*>& stack) {
     auto side_quest = side.quest;
-    if (game.map->options.quests == 0 || !side_quest || side_quest->city != &city) return false;
-    if (side_quest->type != quest::kOccupy && side_quest->type != quest::kRaze) return false;
-    if (std::find(stack.begin(), stack.end(), side_quest->hero) == stack.end()) return false;
+    if (game.map->options.quests == 0 || !side_quest ||
+        side_quest->TargetCityId() != CityId(city.index)) {
+        return false;
+    }
+    if (side_quest->Type() != quest::kOccupy && side_quest->Type() != quest::kRaze) return false;
+    bool hero_in_stack = side_quest->HeroId().IsValid() &&
+                         std::any_of(stack.begin(), stack.end(), [&side_quest](const Army* member) {
+                             return member && member->id == side_quest->HeroId();
+                         });
+    if (!hero_in_stack) return false;
     AIData& data = core::Data(game, side);
     data.quests_done++;
     data.quest_city = kNone;
-    if (side_quest->type == quest::kRaze) {
+    if (side_quest->Type() == quest::kRaze) {
         core::Sel sel = core::Select(game, stack);
         groups::Raze(game, side, city, true, &sel);
         return true;
