@@ -80,11 +80,11 @@ std::optional<int> GarrisonLevel(bool owned, int neutral_cities, Rng& rng) {
 
 Army ArmyFromSlot(const Slot& slot, bool enhanced) {
     Army army;
-    army.type = slot.type;
-    army.name = slot.name;
-    army.strength = enhanced ? std::min(9, slot.strength + 2) : slot.strength;
-    army.max_moves = slot.move;
-    army.upkeep = slot.cost / 2;
+    army.SetType(ArmyTypeId(slot.type));
+    army.SetName(slot.name);
+    army.SetStrength(enhanced ? std::min(9, slot.strength + 2) : slot.strength);
+    army.SetMaxMoves(slot.move);
+    army.SetUpkeep(slot.cost / 2);
     return army;
 }
 

@@ -79,11 +79,11 @@ void Promotion(std::vector<w2::Promotion> list, size_t index, kit::Done after) {
     }
     w2::Army* hero = list[index].hero;
     int gain = list[index].gain;
-    int level = hero->level ? hero->level : 2;  // the new level, 2-4
+    int level = hero->Level() ? hero->Level() : 2;  // the new level, 2-4
     int group = kPromotionGroup + level - 2;
-    int base = hero->female ? 6 : 0;
-    std::string name = hero->name;
-    int strength = hero->strength, moves = hero->max_moves;
+    int base = hero->IsFemale() ? 6 : 0;
+    std::string name = hero->Name();
+    int strength = hero->Strength(), moves = hero->MaxMoves();
     sound::Music(w2::cues::kPromotion);
     auto pic = g_app.level_pic.count(level) ? g_app.level_pic[level] : nullptr;
     Show(
@@ -117,16 +117,16 @@ void Promotions(const std::vector<w2::Promotion>& list, kit::Done after) {
  * goes back to the play music and runs `after`.
  */
 void Medal(w2::Army* army, kit::Done after) {
-    int medal_number = army->medals ? army->medals : 1;  // 1-4: which medal this is
-    bool grew_move = army->strength >= 15;
-    int now = grew_move ? army->max_moves : army->strength;
+    int medal_number = army->Medals() ? army->Medals() : 1;  // 1-4: which medal this is
+    bool grew_move = army->Strength() >= 15;
+    int now = grew_move ? army->MaxMoves() : army->Strength();
     auto pick = [](int group, int count) {
         return kit::Text(group, g_app.g->rng.Dice(1, count, -1));
     };
     std::string line1 = pick(kMedalFor, 7), line3 = pick(kMedalGiven, 4);
-    const w2::ArmyType* army_type = g_app.g->types.ById(army->type);
+    const w2::ArmyType* army_type = g_app.g->types.ById(army->Type());
     std::string type_name = army_type ? army_type->name : "";
-    int type = army->type, owner = army->owner;
+    int type = army->TypeIndex(), owner = army->OwnerIndex();
     sound::Music(w2::cues::kMedal);
     Show(
             g_app.medal_pic[medal_number - 1],

@@ -33,19 +33,19 @@ namespace w2::ai::modern {
 void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<Army*>& attackers,
                          const ml::PolicyNetwork& policy, const ml::ContextVec& ctx,
                          ml::RolloutSampler* sampler) {
-    if (city.razed || city.owner_index != side.index) return;
+    if (city.IsRazed() || city.OwnerIndex() != side.Index()) return;
     if (ai::QuestCapture(game, side, city, attackers)) return;
 
     const SideBelief& belief = belief::Ensure(side);
-    float local_threat = city.index < static_cast<int>(belief.city_threat1_turn.size())
-                                 ? belief.city_threat1_turn[city.index]
+    float local_threat = city.Index() < static_cast<int>(belief.city_threat1_turn.size())
+                                 ? belief.city_threat1_turn[city.Index()]
                                  : 0.0F;
-    float dist_enemy = city.index < static_cast<int>(belief.city_nearest_enemy_dist.size())
-                               ? belief.city_nearest_enemy_dist[city.index]
+    float dist_enemy = city.Index() < static_cast<int>(belief.city_nearest_enemy_dist.size())
+                               ? belief.city_nearest_enemy_dist[city.Index()]
                                : 60.0F;
     int sack_gold = ai::groups::SackValue(game, city);
-    int pillage_gold = city.slots.size() >= 2
-                               ? std::abs(game.types.ById(city.slots.back().type)->price) / 2
+    int pillage_gold = city.Slots().size() >= 2
+                               ? std::abs(game.types.ById(city.Slots().back().type)->price) / 2
                                : 0;
 
     auto make_spoil_in = [&](float ongoing_income, float instant_gold, float diplo_pen) {
@@ -61,20 +61,20 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
 
     bool is_any_capital = false;
     for (int side_idx = 0; side_idx < 8; side_idx++) {
-        if (game.map->sides[side_idx].capital == &city) is_any_capital = true;
+        if (game.map->sides[side_idx].CapitalCity(*game.map) == &city) is_any_capital = true;
     }
 
     std::vector<int> modes = {0};
     std::vector<ml::EconInVec> cand_inputs = {
-        make_spoil_in(static_cast<float>(city.income), 0.0F, 0.0F)};
+        make_spoil_in(static_cast<float>(city.Income()), 0.0F, 0.0F)};
     if (pillage_gold > 0) {
         modes.push_back(1);
-        cand_inputs.push_back(make_spoil_in(static_cast<float>(city.income) * 0.8F,
+        cand_inputs.push_back(make_spoil_in(static_cast<float>(city.Income()) * 0.8F,
                                             static_cast<float>(pillage_gold), 4.0F));
     }
     if (sack_gold > 0) {
         modes.push_back(2);
-        cand_inputs.push_back(make_spoil_in(static_cast<float>(city.income) * 0.5F,
+        cand_inputs.push_back(make_spoil_in(static_cast<float>(city.Income()) * 0.5F,
                                             static_cast<float>(sack_gold), 15.0F));
     }
     if (!is_any_capital) {
@@ -117,37 +117,37 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                          const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
                          MovedArmySet& moved_armies) {
     stack.erase(std::remove_if(stack.begin(), stack.end(),
-                               [&](Army* army) { return !game.Alive(army) || army->moves <= 0; }),
+                               [&](Army* army) { return !game.Alive(army) || army->Moves() <= 0; }),
                 stack.end());
     if (stack.empty()) return false;
 
     if (tgt.kind == TargetKind::kHoldGarrison) {
-        for (Army* army : stack) moved_armies.insert(army->id);
+        for (Army* army : stack) moved_armies.insert(army->Id());
         return true;
     }
 
-    int our_side = side.index;
+    int our_side = side.Index();
     std::map<Army*, int> start_moves;
-    for (Army* army : stack) start_moves[army] = army->moves;
+    for (Army* army : stack) start_moves[army] = army->Moves();
 
     // A coalition drawn from one owned 2x2 city may stand on different corners.
     // Members walk (by the normal rules, paying moves) onto the leader's tile;
     // any that cannot join without breaking the 8-army stack limit stay behind
     // and remain free for later waves.
     {
-        int leader_x = stack[0]->x, leader_y = stack[0]->y;
+        int leader_x = stack[0]->X(), leader_y = stack[0]->Y();
         int on_leader_tile = static_cast<int>(game::ArmiesAt(game, leader_x, leader_y).size());
         std::vector<Army*> joined;
         for (Army* army : stack) {
-            if (army->x == leader_x && army->y == leader_y) {
+            if (army->X() == leader_x && army->Y() == leader_y) {
                 joined.push_back(army);
                 continue;
             }
             if (on_leader_tile + 1 > rules::kMaxStack) continue;
-            auto path = move::FindPath(game, {army}, army->x, army->y, leader_x, leader_y);
+            auto path = move::FindPath(game, {army}, army->X(), army->Y(), leader_x, leader_y);
             if (!path || path->empty()) continue;
             move::WalkResult join_result = move::Walk(game, {army}, *path);
-            if (game.Alive(army) && army->x == leader_x && army->y == leader_y &&
+            if (game.Alive(army) && army->X() == leader_x && army->Y() == leader_y &&
                 join_result.steps > 0) {
                 ai::Walked(game, {army}, join_result);
                 joined.push_back(army);
@@ -156,17 +156,17 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         }
         stack = std::move(joined);
         stack.erase(std::remove_if(stack.begin(), stack.end(),
-                                   [&](Army* army) { return army->moves <= 0; }),
+                                   [&](Army* army) { return army->Moves() <= 0; }),
                     stack.end());
         if (stack.empty()) return false;
     }
 
     int dest_x = tgt.x, dest_y = tgt.y;
     if (tgt.city && !stage_near) {
-        if (tgt.city->owner_index == our_side) {
+        if (tgt.city->OwnerIndex() == our_side) {
             for (int oy = 0; oy <= 1; oy++) {
                 for (int ox = 0; ox <= 1; ox++) {
-                    int tile_x = tgt.city->x + ox, tile_y = tgt.city->y + oy;
+                    int tile_x = tgt.city->X() + ox, tile_y = tgt.city->Y() + oy;
                     if (static_cast<int>(game::ArmiesAt(game, tile_x, tile_y).size() +
                                          stack.size()) <= rules::kMaxStack) {
                         dest_x = tile_x;
@@ -176,8 +176,8 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                 }
             }
         } else {
-            dest_x = tgt.city->x + (tgt.city->x < stack[0]->x ? 1 : 0);
-            dest_y = tgt.city->y + (tgt.city->y < stack[0]->y ? 1 : 0);
+            dest_x = tgt.city->X() + (tgt.city->X() < stack[0]->X() ? 1 : 0);
+            dest_y = tgt.city->Y() + (tgt.city->Y() < stack[0]->Y() ? 1 : 0);
         }
     }
 
@@ -185,7 +185,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                        tgt.kind == TargetKind::kEnemyStack)) {
         int best_sx = dest_x, best_sy = dest_y;
         int best_dist = 999;
-        int sx0 = stack[0]->x, sy0 = stack[0]->y;
+        int sx0 = stack[0]->X(), sy0 = stack[0]->Y();
         for (int dy = -2; dy <= 2; dy++) {
             for (int dx = -2; dx <= 2; dx++) {
                 int rad = std::max(std::abs(dx), std::abs(dy));
@@ -203,7 +203,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                     continue;
                 auto occ = game::ArmiesAt(game, next_x, next_y);
                 if (!occ.empty() &&
-                    (occ[0]->owner != our_side ||
+                    (occ[0]->OwnerIndex() != our_side ||
                      static_cast<int>(occ.size() + stack.size()) > rules::kMaxStack)) {
                     continue;
                 }
@@ -227,7 +227,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
     bool completed_objective = false;
 
     for (int pass = 0; pass < 24 && !sel.armies.empty() && sel.min_moves > 0; pass++) {
-        int leader_x = sel.leader->x, leader_y = sel.leader->y;
+        int leader_x = sel.leader->X(), leader_y = sel.leader->Y();
         if (leader_x == dest_x && leader_y == dest_y) {
             if (is_fog_mission) completed_objective = true;
             break;
@@ -279,8 +279,8 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
 
         if (attack_x != kNone && attack_y != kNone) {
             auto def_armies = game::ArmiesAt(game, attack_x, attack_y);
-            int def_owner = def_armies.empty() ? (att_city ? att_city->owner_index : kNone)
-                                               : def_armies[0]->owner;
+            int def_owner = def_armies.empty() ? (att_city ? att_city->OwnerIndex() : kNone)
+                                               : def_armies[0]->OwnerIndex();
 
             // Breaking a treaty is DiploNet's call, not the mission's: an attack that
             // needs a declaration (the game's own mustDeclare rule) only goes ahead
@@ -293,15 +293,15 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             // Gather friendly units on the launching tile so converged allies fight as one combined
             // force
             std::vector<Army*> combined_here =
-                    core::Collect(game, our_side, sel.leader->x, sel.leader->y, 1);
+                    core::Collect(game, our_side, sel.leader->X(), sel.leader->Y(), 1);
             if (combined_here.empty()) combined_here = sel.armies;
 
             core::Sel comb_sel = core::Select(game, combined_here);
-            int prev_owner = att_city ? att_city->owner_index : kNone;
+            int prev_owner = att_city ? att_city->OwnerIndex() : kNone;
             Battle b_res = core::Fight(game, comb_sel, attack_x, attack_y);
             made_progress = true;
             belief::RecordBattleObservation(game, our_side, attack_x, attack_y);
-            if (att_city && att_city->owner_index == our_side && prev_owner != our_side &&
+            if (att_city && att_city->OwnerIndex() == our_side && prev_owner != our_side &&
                 !comb_sel.armies.empty()) {
                 DecideCaptureSpoils(game, side, *att_city, comb_sel.armies, policy, ctx, sampler);
             }
@@ -310,7 +310,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             if (!b_res.won || sel.armies.empty()) {
                 break;
             }
-            if (tgt.city && tgt.city->owner_index == our_side) {
+            if (tgt.city && tgt.city->OwnerIndex() == our_side) {
                 completed_objective = true;
                 break;
             }
@@ -336,7 +336,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                 }
             }
             if (seen_box_after > seen_box_before ||
-                (sel.leader->x == dest_x && sel.leader->y == dest_y)) {
+                (sel.leader->X() == dest_x && sel.leader->Y() == dest_y)) {
                 // Yield back to the neural wave loop as soon as fog movement reveals new map tiles,
                 // allowing MissionNet itself to evaluate newly uncovered castles or sites!
                 completed_objective = true;
@@ -357,7 +357,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
 
     // Interact with open temple or ruin/sage if standing on one with moves left
     if (!sel.armies.empty() && sel.leader && sel.min_moves > 0) {
-        int final_x = sel.leader->x, final_y = sel.leader->y;
+        int final_x = sel.leader->X(), final_y = sel.leader->Y();
         Site* site = core::SiteAt(game, final_x, final_y);
         if (site && core::SiteOpen(*site)) {
             if (site->content == site::kTemple) {
@@ -365,7 +365,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                 made_progress = true;
                 completed_objective = true;
                 if (game.map->options.quests != 0 && sel.hero &&
-                    (!side.quest || !side.quest->HasTarget())) {
+                    (!side.ActiveQuest() || !side.ActiveQuest()->HasTarget())) {
                     quest::Assign(game, side, sel.hero, true, core::Flies(game, sel.hero));
                 }
             } else if (sel.hero && game.Alive(sel.hero)) {
@@ -380,15 +380,15 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
     for (Army* army : sel.armies) {
         if (!game.Alive(army)) continue;
         auto found = start_moves.find(army);
-        bool spent_moves = (found != start_moves.end() && army->moves < found->second);
-        if (completed_objective && spent_moves && army->moves >= 2 && !stage_near &&
+        bool spent_moves = (found != start_moves.end() && army->Moves() < found->second);
+        if (completed_objective && spent_moves && army->Moves() >= 2 && !stage_near &&
             tgt.kind != TargetKind::kReinforceCity) {
             // Allow remaining movement points to be dispatched in the next wave of this turn
-            moved_armies.erase(army->id);
+            moved_armies.erase(army->Id());
         } else if (made_progress) {
-            moved_armies.insert(army->id);
+            moved_armies.insert(army->Id());
         } else {
-            moved_armies.erase(army->id);
+            moved_armies.erase(army->Id());
         }
     }
     return made_progress;
@@ -417,7 +417,7 @@ std::vector<size_t> BuildCoalitionSizes(const Game& game, Army* seed,
         bool seed_flies = core::Flies(game, seed);
         size_t fast_count = 1;
         for (Army* escort : escorts) {
-            if (seed_flies ? core::Flies(game, escort) : (escort->moves >= 12)) {
+            if (seed_flies ? core::Flies(game, escort) : (escort->Moves() >= 12)) {
                 fast_count++;
             } else {
                 break;

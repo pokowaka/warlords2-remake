@@ -9,8 +9,8 @@ namespace w2::history {
 void RecordDeed(Game& game, const Side* side, DeedType type, int subject, int object,
                 const std::string& name) {
     if (!side) return;
-    auto& kept = game.deeds[side->index];
-    Deed deed{side->index, type, subject, object, name.substr(0, 15)};
+    auto& kept = game.deeds[side->Index()];
+    Deed deed{side->Index(), type, subject, object, name.substr(0, 15)};
     if (kept.size() < 2) {
         kept.push_back(deed);
         return;
@@ -30,16 +30,16 @@ static void Bump(Game& game, int side, int opponent, Loss kind, int n = 1) {
 }
 
 void Tally(Game& game, const Army* army, int killer, bool boat) {
-    int loser = army->owner;
+    int loser = army->OwnerIndex();
     Loss kind;
-    if (army->type == armytype::kHero)
+    if (army->Hero())
         kind = Loss::kHeroes;
-    else if (game.types.ById(army->type)->IsMagical())
+    else if (game.types.ById(army->Type())->IsMagical())
         kind = Loss::kCreatures;
     else
         kind = Loss::kArmies;
     int standards = 0;
-    for (Item* item : army->items)
+    for (Item* item : army->Items())
         if (item->index < 8) standards++;
     // the loser's own row counts it lost, the killer's row for the loser killed
     int rows[2][2] = {{loser, loser}, {killer, loser}};
@@ -64,13 +64,12 @@ void Record(Game& game) {
     auto win = report::ComputeFigures(game, *game.sides[0], report::kWinning);
     for (int i = 0; i < 8; i++) {
         Side* side = game.map->Side(i);
-        record.gold[i] = (side && side->in_use) ? side->gold : 0;
+        record.gold[i] = (side && side->InUse()) ? side->Gold() : 0;
         record.score[i] = win.value[i];
         record.cities[i] = side ? static_cast<int>(game::SideCities(game, *side).size()) : 0;
     }
-    for (auto& city : game.map->cities)
-        record.owners.push_back(city.razed ? 0xff
-                                           : (city.owner_index == kNone ? 8 : city.owner_index));
+    for (const auto& city : game.map->cities)
+        record.owners.push_back(city.IsRazed() ? 0xff : (city.IsNeutral() ? 8 : city.OwnerIndex()));
     // every side's first deed, then second ones while there is room
     int kept = 0;
     int take[8] = {0};

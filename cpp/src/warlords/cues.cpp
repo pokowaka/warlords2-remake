@@ -41,7 +41,7 @@ std::pair<std::string, bool> Song(const uidata::Strings& files, int cue,
         // group 12, 47% group 11 and 48% group 10
         bool human = false;
         for (Side* side : sides) {
-            if (side->alive && !side->computer) {
+            if (side->IsAlive() && !side->IsComputerControlled()) {
                 human = true;
                 break;
             }
@@ -63,12 +63,12 @@ std::pair<std::string, bool> Song(const uidata::Strings& files, int cue,
 
 int AdvisorCue(const Game& game, Side& side, const Roll& roll) {
     int cities = 0, heroes = 0;
-    for (auto& city : game.map->cities)
-        if (city.owner_index == side.index && !city.razed) cities++;
+    for (const auto& city : game.map->cities)
+        if (city.OwnedBy(side.Id()) && !city.IsRazed()) cities++;
     if (cities > 39) return kNone;
-    for (Army* army : game.armies)
-        if (army->owner == side.index && army->type == armytype::kHero) heroes++;
-    Advisor& advisor = side.advisor;
+    for (const Army* army : game.armies)
+        if (army->OwnedBy(side.Id()) && army->Hero()) heroes++;
+    Advisor& advisor = side.MutableAdvisorState();
     int group;
     if (cities < advisor.mark) {
         int mark = (cities / 5) * 5;
@@ -84,9 +84,9 @@ int AdvisorCue(const Game& game, Side& side, const Roll& roll) {
         group = line != kWinning.end() ? line->second : 47;
     } else {
         if (game.turn % 7 != 0) return kNone;
-        if (side.gold < 100)
+        if (side.Gold() < 100)
             group = 54;
-        else if (side.gold > 2800)
+        else if (side.Gold() > 2800)
             group = 55;
         else if (heroes < 1)
             group = 56;

@@ -43,18 +43,19 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
     int cities_taken_from_me = 0;
     std::array<int, 8> side_cities{};
     for (const auto& city : game.map->cities) {
-        if (city.razed || !belief::IsCityVisible(game, ai_side, city)) continue;
+        if (city.IsRazed() || !belief::IsCityVisible(game, ai_side, city)) continue;
         total_standing_cities++;
-        if (city.owner_index >= 0 && city.owner_index < 8) {
-            side_cities[city.owner_index]++;
-            if (side_cities[city.owner_index] > leader_cities) {
-                leader_cities = side_cities[city.owner_index];
-                leader_side = city.owner_index;
+        int owner_idx = city.OwnerIndex();
+        if (owner_idx >= 0 && owner_idx < 8) {
+            side_cities[owner_idx]++;
+            if (side_cities[owner_idx] > leader_cities) {
+                leader_cities = side_cities[owner_idx];
+                leader_side = owner_idx;
             }
         }
-        if (city.owner_index == target_side) {
+        if (owner_idx == target_side) {
             their_cities++;
-            if (city.claim == ai_side) cities_taken_from_me++;
+            if (city.Claim() == ai_side_id) cities_taken_from_me++;
         }
     }
 
@@ -83,7 +84,7 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
     int shared_wars = 0;
     for (int third_side = 0; third_side < 8; third_side++) {
         if (third_side != ai_side && third_side != target_side &&
-            game.map->sides[third_side].alive) {
+            game.map->sides[third_side].IsAlive()) {
             if (diplomacy::State(game, ai_side, third_side) == diplomacy::kWar &&
                 diplomacy::State(game, target_side, third_side) == diplomacy::kWar) {
                 shared_wars++;
@@ -123,7 +124,8 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
         push_factor(absl::StrFormat("You hold %d of our claimed cities", cities_taken_from_me),
                     -cities_taken_from_me * 8);
     }
-    if (own_side.capital && own_side.capital->owner_index == target_side) {
+    const City* own_capital = own_side.CapitalCity(*game.map);
+    if (own_capital && own_capital->OwnerIndex() == target_side) {
         push_factor("You occupy our ancestral Capital!", -60);
     }
 
@@ -143,8 +145,8 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
         push_factor("Need for coalition against the runaway leader", 22);
     }
 
-    if (their_side.diplo_score > 60) {
-        int atrocity_pen = -std::min(35, (their_side.diplo_score - 40) / 4);
+    if (their_side.DiploScore() > 60) {
+        int atrocity_pen = -std::min(35, (their_side.DiploScore() - 40) / 4);
         if (profile.traits[personality::kHonour] > 0.0F) {
             push_factor("Your reputation for razing and treachery", atrocity_pen);
         }
@@ -166,9 +168,9 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
         breakdown.what_it_takes = "Alliance is strong. Coordinate strikes against shared foes!";
         breakdown.peace_gold_needed = 0;
         breakdown.ally_gold_needed = 0;
-    } else if (own_side.capital && own_side.capital->owner_index == target_side) {
+    } else if (own_capital && own_capital->OwnerIndex() == target_side) {
         breakdown.stance_summary = "Mortal Enemy (Capital Held)";
-        breakdown.what_it_takes = "Refuses Peace while you hold " + own_side.capital->name + "!";
+        breakdown.what_it_takes = "Refuses Peace while you hold " + own_capital->Name() + "!";
         breakdown.peace_gold_needed = kNone;
         breakdown.ally_gold_needed = kNone;
     } else {

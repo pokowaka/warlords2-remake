@@ -48,7 +48,7 @@ struct Settings : kit::Modal {
         for (int i = 0; i < 3; i++) states[kSound + i] = w2::uidata::kNormal;
         hidden.clear();
         for (int i = 0; i < 8; i++) {
-            if (g_app.g->map->sides[i].in_use) {
+            if (g_app.g->map->sides[i].InUse()) {
                 states[kHuman + i] = states[kEnhanced + i] = states[kObserve + i] =
                         w2::uidata::kNormal;
             } else {
@@ -68,7 +68,7 @@ struct Settings : kit::Modal {
         kit::Popup(kPopupRect);
         const Font& font = kit::GetFont(2);
         w2::Side* player = g_app.player;
-        const Font& head = font.Colours(player->colour, player->edge);
+        const Font& head = font.Colours(player->Colour(), player->Edge());
         gfx::SetColor(1, 1, 1);
         kit::Right(head, "Name", 248, 60);
         kit::Centred(head, "Human", 280, 60);
@@ -78,19 +78,20 @@ struct Settings : kit::Modal {
             const w2::Side& side = g_app.g->map->sides[i];
             int y = 90 + 30 * i;
             gfx::SetColor(1, 1, 1);
-            kit::Right(font.Colours(side.colour, side.edge), side.name, 248, y);
-            bool playing = side.in_use && side.alive;
+            kit::Right(font.Colours(side.Colour(), side.Edge()), side.Name(), 248, y);
+            bool playing = side.IsActive();
             if (!playing) {
-                if (side.name != "Not used") font.Draw("Deceased!", 280, y);
+                if (side.Name() != "Not used") font.Draw("Deceased!", 280, y);
             } else {
-                Box(!side.computer, 256, y);
+                Box(!side.IsComputerControlled(), 256, y);
                 gfx::SetColor(1, 1, 1);
-                font.Draw(side.computer
-                                  ? (side.level >= 0 && side.level < 3 ? kLevels[side.level] : "")
+                font.Draw(side.IsComputerControlled()
+                                  ? (side.Level() >= 0 && side.Level() < 3 ? kLevels[side.Level()]
+                                                                           : "")
                                   : "Human",
                           280, y);
-                Box(side.enhanced, 400, y);
-                if (side.computer) Box(side.observe, 448, y);
+                Box(side.IsEnhanced(), 400, y);
+                if (side.IsComputerControlled()) Box(side.IsObserved(), 448, y);
             }
         }
         const auto& sound_options = sound::MutableOptions();
@@ -116,13 +117,13 @@ struct Settings : kit::Modal {
         if (control_id == kOk) return Finish();
         if (control_id >= kHuman && control_id < kHuman + 8) {
             w2::Side& side = g_app.g->map->sides[control_id - kHuman];
-            side.computer = !side.computer;
+            side.SetComputerControlled(!side.IsComputerControlled());
         } else if (control_id >= kEnhanced && control_id < kEnhanced + 8) {
             w2::Side& side = g_app.g->map->sides[control_id - kEnhanced];
-            side.enhanced = !side.enhanced;
+            side.SetEnhanced(!side.IsEnhanced());
         } else if (control_id >= kObserve && control_id < kObserve + 8) {
             w2::Side& side = g_app.g->map->sides[control_id - kObserve];
-            if (side.computer) side.observe = !side.observe;
+            if (side.IsComputerControlled()) side.SetObserved(!side.IsObserved());
         } else if (control_id >= kSound && control_id < kSound + 3) {
             sound::Toggle(kSounds[control_id - kSound].channel);
         }

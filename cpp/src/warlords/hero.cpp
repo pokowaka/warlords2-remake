@@ -22,9 +22,9 @@ namespace {
 std::pair<int, int> CountHeroes(const Game& game, const Side* side) {
     int all = 0, mine = 0;
     for (Army* army : game.armies) {
-        if (army->type == armytype::kHero) {
+        if (army->Hero()) {
             all++;
-            if (side && army->owner == side->index) mine++;
+            if (side && army->OwnedBy(side->Id())) mine++;
         }
     }
     return {all, mine};
@@ -62,16 +62,15 @@ int PromotionAt(int level) {
 
 Army NewAlly(const ArmyType* type, int x, int y, int owner) {
     Army ally;
-    ally.x = x;
-    ally.y = y;
-    ally.owner = owner;
-    ally.type = type->id;
-    ally.name = type->name;
-    ally.strength = type->strength;
-    ally.max_moves = type->move;
-    ally.moves = type->move;
-    ally.upkeep = 0;
-    ally.home_city = 0;
+    ally.PlaceAt(TilePos(x, y));
+    ally.SetOwner(SideId(owner));
+    ally.SetType(ArmyTypeId(type->id));
+    ally.SetName(type->name);
+    ally.SetStrength(type->strength);
+    ally.SetMaxMoves(type->move);
+    ally.SetMoves(type->move);
+    ally.SetUpkeep(0);
+    ally.SetHomeCity(CityId(0));
     return ally;
 }
 
@@ -135,11 +134,11 @@ std::vector<Item*> DropItems(Game& game, Army* hero, int x, int y, int current_s
 }  // namespace hero
 
 const HeroSystem::CandidateList& HeroSystem::Names(const Side& side) {
-    auto cached = game_.hero_names.find(side.index);
+    auto cached = game_.hero_names.find(side.Index());
     if (cached != game_.hero_names.end()) return cached->second;
     CandidateList names;
     auto text = ReadFile(game_.data_dir / "TERRAIN0" /
-                         ("HERONAM" + std::to_string(side.index) + ".DAT"));
+                         ("HERONAM" + std::to_string(side.Index()) + ".DAT"));
     for (auto& line : SplitLines(text.ok() ? *text : "")) {
         if (line.size() >= 3 && line[0] == '#' && line[1] >= '0' && line[1] <= '9' &&
             (line[2] == ' ' || line[2] == '\t')) {
@@ -151,7 +150,7 @@ const HeroSystem::CandidateList& HeroSystem::Names(const Side& side) {
                 names.emplace_back(line.substr(name_start), line[1] == '1');
         }
     }
-    return game_.hero_names[side.index] = names;
+    return game_.hero_names[side.Index()] = names;
 }
 
 HeroSystem::CandidateName HeroSystem::RollName(const Side& side) {
@@ -170,7 +169,7 @@ std::shared_ptr<HeroOffer> HeroSystem::Offer(Side& side) {
         return std::make_shared<HeroOffer>(offer);
     };
     if (game_.surrender_offered) return nullptr;
-    if (game_.turn == 1) return named(HeroOffer{0, side.capital, true, "", false});
+    if (game_.turn == 1) return named(HeroOffer{0, side.CapitalCity(*game_.map), true, "", false});
 
     auto [all, mine] = CountHeroes(game_, &side);
     if (all >= hero::kMaxInGame) return nullptr;
@@ -180,13 +179,13 @@ std::shared_ptr<HeroOffer> HeroSystem::Offer(Side& side) {
     if (mine >= limit) return nullptr;
 
     int price = mine == 0 ? game_.rng.Dice(1, 400, 300) : game_.rng.Dice(1, 600, 1000);
-    if (price > side.gold) return nullptr;
+    if (price > side.Gold()) return nullptr;
     if (game_.rng.Dice(1, 30, 0) >= 7) return nullptr;
 
     City* city = game_.rng.Pick(cities, static_cast<City*>(nullptr));
     if (!city) return nullptr;
-    if (side.computer && side.computer_player) {
-        city = side.computer_player->ChooseHeroCity(game_, side, city);
+    if (side.IsComputerControlled() && side.ComputerPlayer()) {
+        city = side.ComputerPlayer()->ChooseHeroCity(game_, side, city);
     }
     return named(HeroOffer{price, city, false, "", false});
 }
@@ -214,8 +213,8 @@ Army* HeroSystem::PlaceAlly(const ArmyType* type, int x, int y, const Side& side
         if (try_x >= 0 && try_y >= 0 && try_x < game_.map->width && try_y < game_.map->height) {
             auto armies_here = game::ArmiesAt(game_, try_x, try_y);
             if (armies_here.size() < 8 &&
-                (armies_here.empty() || armies_here[0]->owner == side.index)) {
-                return game_.Add(hero::NewAlly(type, try_x, try_y, side.index));
+                (armies_here.empty() || armies_here[0]->OwnedBy(side.Id()))) {
+                return game_.Add(hero::NewAlly(type, try_x, try_y, side.Index()));
             }
         }
         try_x += game_.rng.Dice(1, 3, -2);
@@ -226,39 +225,39 @@ Army* HeroSystem::PlaceAlly(const ArmyType* type, int x, int y, const Side& side
 
 hero::Recruited HeroSystem::Recruit(Side& side, const HeroOffer& offer) {
     City* city = offer.city;
-    side.gold = std::max(0, side.gold - offer.price);
+    side.AddGold(-offer.price);
     std::pair<int, int> last{kNone, kNone};
     auto [hero_x, hero_y] = game::FreeTileIn(game_, *city, true, &last);
     if (hero_x == kNone) {
-        hero_x = last.first != kNone ? last.first : city->x;
-        hero_y = last.second != kNone ? last.second : city->y;
+        hero_x = last.first != kNone ? last.first : city->X();
+        hero_y = last.second != kNone ? last.second : city->Y();
     }
 
     Army hero_proto;
-    hero_proto.x = hero_x;
-    hero_proto.y = hero_y;
-    hero_proto.owner = side.index;
-    hero_proto.type = armytype::kHero;
-    hero_proto.name = offer.name.empty() ? "Hero" : offer.name;
-    hero_proto.female = offer.female;
-    hero_proto.strength = hero::kStartStrength;
-    hero_proto.max_moves = hero::kStartMoves;
-    hero_proto.moves = hero::kStartMoves;
-    hero_proto.upkeep = 0;
-    hero_proto.home_city = city->index;
-    hero_proto.level = 1;
-    hero_proto.experience = 0;
-    if (offer.first && side.index < static_cast<int>(game_.map->items.size())) {
-        Item* standard = &game_.map->items[side.index];
+    hero_proto.PlaceAt(TilePos(hero_x, hero_y));
+    hero_proto.SetOwner(side.Id());
+    hero_proto.SetType(ArmyTypeId(armytype::kHero));
+    hero_proto.SetName(offer.name.empty() ? "Hero" : offer.name);
+    hero_proto.SetFemale(offer.female);
+    hero_proto.SetStrength(hero::kStartStrength);
+    hero_proto.SetMaxMoves(hero::kStartMoves);
+    hero_proto.SetMoves(hero::kStartMoves);
+    hero_proto.SetUpkeep(0);
+    hero_proto.SetHomeCity(city->Id());
+    hero_proto.SetLevel(1);
+    hero_proto.SetExperience(0);
+    if (offer.first && side.Index() < static_cast<int>(game_.map->items.size())) {
+        Item* standard = &game_.map->items[side.Index()];
         standard->status = 3;
         standard->x = kNone;
         standard->y = kNone;
-        standard->standard_of = side.index;
-        hero_proto.items.push_back(standard);
+        standard->standard_of = side.Index();
+        hero_proto.AddItem(standard);
     }
     hero::Recruited recruited;
     recruited.hero = game_.Add(hero_proto);
-    history::RecordDeed(game_, &side, DeedType::kHeroEmerges, city->index, 0, recruited.hero->name);
+    history::RecordDeed(game_, &side, DeedType::kHeroEmerges, city->Index(), 0,
+                        recruited.hero->Name());
 
     if (!offer.first) {
         auto [type, ally_count] = Allies();
@@ -273,23 +272,23 @@ hero::Recruited HeroSystem::Recruit(Side& side, const HeroOffer& offer) {
 }
 
 void HeroSystem::AddExperience(Army* hero, int amount) {
-    hero->experience = std::min(rules::kMaxHeroXp, hero->experience + amount);
+    hero->SetExperience(std::min(rules::kMaxHeroXp, hero->Experience() + amount));
 }
 
 std::vector<Promotion> HeroSystem::CheckPromotions(const Side& side) {
     std::vector<Promotion> promoted;
     for (int i = static_cast<int>(game_.armies.size()) - 1; i >= 0; i--) {
         Army* army = game_.armies[i];
-        if (army->type == armytype::kHero && army->owner == side.index) {
-            int level = army->level ? army->level : 1;
+        if (army->Hero() && army->OwnedBy(side.Id())) {
+            int level = army->Level() ? army->Level() : 1;
             int needed = hero::PromotionAt(level);
-            if (needed != kNone && army->experience >= needed) {
-                int before = army->strength;
-                army->level = level + 1;
-                army->strength = std::min(hero::kMaxStrength, before + 1);
-                army->max_moves += hero::kPromotionMoves;
-                army->title = hero::LevelName(army->level);
-                promoted.push_back(Promotion{army, army->strength - before});
+            if (needed != kNone && army->Experience() >= needed) {
+                int before = army->Strength();
+                army->SetLevel(level + 1);
+                army->SetStrength(std::min(hero::kMaxStrength, before + 1));
+                army->AddMaxMoves(hero::kPromotionMoves);
+                army->SetTitle(hero::LevelName(army->Level()));
+                promoted.push_back(Promotion{army, army->Strength() - before});
             }
         }
     }
@@ -299,7 +298,7 @@ std::vector<Promotion> HeroSystem::CheckPromotions(const Side& side) {
 void HeroSystem::BattleExperience(const ArmyStack& attackers, const ArmyStack& defenders,
                                   const Battle& result, bool was_city) {
     for (Army* attacker : attackers) {
-        if (attacker->type == armytype::kHero && !result.dead_by_army.count(attacker))
+        if (attacker->Hero() && !result.dead_by_army.count(attacker))
             AddExperience(attacker, was_city ? 2 : 1);
     }
     for (size_t i = 0; i < defenders.size(); i++) {
@@ -308,20 +307,20 @@ void HeroSystem::BattleExperience(const ArmyStack& attackers, const ArmyStack& d
             bool counts;
             if (game_.RulesBugs().hero_experience_reads_attacker_types) {
                 Army* same_slot = i < attackers.size() ? attackers[i] : nullptr;
-                counts = same_slot && same_slot->type == armytype::kHero;
+                counts = same_slot && same_slot->Hero();
             } else {
                 counts = true;
             }
-            if (counts && defender->type == armytype::kHero) AddExperience(defender, 1);
+            if (counts && defender->Hero()) AddExperience(defender, 1);
         }
     }
 }
 
 std::vector<Item*> HeroSystem::ItemsHere(const Army* hero) {
-    std::vector<Item*> carried = hero->items;
+    std::vector<Item*> carried = hero->Items();
     std::vector<Item*> ground;
     for (auto& item : game_.map->items) {
-        if (item.status == 1 && item.x == hero->x && item.y == hero->y) ground.push_back(&item);
+        if (item.status == 1 && item.x == hero->X() && item.y == hero->Y()) ground.push_back(&item);
     }
     auto by_index = [](Item* left, Item* right) { return left->index < right->index; };
     LuaSort(carried, by_index);
@@ -331,16 +330,15 @@ std::vector<Item*> HeroSystem::ItemsHere(const Army* hero) {
 }
 
 void HeroSystem::DropItem(Army* hero, Item* item) {
-    auto carried = std::find(hero->items.begin(), hero->items.end(), item);
-    if (carried != hero->items.end()) hero->items.erase(carried);
-    if (scn::TerrainAt(*game_.map, hero->x, hero->y) == move::kWater) {
+    hero->RemoveItem(item);
+    if (scn::TerrainAt(*game_.map, hero->X(), hero->Y()) == move::kWater) {
         item->status = 0;
         item->x = kNone;
         item->y = kNone;
     } else {
         item->status = 1;
-        item->x = hero->x;
-        item->y = hero->y;
+        item->x = hero->X();
+        item->y = hero->Y();
         item->planted = false;
     }
 }
@@ -350,15 +348,15 @@ void HeroSystem::TakeItem(Army* hero, Item* item) {
     item->x = kNone;
     item->y = kNone;
     item->planted = false;
-    hero->items.push_back(item);
+    hero->AddItem(item);
 }
 
 std::vector<Item*> HeroSystem::DropItems(Army* hero, int x, int y, int current_side) {
     std::vector<Item*> dropped;
-    if (hero->items.empty()) return dropped;
-    if (current_side == kNone && game_.side) current_side = game_.side->index;
+    if (hero->Items().empty()) return dropped;
+    if (current_side == kNone && game_.side) current_side = game_.side->Index();
     bool drowned = scn::TerrainAt(*game_.map, x, y) == move::kWater;
-    for (Item* item : hero->items) {
+    for (Item* item : hero->TakeAllItems()) {
         item->planted = false;
         if (drowned) {
             item->status = 0;
@@ -372,12 +370,10 @@ std::vector<Item*> HeroSystem::DropItems(Army* hero, int x, int y, int current_s
         }
         if (current_side != kNone && item->index == current_side) {
             for (auto& city : game_.map->cities) {
-                if (city.vector_to == -2 && city.owner_index == current_side)
-                    city.vector_to = kNone;
+                if (city.IsVectoredToStandard() && city.OwnedBy(current_side)) city.ClearVector();
             }
         }
     }
-    hero->items.clear();
     return dropped;
 }
 

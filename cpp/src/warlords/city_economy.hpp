@@ -18,7 +18,6 @@ struct QuestResult;
 
 namespace game {
 
-constexpr int kStandard = -2;      ///< Vector destination meaning "the side's standard".
 constexpr int kMaxVectoredTo = 4;  ///< No more than four cities may send to one place.
 
 /** @brief What pillaging or sacking took: the gold and the types lost. */

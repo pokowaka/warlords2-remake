@@ -62,8 +62,8 @@ bool vector_see_all = false;
 
 /** @brief The index of the side whose capital the city is, or kNone. */
 int CapitalOf(const w2::City* city) {
-    for (auto& side : g_app.g->map->sides)
-        if (side.capital == city) return side.index;
+    for (const auto& side : g_app.g->map->sides)
+        if (side.CapitalCity(*g_app.g->map) == city) return side.Index();
     return kNone;
 }
 
@@ -75,8 +75,9 @@ void SmallShield(int side, int x, int y) {
 
 /** @brief The slot the city is building from, or nullptr when it builds nothing. */
 const w2::Slot* Building(const w2::City* city) {
-    return w2::game::Producing(*city) && city->producing < static_cast<int>(city->slots.size())
-                   ? &city->slots[city->producing]
+    return w2::game::Producing(*city) && city->ProducingSlot() >= 0 &&
+                           city->ProducingSlot() < city->SlotCount()
+                   ? &city->SlotAt(city->ProducingSlot())
                    : nullptr;
 }
 
@@ -84,24 +85,24 @@ const w2::Slot* Building(const w2::City* city) {
 void Stats(const w2::City* city) {
     const Font& font = kit::GetFont(2);
     gfx::SetColor(1, 1, 1);
-    bool razed = city->razed;
-    font.Draw(Format(kit::Text(kTextStats, 0), razed ? 0 : city->income), kStatAt[0][0],
+    bool razed = city->IsRazed();
+    font.Draw(Format(kit::Text(kTextStats, 0), razed ? 0 : city->Income()), kStatAt[0][0],
               kStatAt[0][1]);
-    font.Draw(Format(kit::Text(kTextStats, 1), razed ? 0 : city->defence), kStatAt[1][0],
+    font.Draw(Format(kit::Text(kTextStats, 1), razed ? 0 : city->Defence()), kStatAt[1][0],
               kStatAt[1][1]);
     std::string owner;
     if (razed)
         owner = kit::Text(kTextStats, 2);
-    else if (city->owner_index == kNone)
+    else if (city->IsNeutral())
         owner = kit::Text(kTextStats, 3);
     else
-        owner = Format(kit::Text(kTextStats, 4), g_app.g->map->sides[city->owner_index].name);
+        owner = Format(kit::Text(kTextStats, 4), g_app.g->map->sides[city->OwnerIndex()].Name());
     font.Draw(owner, kStatAt[2][0], kStatAt[2][1]);
 }
 
 /** @brief Draws the owner's shield on both sides of the dialog's title; neutral is side 8. */
 void Shields(const w2::City* city) {
-    int side = city->owner_index == kNone ? 8 : city->owner_index;
+    int side = city->IsNeutral() ? 8 : city->OwnerIndex();
     kit::Shield(side, kLeftShieldAt[0], kLeftShieldAt[1]);
     kit::Shield(side, kRightShieldAt[0], kRightShieldAt[1]);
 }
@@ -129,7 +130,7 @@ struct CityDialog : kit::Modal {
 
     /** @brief Whether the city is the player's and the player has cities at all. */
     bool Owned() const {
-        return city->owner_index == g_app.player->index &&
+        return city->OwnerIndex() == g_app.player->Index() &&
                !w2::game::SideCities(*g_app.g, *g_app.player).empty();
     }
 
@@ -191,7 +192,7 @@ struct CityDialog : kit::Modal {
      * Going into Production chooses what the city builds now.
      */
     void SetMode(int new_mode) {
-        if (new_mode != kInfo && city->owner_index != g_app.player->index) new_mode = kInfo;
+        if (new_mode != kInfo && city->OwnerIndex() != g_app.player->Index()) new_mode = kInfo;
         if (new_mode == kProduction && mode != kProduction) {
             const w2::Slot* building = Building(city);
             chosen = building ? building->type : kNone;
@@ -209,11 +210,10 @@ struct CityDialog : kit::Modal {
 
     /** @brief Chooses what the city builds: slot `slot` of its list, from 0. */
     void Pick(int slot) {
-        if (slot < static_cast<int>(city->slots.size())) chosen = city->slots[slot].type;
+        if (slot < city->SlotCount()) chosen = city->SlotAt(slot).type;
         if (chosen == kNone) return;
-        for (size_t i = 0; i < city->slots.size(); i++)
-            if (city->slots[i].type == chosen)
-                w2::game::SetProduction(*g_app.g, *city, static_cast<int>(i));
+        for (int i = 0; i < city->SlotCount(); i++)
+            if (city->SlotAt(i).type == chosen) w2::game::SetProduction(*g_app.g, *city, i);
         Refresh();
     }
 
@@ -232,7 +232,7 @@ struct CityDialog : kit::Modal {
         input::Options options;
         options.title = rename_title;
         options.lines = {"Type the new name for", "this city"};
-        options.text = city->name;
+        options.text = city->Name();
         options.max_chars = 15;
         options.max_width = 128;
         options.ok = [self, dialog, renamed](const std::string& name) {
@@ -252,7 +252,7 @@ struct CityDialog : kit::Modal {
         w2::City* razed = city;
         input::Options options;
         options.title = raze_title;
-        options.lines = {"Are you sure that you", "want to", "raze " + city->name + "?",
+        options.lines = {"Are you sure that you", "want to", "raze " + city->Name() + "?",
                          "You won't be popular!"};
         options.confirm = true;
         options.ok = [self, dialog, razed](const std::string&) {
@@ -285,12 +285,12 @@ struct CityDialog : kit::Modal {
     void DrawInfo() {
         Shields(city);
         Stats(city);
-        int owner = city->owner_index == kNone ? 8 : city->owner_index;
-        if (!city->razed && (g_app.g->map->options.view_production == 0 ||
-                             city->owner_index == g_app.player->index)) {
+        int owner = city->IsNeutral() ? 8 : city->OwnerIndex();
+        if (!city->IsRazed() && (g_app.g->map->options.view_production == 0 ||
+                                 city->OwnerIndex() == g_app.player->Index())) {
             for (int i = 0; i < 4; i++) {
-                bool have = i < static_cast<int>(city->slots.size());
-                kit::Army(have ? city->slots[i].type : kNone, owner, kInfoSlots[i][0],
+                bool have = i < city->SlotCount();
+                kit::Army(have ? city->SlotAt(i).type : kNone, owner, kInfoSlots[i][0],
                           kInfoSlots[i][1], 1);
             }
         } else {
@@ -299,14 +299,14 @@ struct CityDialog : kit::Modal {
             kit::Bevel(310, 168, 244, 90, 4, 2);
             gfx::SetColor(1, 1, 1);
             if (g_app.city_back) gfx::Draw(g_app.city_back, gfx::NewQuad(0, 0, 240, 86), 312, 170);
-            Tile(city->x, city->y, 392, 176);
-            Tile(city->x, city->y + 1, 392, 216);
-            Tile(city->x + 1, city->y, 432, 176);
-            Tile(city->x + 1, city->y + 1, 432, 216);
+            Tile(city->X(), city->Y(), 392, 176);
+            Tile(city->X(), city->Y() + 1, 392, 216);
+            Tile(city->X() + 1, city->Y(), 432, 176);
+            Tile(city->X() + 1, city->Y() + 1, 432, 216);
         }
         int capital_side = CapitalOf(city);
         if (capital_side != kNone) SmallShield(capital_side, 408, 170);
-        auto text = g_app.g->map->city_text.find(city->index);
+        auto text = g_app.g->map->city_text.find(city->Index());
         const Font& font = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
         if (text != g_app.g->map->city_text.end())
@@ -336,7 +336,7 @@ struct CityDialog : kit::Modal {
      */
     void DrawProduction() {
         const Font& font = kit::GetFont(2);
-        int owner = city->owner_index == kNone ? 8 : city->owner_index;
+        int owner = city->IsNeutral() ? 8 : city->OwnerIndex();
         int capital_side = CapitalOf(city);
         if (capital_side != kNone) SmallShield(capital_side, 312, 110);
         gfx::SetColor(1, 1, 1);
@@ -344,17 +344,17 @@ struct CityDialog : kit::Modal {
         const w2::Slot* building = Building(city);
         kit::Army(building ? building->type : kNone, owner, 416, 104, 1);
         std::string turns_left =
-                w2::game::Producing(*city) ? absl::StrFormat("%dt", city->countdown) : "-";
+                w2::game::Producing(*city) ? absl::StrFormat("%dt", city->Countdown()) : "-";
         gfx::SetColor(1, 1, 1);
-        if (city->vector_to != kNone) {
+        if (city->IsVectored()) {
             std::string where;
-            if (city->vector_to == w2::game::kStandard) {
+            if (city->IsVectoredToStandard()) {
                 where = kit::Text(
                         kTextCurrent,
                         w2::game::StandardAt(*g_app.g, *g_app.player).first != kNone ? 2 : 3);
             } else {
-                w2::City* dest = g_app.g->map->City(city->vector_to);
-                where = dest ? dest->name : kit::Text(kTextCurrent, 3);
+                w2::City* dest = g_app.g->map->City(city->VectoredCityId());
+                where = dest ? dest->Name() : kit::Text(kTextCurrent, 3);
             }
             font.Draw(turns_left + kit::Text(kTextCurrent, 1), 456, 102);
             font.Draw(where, 456, 122);
@@ -363,11 +363,11 @@ struct CityDialog : kit::Modal {
         }
         const w2::Slot* chosen_slot = nullptr;
         for (int i = 0; i < 4; i++) {
-            bool have = i < static_cast<int>(city->slots.size());
-            bool mine = have && city->slots[i].type == chosen;
-            if (mine) chosen_slot = &city->slots[i];
-            kit::Army(have ? city->slots[i].type : kNone, owner, kProdSlots[i][0], kProdSlots[i][1],
-                      mine ? g_app.player->index + 2 : 1);
+            bool have = i < city->SlotCount();
+            bool mine = have && city->SlotAt(i).type == chosen;
+            if (mine) chosen_slot = &city->SlotAt(i);
+            kit::Army(have ? city->SlotAt(i).type : kNone, owner, kProdSlots[i][0],
+                      kProdSlots[i][1], mine ? g_app.player->Index() + 2 : 1);
         }
         if (chosen_slot) {
             gfx::SetColor(1, 1, 1);
@@ -387,43 +387,45 @@ struct CityDialog : kit::Modal {
      */
     void DrawVector() {
         const Font& font = kit::GetFont(2);
-        int owner = city->owner_index == kNone ? 8 : city->owner_index;
+        int owner = city->IsNeutral() ? 8 : city->OwnerIndex();
         gfx::SetColor(1, 1, 1);
         kit::Right(font, kit::Text(kTextVector, 0), 360, 109);
         const w2::Slot* building = Building(city);
         kit::Army(building ? building->type : kNone, owner, 368, 103, 1);
         gfx::SetColor(1, 1, 1);
-        font.Draw(w2::game::Producing(*city) ? Format(kit::Text(kTextVector, 1), city->countdown)
+        font.Draw(w2::game::Producing(*city) ? Format(kit::Text(kTextVector, 1), city->Countdown())
                                              : "-",
                   408, 109);
         w2::Army* out = nullptr;
         w2::Army* on_road = nullptr;
         std::vector<w2::Army*> next, after;
         for (w2::Army* army : g_app.g->armies) {
-            if (army->transit && army->owner == g_app.player->index) {
-                if (army->home_city == city->index && army->transit->dest == city->vector_to) {
-                    if (army->transit->turns >= 2)
+            if (army->InTransit() && army->OwnerIndex() == g_app.player->Index()) {
+                if (city->IsVectored() && army->HomeCity() == city->Id() &&
+                    army->TransitState()->dest == city->VectorDestination()) {
+                    if (army->TransitState()->turns >= 2)
                         out = army;
                     else
                         on_road = army;
                 }
-                if (army->transit->dest == city->index && army->home_city != city->index) {
-                    auto& row = army->transit->turns >= 2 ? after : next;
+                if (army->TransitState()->dest == w2::VectorTarget{city->Id()} &&
+                    army->HomeCity() != city->Id()) {
+                    auto& row = army->TransitState()->turns >= 2 ? after : next;
                     if (row.size() < 4) row.push_back(army);
                 }
             }
         }
-        kit::Army(out ? out->type : kNone, owner, 432, 103, 1);
-        kit::Army(on_road ? on_road->type : kNone, owner, 472, 103, 1);
+        kit::Army(out ? out->TypeIndex() : kNone, owner, 432, 103, 1);
+        kit::Army(on_road ? on_road->TypeIndex() : kNone, owner, 472, 103, 1);
         gfx::SetColor(1, 1, 1);
         kit::Right(font, kit::Text(kTextVector, 2), 392, 155);
         kit::Right(font, kit::Text(kTextVector, 3), 392, 188);
         for (int i = 0; i < 4; i++) {
             int x = 400 + i * 40;
-            kit::Army(i < static_cast<int>(next.size()) ? next[i]->type : kNone,
-                      g_app.player->index, x, 149, 1);
-            kit::Army(i < static_cast<int>(after.size()) ? after[i]->type : kNone,
-                      g_app.player->index, x, 182, 1);
+            kit::Army(i < static_cast<int>(next.size()) ? next[i]->TypeIndex() : kNone,
+                      g_app.player->Index(), x, 149, 1);
+            kit::Army(i < static_cast<int>(after.size()) ? after[i]->TypeIndex() : kNone,
+                      g_app.player->Index(), x, 182, 1);
         }
         gfx::SetColor(1, 1, 1);
         int send_help_line = sub == 1 ? 2 : 0;
@@ -448,7 +450,7 @@ struct CityDialog : kit::Modal {
             front::DrawStrategicPanel(kMap.x, kMap.y, city);
         }
         gfx::SetColor(1, 1, 1);
-        kit::Centred(kit::GetFont(1), city->name, 432, 62);
+        kit::Centred(kit::GetFont(1), city->Name(), 432, 62);
         if (mode == kInfo)
             DrawInfo();
         else if (mode == kCity)
@@ -482,7 +484,7 @@ struct CityDialog : kit::Modal {
         bool to_standard =
                 standard_x != kNone &&
                 std::max(std::abs(standard_x - map_x), std::abs(standard_y - map_y)) <
-                        std::max(std::abs(target->x - map_x), std::abs(target->y - map_y));
+                        std::max(std::abs(target->X() - map_x), std::abs(target->Y() - map_y));
         if (to_standard)
             w2::game::VectorToStandard(*g_app.g, *city, *g_app.player);
         else
@@ -539,7 +541,7 @@ struct CityDialog : kit::Modal {
             if (std::find(incoming.begin(), incoming.end(), target) != incoming.end())
                 allowed = false;
             if (allowed)
-                for (w2::City* source : incoming) source->vector_to = target->index;
+                for (w2::City* source : incoming) source->VectorToCity(target->Id());
         }
         sub = 0;
         if (was != 1 && target != city) {
@@ -595,8 +597,8 @@ struct CityDialog : kit::Modal {
      */
     bool Info(int sub_id, int screen_x, int screen_y) override {
         int slot = sub_id - 1;
-        if (slot < 0 || slot >= static_cast<int>(city->slots.size())) return false;
-        infobox::ArmyType(screen_x, screen_y, city->slots[slot].type, city->slots[slot]);
+        if (slot < 0 || slot >= city->SlotCount()) return false;
+        infobox::ArmyType(screen_x, screen_y, city->SlotAt(slot).type, city->SlotAt(slot));
         return true;
     }
 
@@ -612,17 +614,17 @@ struct CityDialog : kit::Modal {
             return;
         }
         if (mode == kInfo && x >= 308 && x < 532 && y >= 180 && y < 230) {
-            if (city->razed || (g_app.g->map->options.view_production != 0 &&
-                                city->owner_index != g_app.player->index)) {
-                infobox::ShowLines(screen_x, screen_y, city->name, "A picture of the city!");
+            if (city->IsRazed() || (g_app.g->map->options.view_production != 0 &&
+                                    city->OwnerIndex() != g_app.player->Index())) {
+                infobox::ShowLines(screen_x, screen_y, city->Name(), "A picture of the city!");
                 return;
             }
             int slot = std::min(3, (x - 308) / 56);
-            if (slot < static_cast<int>(city->slots.size()))
-                infobox::ArmyType(screen_x, screen_y, city->slots[slot].type, city->slots[slot],
-                                  city->owner_index == kNone ? 8 : city->owner_index);
+            if (slot < city->SlotCount())
+                infobox::ArmyType(screen_x, screen_y, city->SlotAt(slot).type, city->SlotAt(slot),
+                                  city->IsNeutral() ? 8 : city->OwnerIndex());
             else
-                infobox::ShowLines(screen_x, screen_y, city->name, "Info about city production");
+                infobox::ShowLines(screen_x, screen_y, city->Name(), "Info about city production");
         }
     }
 
@@ -646,8 +648,9 @@ void Open(w2::City* city, int mode) {
     dialog->v = kit::View(kDialog);
     dialog->view = &dialog->v;
     kit::Push(dialog);
-    dialog->SetMode(mode == kNone ? (city->owner_index == g_app.player->index ? kProduction : kInfo)
-                                  : mode);
+    dialog->SetMode(mode == kNone
+                            ? (city->OwnerIndex() == g_app.player->Index() ? kProduction : kInfo)
+                            : mode);
     std::vector<std::string> moments = {"prod"};
     if (w2::game::SideCities(*g_app.g, *g_app.player).size() >= 2) moments.push_back("prod2");
     tutorial::Chain(moments);

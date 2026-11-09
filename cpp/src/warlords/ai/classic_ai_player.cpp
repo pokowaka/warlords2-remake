@@ -97,14 +97,14 @@ void ReadIntArray(const Json& json_arr, std::array<T, N>& arr) {
 }
 
 void TurnSetup(Game& game, Side& side, AIData& data) {
-    SideId self_id(side.index);
+    SideId self_id = side.Id();
     game.diplomacy.SetState(self_id, self_id, 0);
     game.diplomacy.SetProposal(self_id, self_id, 0);
-    side.ai_solidarity = data.solidarity;
+    side.SetAiSolidarity(data.solidarity);
     bool quick = game.map->options.quick_start != 0 && game.map->options.hidden_map != 0;
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
-        if (city.owner_index == side.index) {
+        if (city.OwnerIndex() == side.Index()) {
             int role = ai::core::Role(data, city);
             if (role == ai::core::kExplorer || role == ai::core::kExploreR2) {
                 ai::core::SetRole(data, city, game.turn < 5 ? ai::core::kWeak : ai::core::kStop);
@@ -165,7 +165,7 @@ void ClassicAiPlayer::PlayTurn(Game& game, Side& side, const PauseCallback& paus
     pause_after("move #1");
     ai::moves::Rescue(game, side);
     pause_after("rescue");
-    ai::cities::Evaluate(game, side, side.index);
+    ai::cities::Evaluate(game, side, side.Index());
     pause_after("evaluate");
     ai::cities::Clean(game, side);
     pause_after("clean city");
@@ -190,7 +190,8 @@ void ClassicAiPlayer::PlayTurn(Game& game, Side& side, const PauseCallback& paus
 }
 
 void ClassicAiPlayer::OnTurnStarted(Side& side) {
-    data_.cursor = std::make_pair(side.cap_now_x, side.cap_now_y);
+    TilePos cap_pos = side.CapitalPosition();
+    data_.cursor = std::make_pair(cap_pos.x, cap_pos.y);
 }
 
 AttitudeBreakdown ClassicAiPlayer::EvaluateProposal(const Game& game, SideId ai_side,
@@ -204,7 +205,7 @@ City* ClassicAiPlayer::ChooseHeroCity(Game& game, Side& side, City* fallback) {
     int best_score = 0;
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
-        if (city.owner_index == side.index) {
+        if (city.OwnerIndex() == side.Index()) {
             int role = ai::core::Role(data_, city);
             int score = 0;
             if (role == ai::core::kRally)
@@ -223,15 +224,14 @@ City* ClassicAiPlayer::ChooseHeroCity(Game& game, Side& side, City* fallback) {
 }
 
 bool ClassicAiPlayer::OnQuestCapture(Game& game, Side& side, City& city, const ArmyStack& stack) {
-    auto side_quest = side.quest;
-    if (game.map->options.quests == 0 || !side_quest ||
-        side_quest->TargetCityId() != CityId(city.index)) {
+    auto side_quest = side.QuestPtr();
+    if (game.map->options.quests == 0 || !side_quest || side_quest->TargetCityId() != city.Id()) {
         return false;
     }
     if (side_quest->Type() != quest::kOccupy && side_quest->Type() != quest::kRaze) return false;
     bool hero_in_stack = side_quest->HeroId().IsValid() &&
                          std::any_of(stack.begin(), stack.end(), [&side_quest](const Army* member) {
-                             return member && member->id == side_quest->HeroId();
+                             return member && member->Id() == side_quest->HeroId();
                          });
     if (!hero_in_stack) return false;
     data_.quests_done++;
@@ -364,7 +364,7 @@ nlohmann::ordered_json ClassicAiPlayer::SaveState() const {
         Json staged = Json::object();
         for (const auto& [slot_key, army] : grp.staged) {
             if (army != nullptr && (!registry_ || registry_->Alive(army))) {
-                staged[std::to_string(slot_key)] = army->slot;
+                staged[std::to_string(slot_key)] = army->Slot();
             }
         }
         grp_json["staged"] = std::move(staged);
@@ -379,7 +379,7 @@ nlohmann::ordered_json ClassicAiPlayer::SaveState() const {
         for (const auto& [army_id, ord] : orders_) {
             if (ord.IsDefault()) continue;
             if (const Army* army = registry_->FindAlive(army_id)) {
-                by_slot[army->slot] = &ord;
+                by_slot[army->Slot()] = &ord;
             }
         }
         if (!by_slot.empty()) {
@@ -423,7 +423,7 @@ absl::Status ClassicAiPlayer::LoadState(const nlohmann::ordered_json& obj, const
 
     absl::flat_hash_map<int, Army*> army_by_slot;
     army_by_slot.reserve(game.armies.size());
-    for (Army* army : game.armies) army_by_slot[army->slot] = army;
+    for (Army* army : game.armies) army_by_slot[army->Slot()] = army;
 
     auto read_int = [&](std::string_view key, int& target) {
         if (HasField(obj, key)) target = IntField(obj, key, target);
@@ -532,7 +532,7 @@ absl::Status ClassicAiPlayer::LoadState(const nlohmann::ordered_json& obj, const
             ord.explore = BoolField(ord_json, "explore");
             ord.neutral = BoolField(ord_json, "neutral");
             ord.party = BoolField(ord_json, "party");
-            orders_[army_it->second->id] = ord;
+            orders_[army_it->second->Id()] = ord;
         }
     }
 
@@ -563,12 +563,12 @@ absl::Status ClassicAiPlayer::LoadState(const nlohmann::ordered_json& obj, const
 }
 
 const ClassicAiPlayer* ClassicAiPlayer::FindOn(const Side& side) {
-    const auto* backed = dynamic_cast<const IClassicBackedPlayer*>(side.computer_player.get());
+    const auto* backed = dynamic_cast<const IClassicBackedPlayer*>(side.ComputerPlayer());
     return backed ? &backed->ClassicImpl() : nullptr;
 }
 
 ClassicAiPlayer* ClassicAiPlayer::FindMutableOn(Side& side) {
-    auto* backed = dynamic_cast<IClassicBackedPlayer*>(side.computer_player.get());
+    auto* backed = dynamic_cast<IClassicBackedPlayer*>(side.ComputerPlayer());
     return backed ? &backed->ClassicImpl() : nullptr;
 }
 
@@ -585,7 +585,7 @@ ClassicAiPlayer& ClassicAiPlayer::EnsureOn(Game& game, Side& side) {
     if (!shared && game.map) shared = ai::core::BuildNeighbours(game);
     auto created = std::make_shared<ClassicAiPlayer>(ai::core::NewData(), shared, &game.armies);
     ClassicAiPlayer& ref = *created;
-    side.computer_player = std::move(created);
+    side.SetComputerPlayer(std::move(created));
     return ref;
 }
 

@@ -39,7 +39,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                     const ml::ContextVec& ctx, const PauseCallback& pause,
                                     ml::RolloutSampler* sampler, MovedArmySet& moved_armies,
                                     std::vector<MissionSnapshot>* snapshots) {
-    int our_side = side.index;
+    int our_side = side.Index();
     SideBelief& belief = belief::Ensure(side);
     float caution = 0.0F;
 
@@ -47,30 +47,31 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
     targets.reserve(80);
 
     for (City* city : belief.visible_cities) {
-        if (city->razed) continue;
-        float threat = city->index < static_cast<int>(belief.city_threat2_turn.size())
-                               ? belief.city_threat2_turn[city->index]
+        if (city->IsRazed()) continue;
+        float threat = city->Index() < static_cast<int>(belief.city_threat2_turn.size())
+                               ? belief.city_threat2_turn[city->Index()]
                                : 0.0F;
-        bool is_quest_or_own = (side.capital == city) ||
-                               (side.quest && side.quest->TargetCityId() == CityId(city->index));
+        bool is_quest_or_own =
+                (side.CapitalCity(*game.map) == city) ||
+                (side.ActiveQuest() && side.ActiveQuest()->TargetCityId() == city->Id());
         bool is_enemy_cap = false;
         for (int side_idx = 0; side_idx < 8; side_idx++) {
-            if (side_idx != our_side && game.map->sides[side_idx].capital == city)
+            if (side_idx != our_side && game.map->sides[side_idx].CapitalCity(*game.map) == city)
                 is_enemy_cap = true;
         }
 
-        if (city->owner_index == our_side) {
+        if (city->OwnerIndex() == our_side) {
             float existing_garrison_str = 0.0F;
             float stationary_garrison_str = 0.0F;
             int existing_count = 0;
             for (int dy = 0; dy <= 1; dy++) {
                 for (int dx = 0; dx <= 1; dx++) {
-                    for (Army* army : game::ArmiesAt(game, city->x + dx, city->y + dy)) {
-                        if (army->owner == our_side) {
-                            existing_garrison_str += static_cast<float>(army->strength);
+                    for (Army* army : game::ArmiesAt(game, city->X() + dx, city->Y() + dy)) {
+                        if (army->OwnerIndex() == our_side) {
+                            existing_garrison_str += static_cast<float>(army->Strength());
                             existing_count++;
-                            if (army->moves <= 0 || moved_armies.contains(army->id)) {
-                                stationary_garrison_str += static_cast<float>(army->strength);
+                            if (army->Moves() <= 0 || moved_armies.contains(army->Id())) {
+                                stationary_garrison_str += static_cast<float>(army->Strength());
                             }
                         }
                     }
@@ -78,62 +79,62 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             }
             CandidateTarget hold;
             hold.kind = TargetKind::kHoldGarrison;
-            hold.x = city->x;
-            hold.y = city->y;
+            hold.x = city->X();
+            hold.y = city->Y();
             hold.city = city;
             hold.owner = our_side;
             hold.value =
-                    static_cast<float>(city->income) + static_cast<float>(city->defence) * 3.0F;
+                    static_cast<float>(city->Income()) + static_cast<float>(city->Defence()) * 3.0F;
             hold.is_quest_or_own_cap = is_quest_or_own;
             hold.enemy_threat = threat;
             hold.assigned_strength = stationary_garrison_str;
-            hold.label = "Hold " + city->name;
+            hold.label = "Hold " + city->Name();
             targets.push_back(std::move(hold));
 
             if (existing_count < 32) {
                 CandidateTarget reinf;
                 reinf.kind = TargetKind::kReinforceCity;
-                reinf.x = city->x;
-                reinf.y = city->y;
+                reinf.x = city->X();
+                reinf.y = city->Y();
                 reinf.city = city;
                 reinf.owner = our_side;
-                reinf.value =
-                        static_cast<float>(city->income) + static_cast<float>(city->defence) * 3.0F;
+                reinf.value = static_cast<float>(city->Income()) +
+                              static_cast<float>(city->Defence()) * 3.0F;
                 reinf.is_quest_or_own_cap = is_quest_or_own;
                 reinf.enemy_threat = threat;
                 reinf.assigned_strength = existing_garrison_str;
-                reinf.label = "Reinforce " + city->name;
+                reinf.label = "Reinforce " + city->Name();
                 targets.push_back(std::move(reinf));
             }
-        } else if (city->owner_index == kNone) {
+        } else if (city->IsNeutral()) {
             CandidateTarget neut;
             neut.kind = TargetKind::kNeutralCity;
-            neut.x = city->x;
-            neut.y = city->y;
+            neut.x = city->X();
+            neut.y = city->Y();
             neut.city = city;
             neut.owner = kNone;
-            neut.value = static_cast<float>(city->income) +
-                         static_cast<float>(city->slots.size()) * 5.0F;
+            neut.value = static_cast<float>(city->Income()) +
+                         static_cast<float>(city->Slots().size()) * 5.0F;
             neut.is_quest_or_own_cap = is_quest_or_own;
             neut.is_enemy_capital = is_enemy_cap;
             neut.enemy_threat = threat;
-            neut.label = "Capture Neutral " + city->name;
+            neut.label = "Capture Neutral " + city->Name();
             targets.push_back(std::move(neut));
-        } else if (Attackable(game, our_side, city->owner_index, city)) {
+        } else if (Attackable(game, our_side, city->OwnerIndex(), city)) {
             CandidateTarget enem;
             enem.kind = TargetKind::kEnemyCity;
-            enem.x = city->x;
-            enem.y = city->y;
+            enem.x = city->X();
+            enem.y = city->Y();
             enem.city = city;
-            enem.owner = city->owner_index;
+            enem.owner = city->OwnerIndex();
             enem.value =
-                    static_cast<float>(city->income) + static_cast<float>(city->defence) * 6.0F;
-            if (diplomacy::AlliedTargetCity(game, city->owner_index) == city->index)
+                    static_cast<float>(city->Income()) + static_cast<float>(city->Defence()) * 6.0F;
+            if (diplomacy::AlliedTargetCity(game, city->OwnerIndex()) == city->Index())
                 enem.value += 10.0F;
             enem.is_quest_or_own_cap = is_quest_or_own;
             enem.is_enemy_capital = is_enemy_cap;
             enem.enemy_threat = threat;
-            enem.label = "Siege " + city->name;
+            enem.label = "Siege " + city->Name();
             targets.push_back(std::move(enem));
         }
     }
@@ -149,7 +150,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         stack_target.owner = obs.owner;
         stack_target.value = static_cast<float>(obs.visible_count) * 4.0F;
         stack_target.is_quest_or_own_cap =
-                (side.quest && side.quest->TargetSideId() == SideId(obs.owner));
+                (side.ActiveQuest() && side.ActiveQuest()->TargetSideId() == SideId(obs.owner));
         stack_target.label = absl::StrFormat("Intercept stack (%d,%d)", obs.x, obs.y);
         targets.push_back(std::move(stack_target));
     }
@@ -180,7 +181,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         ground_target.item = item;
         ground_target.value = 20.0F;
         ground_target.is_quest_or_own_cap =
-                (side.quest && side.quest->TargetItemId() == ItemId(item->index));
+                (side.ActiveQuest() && side.ActiveQuest()->TargetItemId() == ItemId(item->index));
         ground_target.label = "Pick up " + item->name;
         targets.push_back(std::move(ground_target));
     }
@@ -205,9 +206,10 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             target.kind == TargetKind::kEnemyStack) {
             float near_str = 0.0F;
             for (Army* army : game.armies) {
-                if (army->owner == our_side && army->x != kNone && !army->transit &&
-                    army->moves > 0 && move::Distance(army->x, army->y, target.x, target.y) <= 14) {
-                    near_str += static_cast<float>(army->strength);
+                if (army->OwnerIndex() == our_side && army->X() != kNone && !army->InTransit() &&
+                    army->Moves() > 0 &&
+                    move::Distance(army->X(), army->Y(), target.x, target.y) <= 14) {
+                    near_str += static_cast<float>(army->Strength());
                 }
             }
             target.nearby_friendly_str = near_str;
@@ -222,14 +224,14 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
     };
     std::map<int, LocGroup> groups_by_loc;
     for (Army* army : game.armies) {
-        if (army->owner != our_side || army->x == kNone || army->transit || army->moves <= 0 ||
-            moved_armies.contains(army->id))
+        if (army->OwnerIndex() != our_side || army->X() == kNone || army->InTransit() ||
+            army->Moves() <= 0 || moved_armies.contains(army->Id()))
             continue;
-        City* city = game::CityAt(game, army->x, army->y);
-        int key = city ? -(city->index + 1) : (army->y * game.map->width + army->x);
+        City* city = game::CityAt(game, army->X(), army->Y());
+        int key = city ? -(city->Index() + 1) : (army->Y() * game.map->width + army->X());
         auto& loc_group = groups_by_loc[key];
-        loc_group.x = army->x;
-        loc_group.y = army->y;
+        loc_group.x = army->X();
+        loc_group.y = army->Y();
         loc_group.city = city;
         loc_group.units.push_back(army);
     }
@@ -243,10 +245,10 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             if (lhs->Hero() != rhs->Hero()) return lhs->Hero() > rhs->Hero();
             bool lhs_flies = core::Flies(game, lhs), rhs_flies = core::Flies(game, rhs);
             if (lhs_flies != rhs_flies) return lhs_flies > rhs_flies;
-            int lhs_score = lhs->strength * 2 + lhs->max_moves;
-            int rhs_score = rhs->strength * 2 + rhs->max_moves;
+            int lhs_score = lhs->Strength() * 2 + lhs->MaxMoves();
+            int rhs_score = rhs->Strength() * 2 + rhs->MaxMoves();
             if (lhs_score != rhs_score) return lhs_score > rhs_score;
-            return lhs->moves > rhs->moves;
+            return lhs->Moves() > rhs->Moves();
         });
 
         core::Flood land_flood = core::FloodFrom(game, our_side, loc_group.x, loc_group.y, 72,
@@ -364,12 +366,13 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         while (!pool.empty()) {
             Army* seed = pool.front();
             pool.erase(pool.begin());
-            if (!game.Alive(seed) || seed->moves <= 0 || moved_armies.contains(seed->id)) continue;
+            if (!game.Alive(seed) || seed->Moves() <= 0 || moved_armies.contains(seed->Id()))
+                continue;
 
             std::vector<Army*> eligible_escorts;
             for (auto iter = pool.begin(); iter != pool.end();) {
                 Army* cand = *iter;
-                if (!game.Alive(cand) || cand->moves <= 0 || moved_armies.contains(cand->id)) {
+                if (!game.Alive(cand) || cand->Moves() <= 0 || moved_armies.contains(cand->Id())) {
                     iter = pool.erase(iter);
                     continue;
                 }
@@ -379,22 +382,22 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                 ++iter;
             }
 
-            float rem_group_str = static_cast<float>(seed->strength);
-            for (Army* rem : pool) rem_group_str += static_cast<float>(rem->strength);
+            float rem_group_str = static_cast<float>(seed->Strength());
+            for (Army* rem : pool) rem_group_str += static_cast<float>(rem->Strength());
 
             float committed_city_guard_str = 0.0F;
             float origin_threat = 0.0F;
-            if (loc_group.city && loc_group.city->owner_index == our_side) {
-                if (loc_group.city->index < static_cast<int>(belief.city_threat2_turn.size())) {
-                    origin_threat = belief.city_threat2_turn[loc_group.city->index];
+            if (loc_group.city && loc_group.city->OwnerIndex() == our_side) {
+                if (loc_group.city->Index() < static_cast<int>(belief.city_threat2_turn.size())) {
+                    origin_threat = belief.city_threat2_turn[loc_group.city->Index()];
                 }
                 for (int dy = 0; dy <= 1; dy++) {
                     for (int dx = 0; dx <= 1; dx++) {
-                        for (Army* army :
-                             game::ArmiesAt(game, loc_group.city->x + dx, loc_group.city->y + dy)) {
-                            if (army->owner == our_side &&
-                                (army->moves <= 0 || moved_armies.contains(army->id))) {
-                                committed_city_guard_str += static_cast<float>(army->strength);
+                        for (Army* army : game::ArmiesAt(game, loc_group.city->X() + dx,
+                                                         loc_group.city->Y() + dy)) {
+                            if (army->OwnerIndex() == our_side &&
+                                (army->Moves() <= 0 || moved_armies.contains(army->Id()))) {
+                                committed_city_guard_str += static_cast<float>(army->Strength());
                             }
                         }
                     }
@@ -421,13 +424,13 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     prebuilt.units.push_back(eligible_escorts[i]);
                 }
                 for (Army* army : prebuilt.units)
-                    prebuilt.str += static_cast<float>(army->strength);
+                    prebuilt.str += static_cast<float>(army->Strength());
                 float rem_guard_after_leave =
-                        (loc_group.city && loc_group.city->owner_index == our_side)
+                        (loc_group.city && loc_group.city->OwnerIndex() == our_side)
                                 ? (committed_city_guard_str +
                                    std::max(0.0F, rem_group_str - prebuilt.str))
                                 : 20.0F;
-                prebuilt.sv = BuildStackFeatures(game, prebuilt.units, seed->moves,
+                prebuilt.sv = BuildStackFeatures(game, prebuilt.units, seed->Moves(),
                                                  rem_guard_after_leave, origin_threat);
                 prebuilt.flies = (move::ModeOf(game, prebuilt.units) == move::kFlying);
                 pre_stacks.push_back(std::move(prebuilt));
@@ -455,7 +458,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
 
                     if ((tgt.kind == TargetKind::kNeutralCity ||
                          tgt.kind == TargetKind::kEnemyCity) &&
-                        tgt.city && (tgt.city->owner_index == our_side || tgt.city->razed)) {
+                        tgt.city && (tgt.city->OwnerIndex() == our_side || tgt.city->IsRazed())) {
                         continue;
                     }
                     if (tgt.kind == TargetKind::kEnemyStack &&
@@ -463,7 +466,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                         // Only re-check stacks still in view; one that walked into fog stays a
                         // belief
                         auto cur_at = belief::ArmiesAt(game, tgt.x, tgt.y);
-                        if (cur_at.empty() || cur_at[0]->owner == our_side) continue;
+                        if (cur_at.empty() || cur_at[0]->OwnerIndex() == our_side) continue;
                     }
                     if (tgt.kind == TargetKind::kRuinOrSage && tgt.site &&
                         !core::SiteOpen(*tgt.site))
@@ -497,7 +500,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     if (tgt.kind == TargetKind::kTempleOrItem && tgt.item && !seed->Hero())
                         continue;
                     if (tgt.kind == TargetKind::kTempleOrItem && tgt.site &&
-                        !seed->blessings.empty() && !seed->Hero()) {
+                        !seed->Blessings().empty() && !seed->Hero()) {
                         continue;
                     }
                     if (tgt.kind == TargetKind::kTempleOrItem && tgt.assigned_stacks >= 1) continue;
@@ -533,7 +536,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             }  // scoringIndex
 
             if (options.empty()) {
-                moved_armies.insert(seed->id);
+                moved_armies.insert(seed->Id());
                 continue;
             }
 
@@ -557,7 +560,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     const CandidateTarget& target = targets[option.target_idx];
                     snap.candidates.push_back(option.in_vec);
                     snap.kind.push_back(static_cast<int>(target.kind));
-                    snap.city_index.push_back(target.city ? target.city->index : kNone);
+                    snap.city_index.push_back(target.city ? target.city->Index() : kNone);
                     snap.tx.push_back(target.x);
                     snap.ty.push_back(target.y);
                     snap.stack_size.push_back(
@@ -569,8 +572,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     snap.group.push_back(reinterpret_cast<std::uintptr_t>(army));
                 snap.start_x = loc_group.x;
                 snap.start_y = loc_group.y;
-                snap.start_city = (loc_group.city && loc_group.city->owner_index == our_side)
-                                          ? loc_group.city->index
+                snap.start_city = (loc_group.city && loc_group.city->OwnerIndex() == our_side)
+                                          ? loc_group.city->Index()
                                           : kNone;
                 snapshots->push_back(std::move(snap));
                 break;
@@ -623,7 +626,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                          : 0.0F;
 
             if (chosen_tgt.kind == TargetKind::kHoldGarrison) {
-                for (Army* army : current_stack) moved_armies.insert(army->id);
+                for (Army* army : current_stack) moved_armies.insert(army->Id());
                 chosen_tgt.assigned_stacks++;
                 chosen_tgt.assigned_strength += stack_str;
             } else {
@@ -633,7 +636,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                 if (chosen_tgt.kind == TargetKind::kEnemyCity && chosen_tgt.city &&
                     chosen_opt.out.utility > best_enemy_city_score) {
                     best_enemy_city_score = chosen_opt.out.utility;
-                    best_enemy_city_target = chosen_tgt.city->index;
+                    best_enemy_city_target = chosen_tgt.city->Index();
                 }
 
                 bool moved = ExecuteStackMission(game, side, current_stack, chosen_tgt, stage_near,
@@ -644,7 +647,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     chosen_tgt.assigned_strength =
                             std::max(0.0F, chosen_tgt.assigned_strength - stack_str);
                     for (Army* army : current_stack) {
-                        if (game.Alive(army) && army->moves > 0) moved_armies.insert(army->id);
+                        if (game.Alive(army) && army->Moves() > 0) moved_armies.insert(army->Id());
                     }
                 } else {
                     if (!current_stack.empty() && game.Alive(current_stack[0])) {
@@ -655,8 +658,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                 "Mission",
                                 absl::StrFormat("%d-unit stack (%s)",
                                                 static_cast<int>(current_stack.size()),
-                                                current_stack[0]->name),
-                                chosen_tgt.label, current_stack[0]->x, current_stack[0]->y,
+                                                current_stack[0]->Name()),
+                                chosen_tgt.label, current_stack[0]->X(), current_stack[0]->Y(),
                                 chosen_tgt.x, chosen_tgt.y, chosen_opt.out.utility,
                                 chosen_opt.tv[10], stage_near,
                                 absl::StrFormat("U=%.2f Win=%.0f%% Turns=%.1f %s",
@@ -669,7 +672,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     // Add newly revealed neutral or enemy cities immediately so remaining stacks
                     // can act on them
                     for (auto& city : game.map->cities) {
-                        if (city.razed || city.owner_index == our_side ||
+                        if (city.IsRazed() || city.OwnerIndex() == our_side ||
                             !belief::IsCityVisible(game, our_side, city))
                             continue;
                         bool exists = false;
@@ -683,32 +686,32 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                             bool is_enemy_cap = false;
                             for (int side_idx = 0; side_idx < 8; side_idx++) {
                                 if (side_idx != our_side &&
-                                    game.map->sides[side_idx].capital == &city)
+                                    game.map->sides[side_idx].CapitalCity(*game.map) == &city)
                                     is_enemy_cap = true;
                             }
-                            if (city.owner_index == kNone) {
+                            if (city.IsNeutral()) {
                                 CandidateTarget neut;
                                 neut.kind = TargetKind::kNeutralCity;
-                                neut.x = city.x;
-                                neut.y = city.y;
+                                neut.x = city.X();
+                                neut.y = city.Y();
                                 neut.city = &city;
                                 neut.owner = kNone;
-                                neut.value = static_cast<float>(city.income) +
-                                             static_cast<float>(city.slots.size()) * 5.0F;
+                                neut.value = static_cast<float>(city.Income()) +
+                                             static_cast<float>(city.Slots().size()) * 5.0F;
                                 neut.is_enemy_capital = is_enemy_cap;
-                                neut.label = "Capture Neutral " + city.name;
+                                neut.label = "Capture Neutral " + city.Name();
                                 targets.push_back(std::move(neut));
-                            } else if (Attackable(game, our_side, city.owner_index, &city)) {
+                            } else if (Attackable(game, our_side, city.OwnerIndex(), &city)) {
                                 CandidateTarget enem;
                                 enem.kind = TargetKind::kEnemyCity;
-                                enem.x = city.x;
-                                enem.y = city.y;
+                                enem.x = city.X();
+                                enem.y = city.Y();
                                 enem.city = &city;
-                                enem.owner = city.owner_index;
-                                enem.value = static_cast<float>(city.income) +
-                                             static_cast<float>(city.defence) * 6.0F;
+                                enem.owner = city.OwnerIndex();
+                                enem.value = static_cast<float>(city.Income()) +
+                                             static_cast<float>(city.Defence()) * 6.0F;
                                 enem.is_enemy_capital = is_enemy_cap;
-                                enem.label = "Siege " + city.name;
+                                enem.label = "Siege " + city.Name();
                                 targets.push_back(std::move(enem));
                             }
                         }
@@ -718,21 +721,21 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
 
             // Departure credit (training only): did this move leave its own city empty?
             int vacated_city = kNone;
-            if (recording && loc_group.city && loc_group.city->owner_index == our_side &&
+            if (recording && loc_group.city && loc_group.city->OwnerIndex() == our_side &&
                 chosen_tgt.kind != TargetKind::kHoldGarrison) {
                 bool any_left = false;
                 for (int dy = 0; dy <= 1 && !any_left; dy++) {
                     for (int dx = 0; dx <= 1 && !any_left; dx++) {
-                        for (Army* army :
-                             game::ArmiesAt(game, loc_group.city->x + dx, loc_group.city->y + dy)) {
-                            if (army->owner == our_side) {
+                        for (Army* army : game::ArmiesAt(game, loc_group.city->X() + dx,
+                                                         loc_group.city->Y() + dy)) {
+                            if (army->OwnerIndex() == our_side) {
                                 any_left = true;
                                 break;
                             }
                         }
                     }
                 }
-                if (!any_left) vacated_city = loc_group.city->index;
+                if (!any_left) vacated_city = loc_group.city->Index();
             }
 
             if (sampler && sampler->current_turn && (options.size() > 1 || is_combat_target)) {

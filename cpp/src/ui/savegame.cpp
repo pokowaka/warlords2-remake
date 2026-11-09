@@ -145,7 +145,7 @@ void Load(std::function<void(std::unique_ptr<w2::Game>)> loaded) {
         if (!game) return;
         last_slot = slots[chosen];
         std::string name = game->current < static_cast<int>(game->sides.size())
-                                   ? game->sides[game->current]->name
+                                   ? game->sides[game->current]->Name()
                                    : "";
         loaded(std::move(game));
         search::Say(w2::Format(kit::Text(0x2f, 1), name));

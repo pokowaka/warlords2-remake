@@ -37,9 +37,9 @@ TEST(DiplomacyTest, MustDeclareAndAttackAnywayTransitionsToWar) {
             << "city 0 reproduces the original's > 0 check";
 
     ask_game->diplomacy.SetState(SideId(0), SideId(1), diplomacy::kPeace);
-    int score_before = ask_game->sides[0]->diplo_score;
+    int score_before = ask_game->sides[0]->DiploScore();
     diplomacy::AttackAnyway(*ask_game, 0, 1);
-    int cost = ask_game->sides[0]->diplo_score - score_before;
+    int cost = ask_game->sides[0]->DiploScore() - score_before;
     EXPECT_GE(cost, 101);
     EXPECT_LE(cost, 200);
     EXPECT_EQ(diplomacy::State(*ask_game, 0, 1), diplomacy::kWar);
@@ -96,25 +96,25 @@ TEST(DiplomacyTest, ScoreUpdatesAndRatingTitles) {
     diplomacy::Propose(score_game, 0, 1, diplomacy::kWar);
     diplomacy::Apply(score_game, *score_game.sides[0]);
     diplomacy::Propose(score_game, 0, 1, diplomacy::kPeace);
-    int before = score_game.sides[0]->diplo_score;
+    int before = score_game.sides[0]->DiploScore();
     diplomacy::ScoreUpdate(score_game, *score_game.sides[0]);
-    int gain = score_game.sides[0]->diplo_score - before;
+    int gain = score_game.sides[0]->DiploScore() - before;
     EXPECT_GE(gain, 11);
     EXPECT_LE(gain, 20);
 
     diplomacy::Propose(score_game, 1, 0, diplomacy::kPeace);
-    before = score_game.sides[0]->diplo_score;
+    before = score_game.sides[0]->DiploScore();
     diplomacy::ScoreUpdate(score_game, *score_game.sides[0]);
-    EXPECT_EQ(score_game.sides[0]->diplo_score, before);
+    EXPECT_EQ(score_game.sides[0]->DiploScore(), before);
 
     auto rating_game_ptr = SetupGame("ERYTHEA", Seed(63));
     Game& rating_game = *rating_game_ptr;
     for (size_t i = 0; i < rating_game.sides.size(); ++i) {
-        rating_game.sides[i]->diplo_score = static_cast<int>(i + 1) * 10;
+        rating_game.sides[i]->SetDiploScore(static_cast<int>(i + 1) * 10);
     }
     auto ratings = diplomacy::Ratings(rating_game);
-    EXPECT_EQ(ratings[rating_game.sides[0]->index], "Statesman");
-    EXPECT_EQ(ratings[rating_game.sides.back()->index], "Running Dog");
+    EXPECT_EQ(ratings[rating_game.sides[0]->Index()], "Statesman");
+    EXPECT_EQ(ratings[rating_game.sides.back()->Index()], "Running Dog");
 
     const auto& ranks = diplomacy::RatingRanks(2);
     ASSERT_EQ(ranks.size(), 2U);
@@ -128,19 +128,19 @@ TEST(DiplomacyTest, PeacefulMovementOverStacksAndCombatOnRazedRuins) {
     Side* side = game::Begin(walk_game);
     Side* other = nullptr;
     for (Side* candidate : walk_game.sides) {
-        if (candidate->index != side->index) {
+        if (candidate->Id() != side->Id()) {
             other = candidate;
         }
     }
     ASSERT_NE(other, nullptr);
-    City* city = other->capital;
-    Army* army = AddArmy(walk_game, city->x, city->y - 1, side->index, 11, 3, 20, 20);
-    army->upkeep = 1;
-    auto path = movement::FindPath(walk_game, {army}, army->x, army->y, city->x, city->y);
+    City* city = other->CapitalCity(*walk_game.map);
+    Army* army = AddArmy(walk_game, city->X(), city->Y() - 1, side->Index(), 11, 3, 20, 20);
+    army->SetUpkeep(1);
+    auto path = movement::FindPath(walk_game, {army}, army->X(), army->Y(), city->X(), city->Y());
     if (path && !path->empty()) {
         auto into_city = movement::Walk(walk_game, {army}, *path);
         EXPECT_EQ(into_city.stopped, movement::WalkStop::kAtPeace);
-        EXPECT_EQ(army->x, city->x);
+        EXPECT_EQ(army->X(), city->X());
     }
 
     int map_width = walk_game.map->width;
@@ -162,53 +162,53 @@ TEST(DiplomacyTest, PeacefulMovementOverStacksAndCombatOnRazedRuins) {
         }
     }
     ASSERT_NE(start_x, kNone);
-    Army* walker = AddArmy(walk_game, start_x, start_y, side->index, 11, 3, 20, 20);
-    Army* blocker = AddArmy(walk_game, start_x + 1, start_y, other->index, 11, 3, 20, 20);
-    walker->upkeep = 1;
-    blocker->upkeep = 1;
+    Army* walker = AddArmy(walk_game, start_x, start_y, side->Index(), 11, 3, 20, 20);
+    Army* blocker = AddArmy(walk_game, start_x + 1, start_y, other->Index(), 11, 3, 20, 20);
+    walker->SetUpkeep(1);
+    blocker->SetUpkeep(1);
     movement::Path steps = {{start_x + 1, start_y, 2}, {start_x + 2, start_y, 2}};
     auto past_walk = movement::Walk(walk_game, {walker}, steps);
-    EXPECT_EQ(walker->x, start_x + 2);
-    EXPECT_EQ(walker->moves, 16);
+    EXPECT_EQ(walker->X(), start_x + 2);
+    EXPECT_EQ(walker->Moves(), 16);
     EXPECT_EQ(past_walk.stopped, movement::WalkStop::kArrived);
 
-    walker->x = start_x;
-    walker->moves = 20;
-    walk_game.diplomacy.SetState(SideId(side->index), SideId(other->index), diplomacy::kWar);
+    walker->PlaceAt(TilePos(start_x, start_y));
+    walker->SetMoves(20);
+    walk_game.diplomacy.SetState(side->Id(), other->Id(), diplomacy::kWar);
     auto war_walk = movement::Walk(walk_game, {walker}, steps);
     EXPECT_EQ(war_walk.stopped, movement::WalkStop::kAttack);
-    EXPECT_EQ(walker->x, start_x);
+    EXPECT_EQ(walker->X(), start_x);
 
     City* ruin = nullptr;
     for (auto& candidate : walk_game.map->cities) {
-        if (!ruin && candidate.owner_index != kNone && candidate.owner_index != side->index) {
+        if (!ruin && !candidate.IsNeutral() && !candidate.OwnedBy(side->Id())) {
             ruin = &candidate;
         }
     }
     ASSERT_NE(ruin, nullptr);
-    game::Raze(walk_game, walk_game.map->sides[ruin->owner_index], *ruin, {}, true);
+    game::Raze(walk_game, walk_game.map->sides[ruin->OwnerIndex()], *ruin, {}, true);
     std::vector<Army*> on_ruin;
     for (Army* occupant : walk_game.armies) {
-        if (occupant->x != kNone && occupant->x >= ruin->x && occupant->x <= ruin->x + 1 &&
-            occupant->y >= ruin->y && occupant->y <= ruin->y + 1) {
+        if (occupant->X() != kNone && ruin->ContainsTile(occupant->X(), occupant->Y())) {
             on_ruin.push_back(occupant);
         }
     }
     for (Army* occupant : on_ruin) {
         walk_game.Remove(occupant);
     }
-    walk_game.diplomacy.SetState(SideId(side->index), SideId(other->index), diplomacy::kWar);
-    AddArmy(walk_game, ruin->x, ruin->y, other->index, 11, 1, 20, 20);
-    AddArmy(walk_game, ruin->x + 1, ruin->y + 1, other->index, 11, 1, 20, 20);
+    walk_game.diplomacy.SetState(side->Id(), other->Id(), diplomacy::kWar);
+    AddArmy(walk_game, ruin->X(), ruin->Y(), other->Index(), 11, 1, 20, 20);
+    AddArmy(walk_game, ruin->X() + 1, ruin->Y() + 1, other->Index(), 11, 1, 20, 20);
     std::vector<Army*> strike;
     for (int i = 0; i < 8; ++i) {
-        strike.push_back(AddArmy(walk_game, ruin->x - 1, ruin->y, side->index, 11, 9, 20, 20));
+        strike.push_back(
+                AddArmy(walk_game, ruin->X() - 1, ruin->Y(), side->Index(), 11, 9, 20, 20));
     }
-    auto fight = game::ResolveAttack(walk_game, strike, ruin->x, ruin->y);
+    auto fight = game::ResolveAttack(walk_game, strike, ruin->X(), ruin->Y());
     EXPECT_EQ(fight.lines.city, nullptr);
     EXPECT_EQ(fight.lines.defenders.size(), 1U);
     EXPECT_EQ(fight.captured, nullptr);
-    EXPECT_EQ(ruin->owner_index, kNone);
+    EXPECT_TRUE(ruin->IsNeutral());
 }
 
 }  // namespace

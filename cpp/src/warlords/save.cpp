@@ -198,6 +198,30 @@ Slot ReadSlot(const Json& obj) {
                 IntField(obj, "price")};
 }
 
+/** @brief Serializes a `VectorTarget` (`std::monostate`, `CityId`, or `PlantedStandard`). */
+Json EncodeVectorTarget(const VectorTarget& target) {
+    if (std::holds_alternative<PlantedStandard>(target)) {
+        return Json("standard");
+    }
+    if (const auto* city_id = std::get_if<CityId>(&target); city_id && city_id->IsValid()) {
+        return Json(city_id->Value());
+    }
+    return Json(nullptr);
+}
+
+/** @brief Deserializes a `VectorTarget` from JSON (`"standard"`, `-2`, city index, or `null`). */
+VectorTarget DecodeVectorTarget(const Json& json_val) {
+    if (json_val.is_string() && json_val.get_ref<const std::string&>() == "standard") {
+        return PlantedStandard{};
+    }
+    if (json_val.is_number()) {
+        int raw = json_val.get<int>();
+        if (raw == -2) return PlantedStandard{};
+        if (raw >= 0) return CityId(raw);
+    }
+    return std::monostate{};
+}
+
 }  // namespace
 
 std::string Encode(const Game& game) {
@@ -211,81 +235,81 @@ std::string Encode(const Game& game) {
     Json armies = Json::array();
     for (Army* army : game.armies) {
         Json obj = Json::object();
-        obj["slot"] = army->slot;
-        obj["x"] = OptInt(army->x);
-        obj["y"] = OptInt(army->y);
-        obj["owner"] = OptInt(army->owner);
-        obj["type"] = army->type;
-        obj["name"] = Latin1ToUtf8(army->name);
-        if (army->female) obj["female"] = true;
-        if (army->medals) obj["medals"] = army->medals;
-        obj["strength"] = army->strength;
-        obj["moves"] = army->moves;
-        obj["maxMoves"] = army->max_moves;
-        obj["upkeep"] = army->upkeep;
-        obj["homeCity"] = OptInt(army->home_city);
-        if (army->at_sea) obj["atSea"] = true;
-        if (army->group) obj["group"] = army->group;
-        if (army->target) {
-            obj["target"] = Json::array({army->target->first, army->target->second});
+        obj["slot"] = army->Slot();
+        obj["x"] = OptInt(army->X());
+        obj["y"] = OptInt(army->Y());
+        obj["owner"] = OptInt(army->OwnerIndex());
+        obj["type"] = army->TypeIndex();
+        obj["name"] = Latin1ToUtf8(army->Name());
+        if (army->IsFemale()) obj["female"] = true;
+        if (army->Medals()) obj["medals"] = army->Medals();
+        obj["strength"] = army->Strength();
+        obj["moves"] = army->Moves();
+        obj["maxMoves"] = army->MaxMoves();
+        obj["upkeep"] = army->Upkeep();
+        obj["homeCity"] = OptInt(army->HomeCityIndex());
+        if (army->IsAtSea()) obj["atSea"] = true;
+        if (army->Group()) obj["group"] = army->Group();
+        if (army->HasTarget()) {
+            obj["target"] = Json::array({army->Target()->x, army->Target()->y});
         }
-        if (army->fortified) obj["fortified"] = true;
-        if (army->level) obj["level"] = army->level;
-        if (army->experience) obj["experience"] = army->experience;
-        if (!army->title.empty()) obj["title"] = Latin1ToUtf8(army->title);
-        if (!army->items.empty()) {
+        if (army->IsFortified()) obj["fortified"] = true;
+        if (army->Level()) obj["level"] = army->Level();
+        if (army->Experience()) obj["experience"] = army->Experience();
+        if (!army->Title().empty()) obj["title"] = Latin1ToUtf8(army->Title());
+        if (!army->Items().empty()) {
             Json its = Json::array();
-            for (Item* item : army->items) its.push_back(item->index);
+            for (Item* item : army->Items()) its.push_back(item->index);
             obj["items"] = std::move(its);
         }
-        if (!army->blessings.empty()) {
+        if (!army->Blessings().empty()) {
             Json blessed = Json::array();
-            for (int temple_id : army->blessings) blessed.push_back(temple_id);
+            for (int temple_id : army->Blessings()) blessed.push_back(temple_id);
             obj["blessings"] = std::move(blessed);
         }
-        if (army->transit) {
+        if (army->InTransit()) {
             Json trn = Json::object();
-            trn["turns"] = army->transit->turns;
-            trn["dest"] = army->transit->dest;
+            trn["turns"] = army->TransitState()->turns;
+            trn["dest"] = EncodeVectorTarget(army->TransitState()->dest);
             obj["transit"] = std::move(trn);
         }
-        if (army->returning) obj["returning"] = true;
+        if (army->IsReturning()) obj["returning"] = true;
         armies.push_back(std::move(obj));
     }
 
     Json sides = Json::array();
     for (Side* side : game.sides) {
         Json obj = Json::object();
-        obj["index"] = side->index;
-        obj["name"] = Latin1ToUtf8(side->name);
-        obj["gold"] = side->gold;
-        obj["alive"] = side->alive;
-        obj["computer"] = side->computer;
-        obj["level"] = side->level;
-        obj["enhanced"] = side->enhanced;
-        obj["observe"] = side->observe;
-        if (side->cap_now_x != kNone) {
+        obj["index"] = side->Index();
+        obj["name"] = Latin1ToUtf8(side->Name());
+        obj["gold"] = side->Gold();
+        obj["alive"] = side->IsAlive();
+        obj["computer"] = side->IsComputerControlled();
+        obj["level"] = side->Level();
+        obj["enhanced"] = side->IsEnhanced();
+        obj["observe"] = side->IsObserved();
+        if (side->CurrentCapitalPos().has_value()) {
             Json cap_now = Json::object();
-            cap_now["x"] = side->cap_now_x;
-            cap_now["y"] = side->cap_now_y;
+            cap_now["x"] = side->CurrentCapitalPos()->x;
+            cap_now["y"] = side->CurrentCapitalPos()->y;
             obj["capNow"] = std::move(cap_now);
         }
-        if (side->production_due) obj["productionDue"] = true;
-        obj["diploScore"] = side->diplo_score;
-        obj["income"] = side->income;
-        obj["upkeepTotal"] = side->upkeep_total;
-        obj["aiSolidarity"] = side->ai_solidarity;
-        obj["card"] = side->card;
+        if (side->IsProductionDue()) obj["productionDue"] = true;
+        obj["diploScore"] = side->DiploScore();
+        obj["income"] = side->Income();
+        obj["upkeepTotal"] = side->UpkeepTotal();
+        obj["aiSolidarity"] = side->AiSolidarity();
+        obj["card"] = side->Card();
         if (!side->IsClassicAi()) obj["classicAi"] = false;
         Json adv = Json::object();
-        adv["dir"] = side->advisor.dir;
-        adv["mark"] = side->advisor.mark;
+        adv["dir"] = side->AdvisorState().dir;
+        adv["mark"] = side->AdvisorState().mark;
         obj["advisor"] = std::move(adv);
-        if (side->computer_player) {
-            obj["computerPlayer"] = side->computer_player->SaveState();
+        if (side->ComputerPlayer()) {
+            obj["computerPlayer"] = side->ComputerPlayer()->SaveState();
         }
-        if (side->quest) {
-            const Quest& quest = *side->quest;
+        if (side->ActiveQuest()) {
+            const Quest& quest = *side->ActiveQuest();
             Json quest_json = Json::object();
             quest_json["type"] = quest.Type();
             quest_json["hero"] = id_of(quest.ResolveHero(game));
@@ -322,20 +346,20 @@ std::string Encode(const Game& game) {
     Json cities = Json::array();
     for (const auto& city : game.map->cities) {
         Json obj = Json::object();
-        obj["index"] = city.index;
-        obj["name"] = Latin1ToUtf8(city.name);
-        obj["ownerIndex"] = OptInt(city.owner_index);
-        obj["producing"] = OptInt(city.producing);
-        obj["countdown"] = city.countdown;
-        if (city.vector_to != kNone) obj["vectorTo"] = city.vector_to;
-        if (city.razed) obj["razed"] = true;
-        obj["defence"] = city.defence;
-        obj["income"] = city.income;
-        obj["claim"] = OptInt(city.claim);
-        obj["razedBy"] = OptInt(city.razed_by);
-        if (city.attacked) obj["attacked"] = city.attacked;
+        obj["index"] = city.Index();
+        obj["name"] = Latin1ToUtf8(city.Name());
+        obj["ownerIndex"] = OptInt(city.OwnerIndex());
+        obj["producing"] = OptInt(city.ProducingSlot());
+        obj["countdown"] = city.Countdown();
+        if (city.IsVectored()) obj["vectorTo"] = EncodeVectorTarget(city.VectorDestination());
+        if (city.IsRazed()) obj["razed"] = true;
+        obj["defence"] = city.Defence();
+        obj["income"] = city.Income();
+        obj["claim"] = OptInt(city.Claim().Value());
+        obj["razedBy"] = OptInt(city.RazedBy().Value());
+        if (city.AttackedMask()) obj["attacked"] = city.AttackedMask();
         Json slots = Json::array();
-        for (const auto& slot : city.slots) slots.push_back(SlotJson(slot));
+        for (const auto& slot : city.Slots()) slots.push_back(SlotJson(slot));
         obj["slots"] = std::move(slots);
         cities.push_back(std::move(obj));
     }
@@ -677,28 +701,30 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
         for (const auto& saved : cities_json) {
             City* city = game.map->City(IntField(saved, "index", -1));
             if (!city) continue;
-            city->owner_index = OptField(saved, "ownerIndex");
-            city->producing = OptField(saved, "producing");
-            city->countdown = IntField(saved, "countdown");
-            city->vector_to = HasField(saved, "vectorTo") ? IntField(saved, "vectorTo") : kNone;
-            city->razed = BoolField(saved, "razed");
-            city->defence = IntField(saved, "defence");
-            city->income = IntField(saved, "income");
-            city->slots.clear();
+            city->SetRazed(BoolField(saved, "razed"));
+            city->SetOwner(SideId(OptField(saved, "ownerIndex")));
+            City::SlotList loaded_slots;
             const Json& slots_json = Field(saved, "slots");
             if (slots_json.is_array()) {
-                for (const auto& slot : slots_json) city->slots.push_back(ReadSlot(slot));
+                for (const auto& slot : slots_json) loaded_slots.push_back(ReadSlot(slot));
             }
-            const Json& claim_val = Field(saved, "claim");
-            if (!claim_val.is_null() && claim_val.is_number()) {
-                city->claim = claim_val.get<int>();
+            city->ReplaceSlots(std::move(loaded_slots));
+            city->SetProducingSlot(OptField(saved, "producing"));
+            city->SetCountdown(IntField(saved, "countdown"));
+            city->SetVectorDestination(HasField(saved, "vectorTo")
+                                               ? DecodeVectorTarget(Field(saved, "vectorTo"))
+                                               : VectorTarget{});
+            city->SetDefence(IntField(saved, "defence"));
+            city->SetIncome(IntField(saved, "income"));
+            if (HasField(saved, "claim")) {
+                int raw_claim = OptField(saved, "claim");
+                city->SetClaim((raw_claim >= 0 && raw_claim < 8) ? SideId(raw_claim)
+                                                                 : SideId::None());
             }
-            city->razed_by = OptField(saved, "razedBy");
-            city->attacked = IntField(saved, "attacked");
+            city->SetRazedBy(SideId(OptField(saved, "razedBy")));
+            city->SetAttackedMask(IntField(saved, "attacked"));
             std::string saved_name = StrField(saved, "name");
-            if (!saved_name.empty()) city->name = std::move(saved_name);
-            // Razed cities belong to nobody; older saves could leave an owner set.
-            if (city->razed) city->owner_index = kNone;
+            if (!saved_name.empty()) city->Rename(std::move(saved_name));
         }
     }
     scn::RefreshCityTiles(*game.map);
@@ -814,50 +840,52 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     if (armies_json.is_array()) {
         for (const auto& saved : armies_json) {
             Army army;
-            army.x = OptField(saved, "x");
-            army.y = OptField(saved, "y");
-            army.owner = OptField(saved, "owner");
-            army.type = IntField(saved, "type");
-            army.name = StrField(saved, "name");
-            army.female = BoolField(saved, "female");
-            army.medals = IntField(saved, "medals");
-            army.strength = IntField(saved, "strength");
-            army.moves = IntField(saved, "moves");
-            army.max_moves = IntField(saved, "maxMoves");
-            army.upkeep = IntField(saved, "upkeep");
-            army.home_city = OptField(saved, "homeCity");
-            army.at_sea = BoolField(saved, "atSea");
-            army.group = IntField(saved, "group");
+            army.PlaceAt(TilePos(OptField(saved, "x"), OptField(saved, "y")));
+            army.SetOwner(SideId(OptField(saved, "owner")));
+            army.SetType(ArmyTypeId(IntField(saved, "type")));
+            army.SetName(StrField(saved, "name"));
+            army.SetFemale(BoolField(saved, "female"));
+            army.SetMedals(IntField(saved, "medals"));
+            army.SetStrength(IntField(saved, "strength"));
+            army.SetMoves(IntField(saved, "moves"));
+            army.SetMaxMoves(IntField(saved, "maxMoves"));
+            army.SetUpkeep(IntField(saved, "upkeep"));
+            army.SetHomeCity(CityId(OptField(saved, "homeCity")));
+            army.SetAtSea(BoolField(saved, "atSea"));
+            army.SetGroup(IntField(saved, "group"));
             const Json& target_json = Field(saved, "target");
             if (target_json.is_array() && target_json.size() >= 2) {
-                army.target = std::make_pair(IntOf(target_json[0]), IntOf(target_json[1]));
+                army.SetTarget(TilePos(IntOf(target_json[0]), IntOf(target_json[1])));
             }
-            army.fortified = BoolField(saved, "fortified");
-            army.level = IntField(saved, "level");
-            army.experience = IntField(saved, "experience");
-            army.title = StrField(saved, "title");
+            army.SetFortified(BoolField(saved, "fortified"));
+            army.SetLevel(IntField(saved, "level"));
+            army.SetExperience(IntField(saved, "experience"));
+            army.SetTitle(StrField(saved, "title"));
             const Json& carried = Field(saved, "items");
             if (carried.is_array()) {
                 for (const auto& idx : carried) {
                     auto found_it = item_by_index.find(IntOf(idx, -1));
-                    if (found_it != item_by_index.end()) army.items.push_back(found_it->second);
+                    if (found_it != item_by_index.end()) army.AddItem(found_it->second);
                 }
             }
             const Json& blessings = Field(saved, "blessings");
             if (blessings.is_array()) {
-                for (const auto& temple_id : blessings) army.blessings.insert(IntOf(temple_id));
+                for (const auto& temple_id : blessings) army.AddBlessing(IntOf(temple_id));
             }
+            bool is_returning = BoolField(saved, "returning");
             const Json& transit_json = Field(saved, "transit");
             if (transit_json.is_object()) {
-                army.transit =
-                        Transit{IntField(transit_json, "turns"), IntField(transit_json, "dest")};
+                army.SendIntoTransit(Transit{IntField(transit_json, "turns"),
+                                             DecodeVectorTarget(Field(transit_json, "dest"))},
+                                     is_returning);
+            } else {
+                army.SetReturning(is_returning);
             }
-            army.returning = BoolField(saved, "returning");
             // Keep the army table in slot order; older saves without slot numbers
             // preserve their array order.
             const Json& slot_val = Field(saved, "slot");
-            army.slot =
-                    slot_val.is_number() ? slot_val.get<int>() : static_cast<int>(armies.size());
+            army.SetSlot(slot_val.is_number() ? slot_val.get<int>()
+                                              : static_cast<int>(armies.size()));
             armies.push_back(game.Make(army));
         }
     }
@@ -867,38 +895,39 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
         for (const auto& saved : saved_sides) {
             Side* side = game.map->Side(IntField(saved, "index", -1));
             if (!side) continue;
-            side->gold = IntField(saved, "gold");
-            side->alive = BoolField(saved, "alive");
-            side->computer = BoolField(saved, "computer");
-            side->level = IntField(saved, "level");
-            side->enhanced = BoolField(saved, "enhanced");
-            side->diplo_score = IntField(saved, "diploScore");
-            side->observe = BoolField(saved, "observe");
+            side->SetGold(IntField(saved, "gold"));
+            side->SetAlive(BoolField(saved, "alive"));
+            side->SetComputerControlled(BoolField(saved, "computer"));
+            side->SetLevel(IntField(saved, "level"));
+            side->SetEnhanced(BoolField(saved, "enhanced"));
+            side->SetDiploScore(IntField(saved, "diploScore"));
+            side->SetObserved(BoolField(saved, "observe"));
             const Json& cap_now = Field(saved, "capNow");
             if (cap_now.is_object()) {
-                side->cap_now_x = IntField(cap_now, "x");
-                side->cap_now_y = IntField(cap_now, "y");
+                side->SetCurrentCapitalPos(TilePos(IntField(cap_now, "x"), IntField(cap_now, "y")));
+            } else {
+                side->ClearCurrentCapitalPos();
             }
-            side->production_due = BoolField(saved, "productionDue");
-            side->income = IntField(saved, "income");
-            side->upkeep_total = IntField(saved, "upkeepTotal");
-            side->ai_solidarity = IntField(saved, "aiSolidarity");
-            side->card = IntField(saved, "card");
+            side->SetProductionDue(BoolField(saved, "productionDue"));
+            side->SetIncome(IntField(saved, "income"));
+            side->SetUpkeepTotal(IntField(saved, "upkeepTotal"));
+            side->SetAiSolidarity(IntField(saved, "aiSolidarity"));
+            side->SetCard(IntField(saved, "card"));
             bool is_classic =
                     HasField(saved, "classicAi") ? BoolField(saved, "classicAi", true) : true;
-            side->computer_player = player_factory
+            side->SetComputerPlayer(player_factory
                                             ? player_factory(is_classic, game, *side)
-                                            : CreateDefaultComputerPlayer(is_classic, game, *side);
+                                            : CreateDefaultComputerPlayer(is_classic, game, *side));
             const Json& advisor_json = Field(saved, "advisor");
-            side->advisor.dir = IntField(advisor_json, "dir");
-            side->advisor.mark = IntField(advisor_json, "mark");
+            side->SetAdvisorState(
+                    Advisor{IntField(advisor_json, "dir"), IntField(advisor_json, "mark")});
             const Json& cp_json = HasField(saved, "computerPlayer") ? Field(saved, "computerPlayer")
                                                                     : Field(saved, "ai");
-            if (side->computer_player && cp_json.is_object()) {
-                absl::Status load_status = side->computer_player->LoadState(cp_json, game);
+            if (side->ComputerPlayer() && cp_json.is_object()) {
+                absl::Status load_status = side->ComputerPlayer()->LoadState(cp_json, game);
                 if (!load_status.ok()) return load_status;
             }
-            side->quest.reset();
+            side->ClearQuest();
             const Json& quest_json = Field(saved, "quest");
             if (quest_json.is_object()) {
                 int quest_type = IntField(quest_json, "type");
@@ -908,7 +937,7 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
                 Army* hero_ptr = hero_idx >= 0 && hero_idx < static_cast<int>(armies.size())
                                          ? armies[static_cast<size_t>(hero_idx)]
                                          : nullptr;
-                ArmyId hero_id = hero_ptr ? hero_ptr->id : ArmyId::None();
+                ArmyId hero_id = hero_ptr ? hero_ptr->Id() : ArmyId::None();
                 std::string target_kind = StrField(quest_json, "targetKind");
                 int ref = IntField(quest_json, "target", -1);
                 Quest::Target target = std::monostate{};
@@ -922,11 +951,11 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
                     target = ArmyTypeId(ref);
                 } else if (target_kind == "army" && ref >= 0 &&
                            ref < static_cast<int>(armies.size())) {
-                    target = armies[static_cast<size_t>(ref)]->id;
+                    target = armies[static_cast<size_t>(ref)]->Id();
                 }
                 auto quest =
                         std::make_shared<Quest>(quest_type, hero_id, target, quest_req, quest_done);
-                if (hero_id.IsValid() && quest->HasTarget()) side->quest = quest;
+                if (hero_id.IsValid() && quest->HasTarget()) side->SetQuest(quest);
             }
         }
     }
@@ -936,21 +965,20 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     std::set<int> fliers;
     std::set<int> walkers;
     for (Army* army : game.armies) {
-        if (army->x != kNone) {
-            int tile_key = army->y * game.map->width + army->x;
-            if (game.types.ById(army->type)->flies)
+        if (army->X() != kNone) {
+            int tile_key = army->Y() * game.map->width + army->X();
+            if (game.types.ById(army->Type())->flies)
                 fliers.insert(tile_key);
-            else if (army->type != armytype::kHero)
+            else if (!army->Hero())
                 walkers.insert(tile_key);
         }
     }
     for (Army* army : game.armies) {
-        if (army->at_sea && army->x != kNone) {
-            int tile_key = army->y * game.map->width + army->x;
-            if (game.types.ById(army->type)->flies ||
-                (army->type == armytype::kHero && fliers.count(tile_key) &&
-                 !walkers.count(tile_key))) {
-                army->at_sea = false;
+        if (army->IsAtSea() && army->X() != kNone) {
+            int tile_key = army->Y() * game.map->width + army->X();
+            if (game.types.ById(army->Type())->flies ||
+                (army->Hero() && fliers.count(tile_key) && !walkers.count(tile_key))) {
+                army->ComeAshore();
             }
         }
     }
@@ -963,7 +991,7 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     if (order_at.is_number()) {
         game.turn_schedule.SetCursor(order_at.get<int>());
     } else {
-        int cur_side = game.side ? game.side->index : 0;
+        int cur_side = game.side ? game.side->Index() : 0;
         game.turn_schedule.SyncCursorToSide(SideId(cur_side));
     }
     move::Invalidate(game);

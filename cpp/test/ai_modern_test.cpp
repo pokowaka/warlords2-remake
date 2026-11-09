@@ -57,7 +57,7 @@ TEST(ModernAiTest, PersonalityProfilesFogPathblockingAndAlliedDiplomacy) {
     {
         auto game = SetupGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
         Side* side0 = game->map->Side(0);
-        side0->computer = true;
+        side0->SetComputerControlled(true);
         ai::SetSideClassicAi(*game, *side0, false);
         int unseen_x = kNone;
         int unseen_y = kNone;
@@ -83,8 +83,8 @@ TEST(ModernAiTest, PersonalityProfilesFogPathblockingAndAlliedDiplomacy) {
         EXPECT_TRUE(game::Seen(*game, 1, 50, 50));
         EXPECT_FALSE(game::Seen(*game, 0, 50, 50));
 
-        int gold0_before = game->map->sides[0].gold;
-        int gold1_before = game->map->sides[1].gold;
+        int gold0_before = game->map->sides[0].Gold();
+        int gold1_before = game->map->sides[1].Gold();
         diplomacy::Propose(*game, 0, 1, diplomacy::kPeace);
         diplomacy::ProposeAlliance(*game, 0, 1, true);
         diplomacy::SetGoldOffer(*game, 0, 1, 50);
@@ -95,8 +95,8 @@ TEST(ModernAiTest, PersonalityProfilesFogPathblockingAndAlliedDiplomacy) {
 
         EXPECT_TRUE(diplomacy::IsAllied(*game, 0, 1));
         EXPECT_EQ(diplomacy::TruceTurns(*game, 0, 1), 15);
-        EXPECT_EQ(game->map->sides[0].gold, gold0_before - 50);
-        EXPECT_EQ(game->map->sides[1].gold, gold1_before + 50);
+        EXPECT_EQ(game->map->sides[0].Gold(), gold0_before - 50);
+        EXPECT_EQ(game->map->sides[1].Gold(), gold1_before + 50);
         EXPECT_EQ(diplomacy::State(*game, 1, 2), diplomacy::kWar);
         EXPECT_TRUE(game::Seen(*game, 0, 50, 50));
 
@@ -109,7 +109,7 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
     {
         auto game = SetupGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
         Side& side0 = game->map->sides[0];
-        side0.computer = true;
+        side0.SetComputerControlled(true);
         ai::SetSideClassicAi(*game, side0, false);
         ai::belief::Update(*game, side0);
         const SideBelief& belief = ai::belief::Ensure(side0);
@@ -120,8 +120,8 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
         auto my_armies = game::SideArmies(*game, side0);
         if (!my_armies.empty() && !belief.visible_cities.empty()) {
             auto est = ai::belief::EstimateCombat(*game, side0, {my_armies[0]},
-                                                  belief.visible_cities[0]->x,
-                                                  belief.visible_cities[0]->y);
+                                                  belief.visible_cities[0]->X(),
+                                                  belief.visible_cities[0]->Y());
             EXPECT_TRUE(est.win_prob >= 0.0F && est.win_prob <= 1.0F);
         }
         EXPECT_EQ(game->rng.State(), rng_before);
@@ -155,7 +155,7 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
         }
         auto game = SetupGame("TUTORIA", opts);
         for (auto& side : game->map->sides) {
-            if (side.in_use) ai::SetSideClassicAi(*game, side, false);
+            if (side.InUse()) ai::SetSideClassicAi(*game, side, false);
         }
         Side* cur = game::Begin(*game);
         int turns_played = 0;
@@ -165,9 +165,9 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
             ++turns_played;
             std::map<int, int> per_tile;
             for (const Army* army : game->armies) {
-                if (army->x != kNone && !army->transit) {
-                    worst_stack =
-                            std::max(worst_stack, ++per_tile[army->y * game->map->width + army->x]);
+                if (army->X() != kNone && !army->InTransit()) {
+                    worst_stack = std::max(worst_stack,
+                                           ++per_tile[army->Y() * game->map->width + army->X()]);
                 }
             }
             cur = game::EndTurn(*game);
@@ -188,36 +188,37 @@ TEST(ModernAiTest, PartialVisibilityFrontiersGradientsPotentialAndSampling) {
             "ERYTHEA", SeedWith(7, {{"hiddenMap", 1}, {"viewEnemies", 0}, {"neutralCities", 2}}));
     Game& game = *game_ptr;
     Side& side7 = game.map->sides[7];
-    side7.computer = true;
+    side7.SetComputerControlled(true);
     ai::SetSideClassicAi(game, side7, false);
 
     City* target_neutral = nullptr;
     for (auto& city : game.map->cities) {
-        if (city.owner_index == kNone && !city.razed &&
-            !game::Seen(game, 7, city.x + 1, city.y + 1)) {
+        if (city.IsNeutral() && !city.IsRazed() &&
+            !game::Seen(game, 7, city.X() + 1, city.Y() + 1)) {
             target_neutral = &city;
             break;
         }
     }
     ASSERT_NE(target_neutral, nullptr);
-    for (Army* army : game::ArmiesAt(game, target_neutral->x, target_neutral->y)) {
+    for (Army* army : game::ArmiesAt(game, target_neutral->X(), target_neutral->Y())) {
         game.armies.Relocate(army, TilePos());
     }
-    game.explored.MarkExplored(SideId(7), game.map->width, game.map->height, target_neutral->x,
-                               target_neutral->y);
-    EXPECT_TRUE(game::Seen(game, 7, target_neutral->x, target_neutral->y));
-    EXPECT_FALSE(game::Seen(game, 7, target_neutral->x + 1, target_neutral->y + 1));
+    game.explored.MarkExplored(SideId(7), game.map->width, game.map->height, target_neutral->X(),
+                               target_neutral->Y());
+    EXPECT_TRUE(game::Seen(game, 7, target_neutral->X(), target_neutral->Y()));
+    EXPECT_FALSE(game::Seen(game, 7, target_neutral->X() + 1, target_neutral->Y() + 1));
     ai::belief::Update(game, side7);
     auto my_armies = game::SideArmies(game, side7);
     ASSERT_FALSE(my_armies.empty());
-    auto est = ai::belief::EstimateCombat(game, side7, {my_armies[0]}, target_neutral->x,
-                                          target_neutral->y);
+    auto est = ai::belief::EstimateCombat(game, side7, {my_armies[0]}, target_neutral->X(),
+                                          target_neutral->Y());
     EXPECT_EQ(est.estimated_defender_count, 0);
 
     const SideBelief& belief7 = ai::belief::Ensure(side7);
-    if (side7.capital != nullptr &&
-        side7.capital->index < static_cast<int>(belief7.city_nearest_enemy_dist.size())) {
-        EXPECT_GT(belief7.city_nearest_enemy_dist[side7.capital->index], 50.0F);
+    City* cap7 = side7.CapitalCity(*game.map);
+    if (cap7 != nullptr &&
+        cap7->Index() < static_cast<int>(belief7.city_nearest_enemy_dist.size())) {
+        EXPECT_GT(belief7.city_nearest_enemy_dist[cap7->Index()], 50.0F);
     }
 
     game.explored.ResetSide(SideId(7), game.map->width, game.map->height, false);
@@ -267,25 +268,25 @@ TEST(ModernAiTest, PartialVisibilityFrontiersGradientsPotentialAndSampling) {
 
     City* unseen_neutral = nullptr;
     for (auto& city : game.map->cities) {
-        if (city.owner_index == kNone && !ai::belief::IsCityVisible(game, 7, city)) {
+        if (city.IsNeutral() && !ai::belief::IsCityVisible(game, 7, city)) {
             unseen_neutral = &city;
             break;
         }
     }
     ASSERT_NE(unseen_neutral, nullptr);
     float phi_hidden = ai::ml::ComputeEmpireScore(game, 7);
-    game::Reveal(game, 7, unseen_neutral->x, unseen_neutral->y, false);
+    game::Reveal(game, 7, unseen_neutral->X(), unseen_neutral->Y(), false);
     float phi_revealed = ai::ml::ComputeEmpireScore(game, 7);
-    int prev_owner = unseen_neutral->owner_index;
-    unseen_neutral->owner_index = 7;
+    SideId prev_owner = unseen_neutral->Owner();
+    unseen_neutral->SetOwner(SideId(7));
     float phi_captured = ai::ml::ComputeEmpireScore(game, 7);
-    unseen_neutral->owner_index = prev_owner;
+    unseen_neutral->SetOwner(prev_owner);
     EXPECT_GT(phi_revealed - phi_hidden, 0.0F);
     EXPECT_GT(phi_captured - phi_revealed, 5.0F * (phi_revealed - phi_hidden));
 
-    side7.gold = 200;
+    side7.SetGold(200);
     for (Army* army : game::SideArmies(game, side7)) {
-        army->moves = army->max_moves;
+        army->SetMoves(army->MaxMoves());
     }
     ai::ml::RolloutSampler rec_sampler;
     ai::ml::TurnStepRecord rec_turn;
@@ -342,7 +343,8 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
         for (int i = 0; i < 8; ++i) human_opts.sides[i].computer = i > 0;
         auto human_game = SetupGame("ERYTHEA", human_opts);
         EXPECT_TRUE(game::HasActiveHuman(*human_game));
-        EXPECT_EQ(game::ViewerSide(*human_game, human_game->sides[0]), human_game->sides[0]->index);
+        EXPECT_EQ(game::ViewerSide(*human_game, human_game->sides[0]),
+                  human_game->sides[0]->Index());
         EXPECT_FALSE(
                 game::Seen(*human_game, game::ViewerSide(*human_game, human_game->sides[0]), 0, 0));
 
@@ -354,7 +356,7 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
         EXPECT_TRUE(game::Seen(*ai_game, game::ViewerSide(*ai_game, ai_game->sides[0]), 0, 0));
         EXPECT_EQ(game::FogCell(*ai_game, game::ViewerSide(*ai_game, ai_game->sides[0]), 0, 0),
                   kNone);
-        EXPECT_FALSE(game::Seen(*ai_game, ai_game->sides[0]->index, 0, 0));
+        EXPECT_FALSE(game::Seen(*ai_game, ai_game->sides[0]->Index(), 0, 0));
     }
 
     {
@@ -375,7 +377,7 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
         auto decoded_modern = *save::Decode(modern_json, kData);
         EXPECT_FALSE(decoded_modern->sides[0]->IsClassicAi());
 
-        for (Side* side : decoded_modern->sides) side->computer = true;
+        for (Side* side : decoded_modern->sides) side->SetComputerControlled(true);
         Side* cur = game::Begin(*decoded_modern);
         ASSERT_NE(cur, nullptr);
         int switched_turns = 0;
@@ -390,12 +392,13 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
             ++switched_turns;
             std::map<int, int> per_tile;
             for (const Army* army : decoded_modern->armies) {
-                if (army->x == kNone || army->transit) continue;
-                if (!decoded_modern->map->InBounds(army->x, army->y)) {
+                if (army->X() == kNone || army->InTransit()) continue;
+                if (!decoded_modern->map->InBounds(army->X(), army->Y())) {
                     positions_valid = false;
                 } else {
                     worst_tile = std::max(
-                            worst_tile, ++per_tile[army->y * decoded_modern->map->width + army->x]);
+                            worst_tile,
+                            ++per_tile[army->Y() * decoded_modern->map->width + army->X()]);
                 }
             }
             cur = game::EndTurn(*decoded_modern);
@@ -428,19 +431,19 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
         EXPECT_EQ(small_game->sides.size(), 2U);
         EXPECT_TRUE(small_game->map->cities.size() >= 2 && small_game->map->cities.size() < 45);
         for (const auto& city : small_game->map->cities) {
-            EXPECT_GE(city.x, small_game->map->active_x0);
-            EXPECT_LE(city.x + 1, small_game->map->active_x1);
-            EXPECT_GE(city.y, small_game->map->active_y0);
-            EXPECT_LE(city.y + 1, small_game->map->active_y1);
+            EXPECT_GE(city.X(), small_game->map->active_x0);
+            EXPECT_LE(city.X() + 1, small_game->map->active_x1);
+            EXPECT_GE(city.Y(), small_game->map->active_y0);
+            EXPECT_LE(city.Y() + 1, small_game->map->active_y1);
         }
         EXPECT_EQ(scn::TerrainAt(*small_game->map, 0, 0), movement::kWater);
-        EXPECT_TRUE(game::Seen(*small_game, small_game->sides[0]->index, 0, 0));
+        EXPECT_TRUE(game::Seen(*small_game, small_game->sides[0]->Index(), 0, 0));
 
         ai::SetSideClassicAi(*small_game, *small_game->sides[0], false);
         ai::SetSideClassicAi(*small_game, *small_game->sides[1], true);
         Side* cur = game::Begin(*small_game);
         while (cur != nullptr && !small_game->over && !small_game->won && small_game->turn <= 10) {
-            if (cur->alive) ai::PlayTurn(*small_game, *cur);
+            if (cur->IsAlive()) ai::PlayTurn(*small_game, *cur);
             cur = game::EndTurn(*small_game);
         }
         EXPECT_TRUE(small_game->turn > 5 || small_game->won || small_game->over);
@@ -583,10 +586,10 @@ TEST(ModernAiTest, RaiderAndFrozenComputerPlayerStrategiesExecutePolymorphically
 
     Side* cur = game::Begin(*game);
     while (cur != nullptr && !game->over && game->turn <= 3) {
-        cur->computer_player->PlayTurn(*game, *cur);
+        cur->ComputerPlayer()->PlayTurn(*game, *cur);
         cur = game::EndTurn(*game);
     }
-    EXPECT_FALSE(game->sides[1]->computer_player->Thoughts().empty());
+    EXPECT_FALSE(game->sides[1]->ComputerPlayer()->Thoughts().empty());
 }
 
 }  // namespace

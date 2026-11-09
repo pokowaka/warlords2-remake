@@ -225,7 +225,7 @@ std::vector<std::pair<int, int>> OpenCityAt(Game& game, std::vector<int>& grid, 
         bool port = move::IsPort(game, *city);
         for (int ox = 0; ox <= 1; ox++) {
             for (int oy = 0; oy <= 1; oy++) {
-                int x = city->x + ox, y = city->y + oy;
+                int x = city->X() + ox, y = city->Y() + oy;
                 if (x < width && y < height) {
                     int tile = y * width + x;
                     restore.emplace_back(tile, grid[tile]);
@@ -314,15 +314,15 @@ std::vector<int>& Pathfinder::GridFor(Game& game, int side_index) {
         }
     }
     for (const City& city : map.cities) {
-        bool mine = side_index != kNone && city.owner_index == side_index && !city.razed;
-        bool port = (mine || city.razed) && move::IsPort(game, city);
+        bool mine = side_index != kNone && city.OwnedBy(side_index) && !city.IsRazed();
+        bool port = (mine || city.IsRazed()) && move::IsPort(game, city);
         for (int dx = 0; dx <= 1; dx++) {
             for (int dy = 0; dy <= 1; dy++) {
-                int x = city.x + dx, y = city.y + dy;
+                int x = city.X() + dx, y = city.Y() + dy;
                 if (x < width && y < height) {
                     int tile = y * width + x;
                     int byte = grid[tile];
-                    if (city.razed) {
+                    if (city.IsRazed()) {
                         if (port) byte |= move::kCrossF | move::kWaterF;
                     } else {
                         byte |= move::kCityF;
@@ -388,7 +388,7 @@ std::optional<move::Path> Pathfinder::FindPath(Game& game, const move::Stack& st
     int width = game.map->width, height = game.map->height;
     if (dest_x < 0 || dest_y < 0 || dest_x >= width || dest_y >= height) return std::nullopt;
 
-    int side = stack.empty() ? kNone : stack[0]->owner;
+    int side = stack.empty() ? kNone : stack[0]->OwnerIndex();
     move::Mode movement = move::StackMode(game, stack);
     std::vector<int>& grid = GridFor(game, side);
     int flags = RouteFlags(movement.mode, movement.woods, movement.hills, movement.at_sea);
@@ -499,16 +499,16 @@ std::vector<int> Prepare(Game& game, const std::vector<int>& grid, int side_inde
                          int dest_x, int dest_y) {
     int width = game.map->width, height = game.map->height;
     Side* side = game.map->Side(side_index);
-    bool fog =
-            game.map->options.hidden_map != 0 && side && (!side->computer || !side->IsClassicAi());
+    bool fog = game.map->options.hidden_map != 0 && side &&
+               (!side->IsComputerControlled() || !side->IsClassicAi());
     City* dest_city = (dest_x >= 0 && dest_y >= 0 && dest_x < width && dest_y < height)
                               ? game.map->city_tile[dest_y * width + dest_x]
                               : nullptr;
     bool dest_city_seen = false;
-    if (dest_city && fog && side && side->computer && !side->IsClassicAi()) {
+    if (dest_city && fog && side && side->IsComputerControlled() && !side->IsClassicAi()) {
         for (int oy = 0; oy <= 1; oy++) {
             for (int ox = 0; ox <= 1; ox++) {
-                if (game::Seen(game, side_index, dest_city->x + ox, dest_city->y + oy))
+                if (game::Seen(game, side_index, dest_city->X() + ox, dest_city->Y() + oy))
                     dest_city_seen = true;
             }
         }

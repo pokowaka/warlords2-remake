@@ -35,7 +35,7 @@ static const int kPtrHot[12] = {0, 6, 8, 6, 8, 8, 8, 8, 0, 8, 8, 0};
 int PointerKind(int x, int y) {
     if (g_app.starting || g_app.over || g_app.banner || g_app.offer || g_app.assault ||
         g_app.victory || g_app.ai_run || g_app.open_menu >= 0 || kit::Top() || !g_app.player ||
-        g_app.player->computer) {
+        g_app.player->IsComputerControlled()) {
         return kArrow;
     }
     if (g_app.drag) return kHand;  // while it drags
@@ -45,7 +45,7 @@ int PointerKind(int x, int y) {
     if (!tile) return g_app.panel_rect.Contains(x, y) ? kHand : kArrow;
     auto [tile_x, tile_y] = *tile;
     w2::Game& game_state = *g_app.g;
-    int player_index = g_app.player->index;
+    int player_index = g_app.player->Index();
     if (tile_x < 0 || tile_y < 0 || tile_x >= game_state.map->width ||
         tile_y >= game_state.map->height)
         return kHand;
@@ -53,27 +53,27 @@ int PointerKind(int x, int y) {
     City* city = game::CityAt(game_state, tile_x, tile_y);
     bool armies = !here.empty();
     // the tile's owner nibble: whoever stands there, else the city's, else none
-    int owner = armies ? here[0]->owner : kNone;
-    if (owner == kNone) owner = city ? city->owner_index : kNone;
+    int owner = armies ? here[0]->OwnerIndex() : kNone;
+    if (owner == kNone) owner = city ? city->OwnerIndex() : kNone;
     if (owner == kNone) owner = w2::rules::kNeutral;
-    int terrain = city ? (city->razed ? move::kSite : move::kCity)
+    int terrain = city ? (city->IsRazed() ? move::kSite : move::kCity)
                        : w2::scn::TerrainAt(*game_state.map, tile_x, tile_y);
     const std::vector<Army*>* sel =
             g_app.selection && !g_app.selection->stack.empty() ? &g_app.selection->stack : nullptr;
     int dist = 0, mode = kNone, under = move::kPlain;
     bool at_sea = false;
     if (sel) {
-        int stack_x = (*sel)[0]->x, stack_y = (*sel)[0]->y;
-        if (city && !city->razed) {
-            int dx = std::max(0, std::max(city->x - stack_x, stack_x - (city->x + 1)));
-            int dy = std::max(0, std::max(city->y - stack_y, stack_y - (city->y + 1)));
+        int stack_x = (*sel)[0]->X(), stack_y = (*sel)[0]->Y();
+        if (city && !city->IsRazed()) {
+            int dx = std::max(0, std::max(city->X() - stack_x, stack_x - (city->X() + 1)));
+            int dy = std::max(0, std::max(city->Y() - stack_y, stack_y - (city->Y() + 1)));
             dist = std::max(dx, dy);
         } else {
             dist = std::max(std::abs(tile_x - stack_x), std::abs(tile_y - stack_y));
         }
         mode = move::ModeOf(game_state, *sel);
         under = w2::scn::TerrainAt(*game_state.map, stack_x, stack_y);
-        at_sea = (*sel)[0]->at_sea;
+        at_sea = (*sel)[0]->IsAtSea();
     }
     // any tile with a road on it costs 1, a mountain pass too
     bool road = w2::scn::RoadAt(*game_state.map, tile_x, tile_y) % 0x20 != 0;

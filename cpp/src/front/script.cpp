@@ -142,7 +142,7 @@ void StepScript() {
         } else if (cmd == "eval") {
             printf("turn=%d player=%s modals=%d banner=%d offer=%d ai=%d over=%d walk=%d "
                    "assault=%d status=%s\n",
-                   g_app.g ? g_app.g->turn : 0, g_app.player ? g_app.player->name.c_str() : "-",
+                   g_app.g ? g_app.g->turn : 0, g_app.player ? g_app.player->Name().c_str() : "-",
                    static_cast<int>(g_app.modals.size()), static_cast<bool>(g_app.banner),
                    static_cast<bool>(g_app.offer), static_cast<bool>(g_app.ai_run), g_app.over,
                    static_cast<bool>(g_app.walk), static_cast<bool>(g_app.assault),
@@ -151,11 +151,14 @@ void StepScript() {
                 printf("  options: milAdv=%d diplo=%d hidden=%d viewEn=%d\n",
                        g_app.g->map->options.military_advisor, g_app.g->map->options.diplomacy,
                        g_app.g->map->options.hidden_map, g_app.g->map->options.view_enemies);
-            if (g_app.g && g_app.player && g_app.player->capital)
-                printf("  cam=%.2f,%.2f zoom=%d map=%d,%d,%d,%d capital=%d,%d pointer=%d,%d\n",
-                       g_app.cx, g_app.cy, g_app.zoom, g_app.map_rect.x, g_app.map_rect.y,
-                       g_app.map_rect.w, g_app.map_rect.h, g_app.player->capital->x,
-                       g_app.player->capital->y, g_app.mouse_x, g_app.mouse_y);
+            if (g_app.g && g_app.g->map && g_app.player) {
+                if (const City* cap = g_app.player->CapitalCity(*g_app.g->map)) {
+                    printf("  cam=%.2f,%.2f zoom=%d map=%d,%d,%d,%d capital=%d,%d pointer=%d,%d\n",
+                           g_app.cx, g_app.cy, g_app.zoom, g_app.map_rect.x, g_app.map_rect.y,
+                           g_app.map_rect.w, g_app.map_rect.h, cap->X(), cap->Y(), g_app.mouse_x,
+                           g_app.mouse_y);
+                }
+            }
             fflush(stdout);
         } else if (cmd == "opt") {
             std::string opt_name;
@@ -194,11 +197,10 @@ void StepScript() {
             int tile_x, tile_y, owner, type;
             stream >> tile_x >> tile_y >> owner >> type;
             Army army;
-            army.x = tile_x;
-            army.y = tile_y;
-            army.owner = owner;
-            army.type = type;
-            army.moves = 10;
+            army.PlaceAt(w2::TilePos(tile_x, tile_y));
+            army.SetOwner(w2::SideId(owner));
+            army.SetType(w2::ArmyTypeId(type));
+            army.SetMoves(10);
             g_app.g->Add(army);
         } else if (cmd == "advise") {
             int x, y;
@@ -215,16 +217,16 @@ void StepScript() {
         } else if (cmd == "near" && g_app.g && g_app.selection) {
             std::vector<std::pair<int, City*>> found;
             for (auto& city : g_app.g->map->cities) {
-                if (city.owner_index != g_app.player->index && !city.razed)
-                    found.push_back({std::max(std::abs(city.x - g_app.selection->x),
-                                              std::abs(city.y - g_app.selection->y)),
+                if (city.OwnerIndex() != g_app.player->Index() && !city.IsRazed())
+                    found.push_back({std::max(std::abs(city.X() - g_app.selection->x),
+                                              std::abs(city.Y() - g_app.selection->y)),
                                      &city});
             }
             std::sort(found.begin(), found.end(),
                       [](auto& left, auto& right) { return left.first < right.first; });
             for (size_t i = 0; i < found.size() && i < 3; i++)
-                printf("  %s at %d,%d owner %d, %d away\n", found[i].second->name.c_str(),
-                       found[i].second->x, found[i].second->y, found[i].second->owner_index,
+                printf("  %s at %d,%d owner %d, %d away\n", found[i].second->Name().c_str(),
+                       found[i].second->X(), found[i].second->Y(), found[i].second->OwnerIndex(),
                        found[i].first);
             fflush(stdout);
         } else if (cmd == "greet") {

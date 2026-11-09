@@ -43,7 +43,7 @@ struct Spoils : kit::Modal {
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(kTitle, which), 320, 64);
         const Font& font = kit::GetFont(2);
-        kit::Centred(font, Format(kit::Text(kLine, which), city->name), 320, 115);
+        kit::Centred(font, Format(kit::Text(kLine, which), city->Name()), 320, 115);
         kit::Centred(font, Format(kit::Text(kGold, 0), gold), 320, 135);
         kit::Centred(
                 font,
@@ -58,7 +58,7 @@ struct Spoils : kit::Modal {
         for (int i = 0; i <= 2; i++) {
             int y = 250 + 30 * i;
             bool have = i < static_cast<int>(lost.size());
-            kit::Army(have ? lost[i].first : w2::kNone, g_app.player->index, 208, y, 1);
+            kit::Army(have ? lost[i].first : w2::kNone, g_app.player->Index(), 208, y, 1);
             if (have) {
                 gfx::SetColor(1, 1, 1);
                 const w2::ArmyType* type = g_app.g->types.ById(lost[i].first);

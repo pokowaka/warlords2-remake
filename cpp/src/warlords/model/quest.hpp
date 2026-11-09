@@ -11,12 +11,12 @@
 
 namespace w2 {
 
-struct Army;
+class Army;
 struct ArmyType;
-struct City;
+class City;
 struct Game;
 struct Item;
-struct Side;
+class Side;
 
 /**
  * @brief Active hero quest assigned at a temple, tracking the questing `ArmyId`, typed `Target`,

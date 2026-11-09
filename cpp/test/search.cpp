@@ -114,12 +114,13 @@ std::unique_ptr<Game> CopyGame(const Game& game, const std::string& data_dir) {
 void RestrictToView(Game& game, int my_side) {
     std::array<std::vector<Army*>, 8> unseen;
     for (Army* army : game.armies) {
-        if (army->owner < 0 || army->owner >= 8 || army->owner == my_side || army->disbanded)
+        int owner_index = army->OwnerIndex();
+        if (owner_index < 0 || owner_index >= 8 || owner_index == my_side || army->IsDisbanded())
             continue;
-        bool hidden = army->transit || army->x == kNone;
-        if (!hidden && !game::CityAt(game, army->x, army->y))
-            hidden = !ai::belief::IsTileVisible(game, my_side, army->x, army->y);
-        if (hidden) unseen[army->owner].push_back(army);
+        bool hidden = army->InTransit() || army->X() == kNone;
+        if (!hidden && !game::CityAt(game, army->X(), army->Y()))
+            hidden = !ai::belief::IsTileVisible(game, my_side, army->X(), army->Y());
+        if (hidden) unseen[owner_index].push_back(army);
     }
     for (int side_index = 0; side_index < 8; side_index++) {
         if (!unseen[side_index].empty())
@@ -167,7 +168,8 @@ float Rollout(Game& game, int side_index, int rounds, const ml::PolicyNetwork& p
     Side* current = game::EndTurn(game);
     int safety = 0;
     while (current && !game.over && !game.won && game.turn < stop_turn && safety++ < rounds * 12) {
-        if (current->computer && current->alive) PlayOwnTurn(game, *current, policy);
+        if (current->IsComputerControlled() && current->IsAlive())
+            PlayOwnTurn(game, *current, policy);
         current = game::EndTurn(game);
     }
     return ml::ComputeEmpireScore(game, side_index);
@@ -265,7 +267,7 @@ std::array<bool, 8> AssignSeats(Game& game, int swap) {
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
         Side& side = game.map->sides[side_index];
-        if (!side.in_use) continue;
+        if (!side.InUse()) continue;
         modern[side_index] = ((seat + swap) % 2 == 0);
         ai::SetSideClassicAi(game, side, !modern[side_index]);
         seat++;
@@ -277,8 +279,9 @@ std::array<bool, 8> AssignSeats(Game& game, int swap) {
 double ModernShare(const Game& game, const std::array<bool, 8>& modern) {
     int modern_cities = 0, classic_cities = 0;
     for (const auto& city : game.map->cities) {
-        if (city.razed || city.owner_index < 0 || city.owner_index >= 8) continue;
-        (modern[city.owner_index] ? modern_cities : classic_cities)++;
+        int owner_index = city.OwnerIndex();
+        if (city.IsRazed() || owner_index < 0 || owner_index >= 8) continue;
+        (modern[owner_index] ? modern_cities : classic_cities)++;
     }
     return (modern_cities + classic_cities) > 0
                    ? static_cast<double>(modern_cities) / (modern_cities + classic_cities)
@@ -362,9 +365,10 @@ int main(int argc, char** argv) {
                 int safety = 0;
                 while (current && !game->over && !game->won && game->turn <= turns &&
                        safety++ < turns * 12) {
-                    const int side_index = current->index;
+                    const int side_index = current->Index();
                     const bool search_here =
-                            current->computer && current->alive && modern[side_index] &&
+                            current->IsComputerControlled() && current->IsAlive() &&
+                            modern[side_index] &&
                             (play ||
                              (!play && (game->turn == 10 || game->turn == 20 || game->turn == 30)));
                     if (search_here) {
@@ -405,7 +409,7 @@ int main(int argc, char** argv) {
                             PlayCandidate(*game, side_index, candidates[best].k,
                                           candidates[best].base_seed, settings);  // real dice
                         }
-                    } else if (current->computer && current->alive) {
+                    } else if (current->IsComputerControlled() && current->IsAlive()) {
                         PlayOwnTurn(*game, *current, policy);
                     }
                     current = game::EndTurn(*game);

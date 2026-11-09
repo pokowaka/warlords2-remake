@@ -200,19 +200,18 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromSource(const IScenarioSource& sourc
     for (int i = 0; i < 8; i++) {
         SideRecordView rec(scn_bytes, i);
         Side& side = map->sides[i];
-        side.index = i;
-        side.name = rec.Name();
-        side.colour = rec.Colour();
-        side.edge = rec.Edge();
-        side.gold = rec.Gold();
-        side.cap_x = rec.CapX();
-        side.cap_y = rec.CapY();
-        side.computer = rec.Computer();
-        side.level = rec.Level();
-        side.enhanced = rec.Enhanced();
-        side.observe = rec.Observe();
-        side.diplo_score = rec.DiploScore();
-        side.card = rec.Card();
+        side.SetId(SideId(i));
+        side.SetName(rec.Name());
+        side.SetColour(rec.Colour());
+        side.SetEdge(rec.Edge());
+        side.SetGold(rec.Gold());
+        side.SetOriginCapitalPos(TilePos(rec.CapX(), rec.CapY()));
+        side.SetComputerControlled(rec.Computer());
+        side.SetLevel(rec.Level());
+        side.SetEnhanced(rec.Enhanced());
+        side.SetObserved(rec.Observe());
+        side.SetDiploScore(rec.DiploScore());
+        side.SetCard(rec.Card());
     }
 
     int n_cities = U16(scn_bytes, kCitiesCount);
@@ -222,35 +221,35 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromSource(const IScenarioSource& sourc
     for (int i = 0; i < n_cities; i++) {
         CityRecordView rec(scn_bytes, i);
         City& city = map->cities[i];
-        city.index = i;
-        city.x = rec.X();
-        city.y = rec.Y();
-        city.name = rec.Name();
-        city.income = rec.Income();
+        city.SetId(CityId(i));
+        city.SetPosition(TilePos(rec.X(), rec.Y()));
+        city.Rename(rec.Name());
+        city.SetIncome(rec.Income());
         for (int slot = 0; slot < 4; slot++) {
             int army_type = rec.SlotType(slot);
             // the game removes Navy (type 5) from every city at start
-            if (army_type != kEmptySlot && army_type != 5) city.produces.push_back(army_type);
+            if (army_type != kEmptySlot && army_type != 5) city.AddProducedType(army_type);
         }
-        city.defence = city.produces.size() >= 3 ? 2 : 1;
-        map->city_at[city.y * kMapW + city.x] = &city;
+        city.SetDefence(city.Produces().size() >= 3 ? 2 : 1);
+        map->city_at[city.Y() * kMapW + city.X()] = &city;
     }
     // A city covers a 2x2 footprint; cityAt keys the top-left, cityTile every tile.
     for (auto& city : map->cities) {
         for (int dx = 0; dx <= 1; dx++) {
             for (int dy = 0; dy <= 1; dy++) {
-                int tile = (city.y + dy) * kMapW + (city.x + dx);
+                int tile = (city.Y() + dy) * kMapW + (city.X() + dx);
                 if (tile >= 0 && tile < kMapW * kMapH) map->city_tile[tile] = &city;
             }
         }
     }
     // Ownership is derived: at scenario start a side owns only its capital.
     for (auto& side : map->sides) {
-        int tile = side.cap_y * kMapW + side.cap_x;
+        TilePos cap_pos = side.OriginCapitalPos();
+        int tile = cap_pos.y * kMapW + cap_pos.x;
         City* capital = tile >= 0 && tile < kMapW * kMapH ? map->city_at[tile] : nullptr;
-        side.in_use = capital != nullptr;
-        side.capital = capital;
-        if (capital) capital->owner = &side;
+        side.SetInUse(capital != nullptr);
+        side.SetCapitalCityId(capital ? capital->Id() : CityId::None());
+        if (capital) capital->SetOwner(side.Id());
     }
 
     // fight order: 29 bytes per player, row 8 for neutral
@@ -344,8 +343,8 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromFiles(const std::filesystem::path& 
 }
 
 int CityTileBase(const City& city) {
-    if (city.razed) return 0xa0 + 2 * (city.razed_by == kNone ? 0 : city.razed_by);
-    int owner = city.owner_index;
+    if (city.IsRazed()) return 0xa0 + 2 * (city.RazedBy().IsValid() ? city.RazedBy().Value() : 0);
+    int owner = city.OwnerIndex();
     if (owner == kNone) return 96;  // the original passes owner -1
     if (owner < 6) return 0x62 + 2 * owner;
     return 0x80 + 2 * (owner - 6);
@@ -353,7 +352,7 @@ int CityTileBase(const City& city) {
 
 void SetCityTiles(Map& map, const City& city) {
     int base_tile = CityTileBase(city);
-    int top_left = city.y * kMapW + city.x;
+    int top_left = city.Y() * kMapW + city.X();
     map.tiles[top_left] = base_tile;
     map.tiles[top_left + 1] = base_tile + 1;
     map.tiles[top_left + kMapW] = base_tile + 16;

@@ -489,22 +489,22 @@ bool SelectBinary(float logit, RolloutSampler* sampler, float* out_log_prob) {
 }
 
 float ComputeEmpireScore(const Game& game, int side_index) {
-    if (side_index < 0 || side_index >= 8 || !game.map->sides[side_index].alive) {
+    if (side_index < 0 || side_index >= 8 || !game.map->sides[side_index].IsAlive()) {
         return 0.0F;
     }
     int total_standing = 0, total_income = 0;
     int my_cities = 0, my_income = 0;
     int revealed_cities = 0;
     for (const auto& city : game.map->cities) {
-        if (city.razed) continue;
+        if (city.IsRazed()) continue;
         total_standing++;
-        total_income += std::max(1, city.income);
+        total_income += std::max(1, city.Income());
         if (ai::belief::IsCityVisible(game, side_index, city)) {
             revealed_cities++;
         }
-        if (city.owner_index == side_index) {
+        if (city.OwnerIndex() == side_index) {
             my_cities++;
-            my_income += std::max(1, city.income);
+            my_income += std::max(1, city.Income());
         }
     }
     total_standing = std::max(1, total_standing);
@@ -535,12 +535,12 @@ float ComputeEmpireScore(const Game& game, int side_index) {
     // vectored units in transit) as a zero-sum share of all sides' forces.
     float my_army_str = 0.0F, all_army_str = 0.0F;
     for (const Army* army : game.armies) {
-        if (army->disbanded || (army->x == kNone && !army->transit) || army->owner < 0 ||
-            army->owner >= 8)
+        if (army->IsDisbanded() || (army->X() == kNone && !army->InTransit()) ||
+            army->OwnerIndex() < 0 || army->OwnerIndex() >= 8)
             continue;
-        float power = static_cast<float>(army->strength * army->strength);
+        float power = static_cast<float>(army->Strength() * army->Strength());
         all_army_str += power;
-        if (army->owner == side_index) my_army_str += power;
+        if (army->OwnerIndex() == side_index) my_army_str += power;
     }
     float army_share = all_army_str > 0.0F ? my_army_str / all_army_str : 0.0F;
 
@@ -562,23 +562,23 @@ PolicyNetwork& ActivePolicy() {
 
 ContextVec BuildContext(const Game& game, const Side& side) {
     ContextVec context{};
-    int our_side = side.index;
+    int our_side = side.Index();
     const SideBelief& belief = ai::belief::Ensure(const_cast<Side&>(side));
 
     int my_cities = 0, total_vis_cities = 0, max_cities = 0;
     int vis_neutral_cities = 0, vis_enemy_cities = 0;
     std::array<int, 8> side_cities{};
     for (City* city : belief.visible_cities) {
-        if (city->razed) continue;
+        if (city->IsRazed()) continue;
         total_vis_cities++;
-        if (city->owner_index == kNone) {
+        if (city->IsNeutral()) {
             vis_neutral_cities++;
-        } else if (city->owner_index >= 0 && city->owner_index < 8) {
-            side_cities[city->owner_index]++;
-            max_cities = std::max(max_cities, side_cities[city->owner_index]);
-            if (city->owner_index == our_side) {
+        } else if (city->OwnerIndex() >= 0 && city->OwnerIndex() < 8) {
+            side_cities[city->OwnerIndex()]++;
+            max_cities = std::max(max_cities, side_cities[city->OwnerIndex()]);
+            if (city->OwnerIndex() == our_side) {
                 my_cities++;
-            } else if (!diplomacy::IsAllied(game, our_side, city->owner_index)) {
+            } else if (!diplomacy::IsAllied(game, our_side, city->OwnerIndex())) {
                 vis_enemy_cities++;
             }
         }
@@ -586,9 +586,10 @@ ContextVec BuildContext(const Game& game, const Side& side) {
 
     int my_armies = 0, my_heroes = 0, my_strength = 0;
     for (Army* army : game.armies) {
-        if (army->owner == our_side && !army->disbanded && (army->x != kNone || army->transit)) {
+        if (army->OwnerIndex() == our_side && !army->IsDisbanded() &&
+            (army->X() != kNone || army->InTransit())) {
             my_armies++;
-            my_strength += army->strength;
+            my_strength += army->Strength();
             if (army->Hero()) my_heroes++;
         }
     }
@@ -597,29 +598,30 @@ ContextVec BuildContext(const Game& game, const Side& side) {
     // hostile stack could reach within a turn (belief threat map: fair information)
     std::vector<char> garrisoned(game.map->cities.size(), 0);
     for (Army* army : game.armies) {
-        if (army->owner != our_side || army->disbanded || army->transit || army->x == kNone)
+        if (army->OwnerIndex() != our_side || army->IsDisbanded() || army->InTransit() ||
+            army->X() == kNone)
             continue;
-        if (City* city = game::CityAt(game, army->x, army->y)) {
-            if (city->index >= 0 && city->index < static_cast<int>(garrisoned.size()))
-                garrisoned[city->index] = 1;
+        if (City* city = game::CityAt(game, army->X(), army->Y())) {
+            if (city->Index() >= 0 && city->Index() < static_cast<int>(garrisoned.size()))
+                garrisoned[city->Index()] = 1;
         }
     }
     int own_cities = 0, empty_cities = 0, exposed_cities = 0;
     for (const auto& city : game.map->cities) {
-        if (city.razed || city.owner_index != our_side) continue;
+        if (city.IsRazed() || city.OwnerIndex() != our_side) continue;
         own_cities++;
-        if (city.index >= 0 && city.index < static_cast<int>(garrisoned.size()) &&
-            garrisoned[city.index])
+        if (city.Index() >= 0 && city.Index() < static_cast<int>(garrisoned.size()) &&
+            garrisoned[city.Index()])
             continue;
         empty_cities++;
-        if (city.index < static_cast<int>(belief.city_threat1_turn.size()) &&
-            belief.city_threat1_turn[city.index] > 0.0F)
+        if (city.Index() < static_cast<int>(belief.city_threat1_turn.size()) &&
+            belief.city_threat1_turn[city.Index()] > 0.0F)
             exposed_cities++;
     }
 
     int wars = 0, allies = 0, alive_rivals = 0;
     for (int rival = 0; rival < 8; rival++) {
-        if (rival != our_side && game.map->sides[rival].alive) {
+        if (rival != our_side && game.map->sides[rival].IsAlive()) {
             alive_rivals++;
             if (diplomacy::State(game, our_side, rival) == diplomacy::kWar) wars++;
             if (diplomacy::IsAllied(game, our_side, rival)) allies++;
@@ -628,9 +630,10 @@ ContextVec BuildContext(const Game& game, const Side& side) {
     float rival_denom = static_cast<float>(std::max(1, alive_rivals));
 
     float cap_threat = 0.0F;
-    if (side.capital && side.capital->owner_index == our_side &&
-        side.capital->index < static_cast<int>(belief.city_threat1_turn.size())) {
-        cap_threat = std::tanh(belief.city_threat1_turn[side.capital->index] / 20.0F);
+    const City* capital = side.CapitalCity(*game.map);
+    if (capital && capital->OwnerIndex() == our_side &&
+        capital->Index() < static_cast<int>(belief.city_threat1_turn.size())) {
+        cap_threat = std::tanh(belief.city_threat1_turn[capital->Index()] / 20.0F);
     }
 
     int income = game::Income(game, side);
@@ -639,7 +642,7 @@ ContextVec BuildContext(const Game& game, const Side& side) {
     context[0] = std::tanh(static_cast<float>(game.turn) / 30.0F) * 2.0F - 1.0F;
     context[1] = static_cast<float>(my_cities) / static_cast<float>(std::max(1, total_vis_cities));
     context[2] = std::tanh(static_cast<float>(my_armies) / 24.0F);
-    context[3] = std::tanh(static_cast<float>(side.gold) / 600.0F);
+    context[3] = std::tanh(static_cast<float>(side.Gold()) / 600.0F);
     context[4] = std::tanh(static_cast<float>(income - upkeep) / 40.0F);
     context[5] = std::tanh(static_cast<float>(vis_neutral_cities) / 6.0F);
     context[6] = std::tanh(static_cast<float>(vis_enemy_cities) / 6.0F);
@@ -648,10 +651,10 @@ ContextVec BuildContext(const Game& game, const Side& side) {
     context[9] = static_cast<float>(max_cities) / static_cast<float>(std::max(1, total_vis_cities));
     context[10] = belief.frontier_ratio;
     context[11] = cap_threat;
-    context[12] = (side.quest && side.quest->HasTarget()) ? 1.0F : 0.0F;
+    context[12] = (side.ActiveQuest() && side.ActiveQuest()->HasTarget()) ? 1.0F : 0.0F;
     context[13] = std::min(1.0F, static_cast<float>(my_heroes) / 3.0F);
     // v6 additions: non-saturating scales and empty-city exposure
-    context[14] = 0.5F * std::log1p(static_cast<float>(std::max(0, side.gold)) / 1000.0F);
+    context[14] = 0.5F * std::log1p(static_cast<float>(std::max(0, side.Gold())) / 1000.0F);
     context[15] = std::min(2.0F, static_cast<float>(game.turn) / 50.0F);
     context[16] = 0.5F * std::log1p(static_cast<float>(my_strength) / 50.0F);
     context[17] = own_cities > 0 ? static_cast<float>(empty_cities) / static_cast<float>(own_cities)
@@ -673,28 +676,28 @@ ContextVec BuildContext(const Game& game, const Side& side) {
 
 CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
     CriticVec features{};
-    const int our_side = side.index;
+    const int our_side = side.Index();
     std::array<int, 8> cities{}, income{};
     std::array<float, 8> power{};
     int standing = 0, neutral = 0, total_income = 0;
     for (const auto& city : game.map->cities) {
-        if (city.razed) continue;
+        if (city.IsRazed()) continue;
         standing++;
-        total_income += std::max(1, city.income);
-        if (city.owner_index == kNone)
+        total_income += std::max(1, city.Income());
+        if (city.IsNeutral())
             neutral++;
-        else if (city.owner_index >= 0 && city.owner_index < 8) {
-            cities[city.owner_index]++;
-            income[city.owner_index] += std::max(1, city.income);
+        else if (city.OwnerIndex() >= 0 && city.OwnerIndex() < 8) {
+            cities[city.OwnerIndex()]++;
+            income[city.OwnerIndex()] += std::max(1, city.Income());
         }
     }
     float all_power = 0.0F;
     for (const Army* army : game.armies) {
-        if (army->disbanded || (army->x == kNone && !army->transit) || army->owner < 0 ||
-            army->owner >= 8)
+        if (army->IsDisbanded() || (army->X() == kNone && !army->InTransit()) ||
+            army->OwnerIndex() < 0 || army->OwnerIndex() >= 8)
             continue;
-        float army_power = static_cast<float>(army->strength * army->strength);
-        power[army->owner] += army_power;
+        float army_power = static_cast<float>(army->Strength() * army->Strength());
+        power[army->OwnerIndex()] += army_power;
         all_power += army_power;
     }
     int alive = 0, in_use = 0, rivals = 0, classic_rivals = 0, richer_rivals = 0;
@@ -702,8 +705,8 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
     float max_rival_power = 0.0F;
     for (int side_idx = 0; side_idx < 8; side_idx++) {
         const Side& other = game.map->sides[side_idx];
-        if (other.in_use) in_use++;
-        if (!other.alive) continue;
+        if (other.InUse()) in_use++;
+        if (!other.IsAlive()) continue;
         alive++;
         if (side_idx == our_side) continue;
         rivals++;
@@ -717,17 +720,19 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
     constexpr int kThreatRadius = 6, kGuardRadius = 2;
     int my_cities = 0, threatened = 0;
     for (const auto& city : game.map->cities) {
-        if (city.razed || city.owner_index != our_side) continue;
+        if (city.IsRazed() || city.OwnerIndex() != our_side) continue;
         my_cities++;
         float hostile = 0.0F, guard = 0.0F;
         for (const Army* army : game.armies) {
-            if (army->disbanded || army->x == kNone || army->owner < 0 || army->owner >= 8)
+            if (army->IsDisbanded() || army->X() == kNone || army->OwnerIndex() < 0 ||
+                army->OwnerIndex() >= 8)
                 continue;
-            int dist = std::max(std::abs(army->x - city.x), std::abs(army->y - city.y));
-            if (army->owner == our_side) {
-                if (dist <= kGuardRadius) guard += static_cast<float>(army->strength);
-            } else if (dist <= kThreatRadius && !diplomacy::IsAllied(game, our_side, army->owner)) {
-                hostile += static_cast<float>(army->strength);
+            int dist = std::max(std::abs(army->X() - city.X()), std::abs(army->Y() - city.Y()));
+            if (army->OwnerIndex() == our_side) {
+                if (dist <= kGuardRadius) guard += static_cast<float>(army->Strength());
+            } else if (dist <= kThreatRadius &&
+                       !diplomacy::IsAllied(game, our_side, army->OwnerIndex())) {
+                hostile += static_cast<float>(army->Strength());
             }
         }
         if (hostile > guard) threatened++;

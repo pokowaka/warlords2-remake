@@ -10,7 +10,7 @@
 #include <vector>
 
 namespace w2 {
-struct Army;
+class Army;
 }
 struct SDL_Thread;
 struct SDL_mutex;

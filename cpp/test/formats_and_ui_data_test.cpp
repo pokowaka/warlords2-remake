@@ -120,9 +120,9 @@ class SlotsTest : public ::testing::Test {
         armies_.clear();
         for (int i = 1; i <= n; ++i) {
             Army army;
-            army.type = i;
-            army.moves = 10 + i;
-            army.group = 0;
+            army.SetType(ArmyTypeId(i));
+            army.SetMoves(10 + i);
+            army.SetGroup(0);
             game_->map->fight_order[0][i] = n - i;
             armies_.push_back(game_->Add(army));
         }
@@ -192,28 +192,28 @@ TEST_F(SlotsTest, CommitPersistsGroupIdsAndKeepRetainsSurvivors) {
     auto bar = slots::Build(*game_, armies_, 0);
     slots::All(bar, *game_);
     slots::Commit(bar, *game_);
-    int group_id = armies_[0]->group;
+    int group_id = armies_[0]->Group();
     EXPECT_NE(group_id, slots::kUngrouped);
-    EXPECT_EQ(armies_[1]->group, group_id);
-    EXPECT_EQ(armies_[2]->group, group_id);
+    EXPECT_EQ(armies_[1]->Group(), group_id);
+    EXPECT_EQ(armies_[2]->Group(), group_id);
 
     auto again = slots::Build(*game_, armies_, 0);
     EXPECT_EQ(slots::Selected(again).size(), 3U);
     EXPECT_TRUE(slots::Grouped(again));
     EXPECT_EQ(again.group[0], again.group[2]);
     slots::Commit(again, *game_);
-    EXPECT_EQ(armies_[0]->group, group_id);
+    EXPECT_EQ(armies_[0]->Group(), group_id);
 
     slots::Toggle(again, *game_, 2);
     slots::Commit(again, *game_);
     auto third = slots::Build(*game_, armies_, 0);
     EXPECT_EQ(slots::Selected(third).size(), 2U);
-    EXPECT_EQ(armies_[2]->group, slots::kUngrouped);
-    EXPECT_EQ(armies_[0]->group, group_id);
+    EXPECT_EQ(armies_[2]->Group(), slots::kUngrouped);
+    EXPECT_EQ(armies_[0]->Group(), group_id);
 
     slots::Single(third, *game_);
     slots::Commit(third, *game_);
-    EXPECT_EQ(armies_[0]->group, slots::kUngrouped);
+    EXPECT_EQ(armies_[0]->Group(), slots::kUngrouped);
     EXPECT_EQ(slots::Selected(slots::Build(*game_, armies_, 0)).size(), 1U);
 
     BuildStandInStack(3);
@@ -404,29 +404,28 @@ TEST(CityCastlesTest, CastleAndRuinTileBlocksMatchOwnerAndRazer) {
                                                   {4, 106}, {5, 108}, {6, 128}, {7, 130}};
     City& city = map.cities[0];
     for (auto [owner, base] : expected_by_owner) {
-        city.owner_index = owner >= 0 ? owner : kNone;
-        city.razed = false;
+        city.SetRazed(false);
+        city.SetOwner(owner >= 0 ? SideId(owner) : SideId::None());
         EXPECT_EQ(scn::CityTileBase(city), base) << "owner " << owner;
         scn::SetCityTiles(map, city);
-        EXPECT_EQ(scn::TileAt(map, city.x, city.y), base);
-        EXPECT_EQ(scn::TileAt(map, city.x + 1, city.y), base + 1);
-        EXPECT_EQ(scn::TileAt(map, city.x, city.y + 1), base + 16);
-        EXPECT_EQ(scn::TileAt(map, city.x + 1, city.y + 1), base + 17);
+        EXPECT_EQ(scn::TileAt(map, city.X(), city.Y()), base);
+        EXPECT_EQ(scn::TileAt(map, city.X() + 1, city.Y()), base + 1);
+        EXPECT_EQ(scn::TileAt(map, city.X(), city.Y() + 1), base + 16);
+        EXPECT_EQ(scn::TileAt(map, city.X() + 1, city.Y() + 1), base + 17);
         for (int dx = 0; dx <= 1; ++dx) {
             for (int dy = 0; dy <= 1; ++dy) {
-                EXPECT_EQ(scn::TerrainAt(map, city.x + dx, city.y + dy), 10);
+                EXPECT_EQ(scn::TerrainAt(map, city.X() + dx, city.Y() + dy), 10);
             }
         }
     }
     for (int owner = 0; owner <= 7; ++owner) {
-        city.owner_index = kNone;
-        city.razed = true;
-        city.razed_by = owner;
+        city.SetRazed(true);
+        city.SetRazedBy(SideId(owner));
         EXPECT_EQ(scn::CityTileBase(city), 0xa0 + 2 * owner);
         scn::SetCityTiles(map, city);
         for (int dx = 0; dx <= 1; ++dx) {
             for (int dy = 0; dy <= 1; ++dy) {
-                EXPECT_EQ(scn::TerrainAt(map, city.x + dx, city.y + dy), 11);
+                EXPECT_EQ(scn::TerrainAt(map, city.X() + dx, city.Y() + dy), 11);
             }
         }
     }
@@ -434,16 +433,16 @@ TEST(CityCastlesTest, CastleAndRuinTileBlocksMatchOwnerAndRazer) {
     auto game2 = SetupGame("TUTORIA", Seed(12));
     City& city2 = game2->map->cities[0];
     for (Side* side : game2->sides) {
-        game::SetCityOwner(*game2, city2, side->index);
+        game::SetCityOwner(*game2, city2, side->Index());
         scn::SetCityTiles(*game2->map, city2);
     }
     auto mine_list = game::SideCities(*game2, *game2->sides[0]);
     ASSERT_FALSE(mine_list.empty());
     City* mine = mine_list[0];
-    int previous_owner = mine->owner_index;
+    int previous_owner = mine->OwnerIndex();
     game::Raze(*game2, *game2->sides[0], *mine, {});
-    EXPECT_EQ(mine->razed_by, previous_owner);
-    EXPECT_EQ(scn::TileAt(*game2->map, mine->x, mine->y), 0xa0 + 2 * previous_owner);
+    EXPECT_EQ(mine->RazedBy(), SideId(previous_owner));
+    EXPECT_EQ(scn::TileAt(*game2->map, mine->X(), mine->Y()), 0xa0 + 2 * previous_owner);
 }
 
 TEST(SoundCuesTest, MusicSelectionAndVoiceAdvisorThresholds) {
@@ -454,8 +453,8 @@ TEST(SoundCuesTest, MusicSelectionAndVoiceAdvisorThresholds) {
     EXPECT_TRUE(title_loop);
 
     Side human;
-    human.computer = false;
-    human.alive = true;
+    human.SetComputerControlled(false);
+    human.SetAlive(true);
     auto [computer_song, computer_loop] = cues::Song(files, cues::kComputer, {&human}, first);
     EXPECT_EQ(computer_song, "INT2.XMI");
     EXPECT_FALSE(computer_loop);
@@ -465,27 +464,27 @@ TEST(SoundCuesTest, MusicSelectionAndVoiceAdvisorThresholds) {
     game.map = std::make_unique<Map>();
     game.turn = 1;
     Side side;
-    side.index = 0;
-    side.gold = 500;
+    side.SetId(SideId(0));
+    side.SetGold(500);
     game.map->cities.resize(6);
     for (auto& city : game.map->cities) {
-        city.owner_index = 0;
+        city.SetOwner(SideId(0));
     }
     EXPECT_EQ(cues::AdvisorCue(game, side, first), kNone);
-    EXPECT_EQ(side.advisor.mark, 5);
+    EXPECT_EQ(side.AdvisorState().mark, 5);
     game.turn = 2;
     EXPECT_EQ(cues::AdvisorCue(game, side, first), kNone);
     for (int i = 0; i < 5; ++i) {
-        game.map->cities[i].owner_index = 1;
+        game.map->cities[i].SetOwner(SideId(1));
     }
     EXPECT_EQ(cues::AdvisorCue(game, side, first), 40);
-    EXPECT_EQ(side.advisor.dir, 2);
+    EXPECT_EQ(side.AdvisorState().dir, 2);
     for (int i = 0; i < 5; ++i) {
-        game.map->cities[i].owner_index = 0;
+        game.map->cities[i].SetOwner(SideId(0));
     }
     EXPECT_EQ(cues::AdvisorCue(game, side, first), 47);
     game.turn = 7;
-    side.gold = 50;
+    side.SetGold(50);
     EXPECT_EQ(cues::AdvisorCue(game, side, first), 54);
 }
 

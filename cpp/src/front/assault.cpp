@@ -88,8 +88,8 @@ static std::vector<std::pair<int, int>> LineSlots(int n, const std::vector<int>&
  * type. */
 static std::string VictorName(const std::vector<Army*>& line) {
     for (Army* army : line)
-        if (army->Hero() && !army->name.empty()) return army->name;
-    const w2::ArmyType* rec = line.empty() ? nullptr : g_app.g->types.ById(line[0]->type);
+        if (army->Hero() && !army->Name().empty()) return army->Name();
+    const w2::ArmyType* rec = line.empty() ? nullptr : g_app.g->types.ById(line[0]->Type());
     return rec ? rec->name : "Your armies";
 }
 
@@ -103,8 +103,8 @@ static std::vector<std::string> OutcomeLines(const w2::Battle& result, const Cit
     }
     std::string hero_name;
     for (Army* army : result.lines.attackers)
-        if (army->Hero() && !army->name.empty()) {
-            hero_name = army->name;
+        if (army->Hero() && !army->Name().empty()) {
+            hero_name = army->Name();
             break;
         }
     if (city) {
@@ -135,12 +135,13 @@ void StartAssault(int x, int y, const w2::Battle& result) {
     assault.atk = lines.attackers;
     assault.def_slots = LineSlots(static_cast<int>(lines.defenders.size()), kAsRows);
     assault.atk_slots = LineSlots(static_cast<int>(lines.attackers.size()), {kAsAtkRow});
-    assault.def_side = lines.defenders.empty() ? 8 : OwnerOr8(lines.defenders[0]->owner);
-    assault.atk_side = lines.attackers.empty() ? 8 : OwnerOr8(lines.attackers[0]->owner);
+    assault.def_side = lines.defenders.empty() ? 8 : OwnerOr8(lines.defenders[0]->OwnerIndex());
+    assault.atk_side = lines.attackers.empty() ? 8 : OwnerOr8(lines.attackers[0]->OwnerIndex());
     assault.phase = AssaultPhase::kCloud;
     assault.at = w2::Now();
     // On a human's turn, hold the cloud while WAR.8SN plays.
-    assault.cloud_time = (g_app.g->side && !g_app.g->side->computer) ? sound::Effect("war") : 0;
+    assault.cloud_time =
+            (g_app.g->side && !g_app.g->side->IsComputerControlled()) ? sound::Effect("war") : 0;
     assault.victor = VictorName(lines.attackers);
     assault.message = OutcomeLines(result, lines.city, fled);
     assault.def_fell.resize(assault.def.size());
@@ -229,9 +230,9 @@ void PressAssault() {
     if (!computer) {
         // the fight took effect in CloseAssault; see whether a city fell
         if (g_app.selection && !g_app.selection->stack.empty()) {
-            City* captured_city = game::CityAt(*g_app.g, g_app.selection->stack[0]->x,
-                                               g_app.selection->stack[0]->y);
-            if (captured_city && captured_city->owner_index == g_app.player->index)
+            City* captured_city = game::CityAt(*g_app.g, g_app.selection->stack[0]->X(),
+                                               g_app.selection->stack[0]->Y());
+            if (captured_city && captured_city->OwnerIndex() == g_app.player->Index())
                 city = captured_city;
         }
         // A medal is told before the city's fate is asked.
@@ -267,10 +268,11 @@ static void DrawBattleLine(const std::vector<Army*>& armies,
         if (gone) continue;
         auto pos = slots[i];
         gfx::SetColor(1, 1, 1);
-        if (armies[i]->at_sea)
+        if (armies[i]->IsAtSea())
             gfx::Draw(g_app.war_pic, gfx::NewQuad(kAsSea[0], kAsSea[1], kAsSea[2], kAsSea[3]),
                       pos.first, pos.second + kAsSeaDrop);
-        gfx::Draw(g_app.army_img[side], kit::ArmyQuad(armies[i]->type), pos.first, pos.second);
+        gfx::Draw(g_app.army_img[side], kit::ArmyQuad(armies[i]->TypeIndex()), pos.first,
+                  pos.second);
         if (static_cast<int>(i) < down)
             gfx::Draw(g_app.atrans_shields, gfx::NewQuad(32, 0, 32, 29), pos.first, pos.second);
     }
@@ -329,32 +331,33 @@ void PresentVictory(City* city, const std::string& victor) {
     Victory vic;
     vic.city = city;
     vic.who = Format(kit::Text(kAsVWho, g_app.g->rng.Dice(1, 4, -1)), victor);
-    vic.where = Format(kit::Text(kAsVWhere, g_app.g->rng.Dice(1, 3, -1)), city->name);
+    vic.where = Format(kit::Text(kAsVWhere, g_app.g->rng.Dice(1, 3, -1)), city->Name());
     g_app.victory = vic;
     auto& states = g_app.victory_view->state;
     states[kAsOccupy] = kNormal;
     states[kAsRaze] = kNormal;
     // Enable Pillage and Sack when they would yield gold.
-    int pillage_gold = city->slots.empty()
-                               ? 0
-                               : std::abs(g_app.g->types.ById(city->slots.back().type)->price) / 2;
+    int pillage_gold =
+            city->Slots().empty()
+                    ? 0
+                    : std::abs(g_app.g->types.ById(city->Slots().back().type)->price) / 2;
     int sack_gold = w2::ai::groups::SackValue(*g_app.g, *city);
     states[kAsPillage] = pillage_gold != 0 ? kNormal : kDisabled;
     states[kAsSack] = sack_gold != 0 ? kNormal : kDisabled;
     // Enter chooses Occupy unless the stack's hero is on a quest this answers:
     // Raze for a raze quest on this city, Sack (or Pillage) for gold.
     g_app.victory->enter = kAsOccupy;
-    auto quest = g_app.player->quest;
+    w2::Quest* quest = g_app.player->ActiveQuest();
     Army* hero = nullptr;
     if (g_app.selection) {
         for (Army* army : g_app.selection->stack)
-            if (army->type == w2::armytype::kHero) {
+            if (army->TypeIndex() == w2::armytype::kHero) {
                 hero = army;
                 break;
             }
     }
-    if (g_app.g->map->options.quests != 0 && quest && hero && hero->id == quest->HeroId()) {
-        if (quest->Type() == w2::quest::kRaze && quest->TargetCityId() == w2::CityId(city->index))
+    if (g_app.g->map->options.quests != 0 && quest && hero && hero->Id() == quest->HeroId()) {
+        if (quest->Type() == w2::quest::kRaze && quest->TargetCityId() == city->Id())
             g_app.victory->enter = kAsRaze;
         else if (quest->Type() == w2::quest::kPillageGold) {
             if (sack_gold != 0)
@@ -403,11 +406,10 @@ void TakeCity(int what) {
         auto spoils = sacked ? game::Sack(*g_app.g, *g_app.player, *city, stack)
                              : game::Pillage(*g_app.g, *g_app.player, *city, stack);
         g_app.victory_under = vic;
-        spoils::Open(sacked, city, spoils.gold, spoils.lost, static_cast<int>(city->slots.size()),
-                     done);
+        spoils::Open(sacked, city, spoils.gold, spoils.lost, city->SlotCount(), done);
     } else if (what == kAsRaze) {
         g_app.victory_under = vic;
-        search::Say(city->name + " is in ruins!", [city, stack, done]() {
+        search::Say(city->Name() + " is in ruins!", [city, stack, done]() {
             game::Raze(*g_app.g, *g_app.player, *city, stack);
             done();
         });
@@ -416,7 +418,7 @@ void TakeCity(int what) {
         auto news = game::Occupy(*g_app.g, *g_app.player, *city, stack);
         auto production = [city]() { city::Open(city, city::kProduction); };
         if (news) {
-            g_app.g->TurnNews(w2::SideId(g_app.player->index)).quest_news.reset();
+            g_app.g->TurnNews(g_app.player->Id()).quest_news.reset();
             if (!news->failed.empty())
                 questnews::Show(news, production);
             else

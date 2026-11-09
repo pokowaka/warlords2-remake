@@ -11,7 +11,7 @@
 
 namespace w2 {
 
-struct Side;
+class Side;
 
 /**
  * @brief What a deed was: one of the events History plays back.

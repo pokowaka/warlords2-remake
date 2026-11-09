@@ -34,7 +34,7 @@ namespace slots_mod = w2::slots;
 std::vector<Army*> SelectableAt(int x, int y) {
     std::vector<Army*> out;
     for (Army* army : game::ArmiesAt(*g_app.g, x, y))
-        if (army->owner == g_app.player->index &&
+        if (army->OwnerIndex() == g_app.player->Index() &&
             static_cast<int>(out.size()) < w2::rules::kMaxStack)
             out.push_back(army);
     return out;
@@ -49,8 +49,8 @@ void SyncSelection() {
     // being in the group that moves puts an army back in the cycle and marks
     // it offered for this pass
     for (Army* army : sel.stack) {
-        army->fortified = false;
-        army->offered = true;
+        army->SetFortified(false);
+        army->SetOffered(true);
     }
 }
 
@@ -68,8 +68,8 @@ void Reslot(const std::vector<Army*>& armies) {
         return;
     }
     g_app.selection->slots = *kept;
-    g_app.selection->x = kept->army[0]->x;
-    g_app.selection->y = kept->army[0]->y;
+    g_app.selection->x = kept->army[0]->X();
+    g_app.selection->y = kept->army[0]->Y();
     SyncSelection();
 }
 
@@ -117,11 +117,11 @@ void Select(int x, int y, Army* pick) {
         return;
     }
     // a click selects one army, not the stack (docs/re/ui.md > The army slots)
-    auto chosen = slots_mod::Clicked(*g_app.g, stack, g_app.player->index, pick);
+    auto chosen = slots_mod::Clicked(*g_app.g, stack, g_app.player->Index(), pick);
     Selection sel;
     sel.x = x;
     sel.y = y;
-    sel.slots = slots_mod::Build(*g_app.g, stack, g_app.player->index, &chosen);
+    sel.slots = slots_mod::Build(*g_app.g, stack, g_app.player->Index(), &chosen);
     g_app.selection = sel;
     SyncSelection();
     RefreshRoute();
@@ -130,8 +130,8 @@ void Select(int x, int y, Army* pick) {
     for (int dx = -1; dx <= 1; dx++) {
         for (int dy = -1; dy <= 1; dy++) {
             City* neighbour = game::CityAt(*g_app.g, x + dx, y + dy);
-            if (neighbour && neighbour->owner_index != g_app.player->index && !neighbour->razed &&
-                moments.size() == 1)
+            if (neighbour && neighbour->OwnerIndex() != g_app.player->Index() &&
+                !neighbour->IsRazed() && moments.size() == 1)
                 moments.push_back("fight");
         }
     }
@@ -157,9 +157,12 @@ void SelectAt(int x, int y) {
  *        its capital to while it does not hold its own.
  */
 std::pair<int, int> CapOf(const Side* side) {
-    if (side->cap_now_x != kNone) return {side->cap_now_x, side->cap_now_y};
-    if (side->capital) return {side->capital->x, side->capital->y};
-    return {side->cap_x == kNone ? 0 : side->cap_x, side->cap_y == kNone ? 0 : side->cap_y};
+    if (side->CurrentCapitalPos()) return side->CurrentCapitalPos()->ToPair();
+    if (g_app.g && g_app.g->map) {
+        if (const City* cap = side->CapitalCity(*g_app.g->map)) return {cap->X(), cap->Y()};
+    }
+    w2::TilePos orig = side->OriginCapitalPos();
+    return {orig.x == kNone ? 0 : orig.x, orig.y == kNone ? 0 : orig.y};
 }
 
 /** @brief Starts the army cycle over from the player's capital. */
@@ -173,7 +176,7 @@ void CycleReset() {
  */
 static int CycleRank(const Army* army) {
     int distance =
-            std::abs(army->x - g_app.cursor->first) + std::abs(army->y - g_app.cursor->second);
+            std::abs(army->X() - g_app.cursor->first) + std::abs(army->Y() - g_app.cursor->second);
     return distance == 0 ? 9000 : distance;
 }
 
@@ -188,9 +191,9 @@ static Army* NextArmy() {
     Army* fresh = nullptr;
     Army* used = nullptr;
     for (Army* army : g_app.g->armies) {
-        if (army->owner == g_app.player->index && !army->transit && !army->fortified &&
-            !army->done) {
-            if (army->offered) {
+        if (army->OwnerIndex() == g_app.player->Index() && !army->InTransit() &&
+            !army->IsFortified() && !army->IsDone()) {
+            if (army->IsOffered()) {
                 if (!used || CycleRank(army) < CycleRank(used)) used = army;
             } else if (!fresh || CycleRank(army) < CycleRank(fresh)) {
                 fresh = army;
@@ -200,10 +203,10 @@ static Army* NextArmy() {
     if (!fresh) {
         if (!used) return nullptr;
         for (Army* army : g_app.g->armies)
-            if (army->owner == g_app.player->index) army->offered = false;
+            if (army->OwnerIndex() == g_app.player->Index()) army->SetOffered(false);
         fresh = used;
     }
-    g_app.cursor = std::make_pair(fresh->x, fresh->y);
+    g_app.cursor = std::make_pair(fresh->X(), fresh->Y());
     return fresh;
 }
 
@@ -218,8 +221,8 @@ void SelectNext() {
         return;
     }
     sound::Effect("ding");
-    Select(army->x, army->y, army);
-    CentreOn(army->x, army->y);
+    Select(army->X(), army->Y(), army);
+    CentreOn(army->X(), army->Y());
 }
 
 /** @brief Takes the selection out of the cycle for the rest of this turn (control 175). */
@@ -228,7 +231,7 @@ void QuitArmy() {
         SelectNext();
         return;
     }
-    for (Army* army : g_app.selection->stack) army->done = true;
+    for (Army* army : g_app.selection->stack) army->SetDone(true);
     g_app.route.reset();
     SelectNext();
 }
@@ -240,8 +243,8 @@ void Fortify() {
         return;
     }
     for (Army* army : g_app.selection->stack) {
-        army->fortified = true;
-        army->target.reset();
+        army->SetFortified(true);
+        army->ClearTarget();
     }
     g_app.route.reset();
     SelectNext();

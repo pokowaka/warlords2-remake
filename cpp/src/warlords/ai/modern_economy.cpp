@@ -37,7 +37,8 @@ namespace w2::ai::modern {
  */
 void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                      const ml::ContextVec& ctx, ml::RolloutSampler* sampler) {
-    int our_side = side.index;
+    (void)ctx;
+    int our_side = side.Index();
     const SideBelief& belief = belief::Ensure(side);
 
     auto make_hold_gold_in = [&](const ml::ContextVec& cur_ctx) {
@@ -56,38 +57,39 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     bool over_budget = game::Upkeep(game, side) > game::Income(game, side);
     if (over_budget && my_armies.size() > 3) {
         for (Army* army : my_armies) {
-            if (!game.Alive(army) || army->Hero() || army->transit || army->x == kNone) continue;
-            City* city = game::CityAt(game, army->x, army->y);
-            if (!city || city->owner_index != our_side) continue;
+            if (!game.Alive(army) || army->Hero() || army->InTransit() || army->X() == kNone)
+                continue;
+            City* city = game::CityAt(game, army->X(), army->Y());
+            if (!city || city->OwnerIndex() != our_side) continue;
             int city_armies = 0;
             for (int dy = 0; dy <= 1; dy++) {
                 for (int dx = 0; dx <= 1; dx++) {
                     city_armies += static_cast<int>(
-                            game::ArmiesAt(game, city->x + dx, city->y + dy).size());
+                            game::ArmiesAt(game, city->X() + dx, city->Y() + dy).size());
                 }
             }
             if (city_armies <= 2) continue;
 
-            const ArmyType* army_type = game.types.ById(army->type);
-            float threat = (city->index < static_cast<int>(belief.city_threat2_turn.size()))
-                                   ? belief.city_threat2_turn[city->index]
+            const ArmyType* army_type = game.types.ById(army->Type());
+            float threat = (city->Index() < static_cast<int>(belief.city_threat2_turn.size()))
+                                   ? belief.city_threat2_turn[city->Index()]
                                    : 0.0F;
-            float dist_e = (city->index < static_cast<int>(belief.city_nearest_enemy_dist.size()))
-                                   ? belief.city_nearest_enemy_dist[city->index]
+            float dist_e = (city->Index() < static_cast<int>(belief.city_nearest_enemy_dist.size()))
+                                   ? belief.city_nearest_enemy_dist[city->Index()]
                                    : 100.0F;
 
             ml::ContextVec cur_ctx = ml::BuildContext(game, side);
 
             ml::EconVec econ_vec{};
             econ_vec[5] = 1.0F;
-            econ_vec[7] = static_cast<float>(army->strength) / 9.0F;
-            econ_vec[8] = static_cast<float>(army->max_moves) / 24.0F;
-            econ_vec[10] = static_cast<float>(army->upkeep) / 15.0F;
+            econ_vec[7] = static_cast<float>(army->Strength()) / 9.0F;
+            econ_vec[8] = static_cast<float>(army->MaxMoves()) / 24.0F;
+            econ_vec[10] = static_cast<float>(army->Upkeep()) / 15.0F;
             econ_vec[11] = (army_type && army_type->flies) ? 1.0F : 0.0F;
             econ_vec[12] =
                     (army_type && (army_type->siege || army_type->IsMagical())) ? 1.0F : 0.0F;
             econ_vec[13] =
-                    (army->max_moves >= 14 && (!army_type || !army_type->flies)) ? 1.0F : 0.0F;
+                    (army->MaxMoves() >= 14 && (!army_type || !army_type->flies)) ? 1.0F : 0.0F;
             econ_vec[14] = std::tanh(threat / 25.0F);
             econ_vec[15] = std::tanh(dist_e / 60.0F);
             econ_vec[ml::kEconCurrent] = 1.0F;  // keeping the army is the status quo
@@ -120,7 +122,8 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     // as soon as EconNet chooses HoldGold so multi-city empires neither hoard 10k gold
     // nor suffer 1 - p^N treasury-draining coin-flip cascades across N cities.
     auto menu = game::BuyableTypes(game);
-    for (int buy_round = 0; buy_round < 3 && !own_cities.empty() && side.gold >= 250; buy_round++) {
+    for (int buy_round = 0; buy_round < 3 && !own_cities.empty() && side.Gold() >= 250;
+         buy_round++) {
         /** @brief A candidate production-slot upgrade in one city, or HoldGold when city is null.
          */
         struct BuyOption {
@@ -133,20 +136,20 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         buy_opts.push_back(BuyOption{nullptr, kNone, make_hold_gold_in(buy_ctx)});
 
         for (City* city : own_cities) {
-            bool full_slots = static_cast<int>(city->slots.size()) >= rules::kProductionSlots;
-            int replace_price = (!city->slots.empty()) ? city->slots[0].price : 0;
+            bool full_slots = city->SlotCount() >= rules::kProductionSlots;
+            int replace_price = (!city->Slots().empty()) ? city->SlotAt(0).price : 0;
             int best_existing_str = 0;
-            for (const auto& slot : city->slots)
+            for (const auto& slot : city->Slots())
                 best_existing_str = std::max(best_existing_str, slot.strength);
-            float threat = city->index < static_cast<int>(belief.city_threat2_turn.size())
-                                   ? belief.city_threat2_turn[city->index]
+            float threat = city->Index() < static_cast<int>(belief.city_threat2_turn.size())
+                                   ? belief.city_threat2_turn[city->Index()]
                                    : 0.0F;
-            float dist_e = city->index < static_cast<int>(belief.city_nearest_enemy_dist.size())
-                                   ? belief.city_nearest_enemy_dist[city->index]
+            float dist_e = city->Index() < static_cast<int>(belief.city_nearest_enemy_dist.size())
+                                   ? belief.city_nearest_enemy_dist[city->Index()]
                                    : 100.0F;
             for (const ArmyType* army_type : menu) {
                 int price = std::abs(army_type->price);
-                if (price <= 0 || price + 100 > side.gold) continue;
+                if (price <= 0 || price + 100 > side.Gold()) continue;
                 if (full_slots && price <= replace_price) continue;
                 if (!game::CannotBuy(game, side, *city, *army_type).empty()) continue;
 
@@ -156,13 +159,13 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 econ_vec[8] = static_cast<float>(army_type->move) / 24.0F;
                 econ_vec[9] = static_cast<float>(army_type->time) / 6.0F;
                 econ_vec[10] = static_cast<float>(price) /
-                               std::max(100.0F, static_cast<float>(side.gold - 80));
+                               std::max(100.0F, static_cast<float>(side.Gold() - 80));
                 econ_vec[11] = army_type->flies ? 1.0F : 0.0F;
                 econ_vec[12] = (army_type->siege || army_type->IsMagical()) ? 1.0F : 0.0F;
                 econ_vec[13] = (army_type->move >= 14 && !army_type->flies) ? 1.0F : 0.0F;
                 econ_vec[14] = std::tanh(threat / 25.0F);
                 econ_vec[15] = std::tanh(dist_e / 60.0F);
-                econ_vec[16] = static_cast<float>(city->slots.size()) /
+                econ_vec[16] = static_cast<float>(city->SlotCount()) /
                                static_cast<float>(rules::kProductionSlots);
                 econ_vec[17] = static_cast<float>(army_type->strength - best_existing_str) / 9.0F;
                 econ_vec[18] = static_cast<float>(army_type->strength * army_type->strength) /
@@ -196,8 +199,8 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         int slot_idx = game::BuySlot(*best_buy_city);
         game::BuyProduction(game, side, *best_buy_city, slot_idx, bought_type);
         game::SortProduction(*best_buy_city);
-        for (int si = 0; si < static_cast<int>(best_buy_city->slots.size()); si++) {
-            if (best_buy_city->slots[si].type == bought_type) {
+        for (int si = 0; si < best_buy_city->SlotCount(); si++) {
+            if (best_buy_city->SlotAt(si).type == bought_type) {
                 game::SetProduction(game, *best_buy_city, si);
                 break;
             }
@@ -205,26 +208,27 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     }
 
     // City production macro-action: queried whenever a city has no active build
-    // or has just completed a build (`city->countdown == slot.time`, matching
+    // or has just completed a build (`city->Countdown() == slot.time`, matching
     // game.cpp:1331), so multi-turn unit builds complete without mid-countdown
     // cancellation while cities remain free to switch units after each build.
     ml::ContextVec prod_ctx = ml::BuildContext(game, side);
     for (City* city : own_cities) {
+        int prod_slot = city->ProducingSlot();
         bool mid_countdown =
-                (city->producing >= 0 && city->producing < static_cast<int>(city->slots.size()) &&
-                 city->countdown > 0 && city->countdown < city->slots[city->producing].time);
-        if (city->slots.empty() || mid_countdown) continue;
-        float threat = city->index < static_cast<int>(belief.city_threat2_turn.size())
-                               ? belief.city_threat2_turn[city->index]
+                (prod_slot >= 0 && prod_slot < city->SlotCount() && city->Countdown() > 0 &&
+                 city->Countdown() < city->SlotAt(prod_slot).time);
+        if (city->Slots().empty() || mid_countdown) continue;
+        float threat = city->Index() < static_cast<int>(belief.city_threat2_turn.size())
+                               ? belief.city_threat2_turn[city->Index()]
                                : 0.0F;
-        float dist_e = city->index < static_cast<int>(belief.city_nearest_enemy_dist.size())
-                               ? belief.city_nearest_enemy_dist[city->index]
+        float dist_e = city->Index() < static_cast<int>(belief.city_nearest_enemy_dist.size())
+                               ? belief.city_nearest_enemy_dist[city->Index()]
                                : 100.0F;
         int gar_count = 0;
         for (int dy = 0; dy <= 1; dy++) {
             for (int dx = 0; dx <= 1; dx++) {
-                gar_count +=
-                        static_cast<int>(game::ArmiesAt(game, city->x + dx, city->y + dy).size());
+                gar_count += static_cast<int>(
+                        game::ArmiesAt(game, city->X() + dx, city->Y() + dy).size());
             }
         }
 
@@ -235,12 +239,12 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         stop_vec[14] = std::tanh(threat / 25.0F);
         stop_vec[15] = std::tanh(dist_e / 60.0F);
         stop_vec[16] = std::tanh(static_cast<float>(gar_count) / 6.0F);
-        stop_vec[ml::kEconCurrent] = (city->producing == kNone) ? 1.0F : 0.0F;
+        stop_vec[ml::kEconCurrent] = (prod_slot == kNone) ? 1.0F : 0.0F;
 
         std::vector<int> slot_indices = {kNone};
         std::vector<ml::EconInVec> cands = {ml::PackEconInput(prod_ctx, stop_vec)};
-        for (size_t si = 0; si < city->slots.size(); si++) {
-            const Slot& slot = city->slots[si];
+        for (size_t si = 0; si < city->Slots().size(); si++) {
+            const Slot& slot = city->SlotAt(si);
             const ArmyType* army_type = game.types.ById(slot.type);
             bool is_flier = army_type && army_type->flies;
             bool is_siege_or_spec = army_type && (army_type->siege || army_type->IsMagical() ||
@@ -261,7 +265,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             econ_vec[16] = std::tanh(static_cast<float>(gar_count) / 6.0F);
             econ_vec[18] = static_cast<float>(slot.strength * slot.strength) /
                            static_cast<float>(std::max(1, slot.time * 16));
-            econ_vec[ml::kEconCurrent] = (city->producing == static_cast<int>(si)) ? 1.0F : 0.0F;
+            econ_vec[ml::kEconCurrent] = (prod_slot == static_cast<int>(si)) ? 1.0F : 0.0F;
             slot_indices.push_back(static_cast<int>(si));
             cands.push_back(ml::PackEconInput(prod_ctx, econ_vec));
         }
@@ -287,7 +291,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
 
         if (pick == 0) {
             game::SetProduction(game, *city, kNone);
-        } else if (city->producing != slot_indices[pick] || !game::Producing(*city)) {
+        } else if (city->ProducingSlot() != slot_indices[pick] || !game::Producing(*city)) {
             game::SetProduction(game, *city, slot_indices[pick]);
         }
     }
@@ -295,17 +299,17 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     // City vectoring: re-evaluated each turn, but the vector already set is a
     // flagged candidate (ECON_CURRENT) rather than wiped, so keeping it is a choice
     for (City* src : own_cities) {
-        if (!game::Producing(*src) || src->producing < 0 ||
-            src->producing >= static_cast<int>(src->slots.size())) {
-            src->vector_to = kNone;
+        if (!game::Producing(*src) || src->ProducingSlot() < 0 ||
+            src->ProducingSlot() >= src->SlotCount()) {
+            src->ClearVector();
             continue;
         }
-        const Slot& slot = src->slots[src->producing];
-        float src_threat = src->index < static_cast<int>(belief.city_threat2_turn.size())
-                                   ? belief.city_threat2_turn[src->index]
+        const Slot& slot = src->SlotAt(src->ProducingSlot());
+        float src_threat = src->Index() < static_cast<int>(belief.city_threat2_turn.size())
+                                   ? belief.city_threat2_turn[src->Index()]
                                    : 0.0F;
-        float src_dist_e = src->index < static_cast<int>(belief.city_nearest_enemy_dist.size())
-                                   ? belief.city_nearest_enemy_dist[src->index]
+        float src_dist_e = src->Index() < static_cast<int>(belief.city_nearest_enemy_dist.size())
+                                   ? belief.city_nearest_enemy_dist[src->Index()]
                                    : 100.0F;
 
         ml::EconVec keep_here{};
@@ -313,25 +317,27 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         keep_here[14] = std::tanh(src_threat / 25.0F);
         keep_here[15] = std::tanh(src_dist_e / 60.0F);
         keep_here[17] = 0.0F;
-        keep_here[ml::kEconCurrent] = src->vector_to == kNone ? 1.0F : 0.0F;
+        keep_here[ml::kEconCurrent] = !src->IsVectored() ? 1.0F : 0.0F;
 
         std::vector<City*> dest_cities = {nullptr};
         std::vector<ml::EconInVec> cands = {ml::PackEconInput(prod_ctx, keep_here)};
 
         for (City* dst : own_cities) {
             if (dst == src) continue;
-            bool is_current = (src->vector_to == dst->index);
+            bool is_current = (src->VectoredCityId() == dst->Id());
             if (!is_current &&
                 static_cast<int>(game::VectoredTo(game, dst).size()) >= game::kMaxVectoredTo)
                 continue;
-            int v_turns = std::max(1, move::Distance(src->x, src->y, dst->x, dst->y) / 14 + 1);
+            int v_turns =
+                    std::max(1, move::Distance(src->X(), src->Y(), dst->X(), dst->Y()) / 14 + 1);
             if (v_turns > 4) continue;
-            float dst_threat = dst->index < static_cast<int>(belief.city_threat2_turn.size())
-                                       ? belief.city_threat2_turn[dst->index]
+            float dst_threat = dst->Index() < static_cast<int>(belief.city_threat2_turn.size())
+                                       ? belief.city_threat2_turn[dst->Index()]
                                        : 0.0F;
-            float dst_dist_e = dst->index < static_cast<int>(belief.city_nearest_enemy_dist.size())
-                                       ? belief.city_nearest_enemy_dist[dst->index]
-                                       : 100.0F;
+            float dst_dist_e =
+                    dst->Index() < static_cast<int>(belief.city_nearest_enemy_dist.size())
+                            ? belief.city_nearest_enemy_dist[dst->Index()]
+                            : 100.0F;
             float threat_gain =
                     (dst_threat - src_threat) / 25.0F + (src_dist_e - dst_dist_e) / 45.0F;
 
@@ -367,10 +373,10 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             if (best_dest) {
                 if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
                     modern_player->PushThought(
-                            AIThought{"Economy", src->name, best_dest->name, src->x, src->y,
-                                      best_dest->x, best_dest->y, logits[pick], 1.0F, false,
+                            AIThought{"Economy", src->Name(), best_dest->Name(), src->X(), src->Y(),
+                                      best_dest->X(), best_dest->Y(), logits[pick], 1.0F, false,
                                       absl::StrFormat("Vectoring %s from %s -> %s", slot.name,
-                                                      src->name, best_dest->name)});
+                                                      src->Name(), best_dest->Name())});
                 }
             }
         }
@@ -388,8 +394,8 @@ City* SelectHeroCity(Game& game, Side& side, City* default_city,
     City* best = default_city;
     float best_threat = 0.0F;
     for (City* city : game::SideCities(game, side)) {
-        float threat = city->index < static_cast<int>(belief.city_threat2_turn.size())
-                               ? belief.city_threat2_turn[city->index]
+        float threat = city->Index() < static_cast<int>(belief.city_threat2_turn.size())
+                               ? belief.city_threat2_turn[city->Index()]
                                : 0.0F;
         if (threat > best_threat) {
             best_threat = threat;

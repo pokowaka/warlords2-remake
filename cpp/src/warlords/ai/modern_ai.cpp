@@ -41,7 +41,7 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
         deploy_sampler.temperature = ml::DeployTemperature();
         deploy_sampler.rng_state = (game.rng.State() * 2654435761U) ^
                                    static_cast<uint32_t>(game.turn * 40503U) ^
-                                   static_cast<uint32_t>((side.index + 1) * 2246822519U);
+                                   static_cast<uint32_t>((side.Index() + 1) * 2246822519U);
         sampler = &deploy_sampler;
     }
     MovedArmySet moved_armies;
@@ -60,7 +60,7 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
                 sampler->current_turn->start_ctx = wave_ctx;
                 sampler->current_turn->start_critic = critic;
                 sampler->current_turn->value_pred = board_value;
-                sampler->current_turn->start_score = ml::ComputeEmpireScore(game, side.index);
+                sampler->current_turn->start_score = ml::ComputeEmpireScore(game, side.Index());
             }
         }
         RunDiplomacyPhase(game, side, policy, wave_ctx, sampler, diplo_decided);
@@ -69,8 +69,8 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
                                        sampler, moved_armies);
         bool any_left = false;
         for (Army* army : game.armies) {
-            if (army->owner == side.index && army->x != kNone && !army->transit &&
-                !moved_armies.contains(army->id) && army->moves >= 2) {
+            if (army->OwnerIndex() == side.Index() && army->X() != kNone && !army->InTransit() &&
+                !moved_armies.contains(army->Id()) && army->Moves() >= 2) {
                 any_left = true;
                 break;
             }
@@ -88,8 +88,8 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
             for (int dy = 0; dy <= 1 && mission_step.vacated_city != kNone; dy++) {
                 for (int dx = 0; dx <= 1 && mission_step.vacated_city != kNone; dx++) {
                     for (Army* army :
-                         game::ArmiesAt(game, vacated_city.x + dx, vacated_city.y + dy)) {
-                        if (army->owner == side.index) {
+                         game::ArmiesAt(game, vacated_city.X() + dx, vacated_city.Y() + dy)) {
+                        if (army->OwnerIndex() == side.Index()) {
                             mission_step.vacated_city = kNone;
                             break;
                         }

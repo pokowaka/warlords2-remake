@@ -196,7 +196,7 @@ const Profile& ProfileFor(int level, int card) {
 }
 
 const Profile& ForSide(const Side& side) {
-    return ProfileFor(side.level, side.card);
+    return ProfileFor(side.Level(), side.Card());
 }
 
 }  // namespace w2::ai::personality

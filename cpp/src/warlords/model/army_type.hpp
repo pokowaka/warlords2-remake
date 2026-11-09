@@ -12,6 +12,9 @@
 
 namespace w2 {
 
+/// Canonical army type index for Heroes in `ARMYTYPE.DAT` (see `docs/formats/armytype.md`).
+constexpr int kHeroTypeIndex = 28;
+
 /** @brief An army type as ARMYTYPE.DAT gives it (docs/formats/armytype.md). */
 struct ArmyType {
     int id = 0;        ///< The type id; also the sprite index.

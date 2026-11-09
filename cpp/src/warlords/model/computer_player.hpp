@@ -20,10 +20,10 @@
 namespace w2 {
 
 struct AIThought;
-struct Army;
-struct City;
+class Army;
+class City;
 struct Game;
-struct Side;
+class Side;
 struct SideBelief;
 
 /** @brief One labelled contribution to an AI side's diplomatic attitude score. */

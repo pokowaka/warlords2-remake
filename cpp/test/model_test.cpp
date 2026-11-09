@@ -1,7 +1,9 @@
 /**
  * @file
- * @brief GoogleTest suite for the Warlords II domain model, value types, and .SCN record views.
+ * @brief GoogleTest suite for the Warlords II domain model, encapsulated entities, and .SCN views.
  */
+#include <algorithm>
+#include <array>
 #include <string>
 #include <type_traits>
 #include <variant>
@@ -20,6 +22,7 @@
 #include "warlords/model/diplomacy_state.hpp"
 #include "warlords/model/fog_of_war.hpp"
 #include "warlords/model/ids.hpp"
+#include "warlords/model/item.hpp"
 #include "warlords/model/quest.hpp"
 #include "warlords/model/turn_schedule.hpp"
 #include "warlords/move.hpp"
@@ -132,15 +135,17 @@ TEST(ArmyTypeTest, NamedBonusAccessorsMatchRawArray) {
     EXPECT_EQ(catalogue.List().size(), 1U);
 }
 
-TEST(DomainEntitiesTest, CitySideAndArmyQueries) {
+TEST(CityEncapsulationTest, VectorTargetsProductionSlotsAttacksAndRazeInvariants) {
     City castle;
-    castle.index = 3;
-    castle.x = 40;
-    castle.y = 50;
-    castle.name = "Marthos";
-    castle.owner_index = kNone;
+    castle.SetId(CityId(3));
+    castle.SetPosition(TilePos(40, 50));
+    castle.Rename("Marthos");
+    castle.SetIncome(28);
+    castle.SetDefence(2);
+    EXPECT_EQ(castle.Id(), CityId(3));
+    EXPECT_EQ(castle.Index(), 3);
     EXPECT_TRUE(castle.IsNeutral());
-    EXPECT_FALSE(castle.OwnedBy(0));
+    EXPECT_FALSE(castle.OwnedBy(SideId(0)));
     EXPECT_TRUE(castle.ContainsTile(40, 50));
     EXPECT_TRUE(castle.ContainsTile(41, 51));
     EXPECT_FALSE(castle.ContainsTile(42, 50));
@@ -148,54 +153,214 @@ TEST(DomainEntitiesTest, CitySideAndArmyQueries) {
     EXPECT_FALSE(castle.IsProducing());
     EXPECT_EQ(castle.ActiveSlot(), nullptr);
 
-    Slot heavy_inf;
-    heavy_inf.type = 2;
-    heavy_inf.name = "Heavy Inf";
-    heavy_inf.strength = 5;
-    heavy_inf.time = 2;
-    castle.slots.push_back(heavy_inf);
-    castle.producing = 0;
-    castle.countdown = 2;
-    castle.owner_index = 1;
-    castle.vector_to = 4;
-    EXPECT_FALSE(castle.IsNeutral());
+    Slot expensive{4, "Cavalry", 6, 3, 10, 16, 400};
+    Slot cheap{1, "Light Inf", 3, 1, 4, 10, 100};
+    castle.ReplaceSlots({expensive, cheap});
+    castle.SetOwner(SideId(1));
+    castle.SelectProduction(0);
+    EXPECT_TRUE(castle.OwnedBy(SideId(1)));
     EXPECT_TRUE(castle.OwnedBy(1));
     EXPECT_TRUE(castle.IsProducing());
+    EXPECT_EQ(castle.Countdown(), 3);
     ASSERT_NE(castle.ActiveSlot(), nullptr);
-    EXPECT_EQ(castle.ActiveSlot()->name, "Heavy Inf");
-    EXPECT_TRUE(castle.IsVectored());
+    EXPECT_EQ(castle.ActiveSlot()->name, "Cavalry");
 
-    Side faction;
-    faction.index = 1;
-    faction.in_use = true;
-    faction.alive = true;
-    faction.computer = false;
-    faction.income = 85;
-    faction.upkeep_total = 30;
-    faction.cap_x = 40;
-    faction.cap_y = 50;
+    // Sorting slots by price keeps producing_ pointing at Cavalry (now slot 1).
+    castle.SortSlotsByPrice();
+    EXPECT_EQ(castle.ProducingSlot(), 1);
+    ASSERT_NE(castle.ActiveSlot(), nullptr);
+    EXPECT_EQ(castle.ActiveSlot()->name, "Cavalry");
+
+    // VectorTarget transitions: city -> standard -> clear.
+    castle.VectorToCity(CityId(7));
+    EXPECT_TRUE(castle.IsVectored());
+    EXPECT_EQ(castle.VectoredCityId(), CityId(7));
+    EXPECT_FALSE(castle.IsVectoredToStandard());
+
+    castle.VectorToStandard();
+    EXPECT_TRUE(castle.IsVectored());
+    EXPECT_TRUE(castle.IsVectoredToStandard());
+    EXPECT_EQ(castle.VectoredCityId(), CityId::None());
+
+    castle.VectorToCity(CityId::None());
+    EXPECT_FALSE(castle.IsVectored());
+
+    // Countdown ticks down to completion.
+    castle.VectorToCity(CityId(5));
+    EXPECT_FALSE(castle.TickCountdown());
+    EXPECT_FALSE(castle.TickCountdown());
+    EXPECT_TRUE(castle.TickCountdown());
+    EXPECT_EQ(castle.Countdown(), 0);
+    EXPECT_FALSE(castle.IsProducing());
+
+    // Stopping production clears vectoring as well.
+    castle.SelectProduction(kNone);
+    EXPECT_FALSE(castle.IsVectored());
+
+    // Attack tracking and Raze invariants.
+    castle.RecordAttackBy(SideId(2));
+    castle.RecordAttackBy(SideId(5));
+    EXPECT_TRUE(castle.HasBeenAttacked());
+    EXPECT_TRUE(castle.HasBeenAttackedBy(SideId(2)));
+    EXPECT_FALSE(castle.HasBeenAttackedBy(SideId(1)));
+
+    castle.SetClaim(SideId(1));
+    castle.SelectProduction(0);
+    castle.VectorToStandard();
+    castle.Raze(SideId(2));
+    EXPECT_TRUE(castle.IsRazed());
+    EXPECT_EQ(castle.RazedBy(), SideId(2));
+    EXPECT_TRUE(castle.IsNeutral());
+    EXPECT_EQ(castle.Claim(), SideId::None());
+    EXPECT_TRUE(castle.Slots().empty());
+    EXPECT_FALSE(castle.IsProducing());
+    EXPECT_FALSE(castle.IsVectored());
+    EXPECT_EQ(castle.Defence(), 0);
+    EXPECT_EQ(castle.Income(), 0);
+
+    // Razed cities reject new owners.
+    castle.SetOwner(SideId(4));
+    EXPECT_TRUE(castle.IsNeutral());
+}
+
+TEST(SideEncapsulationTest, CapitalResolutionWithoutPointersTreasuryAndMissives) {
+    Map scenario_map;
+    scenario_map.cities.resize(2);
+    scenario_map.cities[0].SetId(CityId(0));
+    scenario_map.cities[0].Rename("Stormheim");
+    scenario_map.cities[0].SetPosition(TilePos(14, 22));
+    scenario_map.cities[1].SetId(CityId(1));
+    scenario_map.cities[1].Rename("Kor");
+    scenario_map.cities[1].SetPosition(TilePos(40, 50));
+
+    Side& faction = scenario_map.sides[1];
+    faction.SetId(SideId(1));
+    faction.SetName("Storm Giants");
+    faction.SetInUse(true);
+    faction.SetAlive(true);
+    faction.SetComputerControlled(false);
+    faction.SetIncome(85);
+    faction.SetUpkeepTotal(30);
+    faction.SetOriginCapitalPos(TilePos(40, 50));
+    faction.SetCapitalCityId(CityId(1));
+
     EXPECT_TRUE(faction.IsActive());
     EXPECT_TRUE(faction.IsHuman());
     EXPECT_FALSE(faction.IsComputer());
     EXPECT_EQ(faction.NetIncome(), 55);
     EXPECT_EQ(faction.CapitalPosition(), TilePos(40, 50));
-    faction.cap_now_x = 12;
-    faction.cap_now_y = 18;
-    EXPECT_EQ(faction.CapitalPosition(), TilePos(12, 18));
 
-    Army unit;
-    unit.x = 40;
-    unit.y = 50;
-    unit.owner = 1;
-    unit.type = armytype::kHero;
-    unit.moves = 12;
-    EXPECT_TRUE(unit.Hero());
-    EXPECT_TRUE(unit.OnMap());
-    EXPECT_TRUE(unit.OwnedBy(1));
-    EXPECT_TRUE(unit.CanMove());
-    EXPECT_EQ(unit.Position(), TilePos(40, 50));
-    unit.done = true;
-    EXPECT_FALSE(unit.CanMove());
+    // Reallocating Map::cities invalidates raw pointers, while CapitalCity(map) stays valid.
+    scenario_map.cities.reserve(64);
+    ASSERT_NE(faction.CapitalCity(scenario_map), nullptr);
+    EXPECT_EQ(faction.CapitalCity(scenario_map)->Name(), "Kor");
+
+    faction.SetCurrentCapitalPos(TilePos(14, 22));
+    EXPECT_EQ(faction.CapitalPosition(), TilePos(14, 22));
+    faction.ClearCurrentCapitalPos();
+    EXPECT_EQ(faction.CapitalPosition(), TilePos(40, 50));
+
+    // Treasury invariants.
+    faction.SetGold(-50);
+    EXPECT_EQ(faction.Gold(), 0);
+    faction.AddGold(250);
+    EXPECT_EQ(faction.Gold(), 250);
+    EXPECT_FALSE(faction.SpendGold(300));
+    EXPECT_EQ(faction.Gold(), 250);
+    EXPECT_TRUE(faction.SpendGold(120));
+    EXPECT_EQ(faction.Gold(), 130);
+
+    // Missive FIFO queue and cooldown table.
+    DiplomaticMissive first_missive;
+    first_missive.from_side = 3;
+    first_missive.headline = "Peace?";
+    faction.AddMissive(first_missive);
+    EXPECT_EQ(faction.Missives().size(), 1U);
+    EXPECT_EQ(faction.PopFrontMissive().headline, "Peace?");
+    EXPECT_TRUE(faction.Missives().empty());
+
+    faction.SetLastMissiveTurn(SideId(3), 9);
+    EXPECT_EQ(faction.LastMissiveTurn(SideId(3)), 9);
+}
+
+TEST(ArmyAndRegistryTest, SpatialIndexStaysCoherentAcrossPlaceTransitAndArrive) {
+    ArmyRegistry registry;
+    Army first_proto;
+    first_proto.PlaceAt(TilePos(5, 6));
+    first_proto.SetOwner(SideId(0));
+    first_proto.SetType(ArmyTypeId(1));
+    first_proto.SetMoves(12);
+
+    Army hero_proto;
+    hero_proto.PlaceAt(TilePos(5, 6));
+    hero_proto.SetOwner(SideId(0));
+    hero_proto.SetType(ArmyTypeId(armytype::kHero));
+    hero_proto.SetMoves(16);
+
+    Army* first = registry.Add(first_proto);
+    Army* hero = registry.Add(hero_proto);
+    ASSERT_NE(first, nullptr);
+    ASSERT_NE(hero, nullptr);
+    EXPECT_NE(first->Id(), hero->Id());
+    EXPECT_EQ(first->Slot(), 0);
+    EXPECT_EQ(hero->Slot(), 1);
+    EXPECT_TRUE(hero->Hero());
+    EXPECT_TRUE(hero->CanMove());
+
+    // Spatial index lists top-down slot order (slot 1 before slot 0).
+    ASSERT_EQ(registry.IndexedOnTile(TilePos(5, 6)).size(), 2U);
+    EXPECT_EQ(registry.IndexedOnTile(TilePos(5, 6))[0], hero);
+    EXPECT_EQ(registry.IndexedOnTile(TilePos(5, 6))[1], first);
+
+    // Direct Army::PlaceAt updates ArmyRegistry's spatial index automatically.
+    hero->PlaceAt(TilePos(8, 9));
+    EXPECT_EQ(registry.IndexedOnTile(TilePos(5, 6)).size(), 1U);
+    ASSERT_EQ(registry.IndexedOnTile(TilePos(8, 9)).size(), 1U);
+    EXPECT_EQ(registry.IndexedOnTile(TilePos(8, 9))[0], hero);
+
+    // Entering road transit removes the army from on-map spatial buckets immediately.
+    first->SendIntoTransit(Transit{2, PlantedStandard{}}, /*returning=*/false);
+    EXPECT_TRUE(first->InTransit());
+    EXPECT_FALSE(first->OnMap());
+    EXPECT_TRUE(registry.IndexedOnTile(TilePos(5, 6)).empty());
+    EXPECT_FALSE(first->TickTransit());
+    EXPECT_TRUE(first->TickTransit());
+
+    // Arriving at (8, 9) restores on-map state and preserves descending slot order (hero slot 1,
+    // first slot 0).
+    first->ArriveAt(TilePos(8, 9));
+    EXPECT_FALSE(first->InTransit());
+    EXPECT_TRUE(first->OnMap());
+    ASSERT_EQ(registry.IndexedOnTile(TilePos(8, 9)).size(), 2U);
+    EXPECT_EQ(registry.IndexedOnTile(TilePos(8, 9))[0], hero);
+    EXPECT_EQ(registry.IndexedOnTile(TilePos(8, 9))[1], first);
+
+    // Items, blessings, targets, and slot reuse in pool.
+    Item sword;
+    sword.index = 8;
+    sword.name = "Sword";
+    hero->AddItem(&sword);
+    EXPECT_TRUE(hero->HasItem(&sword));
+    EXPECT_EQ(hero->TakeAllItems().size(), 1U);
+    EXPECT_FALSE(hero->HasItem(&sword));
+
+    hero->AddBlessing(2);
+    EXPECT_TRUE(hero->HasBlessing(2));
+    hero->SetTarget(TilePos(20, 21));
+    ASSERT_TRUE(hero->HasTarget());
+    EXPECT_EQ(*hero->Target(), TilePos(20, 21));
+    hero->SetDone(true);
+    EXPECT_FALSE(hero->CanMove());
+
+    ArmyId removed_id = first->Id();
+    registry.Remove(first);
+    EXPECT_FALSE(registry.Alive(removed_id));
+    EXPECT_EQ(registry.FindAlive(removed_id), nullptr);
+    EXPECT_EQ(registry.FindInPool(removed_id), first);
+
+    Army* replacement = registry.Add(first_proto);
+    EXPECT_EQ(replacement->Slot(), 0);
+    EXPECT_NE(replacement->Id(), removed_id);
 }
 
 TEST(ScnFormatTest, TypedRecordViewsReadErytheaScenario) {
@@ -232,20 +397,20 @@ TEST(GameModelTest, NewGameAndMapQueries) {
 
     const City* first_city = game_state->map->City(0);
     ASSERT_NE(first_city, nullptr);
-    EXPECT_EQ(game_state->map->CityAtTopLeft(first_city->x, first_city->y), first_city);
-    EXPECT_EQ(game_state->map->CityAtFootprint(first_city->x + 1, first_city->y + 1), first_city);
+    EXPECT_EQ(game_state->map->CityAtTopLeft(first_city->X(), first_city->Y()), first_city);
+    EXPECT_EQ(game_state->map->CityAtFootprint(first_city->X() + 1, first_city->Y() + 1),
+              first_city);
 
     Army scout;
-    scout.x = first_city->x;
-    scout.y = first_city->y;
-    scout.owner = 0;
-    scout.type = 0;
-    scout.strength = 4;
-    scout.moves = 10;
+    scout.PlaceAt(first_city->Position());
+    scout.SetOwner(SideId(0));
+    scout.SetType(ArmyTypeId(0));
+    scout.SetStrength(4);
+    scout.SetMoves(10);
     Army* added = game_state->Add(scout);
     ASSERT_NE(added, nullptr);
     EXPECT_TRUE(game_state->Alive(added));
-    auto stack_here = game_state->ArmiesOnTile(first_city->x, first_city->y);
+    auto stack_here = game_state->ArmiesOnTile(first_city->X(), first_city->Y());
     EXPECT_FALSE(stack_here.empty());
     game_state->Remove(added);
     EXPECT_FALSE(game_state->Alive(added));
@@ -327,51 +492,6 @@ TEST(TurnScheduleTest, SequentialAndRandomizedRoundOrder) {
     EXPECT_EQ(sorted_order, (std::array<int, 8>{0, 1, 2, 3, 4, 5, 6, 7}));
 }
 
-TEST(ArmyRegistryTest, StableIdsSlotReuseAndSpatialRelocate) {
-    ArmyRegistry registry;
-    Army first_proto;
-    first_proto.x = 5;
-    first_proto.y = 6;
-    first_proto.owner = 0;
-    first_proto.type = 1;
-
-    Army second_proto = first_proto;
-    Army* first = registry.Add(first_proto);
-    Army* second = registry.Add(second_proto);
-    ASSERT_NE(first, nullptr);
-    ASSERT_NE(second, nullptr);
-    EXPECT_NE(first->id, second->id);
-    EXPECT_EQ(first->slot, 0);
-    EXPECT_EQ(second->slot, 1);
-
-    // ArmiesOnTile and IndexedOnTile list top-down slot order (slot 1 before slot 0).
-    auto stack = registry.ArmiesOnTile(5, 6);
-    ASSERT_EQ(stack.size(), 2U);
-    EXPECT_EQ(stack[0], second);
-    EXPECT_EQ(stack[1], first);
-    ASSERT_EQ(registry.IndexedOnTile(TilePos(5, 6)).size(), 2U);
-    EXPECT_EQ(registry.IndexedOnTile(TilePos(5, 6))[0], second);
-
-    ArmyId removed_id = first->id;
-    registry.Remove(first);
-    EXPECT_FALSE(registry.Alive(first));
-    EXPECT_FALSE(registry.Alive(removed_id));
-    EXPECT_EQ(registry.FindAlive(removed_id), nullptr);
-    EXPECT_EQ(registry.FindInPool(removed_id), first);
-
-    Army* replacement = registry.Add(first_proto);
-    EXPECT_EQ(replacement->slot, 0);
-    EXPECT_NE(replacement->id, removed_id);
-    EXPECT_EQ(registry[0], replacement);
-    EXPECT_EQ(registry[1], second);
-
-    registry.Relocate(second, TilePos(8, 9));
-    EXPECT_EQ(second->Position(), TilePos(8, 9));
-    EXPECT_EQ(registry.IndexedOnTile(TilePos(5, 6)).size(), 1U);
-    ASSERT_EQ(registry.IndexedOnTile(TilePos(8, 9)).size(), 1U);
-    EXPECT_EQ(registry.IndexedOnTile(TilePos(8, 9))[0], second);
-}
-
 TEST(QuestAndProducedModelTest, VariantTargetsResolutionAndPerGameBugs) {
     game::NewGameOptions game_opts;
     game_opts.seed = 13;
@@ -380,24 +500,23 @@ TEST(QuestAndProducedModelTest, VariantTargetsResolutionAndPerGameBugs) {
     Game& game = **created_game;
 
     Army hero_proto;
-    hero_proto.x = game.map->cities[0].x;
-    hero_proto.y = game.map->cities[0].y;
-    hero_proto.owner = 0;
-    hero_proto.type = armytype::kHero;
+    hero_proto.PlaceAt(game.map->cities[0].Position());
+    hero_proto.SetOwner(SideId(0));
+    hero_proto.SetType(ArmyTypeId(armytype::kHero));
     Army* hero = game.Add(hero_proto);
 
-    Quest city_quest(quest::kOccupy, hero->id, CityId(2));
+    Quest city_quest(quest::kOccupy, hero->Id(), CityId(2));
     EXPECT_TRUE(city_quest.HasTarget());
     EXPECT_EQ(city_quest.TargetCityId(), CityId(2));
     EXPECT_EQ(city_quest.ResolveHero(game), hero);
     EXPECT_EQ(city_quest.ResolveCity(game), &game.map->cities[2]);
 
-    Quest pillage_quest(quest::kPillageGold, hero->id, std::monostate{}, 800, 0);
+    Quest pillage_quest(quest::kPillageGold, hero->Id(), std::monostate{}, 800, 0);
     EXPECT_TRUE(pillage_quest.HasTarget());
     pillage_quest.AddProgress(350);
     EXPECT_EQ(pillage_quest.Done(), 350);
 
-    Quest broken_quest(quest::kOccupy, hero->id, CityId::None());
+    Quest broken_quest(quest::kOccupy, hero->Id(), CityId::None());
     EXPECT_FALSE(broken_quest.HasTarget());
 
     Produced built_entry{ProducedKind::kBuilt, 4, CityId(2), false};
@@ -419,29 +538,29 @@ TEST(Phase4ArchitectureTest, TurnReportPathfinderAndComputerPlayerStrategy) {
     Game& game = **created_game;
 
     for (const Side* side : game.sides) {
-        ASSERT_NE(side->computer_player, nullptr);
+        ASSERT_NE(side->ComputerPlayer(), nullptr);
         EXPECT_TRUE(side->IsClassicAi());
     }
 
     AttitudeBreakdown attitude =
-            game.sides[1]->computer_player->EvaluateProposal(game, SideId(1), SideId(0));
+            game.sides[1]->ComputerPlayer()->EvaluateProposal(game, SideId(1), SideId(0));
     EXPECT_EQ(attitude.from_side, 1);
     EXPECT_EQ(attitude.to_side, 0);
 
     Side* current = game::Begin(game);
     ASSERT_NE(current, nullptr);
-    TurnReport& news = game.TurnNews(SideId(current->index));
+    TurnReport& news = game.TurnNews(current->Id());
     EXPECT_NE(news.hero_offer, nullptr);
 
     Pathfinder& pathfinder = game.GetPathfinder();
-    auto& grid0 = pathfinder.GridFor(game, current->index);
+    auto& grid0 = pathfinder.GridFor(game, current->Index());
     EXPECT_FALSE(grid0.empty());
-    pathfinder.InvalidateSide(SideId(current->index));
+    pathfinder.InvalidateSide(current->Id());
     pathfinder.Invalidate();
 
-    auto saved_ai = game.sides[1]->computer_player->SaveState();
+    auto saved_ai = game.sides[1]->ComputerPlayer()->SaveState();
     EXPECT_TRUE(saved_ai.is_object());
-    EXPECT_TRUE(game.sides[1]->computer_player->LoadState(saved_ai, game).ok());
+    EXPECT_TRUE(game.sides[1]->ComputerPlayer()->LoadState(saved_ai, game).ok());
 }
 
 }  // namespace

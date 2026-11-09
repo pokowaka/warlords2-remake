@@ -109,7 +109,7 @@ void Victory(kit::Done after) {
 
 /** @brief A side put out at the round's end: its line of group 11. */
 std::string FallenText(const w2::Fallen& fallen) {
-    return w2::Format(GroupLine(0xb, fallen.line), fallen.side->name);
+    return w2::Format(GroupLine(0xb, fallen.line), fallen.side->Name());
 }
 
 namespace {
@@ -166,7 +166,7 @@ void Show(w2::Ending& outcome, kit::Done after) {
     // The last computer side has triumphed, and is the player's now.
     if (outcome.triumph && outcome.winner == g_app.player && !outcome.shown) {
         outcome.shown = true;
-        search::Say(w2::Format(GroupLine(0xf, 0), g_app.player->name), done);
+        search::Say(w2::Format(GroupLine(0xf, 0), g_app.player->Name()), done);
         return;
     }
     // The offer waits on the game, not on the round's finding: computer
@@ -186,7 +186,7 @@ void Show(w2::Ending& outcome, kit::Done after) {
         return;
     }
     if (outcome.won && outcome.winner == g_app.player) {
-        search::ShowMessage(w2::Format(GroupLine(0xf, 0), g_app.player->name), GroupLine(0xf, 1),
+        search::ShowMessage(w2::Format(GroupLine(0xf, 0), g_app.player->Name()), GroupLine(0xf, 1),
                             [after]() { Victory(after); });
         return;
     }
@@ -205,12 +205,13 @@ void Over(w2::Ending& outcome) {
         return;
     }
     if (outcome.winner) {
-        search::Say(w2::Format(GroupLine(0xf, 0), outcome.winner->name));
+        search::Say(w2::Format(GroupLine(0xf, 0), outcome.winner->Name()));
         return;
     }
     bool humans = false;
     for (w2::Side* side : g_app.g->sides)
-        if (side->alive && !side->computer && !w2::game::SideCities(*g_app.g, *side).empty())
+        if (side->IsAlive() && !side->IsComputerControlled() &&
+            !w2::game::SideCities(*g_app.g, *side).empty())
             humans = true;
     if (!humans && outcome.message.contains("No more players")) {
         search::ShowMessage(GroupLine(0xc, 0), GroupLine(0xc, 1), []() {

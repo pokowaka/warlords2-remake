@@ -21,7 +21,7 @@ namespace w2 {
 
 /**
  * @brief Owning registry for every `Army` created in a `Game`, maintaining stable `ArmyId`
- * handles, ascending `slot` order, and a per-tile spatial index.
+ * handles, ascending `slot` order, and a synchronized $O(1)$ per-tile spatial index.
  *
  * Every army created via `Make` or `Add` receives a unique, never-reused
  * `ArmyId` backed by `pool_`, so pointers and `ArmyId` handles remain valid for
@@ -30,12 +30,14 @@ namespace w2 {
  * sorted by ascending `slot`, matching the 1993 engine's fixed army table.
  *
  * Invariants:
- * - For all `k` in `[0, pool_.size())`, `pool_[k]->id == ArmyId(k)`.
- * - `active_` is strictly sorted by `army->slot` ascending, and every element's
- *   `id` belongs to `alive_ids_`.
- * - `by_tile_[pos]` lists active on-map armies at `pos` in descending `slot`
- *   order (newest/highest slot first) as updated by `Add`, `Remove`,
- *   `RestoreActive`, `RebuildTileIndex`, and `Relocate`.
+ * - For all `k` in `[0, pool_.size())`, `pool_[k]->Id() == ArmyId(k)` and
+ *   `pool_[k]->registry_ == this`.
+ * - `active_` is strictly sorted by `army->Slot()` ascending, and every element's
+ *   `Id()` belongs to `alive_ids_`.
+ * - `by_tile_[pos]` lists every active on-map army at `pos` in descending `Slot()`
+ *   order (newest/highest slot first), kept automatically synchronized across
+ *   `Add`, `Remove`, `RestoreActive`, `Relocate`, and `Army` position/transit
+ *   mutations (`PlaceAt`, `SendIntoTransit`, `ArriveAt`, `ClearTransit`).
  *
  * Not thread-safe without external synchronization; owned exclusively by `Game`.
  */
@@ -51,8 +53,8 @@ class ArmyRegistry {
 
     ArmyRegistry(const ArmyRegistry&) = delete;
     ArmyRegistry& operator=(const ArmyRegistry&) = delete;
-    ArmyRegistry(ArmyRegistry&&) noexcept = default;
-    ArmyRegistry& operator=(ArmyRegistry&&) noexcept = default;
+    ArmyRegistry(ArmyRegistry&& other) noexcept;
+    ArmyRegistry& operator=(ArmyRegistry&& other) noexcept;
 
     /**
      * @brief Allocates a new `Army` in the lifetime pool with a unique `ArmyId`, without placing it
@@ -93,14 +95,14 @@ class ArmyRegistry {
     /** @brief Removes every army listed in `dead` from active play. */
     void RemoveAll(absl::Span<Army* const> dead);
 
-    /** @brief Removes every active army marked with `disbanded == true`. */
+    /** @brief Removes every active army marked with `IsDisbanded() == true`. */
     void RemoveDisbanded();
 
     /** @brief Clears all active armies and spatial entries while retaining `pool_`. */
     void ClearActive();
 
     /**
-     * @brief Replaces the active army table with `restored`, sorted by ascending `slot`.
+     * @brief Replaces the active army table with `restored`, sorted by ascending `Slot()`.
      * @param restored Pooled armies belonging to this registry.
      */
     void RestoreActive(absl::Span<Army* const> restored);
@@ -143,19 +145,23 @@ class ArmyRegistry {
     Army* operator[](size_t index) const { return active_[index]; }
 
   private:
+    friend class Army;
+
     using ArmyPool = std::vector<std::unique_ptr<Army>>;
     using ArmyList = std::vector<Army*>;
     using TileArmyMap = absl::flat_hash_map<TilePos, ArmyList>;
     using ArmyPosMap = absl::flat_hash_map<ArmyId, TilePos>;
+    using AliveIdSet = absl::flat_hash_set<ArmyId>;
 
+    void RebindPool();
     void IndexInsert(Army* army);
     void IndexRemove(const Army* army);
 
-    ArmyPool pool_;                          ///< Lifetime-owning pool indexed by `ArmyId`.
-    ArmyList active_;                        ///< Active armies sorted by ascending `slot`.
-    absl::flat_hash_set<ArmyId> alive_ids_;  ///< Set of `ArmyId`s currently in `active_`.
-    TileArmyMap by_tile_;                    ///< Spatial stacks (top-down slot).
-    ArmyPosMap indexed_pos_;                 ///< Last indexed tile per `ArmyId`.
+    ArmyPool pool_;           ///< Lifetime-owning pool indexed by `ArmyId`.
+    ArmyList active_;         ///< Active armies sorted by ascending `Slot()`.
+    AliveIdSet alive_ids_;    ///< Set of `ArmyId`s currently in `active_`.
+    TileArmyMap by_tile_;     ///< Spatial stacks (top-down slot).
+    ArmyPosMap indexed_pos_;  ///< Last indexed tile per `ArmyId`.
 };
 
 }  // namespace w2

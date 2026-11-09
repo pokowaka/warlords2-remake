@@ -43,14 +43,15 @@ struct Reward : kit::Modal {
         const w2::Army* hero = g_app.g ? quest.ResolveHero(*g_app.g) : nullptr;
         kit::Popup(kPopupRect);
         front::DrawStrategicMap(kMapX, kMapY, nullptr, true);
-        if (reward.kind == "revealed" && reward.site && hero && hero->x != w2::kNone)
-            kit::MapTarget(kMapX, kMapY, hero->x, hero->y, reward.site->x, reward.site->y);
-        if (hero && hero->x != w2::kNone) front::DrawHeroFigure(kMapX, kMapY, hero->x, hero->y);
+        if (reward.kind == "revealed" && reward.site && hero && hero->X() != w2::kNone)
+            kit::MapTarget(kMapX, kMapY, hero->X(), hero->Y(), reward.site->x, reward.site->y);
+        if (hero && hero->X() != w2::kNone)
+            front::DrawHeroFigure(kMapX, kMapY, hero->X(), hero->Y());
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), "Quest", 432, 64);
         gfx::Draw(g_app.scroll_pic, 304, 95);
         const Font& font = kit::GetFont(2).Colours(0, 7);
-        kit::Centred(font, (hero ? hero->name : std::string()) + "'s Quest", 440, 145);
+        kit::Centred(font, (hero ? hero->Name() : std::string()) + "'s Quest", 440, 145);
         kit::SetPal(0);
         gfx::Rectangle(gfx::kFill, 360, 165, 160, 1);
         kit::Centred(font, kit::Text(0x1c, 0), 440, 175);
@@ -112,8 +113,8 @@ void Show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
  */
 void Poll() {
     w2::Side* side = g_app.player;
-    if (!g_app.g || !side || side->computer) return;
-    auto& quest_news = g_app.g->TurnNews(w2::SideId(side->index)).quest_news;
+    if (!g_app.g || !side || side->IsComputerControlled()) return;
+    auto& quest_news = g_app.g->TurnNews(side->Id()).quest_news;
     if (!quest_news) return;
     auto news = quest_news;
     quest_news.reset();

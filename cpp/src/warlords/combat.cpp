@@ -24,11 +24,10 @@ const Army* HeroCarrier(const Game& game, const std::vector<Army*>& line, int x,
     int terrain = scn::TerrainAt(*game.map, x, y);
     if (terrain != move::kWater && terrain != move::kShore && terrain != move::kMountains)
         return nullptr;
-    if (std::none_of(line.begin(), line.end(),
-                     [](Army* army) { return army->type == armytype::kHero; }))
+    if (std::none_of(line.begin(), line.end(), [](Army* army) { return army->Hero(); }))
         return nullptr;
     for (Army* army : line) {
-        if (!army->at_sea && game.types.ById(army->type)->flies) return army;
+        if (!army->IsAtSea() && game.types.ById(army->Type())->flies) return army;
     }
     return nullptr;
 }
@@ -37,7 +36,7 @@ void SortLine(const Game& game, std::vector<Army*>& line, int owner_index, const
     const auto& row = game.map->fight_order[owner_index == kNone ? 8 : owner_index];
     std::map<const Army*, std::pair<int, int>> sort_keys;
     for (size_t i = 0; i < line.size(); i++) {
-        sort_keys[line[i]] = {row[line[i]->type] + (line[i] == carrier ? 80 : 0),
+        sort_keys[line[i]] = {row[line[i]->TypeIndex()] + (line[i] == carrier ? 80 : 0),
                               static_cast<int>(i)};
     }
     LuaSort(line, [&](Army* left, Army* right) {
@@ -50,7 +49,7 @@ void SortLine(const Game& game, std::vector<Army*>& line, int owner_index, const
 
 int ItemTotal(const Army& army, int item_type) {
     int total = 0;
-    for (Item* item : army.items) {
+    for (Item* item : army.Items()) {
         if (item->type == item_type) total += item->value;
     }
     return total;
@@ -58,25 +57,25 @@ int ItemTotal(const Army& army, int item_type) {
 
 bool LineHas(const Game& game, const std::vector<Army*>& line, int ability) {
     for (Army* army : line) {
-        if (game.types.ById(army->type)->Ability() == ability) return true;
+        if (game.types.ById(army->Type())->Ability() == ability) return true;
     }
     return false;
 }
 
 int StackBonus(const Game& game, const std::vector<Army*>& line, int cls) {
     int best = 0;
-    for (Army* army : line) best = std::max(best, game.types.ById(army->type)->StackBonus(cls));
+    for (Army* army : line) best = std::max(best, game.types.ById(army->Type())->StackBonus(cls));
     return best;
 }
 
 int Subtract(const Game& game, const std::vector<Army*>& line) {
     int least = 0;
-    for (Army* army : line) least = std::min(least, game.types.ById(army->type)->Subtract());
+    for (Army* army : line) least = std::min(least, game.types.ById(army->Type())->Subtract());
     return least;
 }
 
 bool Ordinary(const Game& game, const Army* army) {
-    return army->type != armytype::kHero && !game.types.ById(army->type)->IsMagical();
+    return !army->Hero() && !game.types.ById(army->Type())->IsMagical();
 }
 
 }  // namespace
@@ -103,7 +102,7 @@ int BattleItems(const Army& army) {
 
 int CommandItems(const Army& army) {
     int count = ItemTotal(army, rules::kItemCommand);
-    for (Item* item : army.items) {
+    for (Item* item : army.Items()) {
         if (item->type == rules::kItemStandard) count++;
     }
     return count;
@@ -161,20 +160,20 @@ int CombatResolver::TerrainClass(int x, int y) const {
 }
 
 combat::Lines CombatResolver::BattleLines(const ArmyStack& stack, int x, int y) const {
-    int attacking_side = stack.empty() ? kNone : stack[0]->owner;
+    int attacking_side = stack.empty() ? kNone : stack[0]->OwnerIndex();
     City* city = game_.map->city_tile[y * game_.map->width + x];
-    if (city && city->razed) city = nullptr;
-    int min_x = city ? city->x : x, min_y = city ? city->y : y;
-    int max_x = city ? city->x + 1 : x, max_y = city ? city->y + 1 : y;
+    if (city && city->IsRazed()) city = nullptr;
+    int min_x = city ? city->X() : x, min_y = city ? city->Y() : y;
+    int max_x = city ? city->X() + 1 : x, max_y = city ? city->Y() + 1 : y;
     combat::Lines lines;
     bool found_defender = false;
     for (int i = static_cast<int>(game_.armies.size()) - 1; i >= 0; i--) {
         Army* army = game_.armies[i];
-        if (!army->transit && army->owner != attacking_side && army->x >= min_x &&
-            army->x <= max_x && army->y >= min_y && army->y <= max_y) {
+        if (!army->InTransit() && army->OwnerIndex() != attacking_side && army->X() >= min_x &&
+            army->X() <= max_x && army->Y() >= min_y && army->Y() <= max_y) {
             lines.defenders.push_back(army);
             if (!found_defender) {
-                lines.def_owner = army->owner;
+                lines.def_owner = army->OwnerIndex();
                 found_defender = true;
             }
         }
@@ -189,8 +188,8 @@ combat::Lines CombatResolver::BattleLines(const ArmyStack& stack, int x, int y) 
 int CombatResolver::HeroBonus(const ArmyStack& line) const {
     int best = 0, command = 0;
     for (Army* army : line) {
-        if (army->type == armytype::kHero) {
-            int hero_strength = army->strength + combat::BattleItems(*army);
+        if (army->Hero()) {
+            int hero_strength = army->Strength() + combat::BattleItems(*army);
             best = std::max(best, std::min(9, hero_strength));
             command += combat::CommandItems(*army);
         }
@@ -208,8 +207,8 @@ int CombatResolver::Fortify(const ArmyStack& attackers, int x, int y, int cls) c
     else if (scn::TerrainAt(*game_.map, x, y) == move::kSite)
         value = 2;
     else
-        value = city ? city->defence : 0;
-    if (city && city->owner_index == kNone) value = value / 2;
+        value = city ? city->Defence() : 0;
+    if (city && city->IsNeutral()) value = value / 2;
     return value;
 }
 
@@ -230,9 +229,9 @@ CombatResolver::ModifierPair CombatResolver::Modifiers(const ArmyStack& attacker
 }
 
 int CombatResolver::Strength(const Army& army, int mod, int cls, int terrain) const {
-    if (army.at_sea && (terrain == move::kWater || terrain == move::kShore)) return 4;
-    int strength = army.strength + mod + combat::BattleItems(army) +
-                   game_.types.ById(army.type)->SelfBonus(cls);
+    if (army.IsAtSea() && (terrain == move::kWater || terrain == move::kShore)) return 4;
+    int strength = army.Strength() + mod + combat::BattleItems(army) +
+                   game_.types.ById(army.Type())->SelfBonus(cls);
     return std::min(combat::kMaxStrength, strength);
 }
 
@@ -241,13 +240,13 @@ CombatResolver::StrengthMap CombatResolver::StackStrengths(const ArmyStack& armi
     int cls = TerrainClass(x, y);
     int total = 0, best_stack_bonus = 0;
     for (Army* army : armies) {
-        if (!army->at_sea) {
-            if (army->type == armytype::kHero) {
-                int hero_strength = std::min(9, army->strength + combat::BattleItems(*army));
+        if (!army->IsAtSea()) {
+            if (army->Hero()) {
+                int hero_strength = std::min(9, army->Strength() + combat::BattleItems(*army));
                 total += combat::kHeroTable[std::max(0, hero_strength)] +
                          combat::CommandItems(*army);
             } else {
-                int stack_bonus = game_.types.ById(army->type)->StackBonus(cls);
+                int stack_bonus = game_.types.ById(army->Type())->StackBonus(cls);
                 if (stack_bonus > best_stack_bonus) {
                     total = total + stack_bonus - best_stack_bonus;
                     best_stack_bonus = stack_bonus;
@@ -259,12 +258,12 @@ CombatResolver::StrengthMap CombatResolver::StackStrengths(const ArmyStack& armi
     StrengthMap strengths;
     for (Army* army : armies) {
         int strength;
-        if (army->at_sea)
+        if (army->IsAtSea())
             strength = 4;
-        else if (army->type == armytype::kHero)
-            strength = army->strength + combat::BattleItems(*army);
+        else if (army->Hero())
+            strength = army->Strength() + combat::BattleItems(*army);
         else
-            strength = army->strength + game_.types.ById(army->type)->SelfBonus(cls);
+            strength = army->Strength() + game_.types.ById(army->Type())->SelfBonus(cls);
         strengths[army] = std::min(9, strength) + total;
     }
     return strengths;
@@ -296,7 +295,7 @@ Battle CombatResolver::Resolve(const ArmyStack& attackers, const ArmyStack& defe
     Battle battle;
     for (const auto* line : {&attackers, &defenders}) {
         for (Army* army : *line) {
-            if (army->at_sea && (terrain == move::kWater || terrain == move::kShore))
+            if (army->IsAtSea() && (terrain == move::kWater || terrain == move::kShore))
                 battle.boats.insert(army);
         }
     }
@@ -316,10 +315,11 @@ Battle CombatResolver::Resolve(const ArmyStack& attackers, const ArmyStack& defe
         }
         throws++;
 
-        if (defender_hits && game_.map->options.tutorial != 0 &&
-            attacker.army->type == armytype::kHero) {
-            Side* side = game_.map->Side(attacker.army->owner == kNone ? 0 : attacker.army->owner);
-            if (!(side && side->computer) && defender.army->owner == kNone) defender_hits = false;
+        if (defender_hits && game_.map->options.tutorial != 0 && attacker.army->Hero()) {
+            Side* side =
+                    game_.map->Side(attacker.army->IsNeutral() ? 0 : attacker.army->OwnerIndex());
+            if (!(side && side->IsComputerControlled()) && defender.army->IsNeutral())
+                defender_hits = false;
         }
         if (attacker_hits) {
             defender.hits--;
@@ -366,14 +366,14 @@ CombatResolver::AdviceVerdict CombatResolver::Advise(const ArmyStack& attackers,
 int CombatResolver::Loot(const Side* loser) const {
     if (!loser) return 0;
     int city_count = static_cast<int>(game::SideCities(game_, *loser).size());
-    int share = city_count > 1 ? loser->gold / city_count : loser->gold;
+    int share = city_count > 1 ? loser->Gold() / city_count : loser->Gold();
     return share / 2;
 }
 
 Battle CombatResolver::DecideAttack(const ArmyStack& stack, int x, int y) {
     combat::Lines lines = BattleLines(stack, x, y);
-    int attacker_side = stack.empty() ? kNone : stack[0]->owner;
-    if (lines.city && attacker_side != kNone) lines.city->attacked |= 1 << attacker_side;
+    SideId attacker_side = stack.empty() ? SideId::None() : stack[0]->Owner();
+    if (lines.city && attacker_side.IsValid()) lines.city->RecordAttackBy(attacker_side);
     Battle result = Resolve(lines.attackers, lines.defenders, x, y);
     result.lines.attackers = lines.attackers;
     result.lines.defenders = lines.defenders;
@@ -381,7 +381,7 @@ Battle CombatResolver::DecideAttack(const ArmyStack& stack, int x, int y) {
     Side* loser = lines.def_owner != kNone ? game_.map->Side(lines.def_owner) : nullptr;
     if (result.won && lines.city && loser) result.loot = Loot(loser);
     for (Army* army : stack) {
-        if (army->type == armytype::kHero) {
+        if (army->Hero()) {
             result.hero = army;
             break;
         }
@@ -392,27 +392,27 @@ Battle CombatResolver::DecideAttack(const ArmyStack& stack, int x, int y) {
 
 void CombatResolver::ChargeAttack(const ArmyStack& stack, int x, int y) {
     City* city = game::CityAt(game_, x, y);
-    int terrain = city && !city->razed ? move::kCity : scn::TerrainAt(*game_.map, x, y);
+    int terrain = city && !city->IsRazed() ? move::kCity : scn::TerrainAt(*game_.map, x, y);
     int cost = std::max(2, terrain >= 0 && terrain < 12 ? move::kCost[terrain] : 0);
     move::Mode mode = move::StackMode(game_, stack);
     if (mode.mode != move::kFlying && !mode.at_sea &&
         (terrain == move::kWater || terrain == move::kShore)) {
         for (Army* army : stack) {
             bool flight = false;
-            if (army->type == armytype::kHero) {
-                for (Item* item : army->items) {
+            if (army->Hero()) {
+                for (Item* item : army->Items()) {
                     if (item->type == rules::kItemFlight) flight = true;
                 }
             }
-            if (!game_.types.ById(army->type)->flies && !flight) {
-                army->at_sea = true;
-                army->moves = 0;
+            if (!game_.types.ById(army->Type())->flies && !flight) {
+                army->BoardShip();
+                army->SetMoves(0);
             }
         }
     }
     for (Army* army : stack) {
-        army->moves = std::max(0, army->moves - cost);
-        army->target.reset();
+        army->SpendMoves(cost);
+        army->ClearTarget();
     }
 }
 
@@ -420,7 +420,7 @@ Army* CombatResolver::AwardMedal(const Battle& result, int side_index) {
     if (side_index == kNone || !result.won) return nullptr;
     const auto& survivors = result.attackers;
     for (Army* army : survivors) {
-        if (army->at_sea) return nullptr;
+        if (army->IsAtSea()) return nullptr;
     }
     size_t n_atk = result.lines.attackers.size(), n_def = result.lines.defenders.size();
     bool counted = (n_atk >= 2 && n_def >= 2) ||
@@ -433,17 +433,17 @@ Army* CombatResolver::AwardMedal(const Battle& result, int side_index) {
     if (plain.empty()) return nullptr;
     int decorated = 0;
     for (Army* army : game_.armies) {
-        if (army->owner == side_index && Ordinary(game_, army) && army->medals > 0) decorated++;
+        if (army->OwnedBy(side_index) && Ordinary(game_, army) && army->Medals() > 0) decorated++;
     }
     int chance = std::max(12, 40 - 5 * decorated);
     if (!(game_.rng.Dice(1, 100, 0) < chance) || !result.hero) return nullptr;
     Army* chosen = plain[game_.rng.Dice(1, static_cast<int>(plain.size()), -1)];
-    if (chosen->medals >= 4) return nullptr;
-    chosen->medals++;
-    if (chosen->strength > 14)
-        chosen->max_moves++;
+    if (chosen->Medals() >= 4) return nullptr;
+    chosen->AddMedal();
+    if (chosen->Strength() > 14)
+        chosen->AddMaxMoves(1);
     else
-        chosen->strength = std::min(9, chosen->strength + 1);
+        chosen->SetStrength(std::min(9, chosen->Strength() + 1));
     return chosen;
 }
 
@@ -460,28 +460,29 @@ Battle& CombatResolver::ApplyAttack(Battle& result) {
     const auto& boats = result.boats;
 
     auto fallen = [&](Army* hero) {
-        history::RecordDeed(game_, game_.map->Side(hero->owner == kNone ? 8 : hero->owner),
+        history::RecordDeed(game_, game_.map->Side(hero->IsNeutral() ? 8 : hero->OwnerIndex()),
                             DeedType::kHeroKilled,
-                            tile_city ? tile_city->index : history::kKilledInBattle, 0, hero->name);
+                            tile_city ? tile_city->Index() : history::kKilledInBattle, 0,
+                            hero->Name());
     };
-    int mine = stack.empty() ? kNone : stack[0]->owner;
+    int mine = stack.empty() ? kNone : stack[0]->OwnerIndex();
     if (def_owner >= 0 && def_owner <= 7 && mine >= 0 && mine <= 7) {
         int heroes_lost = 0;
         for (Army* dead_def : result.dead_defenders) {
-            if (dead_def->type == armytype::kHero) heroes_lost++;
+            if (dead_def->Hero()) heroes_lost++;
         }
         Side* def_side = game_.map->Side(def_owner);
         Side* atk_side = game_.map->Side(mine);
         TilePos pos(x, y);
-        if (def_side && def_side->computer_player) {
-            def_side->computer_player->RecordBattle(
+        if (def_side && def_side->ComputerPlayer()) {
+            def_side->ComputerPlayer()->RecordBattle(
                     game_, SideId(def_owner), SideId(mine), pos, heroes_lost,
                     static_cast<int>(result.dead_defenders.size()),
                     result.won && !defenders.empty(), city != nullptr);
-            def_side->computer_player->RecordBattleObservation(game_, SideId(def_owner), pos);
+            def_side->ComputerPlayer()->RecordBattleObservation(game_, SideId(def_owner), pos);
         }
-        if (atk_side && atk_side->computer_player) {
-            atk_side->computer_player->RecordBattleObservation(game_, SideId(mine), pos);
+        if (atk_side && atk_side->ComputerPlayer()) {
+            atk_side->ComputerPlayer()->RecordBattleObservation(game_, SideId(mine), pos);
         }
     }
     for (Army* attacker : result.dead_attackers)
@@ -494,25 +495,25 @@ Battle& CombatResolver::ApplyAttack(Battle& result) {
         Side* side = game_.map->Side(mine);
         if (result.hero)
             history::RecordDeed(game_, side, DeedType::kCityWon, history::kWonByName,
-                                tile_city->index, result.hero->name);
+                                tile_city->Index(), result.hero->Name());
         else
-            history::RecordDeed(game_, side, DeedType::kCityWon, mine, tile_city->index, "");
+            history::RecordDeed(game_, side, DeedType::kCityWon, mine, tile_city->Index(), "");
     }
     for (Army* attacker : result.dead_attackers) {
-        if (attacker->type == armytype::kHero) {
+        if (attacker->Hero()) {
             fallen(attacker);
             hero::DropItems(game_, attacker, x, y, mine);
         }
     }
     for (Army* defender : result.dead_defenders) {
-        if (defender->type == armytype::kHero) {
+        if (defender->Hero()) {
             fallen(defender);
             hero::DropItems(game_, defender, x, y, mine);
         }
     }
     hero::BattleExperience(game_, attackers, defenders, result, city != nullptr);
-    Side* my_side =
-            game_.map->Side(stack.empty() ? 0 : (stack[0]->owner == kNone ? 0 : stack[0]->owner));
+    Side* my_side = game_.map->Side(
+            stack.empty() ? 0 : (stack[0]->IsNeutral() ? 0 : stack[0]->OwnerIndex()));
     {
         quest::Event event;
         event.stack = attackers;
@@ -525,34 +526,32 @@ Battle& CombatResolver::ApplyAttack(Battle& result) {
     game::TidyTowers(game_);
 
     if (result.won && city) {
-        Side* winner = game_.map->Side(stack[0]->owner);
+        Side* winner = game_.map->Side(stack[0]->Owner());
         Side* loser = def_owner != kNone ? game_.map->Side(def_owner) : nullptr;
         if (loser) {
             int loot = result.loot;
-            winner->gold += loot;
-            loser->gold = std::max(0, loser->gold - 2 * loot);
+            winner->AddGold(loot);
+            loser->AddGold(-2 * loot);
         }
-        if (city->owner_index != kNone) {
-            city->claim = city->claim == winner->index ? rules::kNeutral : city->owner_index;
+        if (!city->IsNeutral()) {
+            city->SetClaim(city->Claim() == winner->Id() ? SideId::None() : city->Owner());
         }
-        city->attacked = 0;
-        city->countdown = 0;
-        city->vector_to = kNone;
+        city->ClearAttackedMask();
+        city->SetCountdown(0);
+        city->ClearVector();
         for (auto& other_city : game_.map->cities) {
-            if (other_city.vector_to == city->index) {
-                other_city.vector_to = kNone;
-                other_city.producing = kNone;
-                other_city.countdown = 0;
+            if (other_city.VectoredCityId() == city->Id()) {
+                other_city.StopProduction();
             }
         }
-        city->owner_index = winner->index;
+        city->SetOwner(winner->Id());
         scn::SetCityTiles(*game_.map, *city);
         game_.GetPathfinder().Invalidate();
         result.captured = city;
         bool handled =
-                winner->computer && winner->computer_player &&
-                winner->computer_player->OnQuestCapture(game_, *winner, *city, result.attackers);
-        if (!handled && winner->computer) {
+                winner->IsComputerControlled() && winner->ComputerPlayer() &&
+                winner->ComputerPlayer()->OnQuestCapture(game_, *winner, *city, result.attackers);
+        if (!handled && winner->IsComputerControlled()) {
             quest::Event event;
             event.city = city;
             event.stack = result.attackers;
@@ -566,7 +565,7 @@ Battle& CombatResolver::ApplyAttack(Battle& result) {
         int room = rules::kMaxStack - static_cast<int>(game::ArmiesAt(game_, x, y).size());
         for (Army* attacker : result.attackers) {
             if (room <= 0) break;
-            game_.armies.Relocate(attacker, TilePos(x, y));
+            attacker->PlaceAt(TilePos(x, y));
             room--;
         }
         if (game_.map->options.hidden_map != 0 && mine != kNone) {
@@ -575,7 +574,7 @@ Battle& CombatResolver::ApplyAttack(Battle& result) {
             if (city) {
                 for (int dx = 0; dx <= 1; dx++) {
                     for (int dy = 0; dy <= 1; dy++)
-                        found += game::Reveal(game_, mine, city->x + dx, city->y + dy, false);
+                        found += game::Reveal(game_, mine, city->X() + dx, city->Y() + dy, false);
                 }
             }
             if (found > 0) game_.GetPathfinder().Invalidate();

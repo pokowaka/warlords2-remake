@@ -76,7 +76,7 @@ const int kTake = 293;                     ///< The ruin's Take control.
  */
 std::vector<std::string> RuinLines(const w2::SearchResult& result) {
     std::vector<std::string> lines;
-    std::string name = result.hero ? result.hero->name : "";
+    std::string name = result.hero ? result.hero->Name() : "";
     const w2::Monster* monster = result.monster ? result.monster : result.guardian;
     if (result.kind != "allies") {
         if (monster) {
@@ -159,7 +159,7 @@ struct Ruin : kit::Modal {
         if (!control) return;
         if (control->id == kTake && hero) {
             for (auto& item : g_app.g->map->items) {
-                if (item.status == 1 && item.x == hero->x && item.y == hero->y)
+                if (item.status == 1 && item.x == hero->X() && item.y == hero->Y())
                     w2::hero::TakeItem(*g_app.g, hero, &item);
             }
             Close();
@@ -266,7 +266,7 @@ void OpenTemple(std::shared_ptr<w2::SearchResult> result, const std::vector<w2::
     dialog->dialog_view = kit::View(kTempleDialog);
     dialog->view = &dialog->dialog_view;
     dialog->dialog_view.state[kBless] = w2::uidata::kNormal;
-    bool can_quest = g_app.g->map->options.quests != 0 && !g_app.player->quest && result->hero;
+    bool can_quest = g_app.g->map->options.quests != 0 && !g_app.player->HasQuest() && result->hero;
     dialog->dialog_view.state[kQuest] = can_quest ? w2::uidata::kNormal : w2::uidata::kDisabled;
     kit::Push(dialog);
 }
@@ -318,8 +318,8 @@ struct Sage : kit::Modal {
         front::DrawStrategicMap(kSageX, kSageY);
         if (!target) front::DrawSiteMarkers(kSageX, kSageY, result->site);
         if (target) {
-            kit::MapTarget(kSageX, kSageY, hero->x, hero->y, target->x, target->y);
-            front::DrawHeroFigure(kSageX, kSageY, hero->x, hero->y);
+            kit::MapTarget(kSageX, kSageY, hero->X(), hero->Y(), target->x, target->y);
+            front::DrawHeroFigure(kSageX, kSageY, hero->X(), hero->Y());
         }
         if (patch) {
             kit::SetPal(15);
@@ -355,8 +355,8 @@ struct Sage : kit::Modal {
             else
                 sage->said.push_back(Format(kit::Text(0x3e, 0), entry.name));
             sage->said.push_back(kit::Text(0x3e, 1));
-            if (w2::Site* site = w2::site::SageShow(*g_app.g, *g_app.player, entry, sage->hero->x,
-                                                    sage->hero->y)) {
+            if (w2::Site* site = w2::site::SageShow(*g_app.g, *g_app.player, entry, sage->hero->X(),
+                                                    sage->hero->Y())) {
                 sage->said.push_back(Format(kit::Text(0x3e, 7), site->name));
                 sage->target = site;
             }
@@ -411,7 +411,8 @@ void OpenSage(std::shared_ptr<w2::SearchResult> result) {
     dialog->hero = result->hero;
     dialog->dialog_view = kit::View(kSageDialog);
     dialog->view = &dialog->dialog_view;
-    dialog->entries = w2::site::SageList(*g_app.g, *g_app.player, dialog->hero->x, dialog->hero->y);
+    dialog->entries =
+            w2::site::SageList(*g_app.g, *g_app.player, dialog->hero->X(), dialog->hero->Y());
     dialog->hidden_map = g_app.g->map->options.hidden_map != 0;
     dialog->Offers(true);
     kit::Push(dialog);
@@ -450,8 +451,8 @@ void Open(const std::vector<w2::Army*>& stack) {
     if (result->kind == "temple") return OpenTemple(result, stack);
     if (result->kind == "sage") {
         sound::Music(w2::cues::kSage);
-        OpenRuin({Format(kit::Text(0x3a, 0), result->hero ? result->hero->name : "")}, false, false,
-                 nullptr, [result]() { OpenSage(result); });
+        OpenRuin({Format(kit::Text(0x3a, 0), result->hero ? result->hero->Name() : "")}, false,
+                 false, nullptr, [result]() { OpenSage(result); });
         return;
     }
     front::StratDirty();

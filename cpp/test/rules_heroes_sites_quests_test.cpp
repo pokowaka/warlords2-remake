@@ -36,8 +36,9 @@ TEST(SageTest, RichSiteDiscoveryGemPayoutAndHiddenMapPatch) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(31));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    int hero_x = side->capital->x;
-    int hero_y = side->capital->y;
+    City* side_cap = side->CapitalCity(*game.map);
+    int hero_x = side_cap->X();
+    int hero_y = side_cap->Y();
     for (auto& map_site : game.map->sites) {
         map_site.rich = false;
         map_site.revealed = 0xff;
@@ -80,56 +81,56 @@ TEST(SageTest, RichSiteDiscoveryGemPayoutAndHiddenMapPatch) {
     ASSERT_NE(gold_ptr, nullptr);
     site::SageEntry gold_entry = *gold_ptr;
     EXPECT_EQ(site::SageShow(game, *side, gold_entry, hero_x, hero_y), near_gold);
-    EXPECT_EQ((near_gold->revealed >> side->index) & 1, 1);
+    EXPECT_EQ((near_gold->revealed >> side->Index()) & 1, 1);
     EXPECT_EQ(site::SageShow(game, *side, gold_entry, hero_x, hero_y), far_gold);
 
     auto remaining = site::SageList(game, *side, hero_x, hero_y);
     ASSERT_EQ(remaining.size(), 1U);
     EXPECT_EQ(remaining[0].item, &game.map->items[9]);
 
-    int gold_before = side->gold;
+    int gold_before = side->Gold();
     int gem = site::SageGem(game, *side);
     EXPECT_TRUE(gem >= 503 && gem <= 2000);
-    EXPECT_EQ(side->gold, gold_before + gem);
+    EXPECT_EQ(side->Gold(), gold_before + gem);
 
     game.map->options.hidden_map = 1;
     game.explored.Clear();
     auto patch = site::SageMap(game, *side, 3, 3);
     EXPECT_EQ(patch[0], 0);
     EXPECT_TRUE(patch[2] >= 16 && patch[2] <= 25 && patch[3] >= 16 && patch[3] <= 25);
-    EXPECT_TRUE(game::Seen(game, side->index, patch[0] + patch[2] - 1, patch[1] + patch[3] - 1));
+    EXPECT_TRUE(game::Seen(game, side->Index(), patch[0] + patch[2] - 1, patch[1] + patch[3] - 1));
 }
 
 TEST(HeroItemsTest, StandardTakeDropPlantFlagAndVectorToStandard) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(29));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    Army* hero = hero::Recruit(game, *side, *game.TurnNews(SideId(side->index)).hero_offer).hero;
-    EXPECT_EQ(hero->items[0], &game.map->items[side->index]);
-    EXPECT_EQ(hero->items[0]->status, 3);
+    Army* hero = hero::Recruit(game, *side, *game.TurnNews(side->Id()).hero_offer).hero;
+    EXPECT_EQ(hero->Items()[0], &game.map->items[side->Index()]);
+    EXPECT_EQ(hero->Items()[0]->status, 3);
     EXPECT_EQ(hero::ItemsHere(game, hero).size(), 1U);
 
     Item* item = &game.map->items[8];
     item->status = 1;
-    item->x = hero->x;
-    item->y = hero->y;
+    item->x = hero->X();
+    item->y = hero->Y();
     auto here = hero::ItemsHere(game, hero);
     ASSERT_EQ(here.size(), 2U);
     EXPECT_EQ(here[1], item);
 
     hero::TakeItem(game, hero, item);
-    EXPECT_TRUE(item->status == 3 && hero->items.size() == 2U);
+    EXPECT_TRUE(item->status == 3 && hero->Items().size() == 2U);
 
     hero::DropItem(game, hero, item);
-    EXPECT_TRUE(item->status == 1 && item->x == hero->x && hero->items.size() == 1U);
+    EXPECT_TRUE(item->status == 1 && item->x == hero->X() && hero->Items().size() == 1U);
 
     EXPECT_FALSE(game::PlantFlag(game, *side, hero));
     int flag_x = kNone;
     int flag_y = kNone;
     for (int dy = -3; dy <= 4 && flag_x == kNone; ++dy) {
         for (int dx = -3; dx <= 4 && flag_x == kNone; ++dx) {
-            int x = hero->x + dx;
-            int y = hero->y + dy;
+            int x = hero->X() + dx;
+            int y = hero->Y() + dy;
             int terrain = scn::TerrainAt(*game.map, x, y);
             if ((terrain == movement::kPlain || terrain == movement::kRoad) &&
                 !game::CityAt(game, x, y)) {
@@ -139,21 +140,20 @@ TEST(HeroItemsTest, StandardTakeDropPlantFlagAndVectorToStandard) {
         }
     }
     ASSERT_NE(flag_x, kNone);
-    hero->x = flag_x;
-    hero->y = flag_y;
+    hero->PlaceAt(TilePos(flag_x, flag_y));
     EXPECT_TRUE(game::PlantFlag(game, *side, hero));
     EXPECT_EQ(game::StandardAt(game, *side).first, flag_x);
     EXPECT_FALSE(game::PlantFlag(game, *side, hero));
 
-    City* city = side->capital;
+    City* city = side->CapitalCity(*game.map);
     game::SetProduction(game, *city, 0);
-    city->countdown = 1;
+    city->SetCountdown(1);
     EXPECT_TRUE(game::VectorToStandard(game, *city, *side));
     size_t count_before = game::ArmiesAt(game, flag_x, flag_y).size();
     for (size_t i = 0; i < 3 * game.sides.size() + 1; ++i) EndTurn(game);
     EXPECT_GT(game::ArmiesAt(game, flag_x, flag_y).size(), count_before);
 
-    hero::TakeItem(game, hero, &game.map->items[side->index]);
+    hero::TakeItem(game, hero, &game.map->items[side->Index()]);
     EXPECT_EQ(game::StandardAt(game, *side).first, kNone);
 }
 
@@ -161,18 +161,18 @@ TEST(TutorialHeroTest, HeroCannotDieAttackingNeutralsWhenTutorialEnabled) {
     auto game_ptr = SetupGame("TUTORIA", Seed(31));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    EXPECT_TRUE(game.map->options.tutorial == 1 && !side->computer);
+    EXPECT_TRUE(game.map->options.tutorial == 1 && !side->IsComputerControlled());
 
     Army hero;
-    hero.type = armytype::kHero;
-    hero.strength = 1;
-    hero.owner = side->index;
+    hero.SetType(ArmyTypeId(armytype::kHero));
+    hero.SetStrength(1);
+    hero.SetOwner(side->Id());
     std::vector<Army> defender_pool(8);
     std::vector<Army*> defenders;
     for (auto& defender : defender_pool) {
-        defender.type = 11;
-        defender.strength = 9;
-        defender.owner = kNone;
+        defender.SetType(ArmyTypeId(11));
+        defender.SetStrength(9);
+        defender.SetOwner(SideId::None());
         defenders.push_back(&defender);
     }
     int deaths = 0;
@@ -194,9 +194,9 @@ TEST(HeroesTest, RecruitmentPromotionsAlliesCapsAndItemDrops) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(37));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    auto offer = game.TurnNews(SideId(side->index)).hero_offer;
+    auto offer = game.TurnNews(side->Id()).hero_offer;
     ASSERT_NE(offer, nullptr);
-    EXPECT_TRUE(offer->price == 0 && offer->city == side->capital);
+    EXPECT_TRUE(offer->price == 0 && offer->city == side->CapitalCity(*game.map));
 
     const auto& names = hero::Names(game, *side);
     EXPECT_EQ(names.size(), 100U);
@@ -210,39 +210,39 @@ TEST(HeroesTest, RecruitmentPromotionsAlliesCapsAndItemDrops) {
 
     auto hired = hero::Recruit(game, *side, *offer);
     Army* hero = hired.hero;
-    EXPECT_TRUE(hero->type == armytype::kHero && hero->name == offer->name);
-    EXPECT_TRUE(hero->strength == 5 && hero->max_moves == 14 && hero->moves == 14);
-    EXPECT_TRUE(hired.allies.empty() && hero->items.size() == 1U);
-    EXPECT_EQ(hero->items[0]->type, rules::kItemStandard);
+    EXPECT_TRUE(hero->TypeIndex() == armytype::kHero && hero->Name() == offer->name);
+    EXPECT_TRUE(hero->Strength() == 5 && hero->MaxMoves() == 14 && hero->Moves() == 14);
+    EXPECT_TRUE(hired.allies.empty() && hero->Items().size() == 1U);
+    EXPECT_EQ(hero->Items()[0]->type, rules::kItemStandard);
 
-    hero->experience = 15;
+    hero->SetExperience(15);
     EXPECT_EQ(hero::CheckPromotions(game, *side).size(), 1U);
-    EXPECT_TRUE(hero->level == 2 && hero->title == "Cavalier" && hero->strength == 6 &&
-                hero->max_moves == 16);
+    EXPECT_TRUE(hero->Level() == 2 && hero->Title() == "Cavalier" && hero->Strength() == 6 &&
+                hero->MaxMoves() == 16);
     EXPECT_TRUE(hero::CheckPromotions(game, *side).empty());
 
-    hero->experience = 60;
+    hero->SetExperience(60);
     hero::CheckPromotions(game, *side);
-    EXPECT_EQ(hero->level, 3);
+    EXPECT_EQ(hero->Level(), 3);
     hero::CheckPromotions(game, *side);
-    EXPECT_EQ(hero->title, "Paladin");
+    EXPECT_EQ(hero->Title(), "Paladin");
     EXPECT_TRUE(hero::CheckPromotions(game, *side).empty());
     hero::AddExperience(game, hero, 99);
-    EXPECT_EQ(hero->experience, rules::kMaxHeroXp);
+    EXPECT_EQ(hero->Experience(), rules::kMaxHeroXp);
 
     auto [ally_type, ally_count] = hero::Allies(game);
     EXPECT_TRUE(ally_type != nullptr && ally_count >= 1 && ally_count <= 3);
 
     game.turn = 4;
     HeroOffer later_offer;
-    later_offer.city = side->capital;
+    later_offer.city = side->CapitalCity(*game.map);
     auto escort = hero::Recruit(game, *side, later_offer).allies;
     EXPECT_FALSE(escort.empty());
     for (const Army* ally : escort)
-        EXPECT_TRUE(ally->moves == ally->max_moves && ally->upkeep == 0);
+        EXPECT_TRUE(ally->Moves() == ally->MaxMoves() && ally->Upkeep() == 0);
     game.turn = 1;
     EXPECT_TRUE(hero::kMaxPerSide == 5 && hero::kMaxInGame == 40);
-    for (int i = 0; i < 5; ++i) AddArmy(game, 0, 0, side->index, armytype::kHero, 5);
+    for (int i = 0; i < 5; ++i) AddArmy(game, 0, 0, side->Index(), armytype::kHero, 5);
     game.turn = 2;
     for (int i = 0; i < 50; ++i) EXPECT_EQ(hero::Offer(game, *side), nullptr);
 
@@ -255,12 +255,12 @@ TEST(HeroesTest, RecruitmentPromotionsAlliesCapsAndItemDrops) {
     fire.type = rules::kItemBattle;
     fire.value = 1;
     Army carrier;
-    carrier.type = armytype::kHero;
-    carrier.owner = side->index;
-    carrier.items = {&fire};
+    carrier.SetType(ArmyTypeId(armytype::kHero));
+    carrier.SetOwner(side->Id());
+    carrier.SetItems({&fire});
     auto dropped = hero::DropItems(game, &carrier, plain.x, plain.y);
     ASSERT_EQ(dropped.size(), 1U);
-    EXPECT_TRUE(dropped[0]->status == 1 && dropped[0]->x == plain.x && carrier.items.empty());
+    EXPECT_TRUE(dropped[0]->status == 1 && dropped[0]->x == plain.x && carrier.Items().empty());
 
     Item ice;
     ice.name = "Icesword";
@@ -268,9 +268,9 @@ TEST(HeroesTest, RecruitmentPromotionsAlliesCapsAndItemDrops) {
     ice.value = 1;
     ice.status = 3;
     Army drowner;
-    drowner.type = armytype::kHero;
-    drowner.owner = side->index;
-    drowner.items = {&ice};
+    drowner.SetType(ArmyTypeId(armytype::kHero));
+    drowner.SetOwner(side->Id());
+    drowner.SetItems({&ice});
     EXPECT_TRUE(hero::DropItems(game, &drowner, water.x, water.y).empty());
     EXPECT_EQ(ice.status, 0);
 }
@@ -282,15 +282,15 @@ TEST(HeroExperienceTest, BugCompatibilityFlagAndBattleAwards) {
     auto defender_xp = [&]() {
         Army def_hero;
         Army attacker;
-        def_hero.type = armytype::kHero;
-        def_hero.strength = 5;
-        def_hero.owner = 1;
-        attacker.type = 11;
-        attacker.strength = 3;
-        attacker.owner = 0;
+        def_hero.SetType(ArmyTypeId(armytype::kHero));
+        def_hero.SetStrength(5);
+        def_hero.SetOwner(SideId(1));
+        attacker.SetType(ArmyTypeId(11));
+        attacker.SetStrength(3);
+        attacker.SetOwner(SideId(0));
         Battle battle;
         hero::BattleExperience(game, {&attacker}, {&def_hero}, battle, false);
-        return def_hero.experience;
+        return def_hero.Experience();
     };
     game.RulesBugs().hero_experience_reads_attacker_types = true;
     EXPECT_EQ(defender_xp(), 0);
@@ -299,23 +299,23 @@ TEST(HeroExperienceTest, BugCompatibilityFlagAndBattleAwards) {
     game.RulesBugs().hero_experience_reads_attacker_types = true;
 
     Army hero;
-    hero.type = armytype::kHero;
-    hero.strength = 5;
-    hero.owner = 0;
+    hero.SetType(ArmyTypeId(armytype::kHero));
+    hero.SetStrength(5);
+    hero.SetOwner(SideId(0));
     Battle clean_battle;
     hero::BattleExperience(game, {&hero}, {}, clean_battle, false);
-    EXPECT_EQ(hero.experience, 1);
+    EXPECT_EQ(hero.Experience(), 1);
     hero::BattleExperience(game, {&hero}, {}, clean_battle, true);
-    EXPECT_EQ(hero.experience, 3);
+    EXPECT_EQ(hero.Experience(), 3);
 
     Army dead_hero;
-    dead_hero.type = armytype::kHero;
-    dead_hero.strength = 5;
-    dead_hero.owner = 0;
+    dead_hero.SetType(ArmyTypeId(armytype::kHero));
+    dead_hero.SetStrength(5);
+    dead_hero.SetOwner(SideId(0));
     Battle fatal_battle;
     fatal_battle.dead_by_army.insert(&dead_hero);
     hero::BattleExperience(game, {&dead_hero}, {}, fatal_battle, true);
-    EXPECT_EQ(dead_hero.experience, 0);
+    EXPECT_EQ(dead_hero.Experience(), 0);
 }
 
 /** @brief Parameterized suite testing site contents, ruins, temples, and guardians. */
@@ -369,19 +369,19 @@ TEST_P(SitesScenarioTest, RuinsItemsTemplesAndGuardianSurvival) {
     Site* gold_ruin = FindSiteByContent(game, site::kGold);
     if (gold_ruin != nullptr) {
         Side* side = game.sides[0];
-        Army* grunt = AddArmy(game, gold_ruin->x, gold_ruin->y, side->index, 11, 3, 10, 10);
+        Army* grunt = AddArmy(game, gold_ruin->x, gold_ruin->y, side->Index(), 11, 3, 10, 10);
         EXPECT_EQ(site::Search(game, {grunt}, gold_ruin->x, gold_ruin->y)->kind, "no hero");
         EXPECT_FALSE(gold_ruin->searched);
 
-        Army* hero =
-                AddArmy(game, gold_ruin->x, gold_ruin->y, side->index, armytype::kHero, 9, 14, 14);
-        int gold_before = side->gold;
+        Army* hero = AddArmy(game, gold_ruin->x, gold_ruin->y, side->Index(), armytype::kHero, 9,
+                             14, 14);
+        int gold_before = side->Gold();
         auto result = site::Search(game, {hero, grunt}, gold_ruin->x, gold_ruin->y);
         EXPECT_TRUE(result->kind == "gold" || result->kind == "killed");
         if (result->kind == "gold") {
             EXPECT_TRUE(result->gold >= 503 && result->gold <= 4000);
-            EXPECT_EQ(side->gold, gold_before + result->gold);
-            EXPECT_EQ(hero->experience, 3);
+            EXPECT_EQ(side->Gold(), gold_before + result->gold);
+            EXPECT_EQ(hero->Experience(), 3);
             EXPECT_TRUE(gold_ruin->searched);
             EXPECT_EQ(site::Search(game, {hero}, gold_ruin->x, gold_ruin->y), nullptr);
         } else {
@@ -392,30 +392,29 @@ TEST_P(SitesScenarioTest, RuinsItemsTemplesAndGuardianSurvival) {
     for (auto& map_site : game.map->sites) {
         if (map_site.content == site::kTemple && map_site.temple_index == 0) {
             Army visitor;
-            visitor.x = map_site.x;
-            visitor.y = map_site.y;
-            visitor.owner = game.sides[0]->index;
-            visitor.type = 11;
-            visitor.strength = 3;
-            visitor.moves = 0;
+            visitor.PlaceAt(TilePos(map_site.x, map_site.y));
+            visitor.SetOwner(game.sides[0]->Id());
+            visitor.SetType(ArmyTypeId(11));
+            visitor.SetStrength(3);
+            visitor.SetMoves(0);
             EXPECT_EQ(site::Search(game, {&visitor}, map_site.x, map_site.y), nullptr);
-            visitor.moves = 10;
+            visitor.SetMoves(10);
             auto blessed = site::Search(game, {&visitor}, map_site.x, map_site.y, true);
             EXPECT_TRUE(blessed->kind == "temple" && blessed->blessed == 1 &&
-                        visitor.strength == 4);
+                        visitor.Strength() == 4);
             EXPECT_EQ(site::Search(game, {&visitor}, map_site.x, map_site.y)->blessed, 0);
-            visitor.strength = 9;
-            visitor.blessings.clear();
+            visitor.SetStrength(9);
+            visitor.ClearBlessings();
             site::Search(game, {&visitor}, map_site.x, map_site.y);
-            EXPECT_EQ(visitor.strength, 9);
+            EXPECT_EQ(visitor.Strength(), 9);
             break;
         }
     }
 
     Army strong_hero;
     Army weak_hero;
-    strong_hero.strength = 9;
-    weak_hero.strength = 1;
+    strong_hero.SetStrength(9);
+    weak_hero.SetStrength(1);
     int survived = 0;
     int died = 0;
     for (int i = 0; i < 400; ++i) {
@@ -434,15 +433,16 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     auto off_game = SetupGame("ERYTHEA", Seed(71));
     Side* side_off = game::Begin(*off_game);
     Army hero_off;
-    hero_off.owner = side_off->index;
-    hero_off.type = armytype::kHero;
-    hero_off.strength = 5;
+    hero_off.SetOwner(side_off->Id());
+    hero_off.SetType(ArmyTypeId(armytype::kHero));
+    hero_off.SetStrength(5);
     EXPECT_EQ(quest::Assign(*off_game, *side_off, &hero_off), nullptr);
 
     auto game_ptr = SetupGame("ERYTHEA", SeedWith(71, {{"quests", 1}}));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    Army* hero = AddArmy(game, side->capital->x, side->capital->y, side->index, armytype::kHero, 5);
+    City* side_cap = side->CapitalCity(*game.map);
+    Army* hero = AddArmy(game, side_cap->X(), side_cap->Y(), side->Index(), armytype::kHero, 5);
     auto assigned = quest::Assign(game, *side, hero);
     ASSERT_NE(assigned, nullptr);
     EXPECT_TRUE(assigned->Type() >= 0 && assigned->Type() <= 6 && assigned->HasTarget());
@@ -455,56 +455,57 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     EXPECT_EQ(quest::kTypeTable.size(), 10U);
 
     auto city_by_one = [&](int idx) { return &game.map->cities[idx - 1]; };
-    side->quest = MakeCityQuest(quest::kOccupy, hero, city_by_one(2));
-    side->gold = 5000;
+    side->SetQuest(MakeCityQuest(quest::kOccupy, hero, city_by_one(2)));
+    side->SetGold(5000);
     quest::Event occupy_ev;
     occupy_ev.city = city_by_one(2);
     occupy_ev.stack = {hero};
     auto result = quest::Notify(game, *side, "occupy", occupy_ev);
     ASSERT_NE(result, nullptr);
-    EXPECT_TRUE(result->failed.empty() && side->quest == nullptr && result->reward != nullptr);
-    EXPECT_EQ(hero->experience, quest::kExperience);
+    EXPECT_TRUE(result->failed.empty() && side->ActiveQuest() == nullptr &&
+                result->reward != nullptr);
+    EXPECT_EQ(hero->Experience(), quest::kExperience);
 
-    bool was_computer = side->computer;
-    auto& quest_news = game.TurnNews(SideId(side->index)).quest_news;
-    side->computer = false;
+    bool was_computer = side->IsComputerControlled();
+    auto& quest_news = game.TurnNews(side->Id()).quest_news;
+    side->SetComputerControlled(false);
     quest_news.reset();
-    side->quest = MakeCityQuest(quest::kOccupy, hero, city_by_one(2));
+    side->SetQuest(MakeCityQuest(quest::kOccupy, hero, city_by_one(2)));
     result = quest::Notify(game, *side, "occupy", occupy_ev);
     EXPECT_EQ(quest_news, result);
 
-    side->computer = true;
+    side->SetComputerControlled(true);
     quest_news.reset();
-    side->quest = MakeCityQuest(quest::kOccupy, hero, city_by_one(2));
+    side->SetQuest(MakeCityQuest(quest::kOccupy, hero, city_by_one(2)));
     quest::Notify(game, *side, "occupy", occupy_ev);
     EXPECT_EQ(quest_news, nullptr);
-    side->computer = was_computer;
+    side->SetComputerControlled(was_computer);
     quest_news.reset();
 
-    hero->experience = 0;
-    side->quest = MakeCityQuest(quest::kOccupy, hero, city_by_one(3));
+    hero->SetExperience(0);
+    side->SetQuest(MakeCityQuest(quest::kOccupy, hero, city_by_one(3)));
     quest::Event no_hero_ev;
     no_hero_ev.city = city_by_one(3);
     result = quest::Notify(game, *side, "occupy", no_hero_ev);
     ASSERT_TRUE(result && !result->failed.empty());
-    EXPECT_TRUE(result->why == 0x22 && hero->experience == 0);
+    EXPECT_TRUE(result->why == 0x22 && hero->Experience() == 0);
 
     City* raze_target = city_by_one(5);
-    int orig_owner = raze_target->owner_index;
-    bool orig_razed = raze_target->razed;
-    side->quest = MakeCityQuest(quest::kRaze, hero, raze_target);
-    raze_target->razed = true;
+    SideId orig_owner = raze_target->Owner();
+    bool orig_razed = raze_target->IsRazed();
+    side->SetQuest(MakeCityQuest(quest::kRaze, hero, raze_target));
+    raze_target->SetRazed(true);
     result = quest::Notify(game, *side, "turn");
     EXPECT_TRUE(result && !result->failed.empty() && result->why == 0x21);
-    raze_target->razed = false;
-    raze_target->owner_index = side->index;
-    side->quest = MakeCityQuest(quest::kRaze, hero, raze_target);
+    raze_target->SetRazed(false);
+    raze_target->SetOwner(side->Id());
+    side->SetQuest(MakeCityQuest(quest::kRaze, hero, raze_target));
     result = quest::Notify(game, *side, "turn");
     EXPECT_TRUE(result && !result->failed.empty() && result->why == 0x2a);
-    raze_target->razed = orig_razed;
-    raze_target->owner_index = orig_owner;
+    raze_target->SetRazed(orig_razed);
+    raze_target->SetOwner(orig_owner);
 
-    side->quest = MakeCityQuest(quest::kOccupy, hero, city_by_one(4));
+    side->SetQuest(MakeCityQuest(quest::kOccupy, hero, city_by_one(4)));
     quest::Event raze_ev;
     raze_ev.city = city_by_one(4);
     raze_ev.stack = {hero};
@@ -512,45 +513,45 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     EXPECT_TRUE(result && !result->failed.empty());
 
     Side* victim = game.sides.back();
-    side->quest = MakeSlaughterQuest(hero, victim, 3);
+    side->SetQuest(MakeSlaughterQuest(hero, victim, 3));
     Army slain_a;
     Army slain_b;
-    slain_a.owner = victim->index;
-    slain_b.owner = victim->index;
+    slain_a.SetOwner(victim->Id());
+    slain_b.SetOwner(victim->Id());
     quest::Event battle_ev;
     battle_ev.stack = {hero};
     battle_ev.killed = {&slain_a, &slain_b};
     EXPECT_EQ(quest::Notify(game, *side, "battle", battle_ev), nullptr);
-    EXPECT_EQ(side->quest->Done(), 2);
+    EXPECT_EQ(side->ActiveQuest()->Done(), 2);
     result = quest::Notify(game, *side, "battle", battle_ev);
     EXPECT_TRUE(result && result->failed.empty());
 
-    side->quest = MakeSlaughterQuest(hero, victim, 2);
+    side->SetQuest(MakeSlaughterQuest(hero, victim, 2));
     battle_ev.stack.clear();
     quest::Notify(game, *side, "battle", battle_ev);
-    EXPECT_EQ(side->quest->Done(), 0);
+    EXPECT_EQ(side->ActiveQuest()->Done(), 0);
 
-    side->quest = MakePillageQuest(hero, 100);
+    side->SetQuest(MakePillageQuest(hero, 100));
     quest::Event pillage_ev{.stack = {hero}, .gold = 60};
     quest::Notify(game, *side, "pillage", pillage_ev);
-    EXPECT_EQ(side->quest->Done(), 60);
+    EXPECT_EQ(side->ActiveQuest()->Done(), 60);
     result = quest::Notify(game, *side, "pillage", pillage_ev);
     EXPECT_TRUE(result && result->failed.empty());
 
     Item quest_item{.index = 99, .type = rules::kItemBattle, .status = 3};
-    hero->items = {&quest_item};
-    side->quest = MakeItemQuest(hero, &quest_item);
+    hero->SetItems({&quest_item});
+    side->SetQuest(MakeItemQuest(hero, &quest_item));
     quest::Event item_ev{.hero = hero};
     result = quest::Notify(game, *side, "item", item_ev);
     EXPECT_TRUE(result && result->failed.empty());
-    EXPECT_EQ(std::find(hero->items.begin(), hero->items.end(), &quest_item), hero->items.end());
+    EXPECT_FALSE(hero->HasItem(&quest_item));
     EXPECT_EQ(quest_item.status, 0);
 
     Army prey_proto;
-    prey_proto.type = armytype::kHero;
-    prey_proto.owner = victim->index;
+    prey_proto.SetType(ArmyTypeId(armytype::kHero));
+    prey_proto.SetOwner(victim->Id());
     Army* prey = game.Make(prey_proto);
-    side->quest = MakeSlayHeroQuest(hero, prey);
+    side->SetQuest(MakeSlayHeroQuest(hero, prey));
     quest::Event slay_ev{.killed = {prey}};
     EXPECT_EQ(quest::Notify(game, *side, "battle", slay_ev), nullptr);
     slay_ev.stack = {hero};
@@ -558,18 +559,18 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     EXPECT_TRUE(result && result->failed.empty());
 
     Army ghost;
-    ghost.type = armytype::kHero;
-    side->quest = MakePillageQuest(&ghost, 1);
+    ghost.SetType(ArmyTypeId(armytype::kHero));
+    side->SetQuest(MakePillageQuest(&ghost, 1));
     result = quest::Notify(game, *side, "turn");
     EXPECT_TRUE(result && !result->failed.empty());
 
-    side->gold = 50;
-    Quest with_hero(quest::kPillageGold, hero->id, std::monostate{}, 100, 100);
+    side->SetGold(50);
+    Quest with_hero(quest::kPillageGold, hero->Id(), std::monostate{}, 100, 100);
     auto gold_reward = quest::ChooseReward(game, *side, &with_hero);
     EXPECT_TRUE(gold_reward->kind == "gold" && gold_reward->gold >= 1002 &&
                 gold_reward->gold <= 3000);
     game.turn = 20;
-    side->gold = 5000;
+    side->SetGold(5000);
     auto ally_reward = quest::ChooseReward(game, *side, &with_hero);
     EXPECT_TRUE(ally_reward->kind == "allies" && !ally_reward->armies.empty() &&
                 ally_reward->armies.size() <= 8);

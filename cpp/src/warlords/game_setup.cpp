@@ -26,38 +26,36 @@ namespace {
 
 void SetupGarrisons(Game& game) {
     Side* setup = game.map->Side(kSetupPlayer);
-    bool enhanced = setup && setup->enhanced;
+    bool enhanced = setup && setup->IsEnhanced();
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
-        if (city.razed) continue;
-        bool owned = city.owner_index != kNone;
+        if (city.IsRazed()) continue;
+        bool owned = !city.IsNeutral();
         auto level = rules::GarrisonLevel(owned, game.map->options.neutral_cities, game.rng);
         int slot = kNone;
-        if (level && !city.slots.empty()) {
-            slot = rules::BestSlot(city.slots, rules::kGarrisonPurpose[*level], game.types,
+        if (level && !city.Slots().empty()) {
+            slot = rules::BestSlot(city.Slots(), rules::kGarrisonPurpose[*level], game.types,
                                    enhanced);
         }
         if (slot != kNone) {
-            Army army = rules::ArmyFromSlot(city.slots[slot], enhanced);
-            army.x = city.x;
-            army.y = city.y;
-            army.owner = city.owner_index;
-            army.moves = 0;
-            army.home_city = city.index;
+            Army army = rules::ArmyFromSlot(city.SlotAt(static_cast<size_t>(slot)), enhanced);
+            army.PlaceAt(city.Position());
+            army.SetOwner(city.Owner());
+            army.SetMoves(0);
+            army.SetHomeCity(city.Id());
             game.Add(army);
         } else {
             const ArmyType* scouts_type = game.types.ById(armytype::kScouts);
             Army army;
-            army.x = city.x;
-            army.y = city.y;
-            army.owner = kNone;
-            army.type = armytype::kScouts;
-            army.name = scouts_type->name;
-            army.strength = 1;
-            army.max_moves = scouts_type->move;
-            army.moves = 0;
-            army.upkeep = 0;
-            army.home_city = city.index;
+            army.PlaceAt(city.Position());
+            army.SetOwner(SideId::None());
+            army.SetType(ArmyTypeId(armytype::kScouts));
+            army.SetName(scouts_type->name);
+            army.SetStrength(1);
+            army.SetMaxMoves(scouts_type->move);
+            army.SetMoves(0);
+            army.SetUpkeep(0);
+            army.SetHomeCity(city.Id());
             game.Add(army);
         }
     }
@@ -68,8 +66,8 @@ void DealCities(Game& game) {
     int turn = kNone;
     for (int i = 7; i >= 0; i--) {
         Side* side = game.map->Side(i);
-        if (side && side->in_use) {
-            from[i] = {side->cap_x, side->cap_y};
+        if (side && side->InUse()) {
+            from[i] = side->OriginCapitalPos().ToPair();
             turn = i;
         }
     }
@@ -79,9 +77,9 @@ void DealCities(Game& game) {
         City* pick = nullptr;
         int best = 1000;
         for (auto& city : game.map->cities) {
-            if (city.owner_index == kNone) {
-                double dx = x - city.x;
-                double dy = y - city.y;
+            if (city.IsNeutral()) {
+                double dx = x - city.X();
+                double dy = y - city.Y();
                 int dist = static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
                 if (dist < best) {
                     pick = &city;
@@ -91,12 +89,11 @@ void DealCities(Game& game) {
         }
         if (!pick) return;
         Side* side = game.map->Side(turn);
-        pick->owner = side;
-        pick->owner_index = turn;
+        pick->SetOwner(SideId(turn));
         if (game.rng.Dice(1, 10, -1) < 5) {
-            from[turn] = {side->cap_x, side->cap_y};
+            from[turn] = side->OriginCapitalPos().ToPair();
         } else {
-            from[turn] = {pick->x, pick->y};
+            from[turn] = pick->Position().ToPair();
         }
         do {
             turn = (turn + 1) % 8;
@@ -107,13 +104,14 @@ void DealCities(Game& game) {
 void ApplyScaleAndCrop(Map& map, const NewGameOptions& opts) {
     std::vector<int> avail;
     for (int i = 0; i < 8; i++) {
-        if (map.sides[i].in_use && map.sides[i].capital) avail.push_back(i);
+        if (map.sides[i].InUse() && map.sides[i].HasCapitalCity()) avail.push_back(i);
     }
     if (opts.active_sides > 0 && static_cast<int>(avail.size()) > opts.active_sides) {
         uint32_t hash = static_cast<uint32_t>(opts.seed) * 2654435761U + 0x9e3779b9U;
         int anchor_side = avail[hash % avail.size()];
-        int anchor_x = map.sides[anchor_side].cap_x;
-        int anchor_y = map.sides[anchor_side].cap_y;
+        TilePos anchor_pos = map.sides[anchor_side].OriginCapitalPos();
+        int anchor_x = anchor_pos.x;
+        int anchor_y = anchor_pos.y;
 
         std::vector<int> land_dist(static_cast<size_t>(kMapW) * kMapH, INT_MAX);
         std::queue<std::pair<int, int>> queue;
@@ -142,8 +140,9 @@ void ApplyScaleAndCrop(Map& map, const NewGameOptions& opts) {
 
         auto metric = [&](int side_idx) -> std::tuple<int, int, int, int> {
             if (side_idx == anchor_side) return {0, 0, 0, side_idx};
-            int side_x = map.sides[side_idx].cap_x;
-            int side_y = map.sides[side_idx].cap_y;
+            TilePos side_pos = map.sides[side_idx].OriginCapitalPos();
+            int side_x = side_pos.x;
+            int side_y = side_pos.y;
             int dist = (side_x >= 0 && side_y >= 0 && side_x < kMapW && side_y < kMapH)
                                ? land_dist[side_y * kMapW + side_x]
                                : INT_MAX;
@@ -156,9 +155,9 @@ void ApplyScaleAndCrop(Map& map, const NewGameOptions& opts) {
                   [&](int left, int right) { return metric(left) < metric(right); });
         for (size_t i = static_cast<size_t>(opts.active_sides); i < avail.size(); i++) {
             Side& side = map.sides[avail[i]];
-            if (side.capital) side.capital->owner = nullptr;
-            side.capital = nullptr;
-            side.in_use = false;
+            if (City* cap = side.CapitalCity(map)) cap->SetOwner(SideId::None());
+            side.SetCapitalCityId(CityId::None());
+            side.SetInUse(false);
         }
     }
 
@@ -170,11 +169,12 @@ void ApplyScaleAndCrop(Map& map, const NewGameOptions& opts) {
     int max_y = 0;
     bool any_side = false;
     for (const auto& side : map.sides) {
-        if (!side.in_use) continue;
-        min_x = std::min(min_x, side.cap_x);
-        max_x = std::max(max_x, side.cap_x + 1);
-        min_y = std::min(min_y, side.cap_y);
-        max_y = std::max(max_y, side.cap_y + 1);
+        if (!side.InUse()) continue;
+        TilePos cap_pos = side.OriginCapitalPos();
+        min_x = std::min(min_x, cap_pos.x);
+        max_x = std::max(max_x, cap_pos.x + 1);
+        min_y = std::min(min_y, cap_pos.y);
+        max_y = std::max(max_y, cap_pos.y + 1);
         any_side = true;
     }
     if (!any_side) return;
@@ -205,16 +205,16 @@ void ApplyScaleAndCrop(Map& map, const NewGameOptions& opts) {
 
     std::vector<City> kept_cities;
     for (auto& city : map.cities) {
-        if (city.x >= left_x && city.x + 1 <= right_x && city.y >= top_y &&
-            city.y + 1 <= bottom_y) {
-            city.index = static_cast<int>(kept_cities.size());
-            city.owner = nullptr;
+        if (city.X() >= left_x && city.X() + 1 <= right_x && city.Y() >= top_y &&
+            city.Y() + 1 <= bottom_y) {
+            city.SetId(CityId(static_cast<int>(kept_cities.size())));
+            city.SetOwner(SideId::None());
             kept_cities.push_back(std::move(city));
         } else {
             for (int dy = 0; dy <= 1; dy++) {
                 for (int dx = 0; dx <= 1; dx++) {
-                    int tile_x = city.x + dx;
-                    int tile_y = city.y + dy;
+                    int tile_x = city.X() + dx;
+                    int tile_y = city.Y() + dy;
                     if (tile_x >= 0 && tile_y >= 0 && tile_x < kMapW && tile_y < kMapH) {
                         map.tiles[tile_y * kMapW + tile_x] = plain_tile;
                     }
@@ -226,24 +226,25 @@ void ApplyScaleAndCrop(Map& map, const NewGameOptions& opts) {
     map.city_at.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
     map.city_tile.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
     for (auto& city : map.cities) {
-        map.city_at[city.y * kMapW + city.x] = &city;
+        map.city_at[city.Y() * kMapW + city.X()] = &city;
         for (int dy = 0; dy <= 1; dy++) {
             for (int dx = 0; dx <= 1; dx++) {
-                map.city_tile[(city.y + dy) * kMapW + (city.x + dx)] = &city;
+                map.city_tile[(city.Y() + dy) * kMapW + (city.X() + dx)] = &city;
             }
         }
     }
     for (auto& side : map.sides) {
-        side.capital = nullptr;
-        if (!side.in_use) continue;
-        City* cap = (side.cap_x >= 0 && side.cap_y >= 0 && side.cap_x < kMapW && side.cap_y < kMapH)
-                            ? map.city_at[side.cap_y * kMapW + side.cap_x]
+        side.SetCapitalCityId(CityId::None());
+        if (!side.InUse()) continue;
+        TilePos cap_pos = side.OriginCapitalPos();
+        City* cap = (cap_pos.x >= 0 && cap_pos.y >= 0 && cap_pos.x < kMapW && cap_pos.y < kMapH)
+                            ? map.city_at[cap_pos.y * kMapW + cap_pos.x]
                             : nullptr;
         if (cap) {
-            side.capital = cap;
-            cap->owner = &side;
+            side.SetCapitalCityId(cap->Id());
+            cap->SetOwner(side.Id());
         } else {
-            side.in_use = false;
+            side.SetInUse(false);
         }
     }
 
@@ -307,17 +308,18 @@ absl::StatusOr<std::unique_ptr<Game>> NewGame(const std::filesystem::path& data_
         if (int* field = game.map->options.Field(opt_name)) *field = opt_val;
     }
     for (auto& side : game.map->sides) {
-        auto setup_it = opts.sides.find(side.index);
-        if (setup_it != opts.sides.end() && side.in_use) {
+        auto setup_it = opts.sides.find(side.Index());
+        if (setup_it != opts.sides.end() && side.InUse()) {
             const SideSetup& setup = setup_it->second;
-            if (!setup.name.empty()) side.name = setup.name;
+            if (!setup.name.empty()) side.SetName(setup.name);
             if (setup.off) {
-                if (side.capital) side.capital->owner = nullptr;
-                side.in_use = false;
+                if (City* cap = side.CapitalCity(*game.map)) cap->SetOwner(SideId::None());
+                side.SetCapitalCityId(CityId::None());
+                side.SetInUse(false);
             } else {
-                side.computer = setup.computer;
-                side.level = setup.level != kNone ? setup.level : side.level;
-                side.card = setup.card;
+                side.SetComputerControlled(setup.computer);
+                if (setup.level != kNone) side.SetLevel(setup.level);
+                side.SetCard(setup.card);
             }
         }
     }
@@ -326,26 +328,22 @@ absl::StatusOr<std::unique_ptr<Game>> NewGame(const std::filesystem::path& data_
     }
 
     for (auto& side : game.map->sides) {
-        side.alive = side.in_use;
-        side.owner_index = side.index;
-        if (side.in_use) game.sides.push_back(&side);
+        side.SetAlive(side.InUse());
+        if (side.InUse()) game.sides.push_back(&side);
     }
     int humans = 0;
     for (Side* side : game.sides) {
-        if (!side->computer) humans++;
+        if (!side->IsComputerControlled()) humans++;
     }
     bool observed = !(game.map->options.hidden_map != 0 && humans >= 1);
-    for (Side* side : game.sides) side->observe = observed;
+    for (Side* side : game.sides) side->SetObserved(observed);
 
-    for (auto& city : game.map->cities) city.owner_index = city.owner ? city.owner->index : kNone;
     if (game.map->options.quick_start != 0) DealCities(game);
 
     for (auto& city : game.map->cities) {
-        city.slots = rules::CitySlots(city.produces, game.types, game.rng);
-        city.defence = rules::CityDefence(static_cast<int>(city.slots.size()));
-        city.producing = kNone;
-        city.countdown = 0;
-        city.vector_to = kNone;
+        city.ReplaceSlots(rules::CitySlots(city.Produces(), game.types, game.rng));
+        city.SetDefence(rules::CityDefence(city.SlotCount()));
+        city.StopProduction();
     }
     scn::RefreshCityTiles(*game.map);
 
@@ -364,7 +362,7 @@ absl::StatusOr<std::unique_ptr<Game>> NewGame(const std::filesystem::path& data_
             int bx1 = std::min(kMapW - 1, game.map->active_x1 + 2);
             int by0 = std::max(0, game.map->active_y0 - 2);
             int by1 = std::min(kMapH - 1, game.map->active_y1 + 2);
-            SideId side_id(side->index);
+            SideId side_id = side->Id();
             if (game.explored.HasMask(side_id)) {
                 for (int y = 0; y < kMapH; y++) {
                     for (int x = 0; x < kMapW; x++) {

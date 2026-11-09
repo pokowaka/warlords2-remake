@@ -66,7 +66,7 @@ struct Bonus : kit::Modal {
                     ranked != by_rank.end() ? g_app.g->types.ById(ranked->second) : nullptr;
             if (type) {
                 int y = 148 + 30 * i;
-                kit::Army(type->id, side->index, 128, y, side->index + 2);
+                kit::Army(type->id, side->Index(), 128, y, side->Index() + 2);
                 gfx::SetColor(1, 1, 1);
                 font.Draw(type->name, 168, y + 5);
                 font.Draw(absl::StrFormat("%d", type->strength), 280, y + 5);
@@ -133,9 +133,9 @@ std::string BonusText(const w2::ArmyType& type, const w2::Army* army) {
     auto say = [](int line, int value = 0) {
         return w2::Format(kit::Text(kBonusGroup, line), value);
     };
-    if (army && army->at_sea) return say(1);
+    if (army && army->IsAtSea()) return say(1);
     if (army && army->Hero()) {
-        int strength = std::min(9, army->strength + w2::combat::BattleItems(*army));
+        int strength = std::min(9, army->Strength() + w2::combat::BattleItems(*army));
         return say(2, std::min(6, w2::combat::kHeroTable[std::max(0, strength)] +
                                           w2::combat::CommandItems(*army)));
     }
@@ -156,7 +156,7 @@ std::string BonusText(const w2::ArmyType& type, const w2::Army* army) {
 /** @brief Opens Army Bonus with the player's fight order. */
 void Open() {
     auto dialog = std::make_shared<Bonus>();
-    const auto& row = g_app.g->map->fight_order[g_app.player->index];
+    const auto& row = g_app.g->map->fight_order[g_app.player->Index()];
     for (int rank = 0; rank <= 28 && rank < static_cast<int>(row.size()); rank++)
         dialog->by_rank[row[rank]] = rank;
     dialog->dialog_view = kit::View(kDialog);

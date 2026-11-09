@@ -118,22 +118,24 @@ void FromCard(Game& game, Side& side, AIData& data, const aicard::Card& card) {
     data.poor = card.poor;
     data.early = card.early;
     data.human_share = card.human_share * 10 + rng.Dice(1, 10, 0);
-    game.map->fight_order[side.index] = card.fight_order;
+    game.map->fight_order[side.Index()] = card.fight_order;
 }
 
 AIData RollInitialData(Game& game, Side& side) {
     AIData data = core::NewData();
     bool quick = game.map->options.quick_start != 0;
     for (auto& city : game.map->cities) {
-        data.roles[city.index] = quick ? core::kWeak : 0;
-        data.held[city.index] = 0;
-        data.flags[city.index] = game.map->options.hidden_map != 0 ? core::kCfUnseen : 0;
+        data.roles[city.Index()] = quick ? core::kWeak : 0;
+        data.held[city.Index()] = 0;
+        data.flags[city.Index()] = game.map->options.hidden_map != 0 ? core::kCfUnseen : 0;
     }
     int level = 2;
-    if (side.computer && (side.level == 0 || side.level == 1)) level = side.level;
+    if (side.IsComputerControlled() && (side.Level() == 0 || side.Level() == 1)) {
+        level = side.Level();
+    }
     LevelDefaults(game, data, level);
-    if (side.in_use && side.computer) {
-        auto card = aicard::Load(game.data_dir, level, side.card);
+    if (side.InUse() && side.IsComputerControlled()) {
+        auto card = aicard::Load(game.data_dir, level, side.Card());
         if (card) FromCard(game, side, data, *card);
     }
     return data;
@@ -144,12 +146,14 @@ AIData MakeDeterministicData(const Game& game, const Side& side) {
     if (!game.map) return data;
     bool quick = game.map->options.quick_start != 0;
     for (const auto& city : game.map->cities) {
-        data.roles[city.index] = quick ? core::kWeak : 0;
-        data.held[city.index] = 0;
-        data.flags[city.index] = game.map->options.hidden_map != 0 ? core::kCfUnseen : 0;
+        data.roles[city.Index()] = quick ? core::kWeak : 0;
+        data.held[city.Index()] = 0;
+        data.flags[city.Index()] = game.map->options.hidden_map != 0 ? core::kCfUnseen : 0;
     }
     int level = 2;
-    if (side.computer && (side.level == 0 || side.level == 1)) level = side.level;
+    if (side.IsComputerControlled() && (side.Level() == 0 || side.Level() == 1)) {
+        level = side.Level();
+    }
     if (level == 0) {
         data.rebuild_limit = 30;
         data.cautious = 1;
@@ -184,8 +188,8 @@ AIData MakeDeterministicData(const Game& game, const Side& side) {
         data.early = 1;
         data.human_share = 35;
     }
-    if (side.in_use && side.computer && !game.data_dir.empty()) {
-        if (auto card = aicard::Load(game.data_dir, level, side.card)) {
+    if (side.InUse() && side.IsComputerControlled() && !game.data_dir.empty()) {
+        if (auto card = aicard::Load(game.data_dir, level, side.Card())) {
             data.max_groups = std::max(0, std::min(core::kMaxGroups, card->groups));
             data.solidarity = card->solidarity;
             if (card->bold != 0) data.bold = true;
@@ -221,7 +225,7 @@ std::shared_ptr<Neighbours> SharedNeighboursFor(Game& game) {
 
 void ShareOutCities(Game& game) {
     for (auto& city : game.map->cities) {
-        city.claim = city.owner_index != kNone ? city.owner_index : core::kNeutral;
+        city.SetClaim(city.Owner());
     }
     bool shares[8] = {false};
     int humans = 0;
@@ -229,23 +233,24 @@ void ShareOutCities(Game& game) {
     std::pair<int, int> from[8];
     for (int i = 0; i < 8; i++) {
         Side& side = game.map->sides[i];
-        if (side.in_use) {
-            if (side.computer) {
+        if (side.InUse()) {
+            if (side.IsComputerControlled()) {
                 shares[i] = true;
                 computers++;
             } else {
                 humans++;
             }
-            from[i] = {side.cap_x, side.cap_y};
-            City* capital = core::CityAt(game, side.cap_x, side.cap_y);
-            if (capital) capital->claim = i;
+            TilePos cap_pos = side.OriginCapitalPos();
+            from[i] = {cap_pos.x, cap_pos.y};
+            City* capital = core::CityAt(game, cap_pos.x, cap_pos.y);
+            if (capital) capital->SetClaim(SideId(i));
         }
     }
     if (computers == 0 && humans != 0) {
         int best = kNone;
         int best_roll = 0;
         for (int i = 7; i >= 0; i--) {
-            if (game.map->sides[i].in_use) {
+            if (game.map->sides[i].InUse()) {
                 shares[i] = true;
                 int roll = game.rng.Dice(1, 100, 0);
                 if (best == kNone || best_roll < roll) {
@@ -270,8 +275,8 @@ void ShareOutCities(Game& game) {
         int best_distance = kNone;
         for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
             City& city = game.map->cities[i];
-            if (core::Standing(city) && city.claim == core::kNeutral) {
-                int distance = core::Dist(from_x, from_y, city.x, city.y);
+            if (core::Standing(city) && !city.Claim().IsValid()) {
+                int distance = core::Dist(from_x, from_y, city.X(), city.Y());
                 if (best_distance == kNone || distance < best_distance) {
                     pick = &city;
                     best_distance = distance;
@@ -279,12 +284,13 @@ void ShareOutCities(Game& game) {
             }
         }
         if (!pick) break;
-        pick->claim = turn;
+        pick->SetClaim(SideId(turn));
         Side& side = game.map->sides[turn];
         if (game.rng.Dice(1, 10, -1) < 5) {
-            from[turn] = {side.cap_x, side.cap_y};
+            TilePos cap_pos = side.OriginCapitalPos();
+            from[turn] = {cap_pos.x, cap_pos.y};
         } else {
-            from[turn] = {pick->x, pick->y};
+            from[turn] = {pick->X(), pick->Y()};
         }
         do {
             turn = (turn + 1) % 8;
@@ -318,8 +324,8 @@ std::shared_ptr<IComputerPlayer> MakeComputerPlayer(bool classic, Game& game, Si
 }
 
 void SetSideClassicAi(Game& game, Side& side, bool classic) {
-    if (side.computer_player && side.computer_player->IsClassic() == classic) return;
-    side.computer_player = MakeComputerPlayer(classic, game, side);
+    if (side.ComputerPlayer() && side.ComputerPlayer()->IsClassic() == classic) return;
+    side.SetComputerPlayer(MakeComputerPlayer(classic, game, side));
 }
 
 AIData& InitSide(Game& game, Side& side) {
@@ -334,24 +340,24 @@ void StartGame(Game& game) {
     for (auto& side : game.map->sides) {
         AIData data = RollInitialData(game, side);
         if (DefaultClassicAiFlag()) {
-            side.computer_player =
-                    std::make_shared<ClassicAiPlayer>(std::move(data), neighbours, &game.armies);
+            side.SetComputerPlayer(
+                    std::make_shared<ClassicAiPlayer>(std::move(data), neighbours, &game.armies));
         } else {
-            side.computer_player = std::make_shared<ModernMlPlayer>();
+            side.SetComputerPlayer(std::make_shared<ModernMlPlayer>());
         }
     }
     ShareOutCities(game);
     for (auto& side : game.map->sides) {
-        side.diplo_score = game.rng.Dice(1, 8, 0);
-        if (game.greatest && !side.computer) side.diplo_score += 400;
+        side.SetDiploScore(game.rng.Dice(1, 8, 0));
+        if (game.greatest && !side.IsComputerControlled()) side.AddDiploScore(400);
     }
 }
 
 void PlayTurn(Game& game, Side& side, const std::function<void(const char*)>& pause) {
-    if (!side.computer_player) {
-        side.computer_player = MakeComputerPlayer(DefaultClassicAiFlag(), game, side);
+    if (!side.ComputerPlayer()) {
+        side.SetComputerPlayer(MakeComputerPlayer(DefaultClassicAiFlag(), game, side));
     }
-    side.computer_player->PlayTurn(game, side, pause);
+    side.ComputerPlayer()->PlayTurn(game, side, pause);
 }
 
 void Walked(Game& game, const std::vector<Army*>& stack, const move::WalkResult& walk) {
@@ -359,17 +365,17 @@ void Walked(Game& game, const std::vector<Army*>& stack, const move::WalkResult&
 }
 
 City* HeroCity(Game& game, Side& side, City* fallback) {
-    if (!side.computer_player) {
-        side.computer_player = MakeComputerPlayer(DefaultClassicAiFlag(), game, side);
+    if (!side.ComputerPlayer()) {
+        side.SetComputerPlayer(MakeComputerPlayer(DefaultClassicAiFlag(), game, side));
     }
-    return side.computer_player->ChooseHeroCity(game, side, fallback);
+    return side.ComputerPlayer()->ChooseHeroCity(game, side, fallback);
 }
 
 bool QuestCapture(Game& game, Side& side, City& city, const std::vector<Army*>& stack) {
-    if (!side.computer_player) {
-        side.computer_player = MakeComputerPlayer(DefaultClassicAiFlag(), game, side);
+    if (!side.ComputerPlayer()) {
+        side.SetComputerPlayer(MakeComputerPlayer(DefaultClassicAiFlag(), game, side));
     }
-    return side.computer_player->OnQuestCapture(game, side, city, stack);
+    return side.ComputerPlayer()->OnQuestCapture(game, side, city, stack);
 }
 
 void RecordBattle(Game& game, int defender, int attacker, int x, int y, int heroes_lost,
@@ -379,13 +385,13 @@ void RecordBattle(Game& game, int defender, int attacker, int x, int y, int hero
     TilePos pos{x, y};
     Side* def_side = game.map->Side(defender);
     Side* atk_side = game.map->Side(attacker);
-    if (def_side && def_side->computer_player) {
-        def_side->computer_player->RecordBattle(game, SideId(defender), SideId(attacker), pos,
-                                                heroes_lost, armies_lost, all_lost, city_tile);
-        def_side->computer_player->RecordBattleObservation(game, SideId(defender), pos);
+    if (def_side && def_side->ComputerPlayer()) {
+        def_side->ComputerPlayer()->RecordBattle(game, SideId(defender), SideId(attacker), pos,
+                                                 heroes_lost, armies_lost, all_lost, city_tile);
+        def_side->ComputerPlayer()->RecordBattleObservation(game, SideId(defender), pos);
     }
-    if (atk_side && atk_side->computer_player) {
-        atk_side->computer_player->RecordBattleObservation(game, SideId(attacker), pos);
+    if (atk_side && atk_side->ComputerPlayer()) {
+        atk_side->ComputerPlayer()->RecordBattleObservation(game, SideId(attacker), pos);
     }
 }
 

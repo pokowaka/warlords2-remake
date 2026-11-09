@@ -57,15 +57,14 @@ City* ModernMlPlayer::ChooseHeroCity(Game& game, Side& side, City* fallback) {
 }
 
 bool ModernMlPlayer::OnQuestCapture(Game& game, Side& side, City& city, const ArmyStack& stack) {
-    auto side_quest = side.quest;
-    if (game.map->options.quests == 0 || !side_quest ||
-        side_quest->TargetCityId() != CityId(city.index)) {
+    auto side_quest = side.QuestPtr();
+    if (game.map->options.quests == 0 || !side_quest || side_quest->TargetCityId() != city.Id()) {
         return false;
     }
     if (side_quest->Type() != quest::kOccupy && side_quest->Type() != quest::kRaze) return false;
     bool hero_in_stack = side_quest->HeroId().IsValid() &&
                          std::any_of(stack.begin(), stack.end(), [&side_quest](const Army* member) {
-                             return member && member->id == side_quest->HeroId();
+                             return member && member->Id() == side_quest->HeroId();
                          });
     if (!hero_in_stack) return false;
     if (side_quest->Type() == quest::kRaze) {
@@ -130,12 +129,12 @@ absl::Status ModernMlPlayer::LoadState(const nlohmann::ordered_json& state, cons
 }
 
 const ModernMlPlayer* ModernMlPlayer::FindOn(const Side& side) {
-    const auto* backed = dynamic_cast<const IModernBackedPlayer*>(side.computer_player.get());
+    const auto* backed = dynamic_cast<const IModernBackedPlayer*>(side.ComputerPlayer());
     return backed ? &backed->ModernImpl() : nullptr;
 }
 
 ModernMlPlayer* ModernMlPlayer::FindMutableOn(Side& side) {
-    auto* backed = dynamic_cast<IModernBackedPlayer*>(side.computer_player.get());
+    auto* backed = dynamic_cast<IModernBackedPlayer*>(side.ComputerPlayer());
     return backed ? &backed->ModernImpl() : nullptr;
 }
 
@@ -143,7 +142,7 @@ ModernMlPlayer& ModernMlPlayer::EnsureOn(Side& side) {
     if (ModernMlPlayer* existing = FindMutableOn(side)) return *existing;
     auto created = std::make_shared<ModernMlPlayer>();
     ModernMlPlayer& ref = *created;
-    side.computer_player = std::move(created);
+    side.SetComputerPlayer(std::move(created));
     return ref;
 }
 

@@ -47,21 +47,21 @@ static void PrintSides(Game& game, const bool* modern) {
     std::printf("--- turn %d\n", game.turn);
     for (int side_index = 0; side_index < 8; side_index++) {
         Side& side = game.map->sides[side_index];
-        if (!side.in_use) continue;
+        if (!side.InUse()) continue;
         int cities = 0, armies = 0, strength = 0, in_city = 0;
         for (auto& city : game.map->cities)
-            if (!city.razed && city.owner_index == side_index) cities++;
+            if (!city.IsRazed() && city.OwnedBy(side_index)) cities++;
         for (Army* army : game.armies) {
-            if (army->owner != side_index || army->x == kNone) continue;
+            if (!army->OwnedBy(side_index) || army->X() == kNone) continue;
             armies++;
-            strength += army->strength;
-            if (game::CityAt(game, army->x, army->y)) in_city++;
+            strength += army->Strength();
+            if (game::CityAt(game, army->X(), army->Y())) in_city++;
         }
         std::printf(
                 "  side %d %s %s cities=%2d armies=%3d strength=%4d in-city=%3d gold=%5d "
                 "income=%4d upkeep=%4d\n",
                 side_index, modern[side_index] ? "MODERN " : "CLASSIC",
-                side.alive ? "     " : "(dead)", cities, armies, strength, in_city, side.gold,
+                side.IsAlive() ? "     " : "(dead)", cities, armies, strength, in_city, side.Gold(),
                 game::Income(game, side), game::Upkeep(game, side));
     }
 }
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
     bool modern[8] = {};
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (!game.map->sides[side_index].in_use) continue;
+        if (!game.map->sides[side_index].InUse()) continue;
         modern[side_index] = (solo_seat >= 0) ? (seat == solo_seat) : (seat % 2 == 0);
         seat++;
         if (modern[side_index]) {
@@ -174,41 +174,41 @@ int main(int argc, char** argv) {
         int count = 0;
         for (int dy = 0; dy <= 1; dy++)
             for (int dx = 0; dx <= 1; dx++)
-                for (Army* army : game::ArmiesAt(game, city.x + dx, city.y + dy))
-                    if (army->owner == city.owner_index) count++;
+                for (Army* army : game::ArmiesAt(game, city.X() + dx, city.Y() + dy))
+                    if (army->Owner() == city.Owner()) count++;
         return count;
     };
     while (current && !game.over && !game.won && game.turn <= turns) {
         std::vector<int> owner_before(game.map->cities.size()),
                 garrison_before(game.map->cities.size());
         for (size_t city_index = 0; city_index < game.map->cities.size(); city_index++) {
-            owner_before[city_index] = game.map->cities[city_index].owner_index;
-            garrison_before[city_index] = game.map->cities[city_index].owner_index >= 0
+            owner_before[city_index] = game.map->cities[city_index].OwnerIndex();
+            garrison_before[city_index] = !game.map->cities[city_index].IsNeutral()
                                                   ? garrison_of(game.map->cities[city_index])
                                                   : 0;
         }
-        const int mover = current->index;
-        if (current->alive) {
-            if (modern[current->index]) {
+        const int mover = current->Index();
+        if (current->IsAlive()) {
+            if (modern[current->Index()]) {
                 std::map<Army*, int> before;
                 for (Army* army : game.armies)
-                    if (army->owner == current->index && army->x != kNone)
-                        before[army] = army->y * 1000 + army->x;
+                    if (army->OwnedBy(current->Id()) && army->X() != kNone)
+                        before[army] = army->Y() * 1000 + army->X();
                 std::map<int, std::vector<int>> slots_before;
                 for (auto& city : game.map->cities) {
-                    if (city.owner_index != current->index) continue;
-                    for (const auto& slot : city.slots)
-                        slots_before[city.index].push_back(slot.type);
+                    if (!city.OwnedBy(current->Id())) continue;
+                    for (const auto& slot : city.Slots())
+                        slots_before[city.Index()].push_back(slot.type);
                 }
                 ai::modern::PlayTurn(game, *current, nullptr, &net, nullptr);
                 side_turns++;
-                if (current->gold >= 1500) rich_turns++;
+                if (current->Gold() >= 1500) rich_turns++;
                 for (auto& city : game.map->cities) {
-                    if (city.owner_index != current->index || city.razed) continue;
+                    if (!city.OwnedBy(current->Id()) || city.IsRazed()) continue;
                     city_turns++;
                     if (game::Producing(city)) producing_turns++;
-                    auto city_slots_before = slots_before.find(city.index);
-                    for (const auto& slot : city.slots) {
+                    auto city_slots_before = slots_before.find(city.Index());
+                    for (const auto& slot : city.Slots()) {
                         if (city_slots_before != slots_before.end() &&
                             std::find(city_slots_before->second.begin(),
                                       city_slots_before->second.end(),
@@ -220,10 +220,10 @@ int main(int argc, char** argv) {
                 for (auto& [army, pos] : before) {
                     if (!game.Alive(army)) continue;
                     army_turns++;
-                    if (army->x != kNone && army->y * 1000 + army->x != pos) moved++;
+                    if (army->X() != kNone && army->Y() * 1000 + army->X() != pos) moved++;
                 }
-                auto thoughts = current->computer_player ? current->computer_player->Thoughts()
-                                                         : IComputerPlayer::ThoughtSpan{};
+                auto thoughts = current->ComputerPlayer() ? current->ComputerPlayer()->Thoughts()
+                                                          : IComputerPlayer::ThoughtSpan{};
                 for (const auto& thought : thoughts) {
                     if (thought.category != "Mission") continue;
                     std::string label =
@@ -233,9 +233,9 @@ int main(int argc, char** argv) {
                     missions[label]++;
                 }
                 for (auto& city : game.map->cities) {
-                    if (city.owner_index == current->index && city.producing != kNone &&
-                        city.producing < static_cast<int>(city.slots.size())) {
-                        built[city.slots[city.producing].name]++;
+                    if (city.OwnedBy(current->Id()) && city.ProducingSlot() != kNone &&
+                        city.ProducingSlot() < city.SlotCount()) {
+                        built[city.SlotAt(city.ProducingSlot()).name]++;
                     }
                 }
             } else {
@@ -244,7 +244,7 @@ int main(int argc, char** argv) {
         }
         for (size_t city_index = 0; city_index < game.map->cities.size(); city_index++) {
             const City& city = game.map->cities[city_index];
-            if (city.razed || city.owner_index != mover || owner_before[city_index] == mover)
+            if (city.IsRazed() || !city.OwnedBy(mover) || owner_before[city_index] == mover)
                 continue;
             int mover_camp = modern[mover] ? 0 : 1;
             if (owner_before[city_index] < 0 || owner_before[city_index] >= 8) {

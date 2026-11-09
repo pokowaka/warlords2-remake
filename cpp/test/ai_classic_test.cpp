@@ -51,7 +51,7 @@ TEST_P(ClassicAiGameTest, PlaysToTurnLimitMaintainingBoardInvariants) {
     Side* side = game::Begin(game);
     std::map<int, int> owned_at_start;
     for (Side* player : game.sides) {
-        owned_at_start[player->index] = static_cast<int>(game::SideCities(game, *player).size());
+        owned_at_start[player->Index()] = static_cast<int>(game::SideCities(game, *player).size());
     }
     while (side != nullptr && game.turn <= param.turns) {
         PlayAi(game, *side);
@@ -61,15 +61,15 @@ TEST_P(ClassicAiGameTest, PlaysToTurnLimitMaintainingBoardInvariants) {
 
     std::map<int, int> per_tile;
     for (const Army* army : game.armies) {
-        EXPECT_NE(game.types.ById(army->type), nullptr);
-        if (!army->transit) {
-            EXPECT_TRUE(army->x != kNone && army->y != kNone);
-            EXPECT_TRUE(army->x >= 0 && army->x < game.map->width && army->y >= 0 &&
-                        army->y < game.map->height);
-            ++per_tile[army->y * game.map->width + army->x];
+        EXPECT_NE(game.types.ById(army->TypeIndex()), nullptr);
+        if (!army->InTransit()) {
+            EXPECT_TRUE(army->X() != kNone && army->Y() != kNone);
+            EXPECT_TRUE(army->X() >= 0 && army->X() < game.map->width && army->Y() >= 0 &&
+                        army->Y() < game.map->height);
+            ++per_tile[army->Y() * game.map->width + army->X()];
         }
-        EXPECT_GE(army->moves, 0);
-        EXPECT_LE(army->moves, rules::kMaxMove);
+        EXPECT_GE(army->Moves(), 0);
+        EXPECT_LE(army->Moves(), rules::kMaxMove);
     }
     int worst_stack = 0;
     for (const auto& [tile_idx, tile_count] : per_tile) {
@@ -79,26 +79,26 @@ TEST_P(ClassicAiGameTest, PlaysToTurnLimitMaintainingBoardInvariants) {
     EXPECT_LE(worst_stack, rules::kMaxStack);
 
     for (Side* player : game.sides) {
-        EXPECT_GE(player->gold, 0) << player->name;
-        if (!player->alive) {
+        EXPECT_GE(player->Gold(), 0) << player->Name();
+        if (!player->IsAlive()) {
             EXPECT_TRUE(game::SideCities(game, *player).empty());
         }
     }
     for (const auto& city : game.map->cities) {
-        if (city.owner_index != kNone) {
-            EXPECT_NE(game.map->Side(city.owner_index), nullptr);
+        if (!city.IsNeutral()) {
+            EXPECT_NE(game.map->Side(city.Owner()), nullptr);
         }
-        EXPECT_LE(city.slots.size(), 4U);
+        EXPECT_LE(city.Slots().size(), 4U);
     }
 
     bool cities_changed = false;
     int captures = 0;
     for (Side* player : game.sides) {
         int current_count = static_cast<int>(game::SideCities(game, *player).size());
-        if (current_count != owned_at_start[player->index]) {
+        if (current_count != owned_at_start[player->Index()]) {
             cities_changed = true;
         }
-        captures += std::max(0, current_count - owned_at_start[player->index]);
+        captures += std::max(0, current_count - owned_at_start[player->Index()]);
     }
     EXPECT_TRUE(cities_changed);
     EXPECT_GT(captures, 0);
@@ -146,8 +146,8 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     auto rabid_game = SetupGame("ERYTHEA", rabid_opts);
     Side& rabid_side = rabid_game->map->sides[1];
     const AIData& rabid_ai = ClassicAiPlayer::EnsureOn(*rabid_game, rabid_side).Data();
-    EXPECT_EQ(rabid_side.card, 2);
-    EXPECT_EQ(rabid_side.name, "Rabids");
+    EXPECT_EQ(rabid_side.Card(), 2);
+    EXPECT_EQ(rabid_side.Name(), "Rabids");
     EXPECT_EQ(rabid_ai.max_groups, 2);
     EXPECT_EQ(rabid_ai.raze, 14);
     EXPECT_EQ(rabid_ai.sack, 100);
@@ -172,7 +172,7 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     const AIData& knight_ai = ClassicAiPlayer::EnsureOn(game, knight).Data();
     const AIData& lord_ai = ClassicAiPlayer::EnsureOn(game, lord).Data();
     AIData& warlord_ai = ClassicAiPlayer::EnsureOn(game, warlord).MutableData();
-    EXPECT_EQ(knight.level, 0);
+    EXPECT_EQ(knight.Level(), 0);
     EXPECT_EQ(knight_ai.max_groups, 1);
     EXPECT_EQ(knight_ai.cautious, 1);
     EXPECT_FALSE(knight_ai.bold);
@@ -187,15 +187,15 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
 
     int unclaimed = 0;
     for (const auto& city : game.map->cities) {
-        if (city.claim == kNone || city.claim == ai::core::kNeutral) {
+        if (!city.Claim().IsValid() || city.Claim() == SideId(ai::core::kNeutral)) {
             ++unclaimed;
         }
     }
     EXPECT_EQ(unclaimed, 0);
     for (Side* player : game.sides) {
-        EXPECT_EQ(player->capital->claim, player->index) << player->name;
-        EXPECT_GE(player->diplo_score, 1);
-        EXPECT_LE(player->diplo_score, 8);
+        EXPECT_EQ(player->CapitalCity(*game.map)->Claim(), player->Id()) << player->Name();
+        EXPECT_GE(player->DiploScore(), 1);
+        EXPECT_LE(player->DiploScore(), 8);
     }
 
     GameOpts greatest_opts = opts;
@@ -203,8 +203,8 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     greatest_opts.greatest = true;
     greatest_opts.options = {{"diplomacy", 1}};
     auto greatest = SetupGame("ERYTHEA", greatest_opts);
-    EXPECT_GT(greatest->map->sides[0].diplo_score, 400);
-    EXPECT_LE(greatest->map->sides[1].diplo_score, 8);
+    EXPECT_GT(greatest->map->sides[0].DiploScore(), 400);
+    EXPECT_LE(greatest->map->sides[1].DiploScore(), 8);
     greatest->diplomacy.SetSymmetricState(SideId(1), SideId(0), diplomacy::kWar);
     auto fights = ai::groups::FightingHumans(*greatest);
     EXPECT_TRUE(fights[1]);
@@ -217,10 +217,11 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     auto hidden = SetupGame("ERYTHEA", hidden_opts);
     Side& human_side = hidden->map->sides[0];
     Side& comp_side = hidden->map->sides[1];
-    auto human_grid = movement::Grid(*hidden, human_side.index);
+    auto human_grid = movement::Grid(*hidden, human_side.Index());
     auto human_prep =
-            movement::Prepare(*hidden, human_grid, human_side.index, movement::kLand, 0, 0);
-    auto comp_prep = movement::Prepare(*hidden, human_grid, comp_side.index, movement::kLand, 0, 0);
+            movement::Prepare(*hidden, human_grid, human_side.Index(), movement::kLand, 0, 0);
+    auto comp_prep =
+            movement::Prepare(*hidden, human_grid, comp_side.Index(), movement::kLand, 0, 0);
     int fogged = 0;
     int map_cells = hidden->map->width * hidden->map->height;
     for (int cell = 0; cell < map_cells; ++cell) {
@@ -232,7 +233,7 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
 
     Army* warlord_army = nullptr;
     for (Army* candidate : game.armies) {
-        if (candidate->owner == warlord.index) {
+        if (candidate->OwnedBy(warlord.Id())) {
             warlord_army = candidate;
         }
     }
@@ -252,20 +253,20 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
 
     City* target_city = &game.map->cities[0];
     for (auto& candidate : game.map->cities) {
-        if (&candidate != knight.capital && &candidate != warlord.capital) {
+        if (candidate.Id() != knight.CapitalCityId() && candidate.Id() != warlord.CapitalCityId()) {
             target_city = &candidate;
             break;
         }
     }
-    target_city->owner_index = warlord.index;
-    int score_before = warlord.diplo_score;
-    EXPECT_TRUE(ai::groups::EarlyVengeance(game, warlord.index, *target_city, 0));
-    EXPECT_GT(warlord.diplo_score, score_before);
-    EXPECT_FALSE(ai::groups::EarlyVengeance(game, knight.index, *target_city, 0));
+    target_city->SetOwner(warlord.Id());
+    int score_before = warlord.DiploScore();
+    EXPECT_TRUE(ai::groups::EarlyVengeance(game, warlord.Index(), *target_city, 0));
+    EXPECT_GT(warlord.DiploScore(), score_before);
+    EXPECT_FALSE(ai::groups::EarlyVengeance(game, knight.Index(), *target_city, 0));
 
     Side* current_side = game::Begin(game);
     while (current_side != nullptr && game.turn <= 12) {
-        if (current_side->computer) {
+        if (current_side->IsComputerControlled()) {
             PlayAi(game, *current_side);
         }
         current_side = EndTurn(game);
@@ -273,17 +274,17 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     auto grp = warlord_ai.groups[1];
     grp->active = 2;
     grp->target = 1;
-    grp->rally = warlord.capital->index;
+    grp->rally = warlord.CapitalCityId().Value();
     grp->staged[2] = game.armies[game.armies.size() - 1];
 
     auto reloaded = *save::Decode(save::Encode(game), kData);
     ASSERT_NE(reloaded, nullptr);
     const AIData& reloaded_ai =
-            ClassicAiPlayer::EnsureOn(*reloaded, reloaded->map->sides[warlord.index]).Data();
+            ClassicAiPlayer::EnsureOn(*reloaded, reloaded->map->sides[warlord.Index()]).Data();
     EXPECT_EQ(reloaded_ai.max_groups, warlord_ai.max_groups);
-    EXPECT_EQ(reloaded_ai.groups[1]->rally, warlord.capital->index);
+    EXPECT_EQ(reloaded_ai.groups[1]->rally, warlord.CapitalCityId().Value());
     EXPECT_EQ(reloaded_ai.groups[1]->staged[2], reloaded->armies[reloaded->armies.size() - 1]);
-    EXPECT_EQ(reloaded->map->cities[4].claim, game.map->cities[4].claim);
+    EXPECT_EQ(reloaded->map->cities[4].Claim(), game.map->cities[4].Claim());
 }
 
 }  // namespace

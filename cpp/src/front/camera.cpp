@@ -249,10 +249,10 @@ void ToggleCrt() {
 static bool ActiveClassicAi() {
     if (g_app.g && g_app.g->map && !g_app.starting) {
         for (const auto& side : g_app.g->map->sides) {
-            if (side.in_use && side.computer) return side.IsClassicAi();
+            if (side.InUse() && side.IsComputerControlled()) return side.IsClassicAi();
         }
         for (const auto& side : g_app.g->map->sides) {
-            if (side.in_use) return side.IsClassicAi();
+            if (side.InUse()) return side.IsClassicAi();
         }
     }
     return w2::ai::DefaultClassicAi();

@@ -206,16 +206,17 @@ absl::StatusOr<Canvas> Draw(const Map& map, const std::filesystem::path& data_di
     for (const City& city : map.cities) {
         const Side* owner = nullptr;
         for (const Side& side : map.sides) {
-            if (side.capital == &city) owner = &side;
+            if (side.CapitalCity(map) == &city) owner = &side;
         }
         if (!owner) {
-            canvas.Rect(city.x * size, city.y * size, 2 * size, 2 * size, kWhite);
-            canvas.Outline(city.x * size, city.y * size, 2 * size, 2 * size, kBlack);
+            canvas.Rect(city.X() * size, city.Y() * size, 2 * size, 2 * size, kWhite);
+            canvas.Outline(city.X() * size, city.Y() * size, 2 * size, 2 * size, kBlack);
         } else {
-            canvas.Rect(city.x * size - 2, city.y * size - 2, 2 * size + 4, 2 * size + 4, kBlack);
-            canvas.Rect(city.x * size, city.y * size, 2 * size, 2 * size,
-                        static_cast<uint8_t>(owner->colour & 15));
-            canvas.Outline(city.x * size - 2, city.y * size - 2, 2 * size + 4, 2 * size + 4,
+            canvas.Rect(city.X() * size - 2, city.Y() * size - 2, 2 * size + 4, 2 * size + 4,
+                        kBlack);
+            canvas.Rect(city.X() * size, city.Y() * size, 2 * size, 2 * size,
+                        static_cast<uint8_t>(owner->Colour() & 15));
+            canvas.Outline(city.X() * size - 2, city.Y() * size - 2, 2 * size + 4, 2 * size + 4,
                            kWhite);
         }
     }

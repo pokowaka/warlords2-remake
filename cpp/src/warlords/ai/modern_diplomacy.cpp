@@ -57,12 +57,12 @@ ml::StackVec BuildStackFeatures(const Game& game, const std::vector<Army*>& stac
     bool has_hero = false, has_flier = false, all_fly = true, has_siege = false,
          has_special = false;
     for (Army* army : stack) {
-        total_str += army->strength;
-        min_move = std::min(min_move, army->moves);
-        total_upkeep += army->upkeep;
-        if (!army->blessings.empty()) blessed++;
+        total_str += army->Strength();
+        min_move = std::min(min_move, army->Moves());
+        total_upkeep += army->Upkeep();
+        if (!army->Blessings().empty()) blessed++;
         if (army->Hero()) has_hero = true;
-        const ArmyType* army_type = game.types.ById(army->type);
+        const ArmyType* army_type = game.types.ById(army->Type());
         if (army_type) {
             if (army_type->flies)
                 has_flier = true;
@@ -108,7 +108,7 @@ int TargetPathCost(const Game& game, const core::Flood& flood, const CandidateTa
         int best = core::kUnreached;
         for (int dy = -1; dy <= 2; dy++) {
             for (int dx = -1; dx <= 2; dx++) {
-                int tile_x = tgt.city->x + dx, tile_y = tgt.city->y + dy;
+                int tile_x = tgt.city->X() + dx, tile_y = tgt.city->Y() + dy;
                 if (tile_x >= 0 && tile_y >= 0 && tile_x < game.map->width &&
                     tile_y < game.map->height) {
                     int cost = core::FloodAt(flood, tile_x, tile_y);
@@ -130,7 +130,7 @@ ml::TargetVec BuildTargetFeatures(Game& game, const Side& side, const std::vecto
     ml::TargetVec features{};
     features[static_cast<int>(tgt.kind)] = 1.0F;
 
-    int start_x = stack[0]->x, start_y = stack[0]->y;
+    int start_x = stack[0]->X(), start_y = stack[0]->Y();
     int min_move = std::max(2, move::StackMoves(stack));
     int eff_cost =
             path_cost >= 0 ? path_cost : (move::Distance(start_x, start_y, tgt.x, tgt.y) * 2);
@@ -147,7 +147,7 @@ ml::TargetVec BuildTargetFeatures(Game& game, const Side& side, const std::vecto
         seen_fraction = est.seen_tile_fraction;
 
         float my_str = 0.0F;
-        for (Army* army : stack) my_str += static_cast<float>(army->strength);
+        for (Army* army : stack) my_str += static_cast<float>(army->Strength());
         int free_slots = std::max(0, rules::kMaxStack - static_cast<int>(stack.size()));
         float add_str = std::min(nearby_friendly_str + tgt.assigned_strength,
                                  static_cast<float>(free_slots) * 5.0F);
@@ -163,7 +163,7 @@ ml::TargetVec BuildTargetFeatures(Game& game, const Side& side, const std::vecto
     bool flies = (move::ModeOf(game, stack) == move::kFlying);
     bool at_sea = false;
     for (Army* army : stack) {
-        if (army->at_sea) at_sea = true;
+        if (army->IsAtSea()) at_sea = true;
     }
     int tile_dist = std::max(1, move::Distance(start_x, start_y, tgt.x, tgt.y));
     bool requires_boat_embark =
@@ -193,7 +193,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                        const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
                        std::array<bool, 8>& decided) {
     if (game.map->options.diplomacy == 0) return;
-    int our_side = side.index;
+    int our_side = side.Index();
     const SideBelief& belief = belief::Ensure(side);
     const auto& prof = personality::ForSide(side);
 
@@ -209,8 +209,8 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     int active_wars = 0;
     int primary_enemy = kNone;
     for (int side_idx = 0; side_idx < 8; side_idx++) {
-        if (side_idx != our_side && game.map->sides[side_idx].in_use &&
-            game.map->sides[side_idx].alive &&
+        if (side_idx != our_side && game.map->sides[side_idx].InUse() &&
+            game.map->sides[side_idx].IsAlive() &&
             (diplomacy::State(game, our_side, side_idx) == diplomacy::kWar ||
              (decided[side_idx] &&
               diplomacy::Proposal(game, our_side, side_idx) != diplomacy::kPeace))) {
@@ -225,8 +225,8 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
 
     float total_my_mobile_str = 0.0F;
     for (Army* army : game.armies) {
-        if (army->owner == our_side && army->x != kNone && !army->transit)
-            total_my_mobile_str += static_cast<float>(army->strength);
+        if (army->OwnerIndex() == our_side && army->X() != kNone && !army->InTransit())
+            total_my_mobile_str += static_cast<float>(army->Strength());
     }
 
     auto my_cities_list = game::SideCities(game, side);
@@ -236,17 +236,17 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     float closest_rival_dist = 999.0F;
     for (int other_idx = 0; other_idx < 8; other_idx++) {
         Side& other = game.map->sides[other_idx];
-        if (other_idx == our_side || !other.in_use || !other.alive) continue;
+        if (other_idx == our_side || !other.InUse() || !other.IsAlive()) continue;
         if (belief.visible_cities_by_side[other_idx] == 0 &&
             belief.their_border_strength[other_idx] == 0.0F)
             continue;
         float min_dist = 120.0F;
         for (City* my_city : my_cities_list) {
             for (City* vis_city : belief.visible_cities) {
-                if (vis_city->owner_index == other_idx) {
-                    min_dist = std::min(
-                            min_dist, static_cast<float>(move::Distance(my_city->x, my_city->y,
-                                                                        vis_city->x, vis_city->y)));
+                if (vis_city->OwnerIndex() == other_idx) {
+                    min_dist = std::min(min_dist, static_cast<float>(move::Distance(
+                                                          my_city->X(), my_city->Y(), vis_city->X(),
+                                                          vis_city->Y())));
                 }
             }
         }
@@ -258,10 +258,12 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     }
 
     int wars_committed = active_wars;
+    const City* own_capital = side.CapitalCity(*game.map);
 
     for (int other_idx = 0; other_idx < 8; other_idx++) {
         Side& other = game.map->sides[other_idx];
-        if (other_idx == our_side || !other.in_use || !other.alive || decided[other_idx]) continue;
+        if (other_idx == our_side || !other.InUse() || !other.IsAlive() || decided[other_idx])
+            continue;
         int cur_st = diplomacy::State(game, our_side, other_idx);
         if (game.map->options.hidden_map != 0 && belief.visible_cities_by_side[other_idx] == 0 &&
             belief.their_border_strength[other_idx] == 0.0F && cur_st != diplomacy::kWar) {
@@ -275,7 +277,8 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
 
         int shared_wars = 0;
         for (int side_idx = 0; side_idx < 8; side_idx++) {
-            if (side_idx != our_side && side_idx != other_idx && game.map->sides[side_idx].alive &&
+            if (side_idx != our_side && side_idx != other_idx &&
+                game.map->sides[side_idx].IsAlive() &&
                 diplomacy::State(game, our_side, side_idx) == diplomacy::kWar &&
                 diplomacy::State(game, other_idx, side_idx) == diplomacy::kWar) {
                 shared_wars++;
@@ -318,7 +321,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         rival_vec[11] = is_leader_or_closest ? 1.0F : 0.0F;
         rival_vec[12] = std::min(1.0F, static_cast<float>(shared_wars) / 2.0F);
         rival_vec[13] = std::tanh(static_cast<float>(grudge) / 30.0F);
-        rival_vec[14] = (side.capital && side.capital->owner_index == other_idx) ? 1.0F : 0.0F;
+        rival_vec[14] = (own_capital && own_capital->OwnerIndex() == other_idx) ? 1.0F : 0.0F;
         rival_vec[15] = std::tanh(
                 static_cast<float>(diplomacy::GoldOffer(game, other_idx, our_side)) / 200.0F);
         rival_vec[16] = std::tanh(min_dist / 45.0F);
@@ -351,11 +354,12 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         // Binary sub-decision (output 4): sweeten a peace offer to a side we are at war with
         bool friendly = (best_choice == 0 || best_choice == 1);
         diplomacy::SetGoldOffer(game, our_side, other_idx, 0);
-        if (friendly && cur_st == diplomacy::kWar && side.gold >= 100) {
+        if (friendly && cur_st == diplomacy::kWar && side.Gold() >= 100) {
             rec.has_tribute = true;
             rec.tribute_chosen = ml::SelectBinary(raw[4], sampler, &rec.old_tribute_log_prob);
             if (rec.tribute_chosen) {
-                int offer = std::clamp(side.gold / 4 / 25 * 25, 50, std::min(300, side.gold / 2));
+                int offer =
+                        std::clamp(side.Gold() / 4 / 25 * 25, 50, std::min(300, side.Gold() / 2));
                 diplomacy::SetGoldOffer(game, our_side, other_idx, offer);
             }
         }
@@ -375,16 +379,18 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
 
         const char* stance_names[4] = {"ALLIED", "PEACE", "UNEASY", "WAR"};
         if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+            TilePos side_cap = side.OriginCapitalPos();
+            TilePos other_cap = other.OriginCapitalPos();
             modern_player->PushThought(
-                    AIThought{"Diplomacy", side.name, other.name, side.cap_x, side.cap_y,
-                              other.cap_x, other.cap_y, best_logit, 0.0F, false,
+                    AIThought{"Diplomacy", side.Name(), other.Name(), side_cap.x, side_cap.y,
+                              other_cap.x, other_cap.y, best_logit, 0.0F, false,
                               absl::StrFormat("Stance -> %s (Attitude %+d, Trust %+d): %s",
                                               stance_names[best_choice], att.total_score,
                                               att.trust_score, att.stance_summary)});
         }
 
-        if (!other.computer && other.missives.empty() && game.turn > 1 &&
-            game.turn - other.last_missive_turn[our_side] >= 4) {
+        if (!other.IsComputerControlled() && other.Missives().empty() && game.turn > 1 &&
+            game.turn - other.LastMissiveTurn(SideId(our_side)) >= 4) {
             bool send_missive = false;
             DiplomaticMissive missive;
             missive.from_side = our_side;
@@ -396,7 +402,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 missive.proposed_state = diplomacy::kPeace;
                 missive.propose_alliance = true;
                 missive.joint_war_target = diplomacy::WarTarget(game, our_side, other_idx);
-                missive.headline = absl::StrFormat("Envoy from %s (%s)", side.name, prof.name);
+                missive.headline = absl::StrFormat("Envoy from %s (%s)", side.Name(), prof.name);
                 missive.body = absl::StrFormat(
                         "\"%s\" We propose a full Military Alliance with shared vision!",
                         prof.motto);
@@ -405,7 +411,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 send_missive = true;
                 missive.proposed_state = diplomacy::kIntermediate;
                 missive.headline =
-                        absl::StrFormat("Border Warning from %s (%s)", side.name, prof.name);
+                        absl::StrFormat("Border Warning from %s (%s)", side.Name(), prof.name);
                 missive.body =
                         "Your armies mass along our frontier. Withdraw them or our peace shall "
                         "end!";
@@ -417,7 +423,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 missive.gold_demand =
                         std::max(75, att.peace_gold_needed > 0 ? att.peace_gold_needed : 100);
                 missive.headline =
-                        absl::StrFormat("Tribute Demand from %s (%s)", side.name, prof.name);
+                        absl::StrFormat("Tribute Demand from %s (%s)", side.Name(), prof.name);
                 missive.body = absl::StrFormat(
                         "\"%s\" Pay %d gold in tribute to preserve the peace between us!",
                         prof.motto, missive.gold_demand);
@@ -427,7 +433,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 int offered = diplomacy::GoldOffer(game, our_side, other_idx);
                 missive.gold_demand = -offered;
                 missive.headline =
-                        absl::StrFormat("Peace Envoy from %s (%s)", side.name, prof.name);
+                        absl::StrFormat("Peace Envoy from %s (%s)", side.Name(), prof.name);
                 missive.body = offered > 0 ? absl::StrFormat(
                                                      "We offer %d gold and a 10-turn truce to end "
                                                      "this war.",
@@ -436,8 +442,8 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             }
 
             if (send_missive) {
-                other.missives.push_back(std::move(missive));
-                other.last_missive_turn[our_side] = game.turn;
+                other.AddMissive(std::move(missive));
+                other.SetLastMissiveTurn(SideId(our_side), game.turn);
             }
         }
     }

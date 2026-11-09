@@ -19,10 +19,6 @@
 
 namespace w2 {
 
-bool Army::Hero() const {
-    return type == armytype::kHero;
-}
-
 Game::Game() : pathfinder(std::make_unique<Pathfinder>()) {}
 Game::~Game() = default;
 
@@ -71,7 +67,7 @@ std::vector<Army*> Game::ArmiesOnTile(int x, int y) const {
 int Game::LivingSideCount() const {
     int count = 0;
     for (const Side* side_ptr : sides) {
-        if (side_ptr && side_ptr->alive) count++;
+        if (side_ptr && side_ptr->IsAlive()) count++;
     }
     return count;
 }
@@ -87,14 +83,14 @@ City* CityAt(const Game& game, int x, int y) {
 }
 
 void SetCityOwner(Game& game, City& city, int side_index) {
-    city.owner_index = side_index;
+    city.SetOwner(SideId(side_index));
     game.GetPathfinder().Invalidate();
 }
 
 std::vector<City*> SideCities(const Game& game, const Side& side) {
     std::vector<City*> out;
     for (auto& city : game.map->cities) {
-        if (city.owner_index == side.index) out.push_back(&city);
+        if (city.OwnedBy(side.Id())) out.push_back(&city);
     }
     return out;
 }
@@ -102,7 +98,7 @@ std::vector<City*> SideCities(const Game& game, const Side& side) {
 std::vector<Army*> SideArmies(const Game& game, const Side& side) {
     std::vector<Army*> out;
     for (Army* army : game.armies) {
-        if (army->owner == side.index) out.push_back(army);
+        if (army->OwnedBy(side.Id())) out.push_back(army);
     }
     return out;
 }
@@ -110,8 +106,8 @@ std::vector<Army*> SideArmies(const Game& game, const Side& side) {
 int ItemBonus(const Game& game, const Side& side, int item_type) {
     int total = 0;
     for (Army* army : game.armies) {
-        if (army->owner == side.index) {
-            for (Item* item : army->items) {
+        if (army->OwnedBy(side.Id())) {
+            for (Item* item : army->Items()) {
                 if (item->type == item_type) total += std::max(1, item->value);
             }
         }
@@ -123,7 +119,7 @@ std::pair<int, int> FreeTileIn(Game& game, const City& city, bool spill,
                                std::pair<int, int>* last) {
     static const int kOffsets[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
     for (const auto& offset : kOffsets) {
-        int x = city.x + offset[0], y = city.y + offset[1];
+        int x = city.X() + offset[0], y = city.Y() + offset[1];
         if (x < game.map->width && y < game.map->height &&
             static_cast<int>(ArmiesAt(game, x, y).size()) < rules::kMaxStack) {
             return {x, y};
@@ -132,8 +128,8 @@ std::pair<int, int> FreeTileIn(Game& game, const City& city, bool spill,
     if (!spill) return {kNone, kNone};
     int last_x = kNone, last_y = kNone;
     for (int i = 0; i < 20; i++) {
-        int x = city.x + game.rng.Dice(1, 3, -2);
-        int y = city.y + game.rng.Dice(1, 3, -2);
+        int x = city.X() + game.rng.Dice(1, 3, -2);
+        int y = city.Y() + game.rng.Dice(1, 3, -2);
         if (x >= 0 && y >= 0 && x < game.map->width && y < game.map->height) {
             last_x = x;
             last_y = y;
@@ -152,7 +148,7 @@ void TidyTowers(Game& game) {
     if (game.towers.empty()) return;
     std::set<int> held;
     for (Army* army : game.armies) {
-        if (army->x != kNone && !army->transit) held.insert(army->y * game.map->width + army->x);
+        if (army->OnMap()) held.insert(army->Y() * game.map->width + army->X());
     }
     for (auto it = game.towers.begin(); it != game.towers.end();) {
         if (!held.count(*it))
@@ -164,9 +160,9 @@ void TidyTowers(Game& game) {
 
 bool HeroWithDoubleMoveAt(const Game& game, const Side& side, int x, int y) {
     for (Army* army : game.armies) {
-        if (army->owner == side.index && !army->transit && army->x == x && army->y == y &&
-            army->type == armytype::kHero) {
-            for (Item* item : army->items) {
+        if (army->OwnedBy(side.Id()) && army->OnMap() && army->X() == x && army->Y() == y &&
+            army->Hero()) {
+            for (Item* item : army->Items()) {
                 if (item->type == rules::kItemDoubleMove) return true;
             }
         }
@@ -182,19 +178,22 @@ Sign* SignAt(Game& game, int x, int y) {
 }
 
 void AddDiploScore(Game& game, Side& side, int points) {
-    side.diplo_score += points;
+    (void)game;
+    side.AddDiploScore(points);
 }
 
 bool HasActiveHuman(const Game& game) {
     for (const Side* side : game.sides) {
-        if (side && side->alive && !side->computer && !SideCities(game, *side).empty()) return true;
+        if (side && side->IsAlive() && !side->IsComputerControlled() &&
+            !SideCities(game, *side).empty())
+            return true;
     }
     return false;
 }
 
 int ViewerSide(const Game& game, const Side* player) {
     if (!HasActiveHuman(game)) return kNone;
-    return player ? player->index : kNone;
+    return player ? player->Index() : kNone;
 }
 
 bool Seen(const Game& game, int side, int x, int y) {
@@ -290,11 +289,12 @@ void TidyExplored(Game& game, int side) {
 
 void RevealStart(Game& game, const Side& side) {
     if (game.map->options.hidden_map == 0) return;
-    for (City* city : SideCities(game, side)) Reveal(game, side.index, city->x, city->y, false);
+    for (City* city : SideCities(game, side))
+        Reveal(game, side.Index(), city->X(), city->Y(), false);
     for (Army* army : SideArmies(game, side)) {
-        if (!army->transit) Reveal(game, side.index, army->x, army->y, false);
+        if (!army->InTransit()) Reveal(game, side.Index(), army->X(), army->Y(), false);
     }
-    TidyExplored(game, side.index);
+    TidyExplored(game, side.Index());
 }
 
 int Income(const Game& game, const Side& side) {
@@ -313,7 +313,7 @@ void HumanProduction(Game& game, Side& side) {
     TurnEngine(game).HumanProduction(side);
 }
 bool Producing(const City& city) {
-    return city.producing != kNone && city.countdown > 0;
+    return city.ProducingSlot() != kNone && city.Countdown() > 0;
 }
 Side* EndTurn(Game& game) {
     return TurnEngine(game).EndTurn();
@@ -384,7 +384,7 @@ Ending CheckEnd(Game& game) {
 }
 std::shared_ptr<SearchResult> SearchHere(Game& game, const std::vector<Army*>& stack, bool human) {
     if (stack.empty()) return nullptr;
-    return site::Search(game, stack, stack[0]->x, stack[0]->y, human);
+    return site::Search(game, stack, stack[0]->X(), stack[0]->Y(), human);
 }
 std::string DescribeSearch(const SearchResult* result) {
     return SiteExplorer::DescribeSearch(result);
@@ -418,9 +418,7 @@ std::string CannotBuy(const Game& game, const Side& side, const City& city,
     return CityEconomy(const_cast<Game&>(game)).CannotBuy(side, city, army_type);
 }
 int BuySlot(const City& city) {
-    return static_cast<int>(city.slots.size()) < rules::kProductionSlots
-                   ? static_cast<int>(city.slots.size())
-                   : 0;
+    return city.SlotCount() < rules::kProductionSlots ? city.SlotCount() : 0;
 }
 void BuyProduction(Game& game, Side& side, City& city, int slot_index, int type_id) {
     CityEconomy(game).BuyProduction(side, city, slot_index, type_id);

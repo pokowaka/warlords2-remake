@@ -15,12 +15,12 @@ bool CanAttack(Game& game, Side& side, const City& city) {
     AIData& data = Data(game, side);
     int wars = 0, last = kNone;
     for (int other = 7; other >= 0; other--) {
-        if (InPlay(game, other) && State(game, side.index, other) == 2) {
+        if (InPlay(game, other) && State(game, side.Index(), other) == 2) {
             wars++;
             last = other;
         }
     }
-    int state = State(game, side.index, owner);
+    int state = State(game, side.Index(), owner);
     if (state == 2) return true;
     if (state == 0 && wars != 0 && (wars != 1 || last != owner)) return false;
     if (state > 2) return false;
@@ -29,11 +29,12 @@ bool CanAttack(Game& game, Side& side, const City& city) {
 
 bool Spared(Game& game, Side& side, int other) {
     AIData& data = Data(game, side);
-    if (game.map->options.diplomacy == 0 || data.solidarity == 0 || !side.computer) return false;
+    if (game.map->options.diplomacy == 0 || data.solidarity == 0 || !side.IsComputerControlled())
+        return false;
     for (int human = 7; human >= 0; human--) {
         const Side& human_side = game.map->sides[human];
-        if (InPlay(game, human) && !human_side.computer && State(game, other, human) == 2 &&
-            human_side.ai_solidarity != 0)
+        if (InPlay(game, human) && !human_side.IsComputerControlled() &&
+            State(game, other, human) == 2 && human_side.AiSolidarity() != 0)
             return true;
     }
     return false;
@@ -44,28 +45,29 @@ bool Spared(Game& game, Side& side, int other) {
  *        city within 40 of its capital that no side in play claims.
  */
 static void Claim(Game& game, Side& side) {
-    City* capital = side.capital;
+    City* capital = side.CapitalCity(*game.map);
     if (!capital) return;
     City* best = nullptr;
     int best_distance = kNone;
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
-        int claim = city.claim != kNone ? city.claim : kNeutral;
-        if (Standing(city) && claim != side.index && (claim == kNeutral || !InPlay(game, claim))) {
-            int distance = Dist(city.x, city.y, capital->x, capital->y);
+        SideId claim = city.Claim();
+        if (Standing(city) && claim != side.Id() &&
+            (!claim.IsValid() || !InPlay(game, claim.Value()))) {
+            int distance = Dist(city.X(), city.Y(), capital->X(), capital->Y());
             if (distance < 40 && (best_distance == kNone || distance < best_distance)) {
                 best = &city;
                 best_distance = distance;
             }
         }
     }
-    if (best) best->claim = side.index;
+    if (best) best->SetClaim(side.Id());
 }
 
 void Phase(Game& game, Side& side) {
     AIData& data = Data(game, side);
-    int side_index = side.index;
-    bool human = !side.computer;
+    int side_index = side.Index();
+    bool human = !side.IsComputerControlled();
     Claim(game, side);
     if (game.map->options.diplomacy == 0) return;
     int enemy = groups::PickEnemy(game, side);
@@ -85,13 +87,13 @@ void Phase(Game& game, Side& side) {
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
         if (Standing(city)) tiles++;
-        int owner = city.owner_index;
+        int owner = city.OwnerIndex();
         if (owner != kNone) {
             total[owner]++;
             if (!Cflag(data, city, kCfUnseen)) seen[owner]++;
-            int claim = city.claim != kNone ? city.claim : kNeutral;
+            int claim = city.Claim().Value();
             if (owner == side_index) {
-                if (claim != kNeutral && claim >= 0 && claim < 16) swapped[claim]++;
+                if (claim >= 0 && claim < 16) swapped[claim]++;
             } else if (claim == side_index) {
                 swapped[owner]++;
             }
@@ -153,7 +155,7 @@ void Phase(Game& game, Side& side) {
         if (at_war_with_human) {
             for (int other = 7; other >= 0; other--) {
                 if (InPlay(game, other) && IsComputer(game, other) &&
-                    game.map->sides[other].ai_solidarity != 0)
+                    game.map->sides[other].AiSolidarity() != 0)
                     Propose(game, side_index, other, 0);
             }
         }

@@ -38,7 +38,7 @@ const int kRows = 8;                           ///< Rows: a stack holds up to ei
 bool Flies(const w2::Army* army, const w2::ArmyType* type) {
     if (type->flies) return true;
     if (!army->Hero()) return false;
-    for (w2::Item* item : army->items)
+    for (w2::Item* item : army->Items())
         if (item->type == w2::rules::kItemFlight) return true;
     return false;
 }
@@ -77,32 +77,32 @@ struct Stack : kit::Modal {
             if (stack_slots.in_group[i]) moving.push_back(stack_slots.army[i]);
         w2::Army* first = stack_slots.n > 0 ? stack_slots.army[0] : nullptr;
         auto fight_strengths =
-                first ? w2::combat::StackStrengths(*g_app.g, moving, first->x, first->y)
+                first ? w2::combat::StackStrengths(*g_app.g, moving, first->X(), first->Y())
                       : std::map<const w2::Army*, int>{};
         for (int i = 0; i < kRows; i++) {
             int x = 112, y = 90 + 30 * i;
             if (i < stack_slots.n && stack_slots.army[i]) {
                 w2::Army* army = stack_slots.army[i];
-                const w2::ArmyType* type = g_app.g->types.ById(army->type);
+                const w2::ArmyType* type = g_app.g->types.ById(army->Type());
                 if (stack_slots.mark[i] != w2::slots::kNomark)
                     abits(448, stack_slots.mark[i] == w2::slots::kTick ? 16 : 0, 32, 16, x - 32,
                           y + 5);
-                kit::Army(army->type, side->index, x, y,
-                          (side->index + stack_slots.group[i]) % 8 + 2, !stack_slots.in_group[i]);
+                kit::Army(army->TypeIndex(), side->Index(), x, y,
+                          (side->Index() + stack_slots.group[i]) % 8 + 2, !stack_slots.in_group[i]);
                 gfx::SetColor(1, 1, 1);
-                font.Draw(army->Hero() ? army->name : type->name, x + 48, y + 5);
-                int strength = army->strength;
+                font.Draw(army->Hero() ? army->Name() : type->name, x + 48, y + 5);
+                int strength = army->Strength();
                 if (army->Hero()) strength += w2::combat::BattleItems(*army);
                 font.Draw(absl::StrFormat("%d", std::min(9, strength)), x + 168, y + 5);
                 auto fight_strength = fight_strengths.find(army);
                 if (stack_slots.in_group[i] && fight_strength != fight_strengths.end())
                     font.Draw(absl::StrFormat("(%d)", fight_strength->second), x + 184, y + 5);
-                font.Draw(absl::StrFormat("%d", army->moves), x + 232, y + 5);
+                font.Draw(absl::StrFormat("%d", army->Moves()), x + 232, y + 5);
                 // the left of the ABITS cell showing how it moves; -1 for on foot
                 int move_cell_x = -1;
                 if (Flies(army, type))
                     move_cell_x = 184;
-                else if (army->at_sea)
+                else if (army->IsAtSea())
                     move_cell_x = 424;
                 else if (type->woods_move && type->hills_move)
                     move_cell_x = 216;
@@ -114,7 +114,7 @@ struct Stack : kit::Modal {
                 gfx::SetColor(1, 1, 1);
                 font.Draw(armybonus::BonusText(*type, army), x + 304, y + 5);
             } else {
-                kit::Army(w2::kNone, side->index, x, y, 1);
+                kit::Army(w2::kNone, side->Index(), x, y, 1);
             }
         }
         // the rows and marks are drawn above, not as controls

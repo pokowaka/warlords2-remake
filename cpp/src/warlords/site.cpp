@@ -45,7 +45,7 @@ std::string Band(const Site& target_site, const std::vector<std::pair<int, int>>
 
 Army* HeroIn(const std::vector<Army*>& stack) {
     for (Army* army : stack) {
-        if (army->type == armytype::kHero) return army;
+        if (army->Hero()) return army;
     }
     return nullptr;
 }
@@ -78,7 +78,7 @@ bool ItemReserved(int type, int value) {
 }
 
 bool ShownTo(const Site& target_site, const Side& side) {
-    return ((target_site.revealed >> side.index) & 1) == 1;
+    return ((target_site.revealed >> side.Index()) & 1) == 1;
 }
 
 void FillItemPool(Game& game, int reserved) {
@@ -172,7 +172,7 @@ void SiteExplorer::MarkRich() {
 
 void SiteExplorer::Setup() {
     std::vector<std::pair<int, int>> capitals;
-    for (Side* side : game_.sides) capitals.emplace_back(side->cap_x, side->cap_y);
+    for (Side* side : game_.sides) capitals.push_back(side->OriginCapitalPos().ToPair());
 
     MarkRich();
     int temples = 0;
@@ -246,8 +246,8 @@ void SiteExplorer::Setup() {
 }
 
 bool SiteExplorer::SurvivesGuardian(const Army& hero, int monster_strength) {
-    int margin = 90 + 5 * (hero.strength + combat::BattleItems(hero) - monster_strength) +
-                 3 * static_cast<int>(game::ArmiesAt(game_, hero.x, hero.y).size());
+    int margin = 90 + 5 * (hero.Strength() + combat::BattleItems(hero) - monster_strength) +
+                 3 * static_cast<int>(game::ArmiesAt(game_, hero.X(), hero.Y()).size());
     return game_.rng.Dice(1, 100, 0) <= margin;
 }
 
@@ -264,11 +264,11 @@ int SiteExplorer::Bless(const Site& target_site, const ArmyStack& stack) {
     int bit = target_site.temple_index;
     int blessed = 0;
     for (Army* army : stack) {
-        if (!army->blessings.count(bit)) {
-            army->blessings.insert(bit);
-            army->strength = std::min(9, army->strength + 1);
+        if (!army->HasBlessing(bit)) {
+            army->AddBlessing(bit);
+            army->SetStrength(std::min(9, army->Strength() + 1));
             blessed++;
-            if (army->type == armytype::kHero) hero::AddExperience(game_, army, 1);
+            if (army->Hero()) hero::AddExperience(game_, army, 1);
         }
     }
     return blessed;
@@ -279,7 +279,7 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
     if (game_.map->site_at.empty() || x < 0 || y < 0) return nullptr;
     Site* target_site = game_.map->site_at[y * game_.map->width + x];
     if (!target_site || target_site->searched) return nullptr;
-    if (stack.empty() || stack[0]->moves < 1) return nullptr;
+    if (stack.empty() || stack[0]->Moves() < 1) return nullptr;
     Army* hero = HeroIn(stack);
     auto out = std::make_shared<SearchResult>();
     out->site = target_site;
@@ -296,12 +296,12 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
         out->kind = "no hero";
         return out;
     }
-    Side* side = game_.map->Side(hero->owner);
+    Side* side = game_.map->Side(hero->Owner());
     out->hero = hero;
 
     if (target_site->content == site::kSage) {
         hero::AddExperience(game_, hero, 3);
-        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundSage, 0, hero->name);
+        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundSage, 0, hero->Name());
         target_site->searched = true;
         out->kind = "sage";
         return out;
@@ -315,9 +315,9 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
         const Monster* monster = MonsterOf(game_, target_site->guardian);
         if (!SurvivesGuardian(*hero, strength)) {
             history::RecordDeed(game_, side, DeedType::kHeroKilled, history::kKilledSearching, 0,
-                                hero->name);
+                                hero->Name());
             history::Tally(game_, hero, kNone, false);
-            hero::DropItems(game_, hero, hero->x, hero->y, hero->owner);
+            hero::DropItems(game_, hero, hero->X(), hero->Y(), hero->OwnerIndex());
             game_.Remove(hero);
             out->kind = "killed";
             out->monster = monster;
@@ -339,9 +339,10 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
             found->y = y;
         } else if (found) {
             found->status = 3;
-            hero->items.push_back(found);
+            hero->AddItem(found);
         }
-        if (found) history::RecordDeed(game_, side, DeedType::kFound, found->index, 0, hero->name);
+        if (found)
+            history::RecordDeed(game_, side, DeedType::kFound, found->index, 0, hero->Name());
         target_site->searched = true;
         target_site->content = site::kEmpty;
         out->kind = "item";
@@ -350,9 +351,9 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
     }
     if (target_site->content == site::kGold) {
         int gold = target_site->rich ? game_.rng.Dice(3, 1000, 1000) : game_.rng.Dice(3, 500, 500);
-        if (side) side->gold += gold;
+        if (side) side->AddGold(gold);
         target_site->searched = true;
-        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundGold, 0, hero->name);
+        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundGold, 0, hero->Name());
         out->kind = "gold";
         out->gold = gold;
         return out;
@@ -367,7 +368,7 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
             Army* ally = hero::PlaceAlly(game_, type, x, y, *side);
             if (ally) out->armies.push_back(ally);
         }
-        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundAllies, 0, hero->name);
+        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundAllies, 0, hero->Name());
         out->kind = "allies";
         out->type = type;
         out->count = count;
@@ -421,14 +422,14 @@ Site* SiteExplorer::SageShow(const Side& side, const site::SageEntry& entry, int
         }
     }
     if (!found) return nullptr;
-    if (!site::ShownTo(*found, side)) found->revealed = found->revealed + (1 << side.index);
-    game::Reveal(game_, side.index, found->x, found->y, false);
+    if (!site::ShownTo(*found, side)) found->revealed = found->revealed + (1 << side.Index());
+    game::Reveal(game_, side.Index(), found->x, found->y, false);
     return found;
 }
 
 int SiteExplorer::SageGem(Side& side) {
     int gold = game_.rng.Dice(3, 500, 500);
-    side.gold += gold;
+    side.AddGold(gold);
     return gold;
 }
 
@@ -439,7 +440,7 @@ SiteExplorer::MapPatch SiteExplorer::SageMap(const Side& side, int target_x, int
     if (left + width >= game_.map->width) width = game_.map->width - left - 1;
     if (top + height >= game_.map->height) height = game_.map->height - top - 1;
     for (int x = left; x < left + width; x++) {
-        for (int y = top; y < top + height; y++) game::Reveal(game_, side.index, x, y, false);
+        for (int y = top; y < top + height; y++) game::Reveal(game_, side.Index(), x, y, false);
     }
     return {left, top, width, height};
 }

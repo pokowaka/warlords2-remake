@@ -32,20 +32,20 @@ using namespace w2;
 static void Trace(const Game& game, const Side& side) {
     long long hash = 0;
     for (Army* army : game.armies) {
-        hash = (hash * 31 + static_cast<int64_t>(army->x == kNone ? 999 : army->x) * 7 +
-                static_cast<int64_t>(army->y == kNone ? 999 : army->y) * 13 +
-                static_cast<int64_t>(army->type) * 17 +
-                static_cast<int64_t>(army->owner == kNone ? 15 : army->owner) * 19 +
-                army->strength + static_cast<int64_t>(army->moves) * 3) %
+        hash = (hash * 31 + static_cast<int64_t>(army->X() == kNone ? 999 : army->X()) * 7 +
+                static_cast<int64_t>(army->Y() == kNone ? 999 : army->Y()) * 13 +
+                static_cast<int64_t>(army->TypeIndex()) * 17 +
+                static_cast<int64_t>(army->OwnerIndex() == kNone ? 15 : army->OwnerIndex()) * 19 +
+                army->Strength() + static_cast<int64_t>(army->Moves()) * 3) %
                1000000007;
     }
     std::string owners;
     for (const auto& city : game.map->cities) {
-        owners += city.razed                  ? 'x'
-                  : city.owner_index != kNone ? static_cast<char>('0' + city.owner_index)
-                                              : '.';
+        owners += city.IsRazed()      ? 'x'
+                  : !city.IsNeutral() ? static_cast<char>('0' + city.OwnerIndex())
+                                      : '.';
     }
-    printf("%d %d gold=%d armies=%d rng=%u h=%lld %s\n", game.turn, side.index, side.gold,
+    printf("%d %d gold=%d armies=%d rng=%u h=%lld %s\n", game.turn, side.Index(), side.Gold(),
            static_cast<int>(game.armies.size()), game.rng.State(), hash, owners.c_str());
 }
 
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::unique_ptr<Game> game = std::move(*created_game);
-    for (Side* player : game->sides) player->computer = true;
+    for (Side* player : game->sides) player->SetComputerControlled(true);
     Side* side = game::Begin(*game);
     bool dump_armies = absl::GetFlag(FLAGS_dump) || (std::getenv("DUMP") != nullptr);
     while (side && game->turn <= turns) {
@@ -109,9 +109,9 @@ int main(int argc, char** argv) {
                 auto show = [](int value) {
                     return value == kNone ? std::string("nil") : std::to_string(value);
                 };
-                printf("%d\t%s\t%s\t%d\t%s\t%d\t%d\n", number++, show(army->x).c_str(),
-                       show(army->y).c_str(), army->type, show(army->owner).c_str(), army->strength,
-                       army->moves);
+                printf("%d\t%s\t%s\t%d\t%s\t%d\t%d\n", number++, show(army->X()).c_str(),
+                       show(army->Y()).c_str(), army->TypeIndex(), show(army->OwnerIndex()).c_str(),
+                       army->Strength(), army->Moves());
             }
         }
         side = game::EndTurn(*game);

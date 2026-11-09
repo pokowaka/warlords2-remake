@@ -42,23 +42,23 @@ bool ValidPair(int from_side, int to_side) {
 }
 
 void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::string>& messages) {
-    int side_index = side.index, other_index = other.index;
+    int side_index = side.Index(), other_index = other.Index();
     int side_offer = GoldOffer(game, side_index, other_index);
     int other_offer = GoldOffer(game, other_index, side_index);
-    if (side_offer > 0 && side.gold > 0) {
-        int paid = std::min(side.gold, side_offer);
-        side.gold -= paid;
-        other.gold += paid;
+    if (side_offer > 0 && side.Gold() > 0) {
+        int paid = std::min(side.Gold(), side_offer);
+        side.AddGold(-paid);
+        other.AddGold(paid);
         AddTrust(game, other_index, side_index, std::min(30, paid / 10 + 5));
-        messages.push_back(
-                absl::StrFormat("%s paid %d gold in tribute to %s.", side.name, paid, other.name));
-    } else if (other_offer > 0 && other.gold > 0) {
-        int paid = std::min(other.gold, other_offer);
-        other.gold -= paid;
-        side.gold += paid;
+        messages.push_back(absl::StrFormat("%s paid %d gold in tribute to %s.", side.Name(), paid,
+                                           other.Name()));
+    } else if (other_offer > 0 && other.Gold() > 0) {
+        int paid = std::min(other.Gold(), other_offer);
+        other.AddGold(-paid);
+        side.AddGold(paid);
         AddTrust(game, side_index, other_index, std::min(30, paid / 10 + 5));
-        messages.push_back(
-                absl::StrFormat("%s paid %d gold in tribute to %s.", other.name, paid, side.name));
+        messages.push_back(absl::StrFormat("%s paid %d gold in tribute to %s.", other.Name(), paid,
+                                           side.Name()));
     }
     SetGoldOffer(game, side_index, other_index, 0);
     SetGoldOffer(game, other_index, side_index, 0);
@@ -66,15 +66,15 @@ void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::s
     int war_target = WarTarget(game, side_index, other_index);
     if (war_target == kNone) war_target = WarTarget(game, other_index, side_index);
     if (war_target >= 0 && war_target < 8 && war_target != side_index &&
-        war_target != other_index && game.map->sides[war_target].alive) {
+        war_target != other_index && game.map->sides[war_target].IsAlive()) {
         for (int participant : {side_index, other_index}) {
             if (State(game, participant, war_target) != kWar) {
                 game.diplomacy.SetSymmetricState(SideId(participant), SideId(war_target), kWar);
                 game.diplomacy.SetSymmetricProposal(SideId(participant), SideId(war_target), kWar);
                 SetAllied(game, participant, war_target, false);
                 messages.push_back(absl::StrFormat("%s joined the war against %s!",
-                                                   game.map->sides[participant].name,
-                                                   game.map->sides[war_target].name));
+                                                   game.map->sides[participant].Name(),
+                                                   game.map->sides[war_target].Name()));
             }
         }
     }
@@ -164,7 +164,7 @@ void SetAlliedTargetCity(Game& game, int side, int city_index) {
 
 std::vector<std::string> Apply(Game& game, Side& side) {
     std::vector<std::string> messages;
-    int side_index = side.index;
+    int side_index = side.Index();
     bool classic = side.IsClassicAi();
     for (int other_index = 0; other_index < 8; other_index++) {
         Side* other = game.map->Side(other_index);
@@ -196,7 +196,7 @@ std::vector<std::string> Apply(Game& game, Side& side) {
                     if (wanted == kWar) {
                         history::RecordDeed(game, &side, DeedType::kAtWar, side_index, other_index,
                                             "");
-                        messages.push_back("War declared with " + other->name + "!");
+                        messages.push_back("War declared with " + other->Name() + "!");
                     }
                 } else if (Proposal(game, other_index, side_index) <= wanted) {
                     game.diplomacy.SetSymmetricState(SideId(side_index), SideId(other_index),
@@ -204,7 +204,7 @@ std::vector<std::string> Apply(Game& game, Side& side) {
                     if (wanted == kPeace) {
                         history::RecordDeed(game, &side, DeedType::kAtPeace, side_index,
                                             other_index, "");
-                        messages.push_back("Peace negotiated with " + other->name + "!");
+                        messages.push_back("Peace negotiated with " + other->Name() + "!");
                         if (!classic || !other->IsClassicAi()) {
                             SetTruce(game, side_index, other_index, 10);
                             AddTrust(game, side_index, other_index, 15);
@@ -223,7 +223,7 @@ std::vector<std::string> Apply(Game& game, Side& side) {
                 AddTrust(game, side_index, other_index, 25);
                 AddTrust(game, other_index, side_index, 25);
                 SettleDealTransfers(game, side, *other, messages);
-                messages.push_back("Alliance forged with " + other->name + "!");
+                messages.push_back("Alliance forged with " + other->Name() + "!");
             }
         }
     }
@@ -233,7 +233,7 @@ std::vector<std::string> Apply(Game& game, Side& side) {
 bool MustDeclare(const Game& game, int from_side, int to_side, const City* city) {
     if (game.map->options.diplomacy == 0 || from_side == kNone || to_side == kNone) return false;
     int current_state = State(game, from_side, to_side);
-    return current_state == kPeace || (current_state == kIntermediate && city && city->index > 0);
+    return current_state == kPeace || (current_state == kIntermediate && city && city->Index() > 0);
 }
 
 void AttackAnyway(Game& game, int from_side, int to_side) {
@@ -258,7 +258,7 @@ void AttackAnyway(Game& game, int from_side, int to_side) {
 }
 
 void ScoreUpdate(Game& game, Side& side) {
-    int side_index = side.index;
+    int side_index = side.Index();
     for (int other_index = 0; other_index < 8; other_index++) {
         if (other_index != side_index) {
             int proposed = Proposal(game, side_index, other_index);
@@ -287,9 +287,9 @@ std::map<int, std::string> Ratings(const Game& game) {
     };
     std::vector<RankedSide> order;
     for (size_t i = 0; i < game.sides.size(); i++) {
-        if (game.sides[i]->alive) {
+        if (game.sides[i]->IsAlive()) {
             order.push_back(
-                    RankedSide{game.sides[i], game.sides[i]->diplo_score, static_cast<int>(i)});
+                    RankedSide{game.sides[i], game.sides[i]->DiploScore(), static_cast<int>(i)});
         }
     }
     LuaSort(order, [](const RankedSide& lhs, const RankedSide& rhs) {
@@ -299,7 +299,7 @@ std::map<int, std::string> Ratings(const Game& game) {
     std::map<int, std::string> titles;
     for (size_t i = 0; i < order.size(); i++) {
         int rank = i < ranks.size() ? ranks[i] : 8;
-        titles[order[i].side->index] = kTitles[rank - 1];
+        titles[order[i].side->Index()] = kTitles[rank - 1];
     }
     return titles;
 }
@@ -310,9 +310,9 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
     breakdown.to_side = target_side;
     if (!ValidPair(ai_side, target_side)) return breakdown;
     const Side& own_side = game.map->sides[ai_side];
-    if (own_side.computer_player) {
-        return own_side.computer_player->EvaluateProposal(game, SideId(ai_side),
-                                                          SideId(target_side));
+    if (own_side.ComputerPlayer()) {
+        return own_side.ComputerPlayer()->EvaluateProposal(game, SideId(ai_side),
+                                                           SideId(target_side));
     }
     return breakdown;
 }

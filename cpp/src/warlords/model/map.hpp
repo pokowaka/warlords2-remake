@@ -58,27 +58,27 @@ struct Map {
     int active_y1 = kMapH - 1;   ///< Bottom row of the part in play.
 
     /** @brief The side with this index, or null. */
-    struct Side* Side(int index) { return index >= 0 && index < 8 ? &sides[index] : nullptr; }
+    w2::Side* Side(int index) { return index >= 0 && index < 8 ? &sides[index] : nullptr; }
     /** @brief The side with this index (const), or null. */
-    const struct Side* Side(int index) const {
+    const w2::Side* Side(int index) const {
         return index >= 0 && index < 8 ? &sides[index] : nullptr;
     }
     /** @brief The side identified by `side_id`, or null. */
-    struct Side* Side(SideId side_id) { return Side(side_id.Value()); }
+    w2::Side* Side(SideId side_id) { return Side(side_id.Value()); }
     /** @brief The side identified by `side_id` (const), or null. */
-    const struct Side* Side(SideId side_id) const { return Side(side_id.Value()); }
+    const w2::Side* Side(SideId side_id) const { return Side(side_id.Value()); }
     /** @brief The city with this index, or null. */
-    struct City* City(int index) {
+    w2::City* City(int index) {
         return index >= 0 && index < static_cast<int>(cities.size()) ? &cities[index] : nullptr;
     }
     /** @brief The city with this index (const), or null. */
-    const struct City* City(int index) const {
+    const w2::City* City(int index) const {
         return index >= 0 && index < static_cast<int>(cities.size()) ? &cities[index] : nullptr;
     }
     /** @brief The city identified by `city_id`, or null. */
-    struct City* City(CityId city_id) { return City(city_id.Value()); }
+    w2::City* City(CityId city_id) { return City(city_id.Value()); }
     /** @brief The city identified by `city_id` (const), or null. */
-    const struct City* City(CityId city_id) const { return City(city_id.Value()); }
+    const w2::City* City(CityId city_id) const { return City(city_id.Value()); }
     /** @brief The site identified by `site_id`, or null. */
     struct Site* SiteById(SiteId site_id) {
         int index = site_id.Value();
@@ -106,11 +106,11 @@ struct Map {
         return x >= active_x0 && x <= active_x1 && y >= active_y0 && y <= active_y1;
     }
     /** @brief Returns the city whose top-left tile is `(x, y)`, or `nullptr`. */
-    struct City* CityAtTopLeft(int x, int y) const {
+    w2::City* CityAtTopLeft(int x, int y) const {
         return InBounds(x, y) && !city_at.empty() ? city_at[y * width + x] : nullptr;
     }
     /** @brief Returns the city covering tile `(x, y)` in its 2x2 footprint, or `nullptr`. */
-    struct City* CityAtFootprint(int x, int y) const {
+    w2::City* CityAtFootprint(int x, int y) const {
         return InBounds(x, y) && !city_tile.empty() ? city_tile[y * width + x] : nullptr;
     }
     /** @brief Returns the temple or ruin on tile `(x, y)`, or `nullptr`. */

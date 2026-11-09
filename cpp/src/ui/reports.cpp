@@ -60,16 +60,16 @@ void DrawArmyBanners() {
     gfx::SetColor(1, 1, 1);
     int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
     for (w2::Army* army : g_app.g->armies) {
-        if (!army->transit && army->x != w2::kNone) {
-            int tile_key = army->y * 1000 + army->x;
+        if (!army->InTransit() && army->X() != w2::kNone) {
+            int tile_key = army->Y() * 1000 + army->X();
             if (!marked_tiles.count(tile_key) &&
-                w2::game::Seen(*g_app.g, viewer, army->x, army->y) &&
-                !w2::game::CityAt(*g_app.g, army->x, army->y)) {
+                w2::game::Seen(*g_app.g, viewer, army->X(), army->Y()) &&
+                !w2::game::CityAt(*g_app.g, army->X(), army->Y())) {
                 marked_tiles.insert(tile_key);
-                int side = army->owner == w2::kNone ? 8 : army->owner;
+                int side = army->IsNeutral() ? 8 : army->OwnerIndex();
                 gfx::Draw(g_app.atrans_shields, gfx::NewQuad(side * 16, 164, 16, 10),
-                          kMapX + std::max(0, army->x * 2 - 1),
-                          kMapY + std::max(0, army->y * 2 - 1));
+                          kMapX + std::max(0, army->X() * 2 - 1),
+                          kMapY + std::max(0, army->Y() * 2 - 1));
             }
         }
     }
@@ -131,8 +131,7 @@ struct Reports : kit::Modal {
         states[kDone] = w2::uidata::kNormal;
         hidden.clear();
         if (shown_report == report::kProduction) {
-            int count = static_cast<int>(
-                    g_app.g->TurnNews(w2::SideId(g_app.player->index)).produced.size());
+            int count = static_cast<int>(g_app.g->TurnNews(g_app.player->Id()).produced.size());
             states[kUp] = top_row > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
             states[kPageUp] = states[kUp];
             states[kDown] = top_row + kRows < count ? w2::uidata::kNormal : w2::uidata::kDisabled;
@@ -143,14 +142,13 @@ struct Reports : kit::Modal {
     }
     /** @brief Scrolls the Production list by `rows`, kept within the list. */
     void Scroll(int rows) {
-        int count = static_cast<int>(
-                g_app.g->TurnNews(w2::SideId(g_app.player->index)).produced.size());
+        int count = static_cast<int>(g_app.g->TurnNews(g_app.player->Id()).produced.size());
         top_row = std::max(0, std::min(std::max(0, count - kRows), top_row + rows));
         Refresh();
     }
     /** @brief The Production list: a page of what was built or sent this turn. */
     void DrawProduction() {
-        const auto& list = g_app.g->TurnNews(w2::SideId(g_app.player->index)).produced;
+        const auto& list = g_app.g->TurnNews(g_app.player->Id()).produced;
         const Font& font = kit::GetFont(2);
         for (int i = 0; i < kRows; i++) {
             if (top_row + i >= static_cast<int>(list.size())) break;
@@ -158,9 +156,9 @@ struct Reports : kit::Modal {
             int y = 176 + 30 * i;
             gfx::SetColor(1, 1, 1);
             font.Draw(absl::StrFormat("%d", top_row + i + 1), 312, y);
-            kit::Army(entry.type, g_app.player->index, 328, 170 + 30 * i, 1);
+            kit::Army(entry.type, g_app.player->Index(), 328, 170 + 30 * i, 1);
             w2::City* city = g_app.g->map->City(entry.city);
-            std::string name = entry.standard ? "Standard" : (city ? city->name : "");
+            std::string name = entry.standard ? "Standard" : (city ? city->Name() : "");
             std::string text;
             switch (entry.kind) {
             case w2::ProducedKind::kBuilt:
@@ -193,7 +191,7 @@ struct Reports : kit::Modal {
             DrawProduction();
         else
             DrawBars(figures);
-        kit::Centred(kit::GetFont(2).Colours(g_app.player->colour, g_app.player->edge),
+        kit::Centred(kit::GetFont(2).Colours(g_app.player->Colour(), g_app.player->Edge()),
                      Summary(shown_report, figures), 432, 322);
         kit::DrawControls(dialog_view, hidden);
     }

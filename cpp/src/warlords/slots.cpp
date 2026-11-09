@@ -16,7 +16,7 @@ const std::vector<int>& Row(const Game& game, int side) {
 
 /** @brief Where the army in `slot` stands in its side's fight order. */
 int Rank(const Game& game, const Slots& slots, int slot) {
-    return Row(game, slots.side)[slots.army[slot]->type];
+    return Row(game, slots.side)[slots.army[slot]->TypeIndex()];
 }
 
 /** @brief Swaps two slots' armies and groups (not their marks, which are worked out afresh). */
@@ -77,15 +77,16 @@ std::set<Army*> Clicked(const Game& game, const std::vector<Army*>& armies, int 
     const auto& fight_order = Row(game, side);
     if (!anchor) {
         for (Army* army : armies) {
-            if (!anchor || fight_order[army->type] > fight_order[anchor->type]) anchor = army;
+            if (!anchor || fight_order[army->TypeIndex()] > fight_order[anchor->TypeIndex()])
+                anchor = army;
         }
     }
     if (!anchor) return {};
-    int key = anchor->group;
+    int key = anchor->Group();
     std::set<Army*> picked = {anchor};
     if (key != kUngrouped) {
         for (Army* army : armies)
-            if (army->group == key) picked.insert(army);
+            if (army->Group() == key) picked.insert(army);
     }
     return picked;
 }
@@ -104,9 +105,9 @@ Slots Build(const Game& game, const std::vector<Army*>& armies, int side,
     for (int i = 0; i < slots.n; i++) original_index[list[i]] = i;
     const auto& fight_order = Row(game, side);
     LuaSort(list, [&](Army* lhs, Army* rhs) {
-        int lhs_group = lhs->group, rhs_group = rhs->group;
+        int lhs_group = lhs->Group(), rhs_group = rhs->Group();
         if (lhs_group != rhs_group) return lhs_group > rhs_group;
-        int lhs_rank = fight_order[lhs->type], rhs_rank = fight_order[rhs->type];
+        int lhs_rank = fight_order[lhs->TypeIndex()], rhs_rank = fight_order[rhs->TypeIndex()];
         if (lhs_rank != rhs_rank) return lhs_rank > rhs_rank;
         return original_index[lhs] < original_index[rhs];
     });
@@ -119,7 +120,7 @@ Slots Build(const Game& game, const std::vector<Army*>& armies, int side,
     bool have_prev = false;
     int previous = 0;
     for (int i = 0; i < slots.n; i++) {
-        int key = slots.army[i]->group;
+        int key = slots.army[i]->Group();
         if (!(have_prev && key == previous && key != kUngrouped && group_number >= 0))
             group_number++;
         slots.group[i] = group_number;
@@ -189,7 +190,7 @@ int Moves(const Slots& slots) {
     int least = kNone;
     for (int i = 0; i < slots.n; i++) {
         if (slots.in_group[i]) {
-            int army_moves = slots.army[i]->moves;
+            int army_moves = slots.army[i]->Moves();
             if (least == kNone || army_moves < least) least = army_moves;
         }
     }
@@ -224,7 +225,7 @@ void Commit(Slots& slots, Game& game) {
     std::set<int> spare_set;
     std::deque<int> spare;
     for (int i = 0; i < slots.n; i++) {
-        int army_group = slots.army[i]->group;
+        int army_group = slots.army[i]->Group();
         if (army_group > 1 && !spare_set.count(army_group)) {
             spare_set.insert(army_group);
             spare.push_back(army_group);
@@ -238,7 +239,7 @@ void Commit(Slots& slots, Game& game) {
             return group_id;
         }
         std::set<int> used;
-        for (Army* army : game.armies) used.insert(army->group);
+        for (Army* army : game.armies) used.insert(army->Group());
         int fresh = 2;
         while (used.count(fresh)) fresh++;
         return fresh;
@@ -255,7 +256,7 @@ void Commit(Slots& slots, Game& game) {
             else
                 group_ids[slot_group] = 1;
         }
-        slots.army[i]->group = group_ids[slot_group];
+        slots.army[i]->SetGroup(group_ids[slot_group]);
     }
 }
 

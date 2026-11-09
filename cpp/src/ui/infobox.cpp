@@ -196,17 +196,17 @@ void ShowLines(int screen_x, int screen_y, const std::string& title, const std::
  * colours.
  */
 void Army(int screen_x, int screen_y, const w2::Army* army) {
-    const w2::ArmyType* army_type = g_app.g->types.ById(army->type);
+    const w2::ArmyType* army_type = g_app.g->types.ById(army->Type());
     bool hero = army->Hero();
-    std::string name = hero ? army->name : (army_type ? army_type->name : "");
+    std::string name = hero ? army->Name() : (army_type ? army_type->name : "");
     w2::Army army_copy = *army;
-    int side = g_app.player->index;
+    int side = g_app.player->Index();
     Show(kArmy, screen_x, screen_y, [name, army_copy, side](int x, int y) {
-        ArmyBoard(x, y, name, army_copy.type, side, 0);
-        Numbers(x, y, absl::StrFormat("Strength: %d", army_copy.strength),
-                absl::StrFormat("Movement: %d", army_copy.max_moves),
-                absl::StrFormat("Remain: %d", army_copy.moves),
-                absl::StrFormat("Upkeep: %d", army_copy.upkeep));
+        ArmyBoard(x, y, name, army_copy.TypeIndex(), side, 0);
+        Numbers(x, y, absl::StrFormat("Strength: %d", army_copy.Strength()),
+                absl::StrFormat("Movement: %d", army_copy.MaxMoves()),
+                absl::StrFormat("Remain: %d", army_copy.Moves()),
+                absl::StrFormat("Upkeep: %d", army_copy.Upkeep()));
     });
 }
 
@@ -218,7 +218,7 @@ void Army(int screen_x, int screen_y, const w2::Army* army) {
 void ArmyType(int screen_x, int screen_y, int type_id, const w2::Slot& slot, int side) {
     const w2::ArmyType* army_type = g_app.g->types.ById(type_id);
     std::string name = army_type ? army_type->name : "";
-    int shown_side = side == w2::kNone ? g_app.player->index : side;
+    int shown_side = side == w2::kNone ? g_app.player->Index() : side;
     w2::Slot slot_copy = slot;
     Show(kArmy, screen_x, screen_y, [name, type_id, shown_side, slot_copy](int x, int y) {
         ArmyBoard(x, y, name, type_id, shown_side, 0);

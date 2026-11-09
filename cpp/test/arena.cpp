@@ -327,18 +327,18 @@ const ml::PolicyNetwork* g_frozen = nullptr;
 void MarkDepartures(const Game& game, int side, ml::TurnStepRecord& turn) {
     int standing = 0, total_income = 0;
     for (const auto& city : game.map->cities) {
-        if (city.razed) continue;
+        if (city.IsRazed()) continue;
         standing++;
-        total_income += std::max(1, city.income);
+        total_income += std::max(1, city.Income());
     }
     for (auto& step : turn.mission_steps) {
         if (step.vacated_city == kNone ||
             step.vacated_city >= static_cast<int>(game.map->cities.size()))
             continue;
         const City& vacated = game.map->cities[step.vacated_city];
-        if (!vacated.razed && vacated.owner_index == side) continue;
+        if (!vacated.IsRazed() && vacated.OwnedBy(side)) continue;
         step.vacated_loss = 2.0F / static_cast<float>(std::max(1, standing)) +
-                            0.5F * static_cast<float>(std::max(1, vacated.income)) /
+                            0.5F * static_cast<float>(std::max(1, vacated.Income())) /
                                     static_cast<float>(std::max(1, total_income));
     }
 }
@@ -365,7 +365,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     std::array<ml::RolloutSampler, 8> samplers{};
     int active_count = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (game.map->sides[side_index].in_use) active_count++;
+        if (game.map->sides[side_index].InUse()) active_count++;
     }
     int solo_seat =
             active_count > 0 ? static_cast<int>(seed % static_cast<uint32_t>(active_count)) : 0;
@@ -378,7 +378,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
         Side& side = game.map->sides[side_index];
-        if (!side.in_use) continue;
+        if (!side.InUse()) continue;
         bool learner_side = solo ? (seat == solo_seat)
                             : mixed_vs_classic
                                     ? ((seat + seed) % 2 == 0)
@@ -419,8 +419,8 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     while (current && !game.over && !game.won && game.turn <= cfg.max_turns &&
            safety < cfg.max_turns * 12) {
         safety++;
-        int side_index = current->index;
-        if (current->computer && current->alive) {
+        int side_index = current->Index();
+        if (current->IsComputerControlled() && current->IsAlive()) {
             if (recorded[side_index]) {
                 if (!episodes[side_index].turns.empty())
                     MarkDepartures(game, side_index, episodes[side_index].turns.back());
@@ -444,11 +444,12 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     RolloutSummary summary;
     std::array<int, 8> cities{};
     for (const auto& city : game.map->cities) {
-        if (city.razed) continue;
-        if (city.owner_index == kNone)
+        if (city.IsRazed()) continue;
+        int owner_index = city.OwnerIndex();
+        if (owner_index == kNone)
             summary.neutrals_left++;
-        else if (city.owner_index >= 0 && city.owner_index < 8)
-            cities[city.owner_index]++;
+        else if (owner_index >= 0 && owner_index < 8)
+            cities[owner_index]++;
     }
     for (int side_index = 0; side_index < 8; side_index++) {
         if (!recorded[side_index] || episodes[side_index].turns.empty()) continue;
@@ -457,12 +458,12 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
         MarkDepartures(game, side_index, episode.turns.back());
         episode.final_cities = cities[side_index];
         episode.final_score = ml::ComputeEmpireScore(game, side_index);
-        if (!side.alive) {
+        if (!side.IsAlive()) {
             episode.terminal = true;
             episode.terminal_reward = cfg.elimination_reward;
         } else if (game.over || game.won) {
             episode.terminal = true;
-            bool won_game = (game.ending.winner && game.ending.winner->index == side_index);
+            bool won_game = (game.ending.winner && game.ending.winner->Index() == side_index);
             episode.terminal_reward = won_game ? cfg.win_reward : 0.0F;
         } else {
             ai::belief::Update(game, side);
@@ -511,7 +512,7 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
     auto current_game = MakeArenaGame(cfg, scenario, preset, seed, false);
     int active_count = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (current_game->map->sides[side_index].in_use) active_count++;
+        if (current_game->map->sides[side_index].InUse()) active_count++;
     }
     const int solo_seat =
             active_count > 0 ? static_cast<int>(seed % static_cast<uint32_t>(active_count)) : 0;
@@ -520,7 +521,7 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
         Side& side = current_game->map->sides[side_index];
-        if (!side.in_use) continue;
+        if (!side.InUse()) continue;
         const bool is_learner = (seat++ == solo_seat);
         if (is_learner) learner_side = side_index;
         ai::SetSideClassicAi(*current_game, side, !is_learner);
@@ -547,10 +548,10 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
 
     // Every side's normal play; the learner plays greedily outside its searched turn
     auto play_side = [&](Game& game, Side& side) {
-        if (side.index == learner_side)
+        if (side.Index() == learner_side)
             ai::modern::PlayTurn(game, side, nullptr, &learner, nullptr);
         else
-            opponents::PlayTurn(game, side, kind[side.index], g_frozen);
+            opponents::PlayTurn(game, side, kind[side.Index()], g_frozen);
     };
     // Plays a copy on for --search-h rounds and returns the learner's empire score
     auto rollout_value = [&](Game& game) {
@@ -559,7 +560,7 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
         int safety = 0;
         while (current && !game.over && !game.won && game.turn < stop_turn &&
                safety++ < cfg.search_h * 12) {
-            if (current->computer && current->alive) play_side(game, *current);
+            if (current->IsComputerControlled() && current->IsAlive()) play_side(game, *current);
             current = game::EndTurn(game);
         }
         return ml::ComputeEmpireScore(game, learner_side);
@@ -573,8 +574,8 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
     int safety = 0;
     while (current && !current_game->over && !current_game->won &&
            current_game->turn <= cfg.max_turns && safety++ < cfg.max_turns * 12) {
-        const int side_index = current->index;
-        if (current->computer && current->alive && side_index == learner_side) {
+        const int side_index = current->Index();
+        if (current->IsComputerControlled() && current->IsAlive() && side_index == learner_side) {
             std::vector<std::unique_ptr<Game>> candidate_games;
             std::vector<ml::TurnStepRecord> candidate_turns(cfg.search_k);
             std::vector<double> values(cfg.search_k, 0.0);
@@ -615,16 +616,16 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
             }
             current_game = std::move(candidate_games[best]);
             current = current_game->map->Side(side_index);
-        } else if (current->computer && current->alive) {
+        } else if (current->IsComputerControlled() && current->IsAlive()) {
             play_side(*current_game, *current);
         }
         current = game::EndTurn(*current_game);
     }
     for (const auto& city : current_game->map->cities) {
-        if (city.razed) continue;
-        if (city.owner_index == kNone)
+        if (city.IsRazed()) continue;
+        if (city.IsNeutral())
             summary.neutrals_left++;
-        else if (city.owner_index == learner_side)
+        else if (city.OwnedBy(learner_side))
             summary.recorded_cities++;
     }
     summary.recorded_sides = 1;
@@ -1025,7 +1026,7 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     Game& game = *owned_game;
     int active_count = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (game.map->sides[side_index].in_use) active_count++;
+        if (game.map->sides[side_index].InUse()) active_count++;
     }
     // Solo: the Modern seat rotates with the seed; the swapped game takes the seat
     // half-way round the table so both games of a seed differ in position.
@@ -1039,7 +1040,7 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     std::array<bool, 8> modern{};
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (!game.map->sides[side_index].in_use) continue;
+        if (!game.map->sides[side_index].InUse()) continue;
         modern[side_index] = solo ? (seat == solo_seat) : ((seat + eval_case.swap) % 2 == 0);
         // Opponent seats are Classic AI sides unless the Frozen Modern checkpoint plays them
         if (modern[side_index]) {
@@ -1056,8 +1057,8 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     int safety = 0;
     while (current && !game.over && !game.won && game.turn <= turns && safety < turns * 12) {
         safety++;
-        if (current->computer && current->alive) {
-            if (modern[current->index])
+        if (current->IsComputerControlled() && current->IsAlive()) {
+            if (modern[current->Index()])
                 ai::modern::PlayTurn(game, *current, nullptr, &policy, nullptr);
             else
                 opponents::PlayTurn(game, *current, cfg.eval_opponent, g_frozen);
@@ -1067,9 +1068,10 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     std::array<int, 8> city_counts{};
     int modern_cities = 0, classic_cities = 0, largest_side = kNone, largest_count = -1;
     for (const auto& city : game.map->cities) {
-        if (city.razed || city.owner_index < 0 || city.owner_index >= 8) continue;
-        city_counts[city.owner_index]++;
-        (modern[city.owner_index] ? modern_cities : classic_cities)++;
+        int owner_index = city.OwnerIndex();
+        if (city.IsRazed() || owner_index < 0 || owner_index >= 8) continue;
+        city_counts[owner_index]++;
+        (modern[owner_index] ? modern_cities : classic_cities)++;
     }
     for (int side_index = 0; side_index < 8; side_index++) {
         if (city_counts[side_index] > largest_count) {

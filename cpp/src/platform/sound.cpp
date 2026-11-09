@@ -444,7 +444,8 @@ void AudioEngine::Toggle(AudioChannel channel) {
 void AudioEngine::Music(int cue, bool has_active_human) {
     if (!options_.music || (cue == cue_ && song_playing_)) return;
     w2::Side synthetic_human{};
-    synthetic_human.in_use = synthetic_human.alive = true;
+    synthetic_human.SetInUse(true);
+    synthetic_human.SetAlive(true);
     SidePtrList cue_sides;
     if (has_active_human) cue_sides.push_back(&synthetic_human);
     auto [name, loop] =
@@ -542,7 +543,7 @@ AudioEngine& DefaultAudio() {
 
 void Music(int cue, const SidePtrList& sides) {
     bool has_human = std::any_of(sides.begin(), sides.end(), [](const w2::Side* side) {
-        return side != nullptr && side->alive && !side->computer;
+        return side != nullptr && side->IsAlive() && !side->IsComputerControlled();
     });
     DefaultAudio().Music(cue, has_human);
 }

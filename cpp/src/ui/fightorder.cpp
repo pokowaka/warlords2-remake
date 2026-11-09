@@ -38,7 +38,7 @@ struct Order : kit::Modal {
     int chosen = -1;           ///< The chosen place, or -1 for none.
 
     /** @brief The player's fight-order row: army type id -> place. */
-    std::vector<int>& Row() { return g_app.g->map->fight_order[g_app.player->index]; }
+    std::vector<int>& Row() { return g_app.g->map->fight_order[g_app.player->Index()]; }
 
     /** @brief The army type id at place `rank`, or w2::kNone. */
     int TypeAt(int rank) {
@@ -77,11 +77,11 @@ struct Order : kit::Modal {
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(kStringGroup, 0), 320, 64);
-        kit::Shield(side->index, 88, 64);
-        kit::Shield(side->index, 512, 64);
+        kit::Shield(side->Index(), 88, 64);
+        kit::Shield(side->Index(), 512, 64);
         const Font& font = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
-        kit::Centred(font, w2::Format(kit::Text(kStringGroup, 1), side->name), 320, 104);
+        kit::Centred(font, w2::Format(kit::Text(kStringGroup, 1), side->Name()), 320, 104);
         kit::Centred(font, kit::Text(kStringGroup, 2), 320, 348);
         kit::Centred(font, kit::Text(kStringGroup, 3), 320, 368);
         kit::Centred(font, kit::Text(kStringGroup, 4), 320, 388);
@@ -89,7 +89,8 @@ struct Order : kit::Modal {
             int x = 120 * (i % 4), y = 31 * (i / 4);
             int type_id = TypeAt(i);
             if (type_id != w2::kNone)
-                kit::Army(type_id, side->index, 88 + x, 128 + y, i == chosen ? side->index + 2 : 1);
+                kit::Army(type_id, side->Index(), 88 + x, 128 + y,
+                          i == chosen ? side->Index() + 2 : 1);
             gfx::SetColor(1, 1, 1);
             font.Draw(absl::StrFormat("%d.", i + 1), 128 + x, 134 + y);
         }
@@ -137,7 +138,7 @@ struct Order : kit::Modal {
         infobox::ArmyType(screen_x, screen_y, type_id,
                           w2::Slot{type->id, type->name, type->strength, type->time, type->cost,
                                    type->move, type->price},
-                          g_app.player->index);
+                          g_app.player->Index());
         return true;
     }
 
@@ -154,7 +155,7 @@ struct Order : kit::Modal {
 /** @brief Opens Fight Order, keeping a copy of the row for Cancel. */
 void Open() {
     auto dialog = std::make_shared<Order>();
-    dialog->backup = g_app.g->map->fight_order[g_app.player->index];
+    dialog->backup = g_app.g->map->fight_order[g_app.player->Index()];
     dialog->dialog_view = kit::View(kDialog);
     dialog->view = &dialog->dialog_view;
     dialog->Refresh();

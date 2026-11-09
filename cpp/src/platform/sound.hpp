@@ -22,7 +22,7 @@
 #include "warlords/uidata.hpp"
 
 namespace w2 {
-struct Side;
+class Side;
 }  // namespace w2
 
 namespace sound {

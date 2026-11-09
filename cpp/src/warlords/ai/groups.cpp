@@ -38,7 +38,7 @@ bool Free(Game& game, Side& side, const City& city, bool members) {
     AIData& data = Data(game, side);
     for (int group_index = data.max_groups; group_index >= 1; group_index--) {
         auto group = data.groups[group_index];
-        if (group->active != 0 && group->rally == city.index) return false;
+        if (group->active != 0 && group->rally == city.Index()) return false;
     }
     int role = Role(data, city);
     if (role == kStop || role == kBuilding) return true;
@@ -49,7 +49,7 @@ bool IsRally(Game& game, Side& side, const City& city) {
     AIData& data = Data(game, side);
     for (int group_index = data.max_groups; group_index >= 1; group_index--) {
         auto group = data.groups[group_index];
-        if (group->active != 0 && group->rally == city.index) return true;
+        if (group->active != 0 && group->rally == city.Index()) return true;
     }
     return false;
 }
@@ -68,8 +68,8 @@ void Cancel(Game& game, Side& side, int group_index) {
 
 int SackValue(const Game& game, const City& city) {
     int value = 0;
-    for (size_t i = 1; i < city.slots.size(); i++)
-        value += std::abs(game.types.ById(city.slots[i].type)->price) / 2;
+    for (size_t i = 1; i < city.Slots().size(); i++)
+        value += std::abs(game.types.ById(city.SlotAt(i).type)->price) / 2;
     return value;
 }
 
@@ -89,7 +89,8 @@ City* Raze(Game& game, Side& side, City& city, bool force, Sel* sel) {
         auto [neighbours, neighbour_dists] = FindNeighbours(game, city);
         int own_nearby = 0;
         for (int j = static_cast<int>(neighbours.size()) - 1; j >= 0; j--) {
-            if (neighbours[j]->owner_index == side.index && neighbour_dists[j] < 45) own_nearby++;
+            if (neighbours[j]->OwnerIndex() == side.Index() && neighbour_dists[j] < 45)
+                own_nearby++;
         }
         if (own_nearby > 2) return nullptr;
     }
@@ -100,16 +101,16 @@ City* Raze(Game& game, Side& side, City& city, bool force, Sel* sel) {
     game::Raze(game, side, city, sel ? sel->armies : std::vector<Army*>{});
     if (hooks.on_spoils) hooks.on_spoils(game, side, city, "razed");
     if (!sel || sel->armies.empty()) return nullptr;
-    Flood flood = FloodFrom(game, side.index, sel->leader->x, sel->leader->y, 15, sel);
+    Flood flood = FloodFrom(game, side.Index(), sel->leader->X(), sel->leader->Y(), 15, sel);
     return BestCity(game, *sel, flood, true);
 }
 
 bool EarlyVengeance(Game& game, int side_index, City& city, int previous_owner) {
     Side& side = *game.map->Side(side_index);
     AIData& data = Data(game, side);
-    if (side.computer && previous_owner != kNone && previous_owner != kNeutral &&
+    if (side.IsComputerControlled() && previous_owner != kNone && previous_owner != kNeutral &&
         !IsComputer(game, previous_owner) && data.early != 0 && game.turn < 10 &&
-        data.quest_city != city.index) {
+        data.quest_city != city.Index()) {
         if (SackValue(game, city) < 200)
             Raze(game, side, city, false);
         else
@@ -126,20 +127,20 @@ bool EarlyVengeance(Game& game, int side_index, City& city, int previous_owner) 
 static void RollSpoils(Game& game, Side& side, Group& group) {
     AIData& data = Data(game, side);
     int bias = data.own * data.per_city;
-    if (!side.computer)
+    if (!side.IsComputerControlled())
         bias += data.bonus_human;
-    else if (side.level == 2)
+    else if (side.Level() == 2)
         bias += data.bonus_warlord;
-    else if (side.level == 1)
+    else if (side.Level() == 1)
         bias += data.bonus_lord;
-    else if (side.level == 0)
+    else if (side.Level() == 0)
         bias += data.bonus_knight;
     group.flags = 0;
     if (data.raze != 0 && game.rng.Dice(1, 1000, 0) < data.raze + bias) {
         group.flags = kGfRaze;
         return;
     }
-    if (side.gold < 100) bias += data.poor;
+    if (side.Gold() < 100) bias += data.poor;
     if (data.sack != 0 && game.rng.Dice(1, 1000, 0) < data.sack + bias) {
         group.flags = kGfSack;
         return;
@@ -167,7 +168,7 @@ void Prepare(Game& game, Side& side) {
         if (Role(data, *city) != kRally) {
             auto [good, slot_index] = cities::BuildsWell(game, side, *city);
             if (good) {
-                const Slot& slot = city->slots[slot_index];
+                const Slot& slot = city->SlotAt(slot_index);
                 strengths.push_back(slot.strength + (game.types.ById(slot.type)->siege ? 2 : 0));
             }
         }
@@ -189,7 +190,7 @@ void Prepare(Game& game, Side& side) {
         for (City* city : Own(game, side)) {
             if (Free(game, side, *city, true) && Cflag(data, *city, kCfFlier)) {
                 bool builds = false;
-                for (auto& slot : city->slots)
+                for (const auto& slot : city->Slots())
                     if (game.types.ById(slot.type)->flies && slot.strength > 4) builds = true;
                 if (builds) {
                     data.fly_cities++;
@@ -214,7 +215,7 @@ void Prepare(Game& game, Side& side) {
                 }
                 if (!skip) {
                     bool builds = false;
-                    for (auto& slot : city->slots)
+                    for (const auto& slot : city->Slots())
                         if (strong(slot) && slot.move > 15) builds = true;
                     if (builds) {
                         data.strong_cities++;
@@ -242,7 +243,7 @@ void Prepare(Game& game, Side& side) {
                 }
                 if (!skip) {
                     bool builds = false;
-                    for (auto& slot : city->slots) {
+                    for (const auto& slot : city->Slots()) {
                         if (strong(slot) && slot.move > 11) {
                             fast_builders++;
                             if (!many_strong || slot.move > 15) builds = true;
@@ -260,7 +261,7 @@ void Prepare(Game& game, Side& side) {
     to_clear = fast_enough ? data.fast_cities - 4 : data.fast_cities;
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
-        if (city.owner_index == side.index && !Cflag(data, city, kCfFlygroup) &&
+        if (city.OwnerIndex() == side.Index() && !Cflag(data, city, kCfFlygroup) &&
             !Cflag(data, city, kCfMovE16) && Cflag(data, city, kCfMovE12) && to_clear != 0) {
             ClearCflag(data, city, kCfMovE12);
             to_clear--;
@@ -302,7 +303,7 @@ static void CleanStaged(Game& game, Side& side, int group_index) {
         auto entry = group->staged.find(slot);
         if (entry == group->staged.end()) continue;
         Army* army = entry->second;
-        if (army && !(Alive(game, army) && army->owner == side.index &&
+        if (army && !(Alive(game, army) && army->OwnerIndex() == side.Index() &&
                       OrderOf(game, army).group == group_index))
             group->staged.erase(entry);
     }
@@ -320,7 +321,7 @@ static int CheckPlan(Game& game, Side& side, int group_index) {
     for (int slot = 1; slot <= 6; slot++) {
         City* target = CityOrNull(game, group->cities, slot);
         if (target) {
-            if (data.quest_city == target->index || Owner(*target) != group->target)
+            if (data.quest_city == target->Index() || Owner(*target) != group->target)
                 group->cities.erase(slot);
             else
                 targets++;
@@ -334,7 +335,7 @@ static int CheckPlan(Game& game, Side& side, int group_index) {
         if (Owner(*neighbour) == group->target && !Cflag(data, *neighbour, kCfUnseen)) {
             bool have = false;
             for (int slot = 1; slot <= 6; slot++)
-                if (HasKey(group->cities, slot) && group->cities[slot] == neighbour->index)
+                if (HasKey(group->cities, slot) && group->cities[slot] == neighbour->Index())
                     have = true;
             if (!have) {
                 targets++;
@@ -357,7 +358,7 @@ static int CheckPlan(Game& game, Side& side, int group_index) {
                     }
                 }
                 if (chosen != kNone && (worst == -1 || neighbour_dists[j] < worst)) {
-                    group->cities[chosen] = neighbour->index;
+                    group->cities[chosen] = neighbour->Index();
                     group->dist[chosen] = neighbour_dists[j];
                 }
             }
@@ -391,17 +392,17 @@ static void AdjustRally(Game& game, Side& side, int group_index) {
             if (Owner(*neighbour) == group->target) {
                 for (int slot = 1; slot <= 6; slot++) {
                     if (!HasKey(group->cities, slot)) {
-                        group->cities[slot] = neighbour->index;
+                        group->cities[slot] = neighbour->Index();
                         break;
                     }
                 }
-            } else if (neighbour->owner_index == side.index) {
-                if (neighbour->index == group->rally) rally_near = true;
+            } else if (neighbour->OwnerIndex() == side.Index()) {
+                if (neighbour->Index() == group->rally) rally_near = true;
                 if (!IsRally(game, side, *neighbour) && !next) next = neighbour;
             }
         }
     }
-    if (!rally_near && next) group->rally = next->index;
+    if (!rally_near && next) group->rally = next->Index();
 }
 
 /**
@@ -419,8 +420,8 @@ static bool Relocate(Game& game, Side& side, int group_index) {
         int best_distance = 1000;
         for (int j = static_cast<int>(neighbours.size()) - 1; j >= 0; j--) {
             City* neighbour = neighbours[j];
-            if (neighbour->owner_index == side.index && !IsRally(game, side, *neighbour)) {
-                int distance = Dist(neighbour->x, neighbour->y, rally->x, rally->y);
+            if (neighbour->OwnerIndex() == side.Index() && !IsRally(game, side, *neighbour)) {
+                int distance = Dist(neighbour->X(), neighbour->Y(), rally->X(), rally->Y());
                 if (distance < best_distance) {
                     best = neighbour;
                     best_distance = distance;
@@ -432,7 +433,7 @@ static bool Relocate(Game& game, Side& side, int group_index) {
         Cancel(game, side, group_index);
         return false;
     }
-    group->rally = best->index;
+    group->rally = best->Index();
     return true;
 }
 
@@ -444,10 +445,10 @@ static bool Relocate(Game& game, Side& side, int group_index) {
 static bool TakeCity(Game& game, Side& side, int group_index, City& city) {
     AIData& data = Data(game, side);
     auto group = data.groups[group_index];
-    if (group->rally == city.index) return false;
+    if (group->rally == city.Index()) return false;
     cities::Garrison(game, side, city, true);
     for (int slot = 1; slot <= 6; slot++) {
-        if (HasKey(group->cities, slot) && group->cities[slot] == city.index) {
+        if (HasKey(group->cities, slot) && group->cities[slot] == city.Index()) {
             group->cities.erase(slot);
             break;
         }
@@ -473,11 +474,11 @@ static bool TakeCity(Game& game, Side& side, int group_index, City& city) {
     if (pick) {
         bool have = false;
         for (int slot = 1; slot <= 6; slot++)
-            if (HasKey(group->taken, slot) && group->taken[slot] == pick->index) have = true;
+            if (HasKey(group->taken, slot) && group->taken[slot] == pick->Index()) have = true;
         if (!have) {
             for (int slot = 1; slot <= 6; slot++) {
                 if (!HasKey(group->taken, slot)) {
-                    group->taken[slot] = pick->index;
+                    group->taken[slot] = pick->Index();
                     break;
                 }
             }
@@ -487,7 +488,7 @@ static bool TakeCity(Game& game, Side& side, int group_index, City& city) {
         Cancel(game, side, group_index);
         return false;
     }
-    group->rally = pick->index;
+    group->rally = pick->Index();
     SetRole(data, city, kRally);
     FollowUp(game, side, group_index);
     return true;
@@ -504,7 +505,7 @@ int March(Game& game, Side& side, int group_index, std::vector<Army*> list, City
         for (int slot = 1; slot <= 6; slot++) {
             City* target = CityOrNull(game, group->cities, slot);
             if (target) {
-                int distance = Dist(lead->x, lead->y, target->x, target->y);
+                int distance = Dist(lead->X(), lead->Y(), target->X(), target->Y());
                 if (distance < best_distance && Standing(*target)) {
                     best = target;
                     best_distance = distance;
@@ -519,25 +520,25 @@ int March(Game& game, Side& side, int group_index, std::vector<Army*> list, City
             if (HasKey(group->cities, slot)) targets++;
         std::vector<Army*> keep;
         for (Army* army : list)
-            if (Alive(game, army) && army->owner == side.index) keep.push_back(army);
+            if (Alive(game, army) && army->OwnerIndex() == side.Index()) keep.push_back(army);
         list = keep;
         int previous_owner = Owner(*city);
-        auto sel = Order(game, list, kOrderCity, city->index, 0);
+        auto sel = Order(game, list, kOrderCity, city->Index(), 0);
         if (!sel) {
             CleanStaged(game, side, group_index);
             return 3;
         }
-        int code = MoveTo(game, *sel, sel->leader->target->first, sel->leader->target->second);
+        int code = MoveTo(game, *sel, sel->leader->Target()->x, sel->leader->Target()->y);
         if (code == 1) {
             game::Disband(game, side, sel->armies);
             CleanStaged(game, side, group_index);
             return 3;
         }
         CleanStaged(game, side, group_index);
-        if (city->owner_index != side.index) return 3;
-        if (previous_owner == side.index) return 3;
+        if (city->OwnerIndex() != side.Index()) return 3;
+        if (previous_owner == side.Index()) return 3;
         // Taken. Raze needs two targets left and never hits the capital.
-        bool capital = side.capital == city;
+        bool capital = side.CapitalCity(*game.map) == city;
         int flags = group->flags;
         if (!capital && targets >= 2 && Has(flags, kGfRaze)) {
             City* next_city = Raze(game, side, *city, false, &*sel);
@@ -562,22 +563,23 @@ int March(Game& game, Side& side, int group_index, std::vector<Army*> list, City
  */
 static int HitArmies(Game& game, Side& side, int group_index, std::vector<Army*>& list, int target,
                      int range, const Flood& flood, const Sel& sel) {
+    (void)group_index;
     Army* lead = list.empty() ? nullptr : list[0];
-    if (!lead || lead->at_sea) return 0;
+    if (!lead || lead->IsAtSea()) return 0;
     int best_x = kNone, best_y = kNone, best_odds = 0;
-    for (int x = lead->x - range; x <= lead->x + range - 1; x++) {
-        for (int y = lead->y - range; y <= lead->y + range - 1; y++) {
+    for (int x = lead->X() - range; x <= lead->X() + range - 1; x++) {
+        for (int y = lead->Y() - range; y <= lead->Y() + range - 1; y++) {
             if (x >= 0 && y >= 0 && x < game.map->width && y < game.map->height) {
                 auto here = game::ArmiesAt(game, x, y);
                 int terrain = Terrain(game, x, y);
-                if (!here.empty() && here[0]->owner == target && terrain != move::kCity &&
+                if (!here.empty() && here[0]->OwnerIndex() == target && terrain != move::kCity &&
                     terrain != move::kShore && terrain != move::kWater &&
                     FloodAt(flood, x, y) <= sel.min_moves - 1 &&
-                    game::Seen(game, side.index, x, y)) {
+                    game::Seen(game, side.Index(), x, y)) {
                     int count = static_cast<int>(here.size());
                     int strength = 0, heroes = 0;
                     for (Army* army : here) {
-                        strength += army->strength;
+                        strength += army->Strength();
                         if (IsHero(army)) heroes++;
                     }
                     int odds = Odds(game, sel, x, y);
@@ -596,11 +598,11 @@ static int HitArmies(Game& game, Side& side, int group_index, std::vector<Army*>
     int dest = lead_ord.order == kOrderCity ? lead_ord.dest : kNone;
     auto stack = Order(game, list, kOrderRoam, 0, 0x20);
     if (stack) {
-        stack->leader->target = std::make_pair(best_x, best_y);
+        stack->leader->SetTarget(TilePos(best_x, best_y));
         MoveTo(game, *stack, best_x, best_y);
         // Back to the city it was going for.
         for (Army* army : list) {
-            if (Alive(game, army) && army->owner == side.index && dest != kNone) {
+            if (Alive(game, army) && army->OwnerIndex() == side.Index() && dest != kNone) {
                 ClassicArmyOrder& ord = MutableOrderOf(game, army);
                 ord.order = kOrderCity;
                 ord.dest = dest;
@@ -621,10 +623,10 @@ static int StagedStep(Game& game, Side& side, int group_index, std::vector<Army*
     int nearest_distance = 1000;
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
-        if (city.owner_index == target) {
+        if (city.OwnerIndex() == target) {
             int distance = std::get<0>(CityDistance(game, flood, city));
             if (distance < 50 && distance < sel.min_moves) {
-                int odds = Odds(game, sel, city.x, city.y);
+                int odds = Odds(game, sel, city.X(), city.Y());
                 if (odds > 75 && distance < nearest_distance) {
                     nearest = &city;
                     nearest_distance = distance;
@@ -650,13 +652,13 @@ static void Gather(Game& game, Side& side, int group_index) {
             Army* lead = entry == group->staged.end() ? nullptr : entry->second;
             if (!lead) break;
             const ClassicArmyOrder& lead_ord = OrderOf(game, lead);
-            auto list = CollectOrdered(game, side.index, lead->x, lead->y, lead_ord.group,
+            auto list = CollectOrdered(game, side.Index(), lead->X(), lead->Y(), lead_ord.group,
                                        lead_ord.order, 0);
             if (list.empty()) break;
             Sel sel = Select(game, list);
-            Flood flood = FloodFrom(game, side.index, lead->x, lead->y, 15, &sel);
+            Flood flood = FloodFrom(game, side.Index(), lead->X(), lead->Y(), 15, &sel);
             std::vector<std::array<int, 3>> before;
-            for (Army* army : list) before.push_back({army->x, army->y, army->moves});
+            for (Army* army : list) before.push_back({army->X(), army->Y(), army->Moves()});
             size_t army_count = game.armies.size();
             int result = StagedStep(game, side, group_index, list, group->target, flood, sel);
             if (result == 0) {
@@ -675,8 +677,8 @@ static void Gather(Game& game, Side& side, int group_index) {
                 again = game.armies.size() != army_count;
                 for (size_t i = 0; i < list.size() && i < before.size(); i++) {
                     Army* army = list[i];
-                    if (army->x != before[i][0] || army->y != before[i][1] ||
-                        army->moves != before[i][2])
+                    if (army->X() != before[i][0] || army->Y() != before[i][1] ||
+                        army->Moves() != before[i][2])
                         again = true;
                 }
             }
@@ -694,7 +696,7 @@ static bool Strike(Game& game, Side& side, int group_index) {
     auto group = data.groups[group_index];
     City* rally = CityOrNull(game, group->rally);
     if (!rally) return false;
-    auto list = Collect(game, side.index, rally->x + 1, rally->y, 0);
+    auto list = Collect(game, side.Index(), rally->X() + 1, rally->Y(), 0);
     int count = static_cast<int>(list.size());
     if (count == 0) return false;
     Sel sel = Select(game, list);
@@ -706,7 +708,7 @@ static bool Strike(Game& game, Side& side, int group_index) {
             int distance = HasKey(group->dist, slot) ? group->dist[slot] : -1;
             int turns = distance / std::max(1, sel.min_moves - 2) +
                         1;  // truncating, as the original divides
-            int odds = Odds(game, sel, target->x, target->y);
+            int odds = Odds(game, sel, target->X(), target->Y());
             int score = (turns < 11 ? 10 - turns : 0) + odds + Get(group->bonus, slot) +
                         game.rng.Dice(1, 4, 0);
             if (turns == 1) score += 100;
@@ -735,9 +737,9 @@ static bool Strike(Game& game, Side& side, int group_index) {
                 pick = army;
                 break;
             }
-            if (strongest < army->strength) {
+            if (strongest < army->Strength()) {
                 pick = army;
-                strongest = army->strength;
+                strongest = army->Strength();
             }
         }
         group->staged[free_slot] = pick;
@@ -752,21 +754,20 @@ void FollowUp(Game& game, Side& side, int group_index) {
     auto group = data.groups[group_index];
     for (int slot = 1; slot <= 6; slot++) {
         City* taken = CityOrNull(game, group->taken, slot);
-        if (taken && taken->index != group->rally && taken->owner_index == side.index) {
+        if (taken && taken->Index() != group->rally && taken->OwnerIndex() == side.Index()) {
             auto [neighbours, neighbour_dists] = FindNeighbours(game, *taken);
             int threats = 0;
             for (int j = static_cast<int>(neighbours.size()) - 1; j >= 0; j--) {
-                int owner = neighbours[j]->owner_index;
-                if (owner != kNone && owner != side.index && neighbour_dists[j] < 25) threats++;
+                int owner = neighbours[j]->OwnerIndex();
+                if (owner != kNone && owner != side.Index() && neighbour_dists[j] < 25) threats++;
             }
             if (threats == 0) {
                 cities::Garrison(game, side, *taken, true);
-                auto list =
-                        CollectOrdered(game, side.index, taken->x + 1, taken->y, 0, group->size, 0);
+                auto list = CollectOrdered(game, side.Index(), taken->X() + 1, taken->Y(), 0,
+                                           group->size, 0);
                 if (list.size() > 3) {
                     auto sel = Order(game, list, kOrderCity, group->rally, 0);
-                    if (sel)
-                        MoveTo(game, *sel, sel->leader->target->first, sel->leader->target->second);
+                    if (sel) MoveTo(game, *sel, sel->leader->Target()->x, sel->leader->Target()->y);
                 }
             }
         }
@@ -798,12 +799,12 @@ static void CancelOldest(Game& game, Side& side) {
 static bool RunGroup(Game& game, Side& side, int group_index) {
     AIData& data = Data(game, side);
     auto group = data.groups[group_index];
-    City* capital = side.capital;
-    if (capital && capital->owner_index != kNone && capital->owner_index != side.index) {
+    City* capital = side.CapitalCity(*game.map);
+    if (capital && !capital->IsNeutral() && capital->OwnerIndex() != side.Index()) {
         bool going = false;
         for (int other_index = data.max_groups; other_index >= 1; other_index--) {
             auto other = data.groups[other_index];
-            if (other->active != 0 && other->target == capital->owner_index) going = true;
+            if (other->active != 0 && other->target == capital->OwnerIndex()) going = true;
         }
         if (!going) {
             CancelOldest(game, side);
@@ -822,7 +823,7 @@ static bool RunGroup(Game& game, Side& side, int group_index) {
             shared = true;
     }
     City* rally = CityOrNull(game, group->rally);
-    if ((!shared && rally && rally->owner_index == side.index) ||
+    if ((!shared && rally && rally->OwnerIndex() == side.Index()) ||
         Relocate(game, side, group_index)) {
         Gather(game, side, group_index);
         if (data.groups[group_index]->active != 0) {
@@ -864,11 +865,11 @@ static City* Hub(Game& game, int enemy) {
     int most = 0;
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
-        if (city.owner_index == enemy) {
+        if (city.OwnerIndex() == enemy) {
             int friends = 1;
             auto neighbours = FindNeighbours(game, city).first;
             for (int j = static_cast<int>(neighbours.size()) - 1; j >= 0; j--)
-                if (neighbours[j]->owner_index == enemy) friends++;
+                if (neighbours[j]->OwnerIndex() == enemy) friends++;
             if (friends > most || (friends == most && game.rng.Dice(1, 2, -1) != 0)) {
                 best = &city;
                 most = friends;
@@ -889,25 +890,25 @@ static void Spread(Game& game, const City& from, std::vector<char>& reached,
     reached.assign(city_count, 0);
     dist.assign(city_count, 0);
     std::vector<char> done(city_count, 0);
-    reached[from.index] = 1;
-    dist[from.index] = 0;
+    reached[from.Index()] = 1;
+    dist[from.Index()] = 0;
     bool changed = true;
     while (changed) {
         changed = false;
         for (int i = static_cast<int>(city_count) - 1; i >= 0; i--) {
             City& city = game.map->cities[i];
-            if (reached[city.index] && !done[city.index]) {
+            if (reached[city.Index()] && !done[city.Index()]) {
                 changed = true;
-                done[city.index] = 1;
+                done[city.Index()] = 1;
                 auto [neighbours, neighbour_dists] = FindNeighbours(game, city);
                 for (int j = static_cast<int>(neighbours.size()) - 1; j >= 0; j--) {
                     City* neighbour = neighbours[j];
-                    int via = dist[city.index] + neighbour_dists[j];
-                    if (!reached[neighbour->index]) {
-                        reached[neighbour->index] = 1;
-                        dist[neighbour->index] = via;
-                    } else if (via < dist[neighbour->index]) {
-                        dist[neighbour->index] = via;
+                    int via = dist[city.Index()] + neighbour_dists[j];
+                    if (!reached[neighbour->Index()]) {
+                        reached[neighbour->Index()] = 1;
+                        dist[neighbour->Index()] = via;
+                    } else if (via < dist[neighbour->Index()]) {
+                        dist[neighbour->Index()] = via;
                     }
                 }
             }
@@ -932,10 +933,10 @@ static City* Plan(Game& game, Side& side, Group& group, int enemy) {
     City* rally = nullptr;
     long best = 1000000000;
     for (City* city : Own(game, side)) {
-        if (kRallyRoles.count(Role(data, *city)) && reached[city->index] &&
-            dist[city->index] < best) {
+        if (kRallyRoles.count(Role(data, *city)) && reached[city->Index()] &&
+            dist[city->Index()] < best) {
             rally = city;
-            best = dist[city->index];
+            best = dist[city->Index()];
         }
     }
     if (!rally) {
@@ -945,7 +946,7 @@ static City* Plan(Game& game, Side& side, Group& group, int enemy) {
             long best_distance = 1000000000;
             for (City* city : Own(game, side)) {
                 if (kRallyRoles.count(Role(data, *city))) {
-                    int distance = core::Dist(city->x, city->y, hub->x, hub->y);
+                    int distance = core::Dist(city->X(), city->Y(), hub->X(), hub->Y());
                     if (distance < best_distance) {
                         rally = city;
                         best_distance = distance;
@@ -953,7 +954,7 @@ static City* Plan(Game& game, Side& side, Group& group, int enemy) {
                 }
             }
             if (rally) {
-                group.cities[1] = hub->index;
+                group.cities[1] = hub->Index();
                 group.dist[1] = 100;
             }
         }
@@ -966,20 +967,20 @@ static City* Plan(Game& game, Side& side, Group& group, int enemy) {
         long pick_distance = 1000000000;
         for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
             City& city = game.map->cities[i];
-            if (city.owner_index == enemy && !Cflag(data, city, kCfUnseen) && reached[city.index] &&
-                dist[city.index] < pick_distance) {
+            if (city.OwnerIndex() == enemy && !Cflag(data, city, kCfUnseen) &&
+                reached[city.Index()] && dist[city.Index()] < pick_distance) {
                 pick = &city;
-                pick_distance = dist[city.index];
+                pick_distance = dist[city.Index()];
             }
         }
         if (!pick) break;
-        group.cities[slot] = pick->index;
+        group.cities[slot] = pick->Index();
         group.dist[slot] = static_cast<int>(pick_distance);
-        reached[pick->index] = 0;
+        reached[pick->Index()] = 0;
         targets++;
     }
     if (targets == 0 && !Cflag(data, *hub, kCfUnseen)) {
-        group.cities[1] = hub->index;
+        group.cities[1] = hub->Index();
         group.dist[1] = 100;
         targets = 1;
     }
@@ -989,8 +990,8 @@ static City* Plan(Game& game, Side& side, Group& group, int enemy) {
 
 int PickEnemy(Game& game, Side& side) {
     AIData& data = Data(game, side);
-    int side_index = side.index;
-    City* capital = side.capital;
+    int side_index = side.Index();
+    City* capital = side.CapitalCity(*game.map);
     int capital_owner = capital ? Owner(*capital) : kNeutral;
     // Per side: cities seen, score, cities owned, whether we hold its
     // capital, cities we took from it, groups aimed at it, and a die.
@@ -1006,13 +1007,12 @@ int PickEnemy(Game& game, Side& side) {
     }
     for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
         City& city = game.map->cities[i];
-        int owner = city.owner_index;
+        int owner = city.OwnerIndex();
         if (owner != kNone) {
             count[owner]++;
             if (!Cflag(data, city, kCfUnseen)) held[owner]++;
-            if (owner == side_index && city.claim != kNone && city.claim != kNeutral &&
-                city.claim >= 0 && city.claim < 8)
-                from_them[city.claim]++;
+            int claim = city.Claim().Value();
+            if (owner == side_index && claim >= 0 && claim < 8) from_them[claim]++;
         }
     }
     int n_groups = 0;
@@ -1028,16 +1028,16 @@ int PickEnemy(Game& game, Side& side) {
     for (int other = 7; other >= 0; other--) {
         if (count[other] != 0) {
             if (other != side_index) others++;
-            City* theirs = game.map->sides[other].capital;
-            if (theirs && theirs->owner_index == side_index) cap_held[other] = 1;
+            City* theirs = game.map->sides[other].CapitalCity(*game.map);
+            if (theirs && theirs->OwnerIndex() == side_index) cap_held[other] = 1;
         }
     }
     int constant;
-    if (!side.computer)
+    if (!side.IsComputerControlled())
         constant = data.die_human;
-    else if (side.level == 2)
+    else if (side.Level() == 2)
         constant = data.die_warlord;
-    else if (side.level == 1)
+    else if (side.Level() == 1)
         constant = data.die_lord;
     else
         constant = data.die_knight;
@@ -1047,7 +1047,7 @@ int PickEnemy(Game& game, Side& side) {
                         data.heroes_killed[other] * 4 + data.armies_killed[other] +
                         data.battles[other] + data.lost[other] * 2 + data.city_battles[other] * 2 +
                         data.cities_lost[other] * 2 + constant;
-        score[other] += std::abs(side.diplo_score - other_side.diplo_score) / 8;
+        score[other] += std::abs(side.DiploScore() - other_side.DiploScore()) / 8;
         score[other] += std::abs(count[side_index] - count[other]) / 4;
     }
     bool proposing_war = false;
@@ -1055,7 +1055,7 @@ int PickEnemy(Game& game, Side& side) {
         if (InPlay(game, other) && other != side_index && Proposal(game, side_index, other) == 2)
             proposing_war = true;
     }
-    if (game.greatest && side.computer) {
+    if (game.greatest && side.IsComputerControlled()) {
         auto fights = FightingHumans(game);
         for (int other = 7; other >= 0; other--) {
             if (InPlay(game, other) && IsComputer(game, other) &&
@@ -1133,18 +1133,18 @@ void AssaultXx(Game& game, Side& side) {
     }
     group->active = 1;
     group->target = enemy;
-    group->rally = rally->index;
+    group->rally = rally->Index();
     SetRole(data, *rally, kRally);
     RollSpoils(game, side, *group);
-    Propose(game, side.index, enemy, 2);
+    Propose(game, side.Index(), enemy, 2);
     // The rally city is no group's member any more.
     for (int group_index = data.max_groups; group_index >= 1; group_index--) {
         auto other = data.groups[group_index];
         if (other->active != 0) {
             for (int member = 1; member <= 4; member++) {
-                if (HasKey(other->members, member) && other->members[member] == rally->index) {
+                if (HasKey(other->members, member) && other->members[member] == rally->Index()) {
                     other->members.erase(member);
-                    rally->vector_to = kNone;
+                    rally->ClearVector();
                 }
             }
         }
@@ -1155,7 +1155,7 @@ void AssaultXx(Game& game, Side& side) {
         if (target) {
             int friends = 0;
             for (City* neighbour : FindNeighbours(game, *target).first)
-                if (neighbour->owner_index == enemy) friends++;
+                if (neighbour->OwnerIndex() == enemy) friends++;
             group->bonus[target_slot] = friends;
         }
     }

@@ -190,11 +190,11 @@ inline bool HasKey(const std::map<int, int>& values, int key) {
 int Dist(int from_x, int from_y, int to_x, int to_y);
 /** @brief The city's owner, with the neutral side for an unowned city. */
 inline int Owner(const City& city) {
-    return city.owner_index == kNone ? kNeutral : city.owner_index;
+    return city.OwnerIndex() == kNone ? kNeutral : city.OwnerIndex();
 }
 /** @brief Is the city still a city (not ruins)? */
 inline bool Standing(const City& city) {
-    return !city.razed;
+    return !city.IsRazed();
 }
 /** @brief Is a side in the game? */
 bool InPlay(const Game& game, int index);
@@ -256,23 +256,23 @@ AIData& Data(Game& game, Side& side);
 AIData& Data(Game& game, int side_index);
 /** @brief The city's role for the side (0 when it has none). */
 inline int Role(const AIData& data, const City& city) {
-    return Get(data.roles, city.index);
+    return Get(data.roles, city.Index());
 }
 /** @brief Give the city a role for the side. */
 inline void SetRole(AIData& data, const City& city, int role) {
-    data.roles[city.index] = role;
+    data.roles[city.Index()] = role;
 }
 /** @brief Is the per-city flag `bit` (kCf*) set? */
 inline bool Cflag(const AIData& data, const City& city, int bit) {
-    return Has(Get(data.flags, city.index), bit);
+    return Has(Get(data.flags, city.Index()), bit);
 }
 /** @brief Set the per-city flag `bit` (kCf*). */
 inline void SetCflag(AIData& data, const City& city, int bit) {
-    data.flags[city.index] = Set(Get(data.flags, city.index), bit);
+    data.flags[city.Index()] = Set(Get(data.flags, city.Index()), bit);
 }
 /** @brief Clear the per-city flag `bit` (kCf*). */
 inline void ClearCflag(AIData& data, const City& city, int bit) {
-    data.flags[city.index] = Clear(Get(data.flags, city.index), bit);
+    data.flags[city.Index()] = Clear(Get(data.flags, city.Index()), bit);
 }
 
 /**

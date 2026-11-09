@@ -109,14 +109,14 @@ struct View {
             for (int dy = -1; dy <= 2 && !is_port; dy++)
                 for (int dx = -1; dx <= 2 && !is_port; dx++) {
                     if (dx >= 0 && dx <= 1 && dy >= 0 && dy <= 1) continue;
-                    int around = TerrainOr(city.x + dx, city.y + dy, -1);
+                    int around = TerrainOr(city.X() + dx, city.Y() + dy, -1);
                     is_port = around == kBridge || around == kWater || around == kShore;
                 }
             for (int dy = 0; dy <= 1; dy++)
                 for (int dx = 0; dx <= 1; dx++) {
-                    if (!In(city.x + dx, city.y + dy)) continue;
-                    int tile = (city.y + dy) * width + city.x + dx;
-                    city_of[tile] = city.index;
+                    if (!In(city.X() + dx, city.Y() + dy)) continue;
+                    int tile = (city.Y() + dy) * width + city.X() + dx;
+                    city_of[tile] = city.Index();
                     port[tile] = is_port;
                 }
         }
@@ -162,13 +162,13 @@ struct Context {
 
 /** @brief Tiles between two footprints along x and along y (0 when touching). */
 std::pair<int, int> Gaps(const City& first, const City& second) {
-    int gap_x = std::max(0, std::abs(first.x - second.x) - 2),
-        gap_y = std::max(0, std::abs(first.y - second.y) - 2);
+    int gap_x = std::max(0, std::abs(first.X() - second.X()) - 2),
+        gap_y = std::max(0, std::abs(first.Y() - second.Y()) - 2);
     return {gap_x, gap_y};
 }
 /** @brief Do two cities' 2x2 footprints share a tile? */
 bool Overlap(const City& first, const City& second) {
-    return std::abs(first.x - second.x) < 2 && std::abs(first.y - second.y) < 2;
+    return std::abs(first.X() - second.X()) < 2 && std::abs(first.Y() - second.Y()) < 2;
 }
 
 /**
@@ -183,16 +183,16 @@ void Cities(Context& context) {
     int crowded = 0;
     std::map<std::string, int> names;
     for (const City& city : map.cities) {
-        if (names[city.name]++ == 1)
-            context.AddIssue("city-name", city.x, city.y,
-                             "two or more cities are called " + city.name);
+        if (names[city.Name()]++ == 1)
+            context.AddIssue("city-name", city.X(), city.Y(),
+                             "two or more cities are called " + city.Name());
         for (int dy = 0; dy <= 1; dy++)
             for (int dx = 0; dx <= 1; dx++) {
-                int terrain = view.TerrainOr(city.x + dx, city.y + dy, -1);
+                int terrain = view.TerrainOr(city.X() + dx, city.Y() + dy, -1);
                 if (terrain != kCity) {
                     context.AddIssue(
-                            "city-terrain", city.x + dx, city.y + dy,
-                            city.name + "'s footprint stands on " +
+                            "city-terrain", city.X() + dx, city.Y() + dy,
+                            city.Name() + "'s footprint stands on " +
                                     (terrain >= 0 ? kTerrainNames[terrain] : "the map's edge"));
                 }
             }
@@ -203,11 +203,11 @@ void Cities(Context& context) {
             auto [gap_x, gap_y] = Gaps(city, other);
             int gap = Overlap(city, other) ? -1 : std::max(gap_x, gap_y);
             best = std::min(best, gap);
-            best_dist = std::min(best_dist, std::hypot(city.x - other.x, city.y - other.y));
-            if (city.index < other.index && gap < kMinCityGap) {
+            best_dist = std::min(best_dist, std::hypot(city.X() - other.X(), city.Y() - other.Y()));
+            if (city.Index() < other.Index() && gap < kMinCityGap) {
                 context.AddIssue(
-                        "city-gap", city.x, city.y,
-                        city.name + " and " + other.name +
+                        "city-gap", city.X(), city.Y(),
+                        city.Name() + " and " + other.Name() +
                                 (gap < 0 ? " overlap"
                                          : " are " + std::to_string(gap) + " tile(s) apart"));
             }
@@ -342,7 +342,7 @@ void Roads(Context& context) {
         std::deque<int> frontier;
         for (int dy = -1; dy <= 2; dy++)
             for (int dx = -1; dx <= 2; dx++) {
-                int x = city.x + dx, y = city.y + dy;
+                int x = city.X() + dx, y = city.Y() + dy;
                 if (!view.In(x, y)) continue;
                 int tile = y * width + x;
                 if (view.Roadway(tile) && view.city_of[tile] < 0) {
@@ -360,7 +360,7 @@ void Roads(Context& context) {
                 for (int dx = -1; dx <= 1 && other < 0; dx++)
                     if (view.In(x + dx, y + dy)) {
                         int near_city = view.city_of[(y + dy) * width + x + dx];
-                        if (near_city >= 0 && near_city != city.index) other = near_city;
+                        if (near_city >= 0 && near_city != city.Index()) other = near_city;
                     }
             if (other >= 0) {
                 if (met.insert(other).second) {
@@ -448,23 +448,23 @@ void Reachability(Context& context) {
     int width = view.width;
     std::vector<const City*> capitals;
     for (const Side& side : map.sides)
-        if (side.capital) capitals.push_back(side.capital);
+        if (const City* cap = side.CapitalCity(map)) capitals.push_back(cap);
     double land_share = 0;
     std::set<int> lost_cities, lost_sites;
     for (const City* capital : capitals) {
-        auto all = Reach(view, capital->x, capital->y, false);
-        auto land = Reach(view, capital->x, capital->y, true);
+        auto all = Reach(view, capital->X(), capital->Y(), false);
+        auto land = Reach(view, capital->X(), capital->Y(), true);
         int by_land = 0;
         for (const City& city : map.cities) {
-            if (land[city.y * width + city.x]) by_land++;
-            if (!all[city.y * width + city.x] && lost_cities.insert(city.index).second)
-                context.AddIssue("unreachable", city.x, city.y,
-                                 city.name + " cannot be reached from " + capital->name);
+            if (land[city.Y() * width + city.X()]) by_land++;
+            if (!all[city.Y() * width + city.X()] && lost_cities.insert(city.Index()).second)
+                context.AddIssue("unreachable", city.X(), city.Y(),
+                                 city.Name() + " cannot be reached from " + capital->Name());
         }
         for (const Site& site : map.sites)
             if (!all[site.y * width + site.x] && lost_sites.insert(site.index).second)
                 context.AddIssue("unreachable", site.x, site.y,
-                                 site.name + " cannot be reached from " + capital->name);
+                                 site.name + " cannot be reached from " + capital->Name());
         land_share += map.cities.empty() ? 0 : static_cast<double>(by_land) / map.cities.size();
     }
     context.Metric("capitals", capitals.size());
@@ -512,8 +512,8 @@ void Fairness(Context& context) {
         std::vector<int> tiles;
         for (int dy = 0; dy <= 1; dy++)
             for (int dx = 0; dx <= 1; dx++)
-                if (view.In(city.x + dx, city.y + dy))
-                    tiles.push_back((city.y + dy) * width + city.x + dx);
+                if (view.In(city.X() + dx, city.Y() + dy))
+                    tiles.push_back((city.Y() + dy) * width + city.X() + dx);
         return tiles;
     };
     auto cost_to = [&](const std::vector<int>& costs, const City& city) {
@@ -523,7 +523,7 @@ void Fairness(Context& context) {
     };
     std::vector<const City*> capitals;
     for (const Side& side : map.sides)
-        if (side.capital) capitals.push_back(side.capital);
+        if (const City* cap = side.CapitalCity(map)) capitals.push_back(cap);
     int capital_count = static_cast<int>(capitals.size());
     if (capital_count < 2) return;
     std::vector<std::vector<int>> cost_fields(capital_count);
@@ -543,9 +543,9 @@ void Fairness(Context& context) {
             int cost = cost_to(cost_fields[i], *capitals[j]);
             if (cost != travel::kUnreached &&
                 static_cast<double>(cost) / travel::kTurn < kCapitalGapTurns)
-                context.AddIssue("capital-gap", capitals[i]->x, capitals[i]->y,
+                context.AddIssue("capital-gap", capitals[i]->X(), capitals[i]->Y(),
                                  absl::StrFormat("%s and %s are %.1f turns apart",
-                                                 capitals[i]->name, capitals[j]->name,
+                                                 capitals[i]->Name(), capitals[j]->Name(),
                                                  static_cast<double>(cost) / travel::kTurn));
         }
     }
@@ -570,7 +570,7 @@ void Fairness(Context& context) {
         }
         if (who < 0) continue;
         cities[who]++;
-        income[who] += city.income;
+        income[who] += city.Income();
         if (best > kRemoteTurns * travel::kTurn) remote++;
         // a city nobody else can contest: the next side is twice as far, and
         // at least two turns further
@@ -642,8 +642,8 @@ void Terrain(Context& context) {
         }
     }
     for (const City& city : map.cities)
-        if (view.In(city.x, city.y) && mass[city.y * width + city.x] >= 0)
-            mass_cities[mass[city.y * width + city.x]]++;
+        if (view.In(city.X(), city.Y()) && mass[city.Y() * width + city.X()] >= 0)
+            mass_cities[mass[city.Y() * width + city.X()]]++;
     int inhabited = 0, biggest = 0;
     for (int cities_on_mass : mass_cities) {
         inhabited += cities_on_mass > 0;
@@ -730,7 +730,7 @@ void SignsAndPorts(Context& context) {
         if (!std::regex_match(sign.lines[1], match, kLeagues)) continue;
         std::vector<const City*> named;  // names may repeat; any of them will do
         for (const City& city : map.cities)
-            if (Trim(sign.lines[0]) == city.name) named.push_back(&city);
+            if (Trim(sign.lines[0]) == city.Name()) named.push_back(&city);
         if (named.empty()) {
             context.AddIssue("signpost", sign.x, sign.y,
                              "points to \"" + sign.lines[0] + "\", which is no city");
@@ -743,7 +743,7 @@ void SignsAndPorts(Context& context) {
         for (const City* city : named)
             for (int dy = 0; dy <= 1; dy++)
                 for (int dx = 0; dx <= 1; dx++) {
-                    int city_x = city->x + dx, city_y = city->y + dy;
+                    int city_x = city->X() + dx, city_y = city->Y() + dy;
                     bool right_way = kCompass[Compass(sign.x, sign.y, city_x, city_y)] == match[2];
                     int truth = 2 * static_cast<int>(std::floor(
                                             std::hypot(sign.x - city_x, sign.y - city_y)));
@@ -751,7 +751,7 @@ void SignsAndPorts(Context& context) {
                     way = way || right_way;
                     far = far || right_distance;
                 }
-        const std::string& name = named[0]->name;
+        const std::string& name = named[0]->Name();
         if (!way)
             context.AddIssue("signpost", sign.x, sign.y,
                              "says " + std::string(match[2]) + " for " + name);

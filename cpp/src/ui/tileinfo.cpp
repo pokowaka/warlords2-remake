@@ -72,7 +72,7 @@ void Open(int tile_x, int tile_y) {
     box->box_y = box_y;
 
     auto armies = w2::game::ArmiesAt(game, tile_x, tile_y);
-    int owner = armies.empty() ? w2::kNone : armies[0]->owner;
+    int owner = armies.empty() ? w2::kNone : armies[0]->OwnerIndex();
     bool tower = w2::game::TowerAt(game, tile_x, tile_y);
     w2::City* city = w2::game::CityAt(game, tile_x, tile_y);
     w2::Site* site = game.map->site_at.empty()
@@ -81,7 +81,7 @@ void Open(int tile_x, int tile_y) {
     int terrain = w2::scn::TerrainAt(*game.map, tile_x, tile_y);
     // the text font in a side's colours
     auto colours = [](const w2::Side* side) -> const Font& {
-        return kit::GetFont(2).Colours(side->colour, side->edge);
+        return kit::GetFont(2).Colours(side->Colour(), side->Edge());
     };
     // two centred lines; the first in colours 7 and 0 unless `plain_first`
     auto two_lines = [box_x, box_y](const std::string& first, const std::string& second,
@@ -93,8 +93,8 @@ void Open(int tile_x, int tile_y) {
     };
 
     if (!armies.empty() && (viewer == w2::kNone || game.map->options.view_enemies != 0 ||
-                            owner == player->index || tower)) {
-        if (viewer != w2::kNone && owner != player->index && tower &&
+                            owner == player->Index() || tower)) {
+        if (viewer != w2::kNone && owner != player->Index() && tower &&
             game.map->options.view_enemies == 0) {
             box->paint = [two_lines]() {
                 two_lines(kit::Text(0x82, 0), kit::Text(0x82, 1), false);
@@ -104,37 +104,38 @@ void Open(int tile_x, int tile_y) {
                 int count = static_cast<int>(armies.size());
                 int x = (box_x + kBoxWidth / 2 - count * 12 - 16 + 4) / 8 * 8;
                 for (int i = 0; i < count; i++)
-                    kit::Army(armies[i]->type, armies[i]->owner, x + 24 * i, box_y + 16, 0);
+                    kit::Army(armies[i]->TypeIndex(), armies[i]->OwnerIndex(), x + 24 * i,
+                              box_y + 16, 0);
             };
         }
     } else if (city) {
         box->paint = [city, player, box_x, box_y, colours]() {
             const Font& font = kit::GetFont(2);
-            const w2::Side* owner_side = city->owner_index != w2::kNone
-                                                 ? &g_app.g->map->sides[city->owner_index]
-                                                 : player;
-            kit::Centred(colours(owner_side), city->name, box_x + kBoxWidth / 2 - 8, box_y + 11);
-            if (city->razed) {
+            const w2::Side* owner_side =
+                    !city->IsNeutral() ? &g_app.g->map->sides[city->OwnerIndex()] : player;
+            kit::Centred(colours(owner_side), city->Name(), box_x + kBoxWidth / 2 - 8, box_y + 11);
+            if (city->IsRazed()) {
                 kit::Centred(font, "Razed!", box_x + kBoxWidth / 2 - 8, box_y + 35);
                 return;
             }
-            if (city->owner_index != w2::kNone && city->owner_index < 8) {
+            if (!city->IsNeutral() && city->OwnerIndex() < 8) {
                 for (int x : {box_x + 24, box_x + kBoxWidth - 48}) {
                     gfx::SetColor(1, 1, 1);
                     gfx::Draw(g_app.shields_img,
-                              gfx::NewQuad(city->owner_index * 40 + 24, 46, 16, 16), x, box_y + 10);
+                              gfx::NewQuad(city->OwnerIndex() * 40 + 24, 46, 16, 16), x,
+                              box_y + 10);
                 }
             }
             gfx::SetColor(1, 1, 1);
             gfx::Draw(g_app.abits, gfx::NewQuad(424, 0, 24, 11), box_x + 48, box_y + 36);
-            font.Draw(absl::StrFormat("%d", city->income), box_x + 80, box_y + 33);
+            font.Draw(absl::StrFormat("%d", city->Income()), box_x + 80, box_y + 33);
             gfx::SetColor(1, 1, 1);
             gfx::Draw(g_app.abits, gfx::NewQuad(424, 11, 24, 11), box_x + 144, box_y + 36);
-            font.Draw(absl::StrFormat("%d", city->defence), box_x + 176, box_y + 33);
+            font.Draw(absl::StrFormat("%d", city->Defence()), box_x + 176, box_y + 33);
             // a capital is marked on both sides with its side's cell of art 38
             auto capital_marks = g_app.screen->ArtFor(38);
             for (int i = 0; i < 8; i++) {
-                if (g_app.g->map->sides[i].capital == city && capital_marks) {
+                if (g_app.g->map->sides[i].CapitalCity(*g_app.g->map) == city && capital_marks) {
                     for (int x : {box_x + 16, box_x + kBoxWidth - 56}) {
                         gfx::SetColor(1, 1, 1);
                         gfx::Draw(capital_marks->image, gfx::NewQuad(i * 32, 36, 32, 23), x,

@@ -51,7 +51,7 @@ TEST_P(MovementScenarioTest, StepCostsPathfindingAttacksAndRoutePreview) {
     EXPECT_EQ(movement::kCost[movement::kRoad], 1);
     EXPECT_EQ(movement::kCost[movement::kHills], 6);
 
-    const auto& grid = movement::Grid(game, side->index);
+    const auto& grid = movement::Grid(game, side->Index());
     int roaded = 0;
     bool road_cost_ok = true;
     for (int y = 0; y < game.map->height; ++y) {
@@ -100,16 +100,16 @@ TEST_P(MovementScenarioTest, StepCostsPathfindingAttacksAndRoutePreview) {
     EXPECT_EQ(unwrap(movement::StepCost(kWater, kLand, movement::kBoat, false, false, 10)), kNone);
     EXPECT_EQ(unwrap(movement::StepCost(kWater, kWater, movement::kBoat, false, false, 10)), 2);
 
-    army->moves = 7;
+    army->SetMoves(7);
     Army slow_army;
     Army fast_army;
-    slow_army.moves = 3;
-    fast_army.moves = 9;
+    slow_army.SetMoves(3);
+    fast_army.SetMoves(9);
     EXPECT_EQ(movement::StackMoves({army, &slow_army, &fast_army}), 3);
 
-    army->moves = army->max_moves;
-    int from_x = army->x;
-    int from_y = army->y;
+    army->SetMoves(army->MaxMoves());
+    int from_x = army->X();
+    int from_y = army->Y();
     bool found = false;
     int target_x = 0;
     int target_y = 0;
@@ -121,7 +121,7 @@ TEST_P(MovementScenarioTest, StepCostsPathfindingAttacksAndRoutePreview) {
             auto found_path = movement::FindPath(game, stack, from_x, from_y, x, y);
             if (found_path && found_path->size() >= 2 &&
                 found_path->back().cost < movement::kPastShore &&
-                !movement::Has(movement::Grid(game, side->index)[y * game.map->width + x],
+                !movement::Has(movement::Grid(game, side->Index())[y * game.map->width + x],
                                movement::kWaterF)) {
                 found = true;
                 target_x = x;
@@ -131,39 +131,40 @@ TEST_P(MovementScenarioTest, StepCostsPathfindingAttacksAndRoutePreview) {
     }
     EXPECT_TRUE(found);
     if (found) {
-        int before = army->moves;
+        int before = army->Moves();
         auto result = movement::MoveTo(game, stack, target_x, target_y);
         EXPECT_GT(result.steps, 0);
-        EXPECT_EQ(army->moves, std::max(0, before - result.spent));
-        EXPECT_TRUE(army->x != from_x || army->y != from_y);
+        EXPECT_EQ(army->Moves(), std::max(0, before - result.spent));
+        EXPECT_TRUE(army->X() != from_x || army->Y() != from_y);
     }
 
-    army->moves = 0;
+    army->SetMoves(0);
     EXPECT_EQ(movement::MoveTo(game, stack, from_x, from_y + 1).steps, 0);
 
-    City* enemy = FindEnemyCity(game, side->index);
+    City* enemy = FindEnemyCity(game, side->Index());
     ASSERT_NE(enemy, nullptr);
-    army->moves = 99;
-    army->x = enemy->x;
-    army->y = enemy->y - 1;
-    auto attack_path = movement::FindPath(game, stack, army->x, army->y, enemy->x, enemy->y);
+    army->SetMoves(99);
+    army->PlaceAt(TilePos(enemy->X(), enemy->Y() - 1));
+    auto attack_path =
+            movement::FindPath(game, stack, army->X(), army->Y(), enemy->X(), enemy->Y());
     if (attack_path && !attack_path->empty()) {
         auto walk = movement::Walk(game, stack, *attack_path);
         EXPECT_EQ(walk.stopped, movement::WalkStop::kAttack);
         EXPECT_TRUE(walk.attack && walk.attack->city == enemy);
-        EXPECT_EQ(army->x, enemy->x);
-        EXPECT_EQ(army->y, enemy->y - 1);
+        EXPECT_EQ(army->X(), enemy->X());
+        EXPECT_EQ(army->Y(), enemy->Y() - 1);
     }
-    EXPECT_EQ(movement::Grid(game, side->index)[enemy->y * game.map->width + enemy->x] % 8, 0);
+    EXPECT_EQ(movement::Grid(game, side->Index())[enemy->Y() * game.map->width + enemy->X()] % 8,
+              0);
 
-    Army* scout = AddArmy(game, army->x, army->y, side->index, 11, 9, 20, 20);
-    scout->upkeep = 1;
+    Army* scout = AddArmy(game, army->X(), army->Y(), side->Index(), 11, 9, 20, 20);
+    scout->SetUpkeep(1);
     int far_x = 0;
     int far_y = 0;
     std::optional<movement::Preview> route;
     for (int distance = 12; distance <= 30; distance += 2) {
-        far_x = std::min(game.map->width - 2, scout->x + distance);
-        far_y = scout->y;
+        far_x = std::min(game.map->width - 2, scout->X() + distance);
+        far_y = scout->Y();
         route = movement::PreviewRoute(game, {scout}, far_x, far_y);
         if (route && route->reach < static_cast<int>(route->path.size())) break;
     }
@@ -172,8 +173,8 @@ TEST_P(MovementScenarioTest, StepCostsPathfindingAttacksAndRoutePreview) {
         EXPECT_LE(route->reach, static_cast<int>(route->path.size()));
         EXPECT_EQ(route->path.back().x, far_x);
         EXPECT_EQ(route->path.back().y, far_y);
-        int prev_x = scout->x;
-        int prev_y = scout->y;
+        int prev_x = scout->X();
+        int prev_y = scout->Y();
         bool single_steps = true;
         for (const auto& step : route->path) {
             if (std::max(std::abs(step.x - prev_x), std::abs(step.y - prev_y)) != 1) {
@@ -186,8 +187,8 @@ TEST_P(MovementScenarioTest, StepCostsPathfindingAttacksAndRoutePreview) {
         auto scout_walk = movement::MoveTo(game, {scout}, far_x, far_y);
         EXPECT_EQ(static_cast<int>(scout_walk.walked.size()), scout_walk.steps);
         if (scout_walk.steps > 0) {
-            EXPECT_EQ(scout_walk.walked.back().first, scout->x);
-            EXPECT_EQ(scout_walk.walked.back().second, scout->y);
+            EXPECT_EQ(scout_walk.walked.back().first, scout->X());
+            EXPECT_EQ(scout_walk.walked.back().second, scout->Y());
         }
         auto remaining = movement::PreviewRoute(game, {scout}, far_x, far_y);
         if (remaining) EXPECT_LT(remaining->reach, static_cast<int>(remaining->path.size()));
@@ -204,16 +205,17 @@ TEST(MovementTest, StackLimitBlocksEnteringFullTile) {
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
     Army* army = game::SideArmies(game, *side)[0];
-    int target_x = army->x;
-    int target_y = army->y - 1 >= 0 ? army->y - 1 : army->y + 1;
+    int target_x = army->X();
+    int target_y = army->Y() - 1 >= 0 ? army->Y() - 1 : army->Y() + 1;
     for (int i = 0; i < rules::kMaxStack; ++i) {
-        Army* filler = AddArmy(game, target_x, target_y, side->index, army->type, 1, 10, 10);
-        filler->home_city = army->home_city;
+        Army* filler =
+                AddArmy(game, target_x, target_y, side->Index(), army->TypeIndex(), 1, 10, 10);
+        filler->SetHomeCity(army->HomeCity());
     }
     EXPECT_EQ(static_cast<int>(game::ArmiesAt(game, target_x, target_y).size()), rules::kMaxStack);
-    army->moves = 99;
+    army->SetMoves(99);
     EXPECT_EQ(movement::MoveTo(game, {army}, target_x, target_y).steps, 0);
-    EXPECT_TRUE(army->x != target_x || army->y != target_y);
+    EXPECT_TRUE(army->X() != target_x || army->Y() != target_y);
 }
 
 TEST(MovementTest, ShipsDisembarkAtTurnStartAndSinkStrandedLandUnits) {
@@ -221,18 +223,18 @@ TEST(MovementTest, ShipsDisembarkAtTurnStartAndSinkStrandedLandUnits) {
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
     City* city = game::SideCities(game, *side)[0];
-    Army* sailor = AddArmy(game, city->x, city->y, side->index, 2, 3, 0, 14);
-    sailor->at_sea = true;
+    Army* sailor = AddArmy(game, city->X(), city->Y(), side->Index(), 2, 3, 0, 14);
+    sailor->SetAtSea(true);
     AdvanceRounds(game, 1);
-    EXPECT_FALSE(sailor->at_sea);
-    EXPECT_EQ(sailor->moves, sailor->max_moves);
+    EXPECT_FALSE(sailor->IsAtSea());
+    EXPECT_EQ(sailor->Moves(), sailor->MaxMoves());
 
     TilePos water = FindTerrainTile(game, movement::kWater, true);
     ASSERT_TRUE(water.IsValid());
-    Army* walker = AddArmy(game, water.x, water.y, side->index, 2, 3, 14, 14);
-    Army* boat = AddArmy(game, water.x, water.y, side->index, 2, 3, 14, 14);
-    boat->at_sea = true;
-    Army* hero = AddArmy(game, water.x, water.y, side->index, armytype::kHero, 5, 14, 14);
+    Army* walker = AddArmy(game, water.x, water.y, side->Index(), 2, 3, 14, 14);
+    Army* boat = AddArmy(game, water.x, water.y, side->Index(), 2, 3, 14, 14);
+    boat->SetAtSea(true);
+    Army* hero = AddArmy(game, water.x, water.y, side->Index(), armytype::kHero, 5, 14, 14);
     EXPECT_EQ(game::SinkStranded(game, *side, water.x, water.y), 1);
     EXPECT_FALSE(game.Alive(walker));
     EXPECT_TRUE(game.Alive(boat) && game.Alive(hero));
@@ -241,22 +243,22 @@ TEST(MovementTest, ShipsDisembarkAtTurnStartAndSinkStrandedLandUnits) {
     for (const auto& army_type : game.types.all) {
         if (flyer_type == kNone && army_type.flies) flyer_type = army_type.id;
     }
-    Army* bird = AddArmy(game, water.x, water.y, side->index, flyer_type, 3, 14, 14);
-    Army* walker2 = AddArmy(game, water.x, water.y, side->index, 2, 3, 14, 14);
+    Army* bird = AddArmy(game, water.x, water.y, side->Index(), flyer_type, 3, 14, 14);
+    Army* walker2 = AddArmy(game, water.x, water.y, side->Index(), 2, 3, 14, 14);
     EXPECT_EQ(game::SinkStranded(game, *side), 1);
     EXPECT_TRUE(game.Alive(bird) && !game.Alive(walker2));
 
     Item wings;
     wings.type = rules::kItemFlight;
-    hero->items.push_back(&wings);
-    Army* carried = AddArmy(game, water.x, water.y, side->index, 2, 3, 14, 14);
+    hero->AddItem(&wings);
+    Army* carried = AddArmy(game, water.x, water.y, side->Index(), 2, 3, 14, 14);
     EXPECT_EQ(game::SinkStranded(game, *side, water.x, water.y), 0);
-    hero->items.clear();
+    hero->ClearItems();
     EXPECT_EQ(game::SinkStranded(game, *side, water.x, water.y), 1);
     EXPECT_FALSE(game.Alive(carried));
 
-    Army* ashore = AddArmy(game, city->x, city->y, side->index, 2, 3, 14, 14);
-    EXPECT_EQ(game::SinkStranded(game, *side, city->x, city->y), 0);
+    Army* ashore = AddArmy(game, city->X(), city->Y(), side->Index(), 2, 3, 14, 14);
+    EXPECT_EQ(game::SinkStranded(game, *side, city->X(), city->Y()), 0);
     EXPECT_TRUE(game.Alive(ashore));
 }
 
@@ -282,24 +284,23 @@ TEST(MovementTest, LastMovePointBuysRoadStepAndChargesAttackMinimumTwo) {
         }
     }
     ASSERT_NE(road_x, kNone);
-    army->x = road_x;
-    army->y = road_y;
-    army->at_sea = false;
-    army->moves = 1;
+    army->PlaceAt(TilePos(road_x, road_y));
+    army->SetAtSea(false);
+    army->SetMoves(1);
     movement::Invalidate(game);
     auto walk_result = movement::MoveTo(game, {army}, road_x + 1, road_y);
     EXPECT_EQ(walk_result.steps, 1);
-    EXPECT_EQ(army->x, road_x + 1);
-    EXPECT_EQ(army->moves, 0);
+    EXPECT_EQ(army->X(), road_x + 1);
+    EXPECT_EQ(army->Moves(), 0);
 
-    City* enemy = FindEnemyCity(game, side->index);
+    City* enemy = FindEnemyCity(game, side->Index());
     ASSERT_NE(enemy, nullptr);
-    Army* attacker = AddArmy(game, enemy->x, enemy->y - 1, side->index, 11, 3, 1, 20);
-    game::ChargeAttack(game, {attacker}, enemy->x, enemy->y);
-    EXPECT_EQ(attacker->moves, 0);
-    attacker->moves = 10;
-    game::ChargeAttack(game, {attacker}, enemy->x, enemy->y);
-    EXPECT_EQ(attacker->moves, 8);
+    Army* attacker = AddArmy(game, enemy->X(), enemy->Y() - 1, side->Index(), 11, 3, 1, 20);
+    game::ChargeAttack(game, {attacker}, enemy->X(), enemy->Y());
+    EXPECT_EQ(attacker->Moves(), 0);
+    attacker->SetMoves(10);
+    game::ChargeAttack(game, {attacker}, enemy->X(), enemy->Y());
+    EXPECT_EQ(attacker->Moves(), 8);
 }
 
 TEST(MovementTest, HiddenMapSightRadiiPathBlockingAndNextHumanScreen) {
@@ -310,8 +311,9 @@ TEST(MovementTest, HiddenMapSightRadiiPathBlockingAndNextHumanScreen) {
     auto game_ptr = SetupGame("ERYTHEA", SeedWith(101, {{"hiddenMap", 1}}));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    EXPECT_TRUE(game::Seen(game, side->index, side->capital->x, side->capital->y));
-    EXPECT_FALSE(game::Seen(game, side->index, 0, 0));
+    City* side_cap = side->CapitalCity(*game.map);
+    EXPECT_TRUE(game::Seen(game, side->Index(), side_cap->X(), side_cap->Y()));
+    EXPECT_FALSE(game::Seen(game, side->Index(), 0, 0));
 
     auto dark_game = SetupGame("ERYTHEA", SeedWith(102, {{"hiddenMap", 1}}));
     int open_x = kNone;
@@ -328,30 +330,30 @@ TEST(MovementTest, HiddenMapSightRadiiPathBlockingAndNextHumanScreen) {
     EXPECT_EQ(game::Reveal(*dark_game, 20, open_x, open_y, false), 0);
     EXPECT_EQ(game::Reveal(*dark_game, 20, open_x + 20, open_y, true), 25);
     City& first_city = dark_game->map->cities[0];
-    EXPECT_EQ(game::Reveal(*dark_game, 21, first_city.x, first_city.y, false), 25);
+    EXPECT_EQ(game::Reveal(*dark_game, 21, first_city.X(), first_city.Y(), false), 25);
 
     Army* army = game::SideArmies(game, *side)[0];
-    army->moves = 99;
+    army->SetMoves(99);
     City* unseen = nullptr;
     for (auto& candidate : game.map->cities) {
-        if (!unseen && !game::Seen(game, side->index, candidate.x, candidate.y) &&
-            candidate.owner_index != side->index) {
+        if (!unseen && !game::Seen(game, side->Index(), candidate.X(), candidate.Y()) &&
+            !candidate.OwnedBy(side->Id())) {
             unseen = &candidate;
         }
     }
     ASSERT_NE(unseen, nullptr);
-    EXPECT_FALSE(movement::FindPath(game, {army}, army->x, army->y, unseen->x, unseen->y));
+    EXPECT_FALSE(movement::FindPath(game, {army}, army->X(), army->Y(), unseen->X(), unseen->Y()));
 
-    auto count_seen = [&]() { return game.explored.ExploredCount(SideId(side->index)); };
+    auto count_seen = [&]() { return game.explored.ExploredCount(side->Id()); };
     int seen_before = count_seen();
     for (int dx = -3; dx <= 3; ++dx) {
         bool walked = false;
         for (int dy = -3; dy <= 3 && !walked; ++dy) {
-            int x = army->x + dx;
-            int y = army->y + dy;
-            if (x >= 0 && y >= 0 && game::Seen(game, side->index, x, y) &&
-                (x != army->x || y != army->y)) {
-                auto path = movement::FindPath(game, {army}, army->x, army->y, x, y);
+            int x = army->X() + dx;
+            int y = army->Y() + dy;
+            if (x >= 0 && y >= 0 && game::Seen(game, side->Index(), x, y) &&
+                (x != army->X() || y != army->Y())) {
+                auto path = movement::FindPath(game, {army}, army->X(), army->Y(), x, y);
                 if (path && !path->empty() && path->back().cost < movement::kPastShore) {
                     movement::MoveTo(game, {army}, x, y);
                     EXPECT_GT(count_seen(), seen_before);
@@ -363,15 +365,15 @@ TEST(MovementTest, HiddenMapSightRadiiPathBlockingAndNextHumanScreen) {
     }
 
     Side* other = game.sides[0] != side ? game.sides[0] : game.sides[1];
-    EXPECT_FALSE(game::Seen(game, other->index, side->capital->x, side->capital->y));
+    EXPECT_FALSE(game::Seen(game, other->Index(), side_cap->X(), side_cap->Y()));
 
     auto computer_first = SetupGame("ERYTHEA", SeedWith(103, {{"hiddenMap", 1}}));
     for (size_t i = 0; i < computer_first->sides.size(); ++i) {
-        computer_first->sides[i]->computer = i != 2;
+        computer_first->sides[i]->SetComputerControlled(i != 2);
     }
     EXPECT_EQ(game::Begin(*computer_first), computer_first->sides[0]);
     EXPECT_EQ(game::NextHuman(*computer_first), computer_first->sides[2]);
-    computer_first->sides[2]->computer = true;
+    computer_first->sides[2]->SetComputerControlled(true);
     EXPECT_EQ(game::NextHuman(*computer_first), nullptr);
 }
 
@@ -379,15 +381,15 @@ TEST(MovementTest, EncampmentFormsOnOpenGroundWhenFortifiedAndAddsFortifyOne) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(5));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    City* cap = side->capital;
+    City* cap = side->CapitalCity(*game.map);
     Army* army = game::SideArmies(game, *side)[0];
     int x = kNone;
     int y = kNone;
     for (int radius = 2; radius <= 8 && x == kNone; ++radius) {
         for (int dx = -radius; dx <= radius && x == kNone; ++dx) {
             for (int dy = -radius; dy <= radius && x == kNone; ++dy) {
-                int tile_x = cap->x + dx;
-                int tile_y = cap->y + dy;
+                int tile_x = cap->X() + dx;
+                int tile_y = cap->Y() + dy;
                 if (tile_x >= 0 && tile_y >= 0 && tile_x < game.map->width - 1 &&
                     tile_y < game.map->height &&
                     scn::TerrainAt(*game.map, tile_x, tile_y) == movement::kPlain &&
@@ -402,13 +404,12 @@ TEST(MovementTest, EncampmentFormsOnOpenGroundWhenFortifiedAndAddsFortifyOne) {
         }
     }
     ASSERT_TRUE(army != nullptr && x != kNone);
-    army->x = x;
-    army->y = y;
+    army->PlaceAt(TilePos(x, y));
     EXPECT_FALSE(game::TowerAt(game, x, y));
     game::StartTurn(game, *side);
     EXPECT_FALSE(game::TowerAt(game, x, y));
 
-    army->fortified = true;
+    army->SetFortified(true);
     game::StartTurn(game, *side);
     EXPECT_TRUE(game::TowerAt(game, x, y));
     EXPECT_EQ(combat::Fortify(game, {}, x, y, combat::TerrainClass(game, x, y)), 1);
@@ -416,10 +417,9 @@ TEST(MovementTest, EncampmentFormsOnOpenGroundWhenFortifiedAndAddsFortifyOne) {
     EXPECT_EQ(movement::MoveTo(game, {army}, x + 1, y).steps, 1);
     EXPECT_FALSE(game::TowerAt(game, x, y));
 
-    army->x = cap->x;
-    army->y = cap->y;
+    army->PlaceAt(cap->Position());
     game::StartTurn(game, *side);
-    EXPECT_FALSE(game::TowerAt(game, cap->x, cap->y));
+    EXPECT_FALSE(game::TowerAt(game, cap->X(), cap->Y()));
 }
 
 TEST(MovementTest, EmbarkingDisembarkingFlyingOverWaterAndPortSailing) {
@@ -456,36 +456,34 @@ TEST(MovementTest, EmbarkingDisembarkingFlyingOverWaterAndPortSailing) {
     std::vector<Army*> stack = {hero, dragon_army};
     EXPECT_EQ(movement::ModeOf(*game, stack), movement::kFlying);
     movement::Walk(*game, stack, {movement::Step{water_x, water_y, 2}});
-    EXPECT_EQ(hero->x, water_x);
-    EXPECT_TRUE(!dragon_army->at_sea && !hero->at_sea);
+    EXPECT_EQ(hero->X(), water_x);
+    EXPECT_TRUE(!dragon_army->IsAtSea() && !hero->IsAtSea());
     EXPECT_EQ(movement::ModeOf(*game, stack), movement::kFlying);
     movement::Walk(*game, stack, {movement::Step{land_x, land_y, 2}});
-    EXPECT_EQ(hero->x, land_x);
+    EXPECT_EQ(hero->X(), land_x);
 
     Army* foot = AddArmy(*game, land_x, land_y, 0, 1, 5, 20, 20);
     movement::SettleSea(*game, {foot}, water_x, water_y, movement::kLand, false);
-    EXPECT_TRUE(foot->at_sea);
+    EXPECT_TRUE(foot->IsAtSea());
     movement::SettleSea(*game, {foot}, land_x, land_y, movement::kLand, true);
-    EXPECT_FALSE(foot->at_sea);
+    EXPECT_FALSE(foot->IsAtSea());
     movement::SettleSea(*game, {hero, dragon_army, foot}, water_x, water_y, movement::kLand, false);
-    EXPECT_FALSE(dragon_army->at_sea);
-    EXPECT_TRUE(hero->at_sea && foot->at_sea);
-    hero->at_sea = false;
-    foot->at_sea = false;
+    EXPECT_FALSE(dragon_army->IsAtSea());
+    EXPECT_TRUE(hero->IsAtSea() && foot->IsAtSea());
+    hero->SetAtSea(false);
+    foot->SetAtSea(false);
     movement::SettleSea(*game, {foot}, water_x, water_y, movement::kBoat, false);
-    EXPECT_FALSE(foot->at_sea);
+    EXPECT_FALSE(foot->IsAtSea());
 
-    hero->x = water_x;
-    hero->y = water_y;
-    dragon_army->x = water_x;
-    dragon_army->y = water_y;
-    hero->at_sea = true;
-    dragon_army->at_sea = true;
+    hero->PlaceAt(TilePos(water_x, water_y));
+    dragon_army->PlaceAt(TilePos(water_x, water_y));
+    hero->SetAtSea(true);
+    dragon_army->SetAtSea(true);
     game->Remove(foot);
     auto reloaded = *save::Decode(save::Encode(*game), kData);
     for (const Army* loaded_army : reloaded->armies) {
-        if (loaded_army->x == water_x && loaded_army->y == water_y) {
-            EXPECT_FALSE(loaded_army->at_sea);
+        if (loaded_army->X() == water_x && loaded_army->Y() == water_y) {
+            EXPECT_FALSE(loaded_army->IsAtSea());
         }
     }
 
@@ -494,7 +492,7 @@ TEST(MovementTest, EmbarkingDisembarkingFlyingOverWaterAndPortSailing) {
     City* mirea = FindCityByName(*game, "Mirea");
     City* kuuria = FindCityByName(*game, "Kuuria");
     ASSERT_NE(mirea, nullptr);
-    EXPECT_TRUE(mirea->owner_index == 0 && movement::IsPort(*game, *mirea));
+    EXPECT_TRUE(mirea->OwnedBy(0) && movement::IsPort(*game, *mirea));
     const auto& grid = movement::Grid(*game, 0);
     auto grid_byte = [&](int x, int y) { return grid[y * game->map->width + x]; };
     EXPECT_EQ(scn::TerrainAt(*game->map, 86, 7), movement::kShore);
@@ -503,33 +501,33 @@ TEST(MovementTest, EmbarkingDisembarkingFlyingOverWaterAndPortSailing) {
                                     false, 10)
                          .has_value());
 
-    Army* sailor = AddArmy(*game, mirea->x, mirea->y, 0, 1, 5, 20, 20);
+    Army* sailor = AddArmy(*game, mirea->X(), mirea->Y(), 0, 1, 5, 20, 20);
     auto walk_result = movement::MoveTo(*game, {sailor}, 86, 4);
-    EXPECT_EQ(sailor->y, 7);
-    EXPECT_EQ(scn::TerrainAt(*game->map, sailor->x, sailor->y), movement::kShore);
-    EXPECT_TRUE(sailor->at_sea);
+    EXPECT_EQ(sailor->Y(), 7);
+    EXPECT_EQ(scn::TerrainAt(*game->map, sailor->X(), sailor->Y()), movement::kShore);
+    EXPECT_TRUE(sailor->IsAtSea());
     EXPECT_EQ(walk_result.spent, movement::kCost[movement::kShore]);
-    EXPECT_EQ(sailor->moves, 0);
+    EXPECT_EQ(sailor->Moves(), 0);
     EXPECT_EQ(walk_result.stopped, movement::WalkStop::kOutOfMoves);
 
-    sailor->moves = 20;
+    sailor->SetMoves(20);
     walk_result = movement::MoveTo(*game, {sailor}, 86, 4);
-    EXPECT_EQ(sailor->y, 4);
-    EXPECT_TRUE(sailor->at_sea);
-    EXPECT_EQ(sailor->moves, 20 - (7 - 4) * movement::kCost[movement::kWater]);
+    EXPECT_EQ(sailor->Y(), 4);
+    EXPECT_TRUE(sailor->IsAtSea());
+    EXPECT_EQ(sailor->Moves(), 20 - (7 - 4) * movement::kCost[movement::kWater]);
     auto open_path = movement::FindPath(*game, {sailor}, 86, 4, 86, 5);
     EXPECT_EQ(open_path ? (*open_path)[0].cost : kNone, movement::kCost[movement::kWater]);
 
-    walk_result = movement::MoveTo(*game, {sailor}, mirea->x, mirea->y);
-    EXPECT_EQ(sailor->x * 1000 + sailor->y, mirea->x * 1000 + mirea->y);
-    EXPECT_FALSE(sailor->at_sea);
-    EXPECT_EQ(sailor->moves, 0);
+    walk_result = movement::MoveTo(*game, {sailor}, mirea->X(), mirea->Y());
+    EXPECT_EQ(sailor->X() * 1000 + sailor->Y(), mirea->X() * 1000 + mirea->Y());
+    EXPECT_FALSE(sailor->IsAtSea());
+    EXPECT_EQ(sailor->Moves(), 0);
 
     ASSERT_NE(kuuria, nullptr);
     int sea_x = kNone;
     int sea_y = kNone;
-    for (int x = kuuria->x - 1; x <= kuuria->x + 2 && sea_x == kNone; ++x) {
-        for (int y = kuuria->y - 1; y <= kuuria->y + 2 && sea_x == kNone; ++y) {
+    for (int x = kuuria->X() - 1; x <= kuuria->X() + 2 && sea_x == kNone; ++x) {
+        for (int y = kuuria->Y() - 1; y <= kuuria->Y() + 2 && sea_x == kNone; ++y) {
             int terrain = scn::TerrainAt(*game->map, x, y);
             if ((terrain == movement::kWater || terrain == movement::kShore) &&
                 !game->map->crossing[y * game->map->width + x] &&
@@ -540,12 +538,11 @@ TEST(MovementTest, EmbarkingDisembarkingFlyingOverWaterAndPortSailing) {
         }
     }
     ASSERT_NE(sea_x, kNone);
-    sailor->x = sea_x;
-    sailor->y = sea_y;
-    sailor->at_sea = true;
-    sailor->moves = 20;
-    EXPECT_TRUE(
-            movement::FindPath(*game, {sailor}, sea_x, sea_y, kuuria->x, kuuria->y).has_value());
+    sailor->PlaceAt(TilePos(sea_x, sea_y));
+    sailor->SetAtSea(true);
+    sailor->SetMoves(20);
+    EXPECT_TRUE(movement::FindPath(*game, {sailor}, sea_x, sea_y, kuuria->X(), kuuria->Y())
+                        .has_value());
 }
 
 }  // namespace

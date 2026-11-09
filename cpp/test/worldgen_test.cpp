@@ -96,10 +96,9 @@ TEST(MapEvalTest, BrokenMapsTriggerHardChecksFairCapitalsAndReferenceScores) {
     }
     ASSERT_GE(lone_x, 0);
     broken.roads[index_of(lone_x, lone_y)] = 1;
-    broken.cities[1].x = broken.cities[0].x + 1;
-    broken.cities[1].y = broken.cities[0].y;
-    broken.cities[3].name = broken.cities[2].name;
-    broken.signs[0].lines = {broken.cities[5].name, "999 leagues north"};
+    broken.cities[1].SetPosition(TilePos(broken.cities[0].X() + 1, broken.cities[0].Y()));
+    broken.cities[3].Rename(broken.cities[2].Name());
+    broken.signs[0].lines = {broken.cities[5].Name(), "999 leagues north"};
     const Site& walled = broken.sites[0];
     for (int dy = -2; dy <= 2; ++dy) {
         for (int dx = -2; dx <= 2; ++dx) {
@@ -120,16 +119,16 @@ TEST(MapEvalTest, BrokenMapsTriggerHardChecksFairCapitalsAndReferenceScores) {
     }
 
     auto near_map = *scn::Load(kData / "ERYTHEA", "ERYTHEA");
-    City* home = near_map->sides[0].capital;
+    City* home = near_map->sides[0].CapitalCity(*near_map);
     City* next = nullptr;
     for (auto& candidate : near_map->cities) {
         if (&candidate != home &&
-            (!next || std::hypot(candidate.x - home->x, candidate.y - home->y) <
-                              std::hypot(next->x - home->x, next->y - home->y))) {
+            (!next || std::hypot(candidate.X() - home->X(), candidate.Y() - home->Y()) <
+                              std::hypot(next->X() - home->X(), next->Y() - home->Y()))) {
             next = &candidate;
         }
     }
-    near_map->sides[1].capital = next;
+    near_map->sides[1].SetCapitalCityId(next->Id());
     EXPECT_GT(mapeval::Evaluate(*near_map, "near").Count("capital-gap"), 0);
 
     Rng classic_rng(11);
@@ -146,7 +145,7 @@ TEST(MapEvalTest, BrokenMapsTriggerHardChecksFairCapitalsAndReferenceScores) {
     auto fair = *scn::LoadFromFiles(kData / "RANDOM", "RANDOM", fair_files);
     std::set<City*> capitals;
     for (auto& fair_side : fair->sides) {
-        capitals.insert(fair_side.capital);
+        capitals.insert(fair_side.CapitalCity(*fair));
     }
     EXPECT_EQ(capitals.size(), 8U);
     auto fair_eval = mapeval::Evaluate(*fair, "fair#11");
@@ -304,20 +303,22 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
 
     std::set<City*> capitals;
     for (auto& side : map->sides) {
-        EXPECT_TRUE(side.capital != nullptr && side.capital->owner == &side) << side.name;
-        capitals.insert(side.capital);
+        City* cap = side.CapitalCity(*map);
+        EXPECT_TRUE(cap != nullptr && cap->Owner() == side.Id()) << side.Name();
+        capitals.insert(cap);
     }
     EXPECT_EQ(capitals.size(), 8U);
 
     for (const auto& city : map->cities) {
-        EXPECT_EQ(map->terrain_type[scn::TileAt(*map, city.x, city.y) % 256], 10) << city.name;
-        EXPECT_FALSE(city.produces.empty()) << city.name;
-        bool is_capital = city.owner != nullptr;
-        EXPECT_GE(city.income, is_capital ? 33 : 15) << city.name;
-        EXPECT_LE(city.income, is_capital ? 40 : 28) << city.name;
-        auto description = map->city_text.find(city.index);
+        EXPECT_EQ(map->terrain_type[scn::TileAt(*map, city.X(), city.Y()) % 256], 10)
+                << city.Name();
+        EXPECT_FALSE(city.Produces().empty()) << city.Name();
+        bool is_capital = !city.IsNeutral();
+        EXPECT_GE(city.Income(), is_capital ? 33 : 15) << city.Name();
+        EXPECT_LE(city.Income(), is_capital ? 40 : 28) << city.Name();
+        auto description = map->city_text.find(city.Index());
         ASSERT_NE(description, map->city_text.end());
-        EXPECT_TRUE(description->second[0].starts_with(city.name + " is a")) << city.name;
+        EXPECT_TRUE(description->second[0].starts_with(city.Name() + " is a")) << city.Name();
     }
 
     Types types;
@@ -327,7 +328,7 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
     };
     bool no_magical = true;
     for (const auto& city : map->cities) {
-        for (int produced : city.produces) {
+        for (int produced : city.Produces()) {
             if (is_magical(produced)) {
                 no_magical = false;
             }
@@ -340,7 +341,7 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
         auto allied_files = make_world(seed, {{3, 3, 2, 3}}, true);
         auto allied = *scn::LoadFromFiles(kData / "RANDOM", "RANDOM", allied_files);
         for (const auto& city : allied->cities) {
-            for (int produced : city.produces) {
+            for (int produced : city.Produces()) {
                 if (is_magical(produced)) {
                     ++magical_count;
                 }
@@ -376,7 +377,7 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
     auto game_ptr = *game::NewGame(kData, "RANDOM", options);
     Game& game = *game_ptr;
     for (Side* player : game.sides) {
-        player->computer = true;
+        player->SetComputerControlled(true);
     }
     Side* side = game::Begin(game);
     while (side != nullptr && game.turn <= 6) {
@@ -391,7 +392,7 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
     EXPECT_EQ(reloaded->map->tiles, game.map->tiles);
     ASSERT_EQ(reloaded->map->cities.size(), game.map->cities.size());
     for (size_t i = 0; i < game.map->cities.size(); ++i) {
-        EXPECT_EQ(reloaded->map->cities[i].name, game.map->cities[i].name);
+        EXPECT_EQ(reloaded->map->cities[i].Name(), game.map->cities[i].Name());
     }
     EXPECT_EQ(reloaded->map->signs.size(), game.map->signs.size());
 }

@@ -47,22 +47,22 @@ void RefreshRoute() {
     g_app.route.reset();
     if (!g_app.selection || g_app.selection->stack.empty()) return;
     auto& sel = *g_app.selection;
-    auto target = sel.stack[0]->target;
+    auto target = sel.stack[0]->Target();
     if (!target) return;
-    if (sel.stack[0]->x == target->first && sel.stack[0]->y == target->second) {
-        for (Army* army : sel.stack) army->target.reset();
+    if (sel.stack[0]->X() == target->x && sel.stack[0]->Y() == target->y) {
+        for (Army* army : sel.stack) army->ClearTarget();
         return;
     }
-    g_app.route = move::PreviewRoute(*g_app.g, sel.stack, target->first, target->second);
+    g_app.route = move::PreviewRoute(*g_app.g, sel.stack, target->x, target->y);
 }
 
 /** @brief Gives every army in the stack the destination (x, y); kNone clears it. */
 void OrderTo(const std::vector<Army*>& stack, int x, int y) {
     for (Army* army : stack) {
         if (x == kNone)
-            army->target.reset();
+            army->ClearTarget();
         else
-            army->target = std::make_pair(x, y);
+            army->SetTarget(w2::TilePos(x, y));
     }
 }
 
@@ -74,8 +74,8 @@ void OrderTo(const std::vector<Army*>& stack, int x, int y) {
 void PlanRoute(int x, int y) {
     if (!g_app.selection || g_app.selection->stack.empty()) return;
     auto& sel = *g_app.selection;
-    if (!game::Seen(*g_app.g, g_app.player->index, x, y)) return;
-    if (sel.stack[0]->x == x && sel.stack[0]->y == y) {
+    if (!game::Seen(*g_app.g, g_app.player->Index(), x, y)) return;
+    if (sel.stack[0]->X() == x && sel.stack[0]->Y() == y) {
         OrderTo(sel.stack, kNone, kNone);
         g_app.route.reset();
         return;
@@ -116,11 +116,11 @@ void FlushKeys();
  */
 void PutDown(const std::vector<Army*>& stack) {
     Army* lead = stack.empty() ? nullptr : stack[0];
-    bool arrived = lead && lead->target && lead->x == lead->target->first &&
-                   lead->y == lead->target->second;
+    bool arrived = lead && lead->HasTarget() && lead->X() == lead->Target()->x &&
+                   lead->Y() == lead->Target()->y;
     for (Army* army : stack) {
-        army->done = true;
-        if (arrived) army->target.reset();
+        army->SetDone(true);
+        if (arrived) army->ClearTarget();
     }
     g_app.selection.reset();
     g_app.route.reset();
@@ -174,8 +174,8 @@ void DrawRoute() {
         gfx::SetColor(1, 1, 1);
         if (i == route.path.size()) {
             if (ghost)
-                gfx::Draw(g_app.shadow_img, kit::ArmyQuad(ghost->type), pixel_x + kWalkGhostAt[0],
-                          pixel_y + kWalkGhostAt[1]);
+                gfx::Draw(g_app.shadow_img, kit::ArmyQuad(ghost->TypeIndex()),
+                          pixel_x + kWalkGhostAt[0], pixel_y + kWalkGhostAt[1]);
         } else {
             const int* src = static_cast<int>(i) <= route.reach ? kWalkRing : kWalkCrossed;
             gfx::Draw(g_app.shadow_img, gfx::NewQuad(src[0], src[1], kWalkRingW, kWalkRingH),

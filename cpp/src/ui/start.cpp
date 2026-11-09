@@ -190,15 +190,15 @@ std::shared_ptr<Setup> NewSetup(const Scenario& scenario) {
         for (int i = 0; i <= 9; i++) remembered_options[i] = kPresets[0][i];
     else
         RecallOptions();
-    for (auto& side : map->sides) {
-        SideSetup& side_setup = setup->sides[side.index];
-        side_setup.in_use = side.in_use;
-        side_setup.name = side.name;
-        side_setup.colour = side.colour;
-        side_setup.edge = side.edge;
-        side_setup.computer = side.computer;
-        side_setup.level = side.computer ? side.level : 0;
-        side_setup.card = side.card;
+    for (const auto& side : map->sides) {
+        SideSetup& side_setup = setup->sides[side.Index()];
+        side_setup.in_use = side.InUse();
+        side_setup.name = side.Name();
+        side_setup.colour = side.Colour();
+        side_setup.edge = side.Edge();
+        side_setup.computer = side.IsComputerControlled();
+        side_setup.level = side.IsComputerControlled() ? side.Level() : 0;
+        side_setup.card = side.Card();
     }
     return setup;
 }

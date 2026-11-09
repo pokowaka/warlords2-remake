@@ -87,7 +87,7 @@ absl::Status WriteListing(const std::filesystem::path& data, const std::string& 
     entry.text = text;
     entry.cities = static_cast<int>((*map)->cities.size());
     entry.ruins = static_cast<int>((*map)->sites.size());
-    for (const auto& side : (*map)->sides) entry.players += side.capital != nullptr;
+    for (const auto& side : (*map)->sides) entry.players += side.CapitalCity(**map) != nullptr;
     std::filesystem::path base = data / dir;
     std::filesystem::create_directories(base / "PICS");
     if (absl::Status status = WriteFile(base / (dir + ".INF"), scenarios::Info(entry));

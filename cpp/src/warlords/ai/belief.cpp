@@ -18,11 +18,11 @@ SideBelief& Ensure(Side& side) {
     if (ModernMlPlayer* modern = ModernMlPlayer::FindMutableOn(side)) {
         return modern->MutableBelief();
     }
-    if (!side.computer_player) {
+    if (!side.ComputerPlayer()) {
         return ModernMlPlayer::EnsureOn(side).MutableBelief();
     }
     thread_local std::array<SideBelief, 8> inspector_belief;
-    return inspector_belief[std::clamp(side.index, 0, 7)];
+    return inspector_belief[std::clamp(side.Index(), 0, 7)];
 }
 
 bool IsTileVisible(const Game& game, int side_index, int x, int y) {
@@ -30,15 +30,16 @@ bool IsTileVisible(const Game& game, int side_index, int x, int y) {
 }
 
 bool IsCityVisible(const Game& game, int side_index, const City& city) {
-    if (city.razed) return false;
+    if (city.IsRazed()) return false;
     if (game.map->options.hidden_map == 0) return true;
     for (int dy = 0; dy <= 1; dy++) {
         for (int dx = 0; dx <= 1; dx++) {
-            if (game::Seen(game, side_index, city.x + dx, city.y + dy)) return true;
+            if (game::Seen(game, side_index, city.X() + dx, city.Y() + dy)) return true;
         }
     }
     const Side* viewer = game.map->Side(side_index);
-    if (viewer && viewer->quest && viewer->quest->TargetCityId() == CityId(city.index)) return true;
+    if (viewer && viewer->ActiveQuest() && viewer->ActiveQuest()->TargetCityId() == city.Id())
+        return true;
     return false;
 }
 
@@ -58,10 +59,10 @@ ScopedTileIndex::ScopedTileIndex(const Game& game) : game_(game), prev_(active_i
     // newest army first, as game::ArmiesAt lists them
     for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
         Army* army = game.armies[i];
-        if (army->transit || army->x < 0 || army->y < 0 || army->x >= game.map->width ||
-            army->y >= game.map->height)
+        if (army->InTransit() || army->X() < 0 || army->Y() < 0 || army->X() >= game.map->width ||
+            army->Y() >= game.map->height)
             continue;
-        by_tile_[static_cast<size_t>(army->y) * game.map->width + army->x].push_back(army);
+        by_tile_[static_cast<size_t>(army->Y()) * game.map->width + army->X()].push_back(army);
     }
     active_index = this;
 }
@@ -90,7 +91,7 @@ void RecordBattleObservation(Game& game, int observer_side, int x, int y) {
     std::vector<std::pair<int, int>> tiles;
     if (City* city = game::CityAt(game, x, y)) {
         for (int dy = 0; dy <= 1; dy++)
-            for (int dx = 0; dx <= 1; dx++) tiles.emplace_back(city->x + dx, city->y + dy);
+            for (int dx = 0; dx <= 1; dx++) tiles.emplace_back(city->X() + dx, city->Y() + dy);
     } else {
         tiles.emplace_back(x, y);
     }
@@ -98,22 +99,22 @@ void RecordBattleObservation(Game& game, int observer_side, int x, int y) {
     for (auto [tile_x, tile_y] : tiles) {
         int key = tile_y * game.map->width + tile_x;
         auto armies = game::ArmiesAt(game, tile_x, tile_y);
-        if (armies.empty() || armies[0]->owner == observer_side) {
+        if (armies.empty() || armies[0]->OwnerIndex() == observer_side) {
             belief.stacks_by_tile.erase(key);
             continue;
         }
         ObservedStack observed;
         observed.x = tile_x;
         observed.y = tile_y;
-        observed.owner = armies[0]->owner;
+        observed.owner = armies[0]->OwnerIndex();
         observed.visible_count = static_cast<int>(armies.size());
-        observed.top_type = armies[0]->type;
+        observed.top_type = armies[0]->TypeIndex();
         observed.last_inspected_turn = game.turn;
         float strength_sum = 0.0F;
         for (Army* army : armies) {
-            observed.known_types.push_back(army->type);
-            observed.known_strengths.push_back(army->strength);
-            strength_sum += static_cast<float>(army->strength);
+            observed.known_types.push_back(army->TypeIndex());
+            observed.known_strengths.push_back(army->Strength());
+            strength_sum += static_cast<float>(army->Strength());
         }
         if (observed.owner >= 0 && observed.owner < 8 && !armies.empty()) {
             float average = strength_sum / static_cast<float>(armies.size());
@@ -128,7 +129,7 @@ void Update(Game& game, Side& side) {
     SideBelief& belief = Ensure(side);
     ScopedTileIndex tile_index(game);  // nothing moves while the belief is rebuilt
     belief.updated_turn = game.turn;
-    int side_index = side.index;
+    int side_index = side.Index();
     int width = game.map->width, height = game.map->height;
 
     belief.visible_cities.clear();
@@ -152,15 +153,16 @@ void Update(Game& game, Side& side) {
             }
             int key = y * width + x;
             auto armies = ArmiesAt(game, x, y);
-            if (!armies.empty() && armies[0]->owner != side_index && armies[0]->owner != kNone) {
-                int owner = armies[0]->owner;
+            if (!armies.empty() && armies[0]->OwnerIndex() != side_index &&
+                armies[0]->OwnerIndex() != kNone) {
+                int owner = armies[0]->OwnerIndex();
                 bool tower = game::TowerAt(game, x, y);
                 bool full_view = game.map->options.view_enemies != 0;
                 ObservedStack observed;
                 observed.x = x;
                 observed.y = y;
                 observed.owner = owner;
-                observed.top_type = armies[0]->type;
+                observed.top_type = armies[0]->TypeIndex();
                 observed.visible_count =
                         (tower && !full_view) ? 4 : static_cast<int>(armies.size());
 
@@ -175,8 +177,8 @@ void Update(Game& game, Side& side) {
                 if (full_view) {
                     observed.last_inspected_turn = game.turn;
                     for (Army* army : armies) {
-                        observed.known_types.push_back(army->type);
-                        observed.known_strengths.push_back(army->strength);
+                        observed.known_types.push_back(army->TypeIndex());
+                        observed.known_strengths.push_back(army->Strength());
                     }
                 } else if (previous != belief.stacks_by_tile.end() &&
                            previous->second.owner == owner &&
@@ -224,11 +226,12 @@ void Update(Game& game, Side& side) {
     // tiles that connect cities) so local expansion frontiers are among the top clusters.
     std::vector<std::pair<int, int>> my_anchors;
     for (const auto& city : game.map->cities) {
-        if (!city.razed && city.owner_index == side_index) my_anchors.emplace_back(city.x, city.y);
+        if (!city.IsRazed() && city.OwnerIndex() == side_index)
+            my_anchors.emplace_back(city.X(), city.Y());
     }
     for (const Army* army : game.armies) {
-        if (army->owner == side_index && army->x != kNone && !army->transit)
-            my_anchors.emplace_back(army->x, army->y);
+        if (army->OwnerIndex() == side_index && army->X() != kNone && !army->InTransit())
+            my_anchors.emplace_back(army->X(), army->Y());
     }
     std::sort(raw_frontiers.begin(), raw_frontiers.end(),
               [&](const FrontierCluster& lhs, const FrontierCluster& rhs) {
@@ -277,8 +280,8 @@ void Update(Game& game, Side& side) {
     for (auto& city : game.map->cities) {
         if (IsCityVisible(game, side_index, city)) {
             belief.visible_cities.push_back(&city);
-            if (city.owner_index >= 0 && city.owner_index < 8) {
-                belief.visible_cities_by_side[city.owner_index]++;
+            if (city.OwnerIndex() >= 0 && city.OwnerIndex() < 8) {
+                belief.visible_cities_by_side[city.OwnerIndex()]++;
             }
         }
     }
@@ -303,10 +306,10 @@ void Update(Game& game, Side& side) {
     for (City* city : belief.visible_cities) {
         float min_dist = 200.0F;
         for (City* other : belief.visible_cities) {
-            if (other->owner_index >= 0 && other->owner_index != side_index && !other->razed &&
-                !diplomacy::IsAllied(game, side_index, other->owner_index)) {
-                float distance =
-                        static_cast<float>(move::Distance(city->x, city->y, other->x, other->y));
+            if (other->OwnerIndex() >= 0 && other->OwnerIndex() != side_index &&
+                !other->IsRazed() && !diplomacy::IsAllied(game, side_index, other->OwnerIndex())) {
+                float distance = static_cast<float>(
+                        move::Distance(city->X(), city->Y(), other->X(), other->Y()));
                 if (distance < min_dist) min_dist = distance;
             }
         }
@@ -314,18 +317,18 @@ void Update(Game& game, Side& side) {
             if (observed.owner >= 0 && observed.owner != side_index &&
                 !diplomacy::IsAllied(game, side_index, observed.owner)) {
                 float distance = static_cast<float>(
-                        move::Distance(city->x, city->y, observed.x, observed.y));
+                        move::Distance(city->X(), city->Y(), observed.x, observed.y));
                 if (distance < min_dist) min_dist = distance;
             }
         }
-        belief.city_nearest_enemy_dist[city->index] = min_dist;
+        belief.city_nearest_enemy_dist[city->Index()] = min_dist;
 
         float threat1 = 0.0F, threat2 = 0.0F;
         for (const auto& [tile_key, observed] : belief.stacks_by_tile) {
             if (observed.owner == side_index || observed.owner == kNone ||
                 diplomacy::IsAllied(game, side_index, observed.owner))
                 continue;
-            int distance = move::Distance(city->x, city->y, observed.x, observed.y);
+            int distance = move::Distance(city->X(), city->Y(), observed.x, observed.y);
             const ArmyType* top_army_type = game.types.ById(observed.top_type);
             int estimated_move = top_army_type ? std::max(10, top_army_type->move) : 12;
             int reach1 = std::max(8, (estimated_move * 3) / 4);
@@ -347,24 +350,24 @@ void Update(Game& game, Side& side) {
             if (distance <= reach1) threat1 += estimated_strength;
             if (distance <= reach2) threat2 += estimated_strength;
 
-            if (city->owner_index == side_index && distance <= 18 && observed.owner >= 0 &&
+            if (city->OwnerIndex() == side_index && distance <= 18 && observed.owner >= 0 &&
                 observed.owner < 8) {
                 belief.their_border_strength[observed.owner] += estimated_strength;
             }
         }
-        belief.city_threat1_turn[city->index] = threat1;
-        belief.city_threat2_turn[city->index] = threat2;
+        belief.city_threat1_turn[city->Index()] = threat1;
+        belief.city_threat2_turn[city->Index()] = threat2;
     }
 
     // Compute our own border strength near each rival's visible cities
     for (Army* army : game.armies) {
-        if (army->owner != side_index || army->x == kNone || army->transit) continue;
+        if (army->OwnerIndex() != side_index || army->X() == kNone || army->InTransit()) continue;
         for (City* city : belief.visible_cities) {
-            if (city->owner_index >= 0 && city->owner_index < 8 &&
-                city->owner_index != side_index) {
-                if (move::Distance(army->x, army->y, city->x, city->y) <= 18) {
-                    belief.my_border_strength[city->owner_index] +=
-                            static_cast<float>(army->strength);
+            if (city->OwnerIndex() >= 0 && city->OwnerIndex() < 8 &&
+                city->OwnerIndex() != side_index) {
+                if (move::Distance(army->X(), army->Y(), city->X(), city->Y()) <= 18) {
+                    belief.my_border_strength[city->OwnerIndex()] +=
+                            static_cast<float>(army->Strength());
                 }
             }
         }
@@ -378,7 +381,7 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
         estimate.win_prob = 0.0F;
         return estimate;
     }
-    int side_index = side.index;
+    int side_index = side.Index();
     City* city = game::CityAt(game, target_x, target_y);
     bool target_visible = city ? IsCityVisible(game, side_index, *city)
                                : IsTileVisible(game, side_index, target_x, target_y);
@@ -388,14 +391,15 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
         return estimate;
     }
 
-    const SideBelief* existing = side.computer_player ? side.computer_player->Belief() : nullptr;
+    const SideBelief* existing = side.ComputerPlayer() ? side.ComputerPlayer()->Belief() : nullptr;
     const SideBelief& belief = existing ? *existing : Ensure(const_cast<Side&>(side));
 
     // Gather visible defender tiles (4 tiles if city, 1 tile otherwise)
     std::vector<std::pair<int, int>> defender_tiles;
     if (city) {
         for (int dy = 0; dy <= 1; dy++)
-            for (int dx = 0; dx <= 1; dx++) defender_tiles.emplace_back(city->x + dx, city->y + dy);
+            for (int dx = 0; dx <= 1; dx++)
+                defender_tiles.emplace_back(city->X() + dx, city->Y() + dy);
     } else {
         defender_tiles.emplace_back(target_x, target_y);
     }
@@ -411,33 +415,32 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
         seen_tiles++;
         int key = tile_y * game.map->width + tile_x;
         auto actual = ArmiesAt(game, tile_x, tile_y);
-        if (actual.empty() || actual[0]->owner == side_index) continue;
+        if (actual.empty() || actual[0]->OwnerIndex() == side_index) continue;
 
         if (full_view) {
             for (Army* army : actual) {
                 defenders.push_back(army);
-                estimate.estimated_defender_strength += static_cast<float>(army->strength);
+                estimate.estimated_defender_strength += static_cast<float>(army->Strength());
             }
             estimate.estimated_defender_count += static_cast<int>(actual.size());
             continue;
         }
 
         auto observed = belief.stacks_by_tile.find(key);
-        int owner = actual[0]->owner;
-        int top_type = actual[0]->type;
+        int owner = actual[0]->OwnerIndex();
+        int top_type = actual[0]->TypeIndex();
         bool tower = game::TowerAt(game, tile_x, tile_y);
         int count = tower ? 4 : static_cast<int>(actual.size());
         if (observed != belief.stacks_by_tile.end() && !observed->second.known_types.empty()) {
             for (size_t i = 0; i < observed->second.known_types.size(); i++) {
                 Army synthetic;
-                synthetic.owner = owner;
-                synthetic.x = tile_x;
-                synthetic.y = tile_y;
-                synthetic.type = observed->second.known_types[i];
-                synthetic.strength = observed->second.known_strengths[i];
+                synthetic.SetOwner(SideId(owner));
+                synthetic.PlaceAt(TilePos(tile_x, tile_y));
+                synthetic.SetType(ArmyTypeId(observed->second.known_types[i]));
+                synthetic.SetStrength(observed->second.known_strengths[i]);
                 synthetic_pool.push_back(synthetic);
                 defenders.push_back(&synthetic_pool.back());
-                estimate.estimated_defender_strength += static_cast<float>(synthetic.strength);
+                estimate.estimated_defender_strength += static_cast<float>(synthetic.Strength());
             }
             estimate.estimated_defender_count +=
                     static_cast<int>(observed->second.known_types.size());
@@ -448,20 +451,19 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
                     std::clamp(static_cast<int>(std::round(average_strength + caution_bias)), 2, 8);
             for (int i = 0; i < count; i++) {
                 Army synthetic;
-                synthetic.owner = owner;
-                synthetic.x = tile_x;
-                synthetic.y = tile_y;
+                synthetic.SetOwner(SideId(owner));
+                synthetic.PlaceAt(TilePos(tile_x, tile_y));
                 if (i == 0) {
-                    synthetic.type = top_type;
+                    synthetic.SetType(ArmyTypeId(top_type));
                     const ArmyType* army_type = game.types.ById(top_type);
-                    synthetic.strength = army_type ? army_type->strength : under_strength;
+                    synthetic.SetStrength(army_type ? army_type->strength : under_strength);
                 } else {
-                    synthetic.type = 2;
-                    synthetic.strength = under_strength;
+                    synthetic.SetType(ArmyTypeId(2));
+                    synthetic.SetStrength(under_strength);
                 }
                 synthetic_pool.push_back(synthetic);
                 defenders.push_back(&synthetic_pool.back());
-                estimate.estimated_defender_strength += static_cast<float>(synthetic.strength);
+                estimate.estimated_defender_strength += static_cast<float>(synthetic.Strength());
             }
             estimate.estimated_defender_count += count;
         }
@@ -476,40 +478,38 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
     // and no defenders were observed on the visible tiles:
     int unseen_enemy_tiles = 0;
     std::vector<Army*> unseen_fallback_defenders;
-    if (defenders.empty() && city && city->owner_index != side_index && !city->razed &&
+    if (defenders.empty() && city && city->OwnerIndex() != side_index && !city->IsRazed() &&
         seen_tiles < 4) {
-        if (city->owner_index == kNone) {
+        if (city->IsNeutral()) {
             // Neutral garrisons stand only on the city's top-left tile, so a neutral
             // garrison can only be hidden when that tile itself is unseen.
-            if (!IsTileVisible(game, side_index, city->x, city->y)) {
+            if (!IsTileVisible(game, side_index, city->X(), city->Y())) {
                 Army synthetic;
-                synthetic.owner = kNone;
-                synthetic.x = city->x;
-                synthetic.y = city->y;
-                synthetic.type = (game.map->options.neutral_cities <= 0) ? 0 : 2;
-                synthetic.strength = (game.map->options.neutral_cities <= 0) ? 1 : 4;
+                synthetic.SetOwner(SideId::None());
+                synthetic.PlaceAt(city->Position());
+                synthetic.SetType(ArmyTypeId((game.map->options.neutral_cities <= 0) ? 0 : 2));
+                synthetic.SetStrength((game.map->options.neutral_cities <= 0) ? 1 : 4);
                 synthetic_pool.push_back(synthetic);
                 defenders.push_back(&synthetic_pool.back());
                 estimate.estimated_defender_count = 1;
-                estimate.estimated_defender_strength = static_cast<float>(synthetic.strength);
+                estimate.estimated_defender_strength = static_cast<float>(synthetic.Strength());
             }
         } else {
             // Enemy city with unseen corner(s): sample unseen garrison occupancy in
             // proportion to (4 - seen tiles) / 4 across the simulated battles rather
             // than assuming a guaranteed 3-stack
             unseen_enemy_tiles = 4 - seen_tiles;
-            int owner = city->owner_index;
+            int owner = city->OwnerIndex();
             float average_strength =
                     (owner >= 0 && owner < 8) ? belief.seen_enemy_avg_strength[owner] : 4.0F;
             int estimated_strength =
                     std::clamp(static_cast<int>(std::round(average_strength + caution_bias)), 2, 7);
             for (int i = 0; i < 2; i++) {
                 Army synthetic;
-                synthetic.owner = owner;
-                synthetic.x = city->x;
-                synthetic.y = city->y;
-                synthetic.type = 2;
-                synthetic.strength = estimated_strength;
+                synthetic.SetOwner(SideId(owner));
+                synthetic.PlaceAt(city->Position());
+                synthetic.SetType(ArmyTypeId(2));
+                synthetic.SetStrength(estimated_strength);
                 synthetic_pool.push_back(synthetic);
                 unseen_fallback_defenders.push_back(&synthetic_pool.back());
             }

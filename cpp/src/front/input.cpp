@@ -73,7 +73,7 @@ static bool ComputerInput(const std::string& key) {
     // Allow opening the F10 AI Brain Inspector (under --modern-ui), panning, or adjusting zoom
     // while spectating AI turns
     if (g_app.modern_ui && key == "f10") {
-        diplomacyui::OpenBrainInspector(g_app.ai_side ? g_app.ai_side->index : kNone);
+        diplomacyui::OpenBrainInspector(g_app.ai_side ? g_app.ai_side->Index() : kNone);
         return true;
     }
     if (key == "kp+" || key == "pageup" || key == "=") {
@@ -325,8 +325,8 @@ void MoveAllStep() {
         if (g_app.walk) return;
         Army* lead = nullptr;
         for (Army* army : g_app.g->armies) {
-            if (army->owner == g_app.player->index && army->target && !army->transit &&
-                !g_app.move_all->seen.count(army)) {
+            if (army->OwnerIndex() == g_app.player->Index() && army->HasTarget() &&
+                !army->InTransit() && !g_app.move_all->seen.count(army)) {
                 lead = army;
                 break;
             }
@@ -338,14 +338,14 @@ void MoveAllStep() {
             return;
         }
         g_app.move_all->seen.insert(lead);
-        Select(lead->x, lead->y, lead);
+        Select(lead->X(), lead->Y(), lead);
         if (g_app.selection) {
             for (Army* army : g_app.selection->stack) g_app.move_all->seen.insert(army);
             // selecting a stack already where it was sent lifts the order
             // (refreshRoute), so there may be nothing left to walk to
-            if (lead->target) {
-                auto target = *lead->target;
-                MoveSelection(target.first, target.second);
+            if (lead->HasTarget()) {
+                auto target = *lead->Target();
+                MoveSelection(target.x, target.y);
                 if (g_app.move_all) g_app.move_all->moved++;
             }
         }
@@ -355,10 +355,11 @@ void MoveAllStep() {
 /** @brief Starts Order > Move All, walking the selected stack first if it has a destination. */
 static void MoveAll() {
     g_app.move_all = App::MoveAll{};
-    if (g_app.selection && !g_app.selection->stack.empty() && g_app.selection->stack[0]->target) {
-        auto target = *g_app.selection->stack[0]->target;
+    if (g_app.selection && !g_app.selection->stack.empty() &&
+        g_app.selection->stack[0]->HasTarget()) {
+        auto target = *g_app.selection->stack[0]->Target();
         for (Army* army : g_app.selection->stack) g_app.move_all->seen.insert(army);
-        MoveSelection(target.first, target.second);
+        MoveSelection(target.x, target.y);
         if (g_app.move_all) g_app.move_all->moved = 1;
     }
     MoveAllStep();
@@ -415,9 +416,9 @@ static std::map<int, std::function<void()>>& Actions() {
     // deselect.
     action_table[173] = []() {
         if (!g_app.selection || g_app.selection->stack.empty()) return;
-        auto target = g_app.selection->stack[0]->target;
+        auto target = g_app.selection->stack[0]->Target();
         if (!target) return;
-        MoveSelection(target->first, target->second);
+        MoveSelection(target->x, target->y);
     };
     action_table[174] = SelectNext;
     action_table[175] = QuitArmy;
@@ -449,10 +450,10 @@ static std::map<int, std::function<void()>>& Actions() {
     action_table[186] = []() {
         if (!g_app.selection || g_app.selection->stack.empty()) return;
         auto& sel = *g_app.selection;
-        auto target = sel.stack[0]->target;
+        auto target = sel.stack[0]->Target();
         double cam_x = g_app.cx, cam_y = g_app.cy;
         if (target && InView(sel.x, sel.y)) {
-            CentreOn(target->first, target->second);
+            CentreOn(target->x, target->y);
             if (g_app.cx == cam_x && g_app.cy == cam_y) CentreOn(sel.x, sel.y);
         } else {
             CentreOn(sel.x, sel.y);
@@ -461,9 +462,9 @@ static std::map<int, std::function<void()>>& Actions() {
     // 187 forgets the destination.
     action_table[187] = []() {
         if (!g_app.selection || g_app.selection->stack.empty() ||
-            !g_app.selection->stack[0]->target)
+            !g_app.selection->stack[0]->HasTarget())
             return;
-        for (Army* army : g_app.selection->stack) army->target.reset();
+        for (Army* army : g_app.selection->stack) army->ClearTarget();
         g_app.route.reset();
     };
     // 183-185 are one button in three faces: Diplomatic Action.
@@ -505,8 +506,8 @@ void RefreshControls() {
     set(173, walk_on);
     bool more = false;
     for (Army* army : g_app.g->armies)
-        if (army->owner == g_app.player->index && !army->transit && !army->fortified &&
-            !army->done) {
+        if (army->OwnerIndex() == g_app.player->Index() && !army->InTransit() &&
+            !army->IsFortified() && !army->IsDone()) {
             more = true;
             break;
         }
@@ -516,7 +517,7 @@ void RefreshControls() {
     set(177, sel);
     set(178, sel);
     set(186, sel);
-    set(187, sel && !sel->stack.empty() && sel->stack[0]->target);
+    set(187, sel && !sel->stack.empty() && sel->stack[0]->HasTarget());
     set(188, true);
     for (int i = 0; i < kSlotCount; i++) {
         bool live = sel && i < sel->slots.n;
@@ -531,7 +532,7 @@ void RefreshControls() {
         set(w2::uidata::kShortcutFirst + i, !key.empty() && MenuEnabled(key));
     }
     for (int i = 0; i < 8; i++) set(320 + i, true);
-    int face = diplomacyui::ButtonFor(*g_app.g, g_app.player->index);
+    int face = diplomacyui::ButtonFor(*g_app.g, g_app.player->Index());
     for (int control_id = 183; control_id <= 185; control_id++) set(control_id, control_id == face);
 }
 
@@ -588,10 +589,10 @@ static void ViewCity(int mode) {
     City* best = nullptr;
     int best_d = kNone;
     for (auto& city : g_app.g->map->cities) {
-        bool allowed = game::Seen(*g_app.g, viewer, city.x, city.y) &&
-                       (mode == city::kInfo || city.owner_index == g_app.player->index);
+        bool allowed = game::Seen(*g_app.g, viewer, city.X(), city.Y()) &&
+                       (mode == city::kInfo || city.OwnerIndex() == g_app.player->Index());
         if (allowed) {
-            int dist = std::max(std::abs(city.x - centre_x), std::abs(city.y - centre_y));
+            int dist = std::max(std::abs(city.X() - centre_x), std::abs(city.Y() - centre_y));
             if (best_d == kNone || dist < best_d) {
                 best = &city;
                 best_d = dist;
@@ -780,13 +781,13 @@ bool MenuEnabled(const std::string& menu_key) {
     w2::Game& game_state = *g_app.g;
     auto side_has_hero = [&]() {
         for (Army* army : game_state.armies)
-            if (army->owner == g_app.player->index && army->Hero()) return true;
+            if (army->OwnerIndex() == g_app.player->Index() && army->Hero()) return true;
         return false;
     };
     auto selected = []() { return g_app.selection && !g_app.selection->stack.empty(); };
     auto side_has_cities = [&]() {
         for (auto& city : game_state.map->cities)
-            if (city.owner_index == g_app.player->index && !city.razed) return true;
+            if (city.OwnerIndex() == g_app.player->Index() && !city.IsRazed()) return true;
         return false;
     };
     auto can_search = [&]() {
@@ -795,7 +796,7 @@ bool MenuEnabled(const std::string& menu_key) {
         w2::Site* site =
                 game_state.map->site_at.empty()
                         ? nullptr
-                        : game_state.map->site_at[lead->y * game_state.map->width + lead->x];
+                        : game_state.map->site_at[lead->Y() * game_state.map->width + lead->X()];
         if (!site || site->searched) return false;
         return lead->Hero() || site->type == w2::site::kTemple;
     };
@@ -803,23 +804,22 @@ bool MenuEnabled(const std::string& menu_key) {
         if (!selected()) return false;
         Army* lead = g_app.selection->stack[0];
         if (!lead->Hero()) return false;
-        if (g_app.player->index >= static_cast<int>(game_state.map->items.size())) return false;
-        w2::Item* std = &game_state.map->items[g_app.player->index];
-        if (std::find(lead->items.begin(), lead->items.end(), std) == lead->items.end())
-            return false;
-        int terrain = w2::scn::TerrainAt(*game_state.map, lead->x, lead->y);
+        if (g_app.player->Index() >= static_cast<int>(game_state.map->items.size())) return false;
+        w2::Item* std = &game_state.map->items[g_app.player->Index()];
+        if (!lead->HasItem(std)) return false;
+        int terrain = w2::scn::TerrainAt(*game_state.map, lead->X(), lead->Y());
         if (terrain == move::kWater || terrain == move::kShore || terrain == move::kCity ||
             terrain == move::kSite)
             return false;
         for (auto& item : game_state.map->items)
-            if (item.planted && item.x == lead->x && item.y == lead->y) return false;
+            if (item.planted && item.x == lead->X() && item.y == lead->Y()) return false;
         return true;
     };
     if (menu_key == "alt L") return savegame::Used() > 0;
     if (menu_key == "q" || menu_key == "s") return selected();
     if (menu_key == "x")
-        return selected() && w2::scn::TerrainAt(*game_state.map, g_app.selection->stack[0]->x,
-                                                g_app.selection->stack[0]->y) == move::kTower;
+        return selected() && w2::scn::TerrainAt(*game_state.map, g_app.selection->stack[0]->X(),
+                                                g_app.selection->stack[0]->Y()) == move::kTower;
     if (menu_key == "r" || menu_key == "b" || menu_key == "p" || menu_key == "v")
         return side_has_cities();
     if (menu_key == "d") return game_state.map->options.diplomacy != 0;
@@ -931,7 +931,7 @@ void Keypressed(const std::string& key) {
             {'2', {0, 1}},  {'1', {-1, 1}}, {'4', {-1, 0}}, {'7', {-1, -1}}};
         auto step_it = kStep.find(digit[0]);
         if (step_it != kStep.end() && g_app.selection) {
-            for (Army* army : g_app.selection->stack) army->target.reset();
+            for (Army* army : g_app.selection->stack) army->ClearTarget();
             MoveSelection(g_app.selection->x + step_it->second.first,
                           g_app.selection->y + step_it->second.second);
         }

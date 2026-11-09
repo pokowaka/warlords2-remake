@@ -48,7 +48,7 @@ bool HumansLeft() {
 
 /** @brief Whether the side's turn is shown: it is observed, or no human is left. */
 static bool ShownSide(const Side* side) {
-    return side && (side->observe || !HumansLeft());
+    return side && (side->IsObserved() || !HumansLeft());
 }
 
 /**
@@ -90,7 +90,7 @@ void InstallHooks() {
         bool seen = !HumansLeft();
         for (auto& tile : walk_result.walked) {
             if (seen) break;
-            if (game::Seen(game_state, g_app.player->index, tile.first, tile.second)) seen = true;
+            if (game::Seen(game_state, g_app.player->Index(), tile.first, tile.second)) seen = true;
         }
         if (seen) {
             Yield walk_step;
@@ -109,18 +109,18 @@ void InstallHooks() {
         if (!ai_co || !g_app.ai_status) return;
         int defender = kNone;
         if (result.lines.city)
-            defender = result.lines.city->owner_index;
+            defender = result.lines.city->OwnerIndex();
         else if (!result.lines.defenders.empty())
-            defender = result.lines.defenders[0]->owner;
+            defender = result.lines.defenders[0]->OwnerIndex();
         Side* def_side =
                 defender != kNone && defender < 8 ? &game_state.map->sides[defender] : nullptr;
-        bool human = def_side && !def_side->computer;
+        bool human = def_side && !def_side->IsComputerControlled();
         if (!(ShownSide(g_app.ai_side) || human)) return;
         std::vector<Side*> humans;
         for (Side* side : game_state.sides)
-            if (side->alive && !side->computer) humans.push_back(side);
+            if (side->IsAlive() && !side->IsComputerControlled()) humans.push_back(side);
         if (game_state.map->options.hidden_map != 0 && humans.size() == 1 &&
-            !game::Seen(game_state, humans[0]->index, x, y))
+            !game::Seen(game_state, humans[0]->Index(), x, y))
             return;
         auto text_of = [](int grp) { return kit::Text(grp, 0); };
         Army* attacking_hero = nullptr;
@@ -129,12 +129,12 @@ void InstallHooks() {
                 attacking_hero = army;
                 break;
             }
-        std::string attacker_name = g_app.ai_side->name;
+        std::string attacker_name = g_app.ai_side->Name();
         std::string outcome;
         if (!result.won)
             outcome = Format(text_of(0x98), attacker_name);
         else if (attacking_hero)
-            outcome = Format(text_of(0x8e), attacking_hero->name);
+            outcome = Format(text_of(0x8e), attacking_hero->Name());
         else
             outcome = Format(text_of(0x96), attacker_name);
         bool hidden_many = game_state.map->options.hidden_map != 0 && humans.size() > 1;
@@ -146,7 +146,7 @@ void InstallHooks() {
             CentreOn(x, y);
             StratDirty();
         }
-        Status(def_side ? Format(text_of(0x94), def_side->name) : text_of(0x95), 5);
+        Status(def_side ? Format(text_of(0x94), def_side->Name()) : text_of(0x95), 5);
         if (cloud && !g_app.ai_skip) {
             StartAssault(x, y, result);
             g_app.assault->computer = true;
@@ -201,13 +201,13 @@ static void ComputerTurns(Coroutine& coroutine, Side* side) {
         if (no_humans) yield_what("nohumans");
     };
     announce();  // a human's turn may have ended the round
-    while (side && side->computer) {
+    while (side && side->IsComputerControlled()) {
         g_app.ai_side = side;
         // each computer turn opens with a song that plays once
         sound::Music(w2::cues::kComputer, g_app.g->sides);
-        g_app.ai_status = AiStatus{side, side->name, 5};
+        g_app.ai_status = AiStatus{side, side->Name(), 5};
         yield_what("progress");
-        auto& side_news = g_app.g->TurnNews(w2::SideId(side->index));
+        auto& side_news = g_app.g->TurnNews(side->Id());
         if (ShownSide(side)) {
             auto news = side_news.diplo_news;
             for (auto& news_line : news) Status(news_line, 20);
@@ -317,7 +317,7 @@ void EndTurn() {
     g_app.selection.reset();
     g_app.route.reset();
     Side* side = game::EndTurn(*g_app.g);
-    if (side && side->computer) return PlayComputers(side);
+    if (side && side->IsComputerControlled()) return PlayComputers(side);
     FinishRound(side);
 }
 

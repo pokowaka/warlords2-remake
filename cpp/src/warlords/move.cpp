@@ -28,16 +28,16 @@ Mode StackMode(const Game& game, const Stack& stack) {
     bool all_fly = true, any_fly = false, all_non_hero_fly = true, hero_flight = false;
     bool woods = false, hills = false;
     for (Army* army : stack) {
-        const ArmyType* army_type = game.types.ById(army->type);
-        if (army->at_sea) at_sea = true;
+        const ArmyType* army_type = game.types.ById(army->Type());
+        if (army->IsAtSea()) at_sea = true;
         if (army_type->boat) any_boat = true;
-        if (army_type->flies && !army->at_sea) any_fly = true;
-        if (!army_type->flies || army->at_sea) {
+        if (army_type->flies && !army->IsAtSea()) any_fly = true;
+        if (!army_type->flies || army->IsAtSea()) {
             all_fly = false;
-            if (army->type != armytype::kHero) all_non_hero_fly = false;
+            if (!army->Hero()) all_non_hero_fly = false;
         }
-        if (army->type == armytype::kHero) {
-            for (Item* item : army->items)
+        if (army->Hero()) {
+            for (Item* item : army->Items())
                 if (item->type == rules::kItemFlight) hero_flight = true;
         }
         if (army_type->woods_move) woods = true;
@@ -66,12 +66,12 @@ bool OutOfMoves(const Stack& stack, const Path& path, int landed, WalkStop stopp
 }
 
 WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
-    int side = stack.empty() ? kNone : stack[0]->owner;
+    int side = stack.empty() ? kNone : stack[0]->OwnerIndex();
     int left = StackMoves(stack);
     WalkResult result;
     result.stopped = WalkStop::kArrived;
     for (Army* army : stack)
-        if (army->at_sea) result.sea_before = true;
+        if (army->IsAtSea()) result.sea_before = true;
     int last_ok = 0, cumulative = 0;
     std::map<int, int> cost_to;
 
@@ -83,8 +83,8 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
         }
         City* city = game.map->city_tile[step.y * game.map->width + step.x];
         auto here = game::ArmiesAt(game, step.x, step.y);
-        if (city && !city->razed && city->owner_index != side) {
-            if (!diplomacy::MayAttack(game, side, city->owner_index)) {
+        if (city && !city->IsRazed() && !city->OwnedBy(side)) {
+            if (!diplomacy::MayAttack(game, side, city->OwnerIndex())) {
                 result.stopped = WalkStop::kAtPeace;
                 break;
             }
@@ -92,8 +92,8 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
             result.attack = Attack{step.x, step.y, city};
             break;
         }
-        bool theirs = !here.empty() && here[0]->owner != side;
-        if (theirs && diplomacy::MayAttack(game, side, here[0]->owner)) {
+        bool theirs = !here.empty() && !here[0]->OwnedBy(side);
+        if (theirs && diplomacy::MayAttack(game, side, here[0]->OwnerIndex())) {
             result.stopped = WalkStop::kAttack;
             result.attack = Attack{step.x, step.y, nullptr};
             break;
@@ -116,13 +116,13 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
     const Step& dest = path[last_ok - 1];
     Mode movement = StackMode(game, stack);
     for (Army* army : stack) {
-        game.armies.Relocate(army, TilePos(dest.x, dest.y));
-        army->moves = std::max(0, army->moves - cost);
+        army->PlaceAt(TilePos(dest.x, dest.y));
+        army->SpendMoves(cost);
     }
     std::string change = SettleSea(game, stack, dest.x, dest.y, movement.mode, movement.at_sea);
     if (!change.empty()) {
         for (Army* army : stack) {
-            if (army->at_sea == (change == "to sea")) army->moves = 0;
+            if (army->IsAtSea() == (change == "to sea")) army->SetMoves(0);
         }
         result.stopped = WalkStop::kOutOfMoves;
         result.attack.reset();
@@ -151,7 +151,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
 }  // namespace
 
 bool IsPort(const Game& game, const City& city) {
-    int x = city.x, y = city.y;
+    int x = city.X(), y = city.Y();
     for (int direction : kPortTour) {
         x += kDirs[direction][0];
         y += kDirs[direction][1];
@@ -210,7 +210,7 @@ bool CrossesShore(int byte, bool at_sea) {
 int StackMoves(const Stack& stack) {
     if (stack.empty()) return 0;
     int least = INT_MAX;
-    for (Army* army : stack) least = std::min(least, army->moves);
+    for (Army* army : stack) least = std::min(least, army->Moves());
     return least;
 }
 
@@ -234,23 +234,23 @@ std::string SettleSea(Game& game, const Stack& stack, int x, int y, int mode, bo
         if (terrain != kWater && terrain != kShore) return "";
         bool flier = false, walker = false;
         for (Army* army : stack) {
-            if (game.types.ById(army->type)->flies)
+            if (game.types.ById(army->Type())->flies)
                 flier = true;
-            else if (army->type != armytype::kHero)
+            else if (!army->Hero())
                 walker = true;
         }
         if (walker) flier = false;
         std::string change;
         for (Army* army : stack) {
-            if (!game.types.ById(army->type)->flies && (army->type != armytype::kHero || !flier)) {
-                army->at_sea = true;
+            if (!game.types.ById(army->Type())->flies && (!army->Hero() || !flier)) {
+                army->BoardShip();
                 change = "to sea";
             }
         }
         return change;
     }
     if (terrain != kWater && terrain != kShore && terrain != kBridge) {
-        for (Army* army : stack) army->at_sea = false;
+        for (Army* army : stack) army->ComeAshore();
         return "ashore";
     }
     return "";
@@ -311,7 +311,7 @@ WalkResult MoveTo(Game& game, const Stack& stack, int x, int y) {
 std::optional<move::Preview> Pathfinder::PreviewRoute(Game& game, const move::Stack& stack, int x,
                                                       int y) {
     if (stack.empty()) return std::nullopt;
-    auto path = FindPath(game, stack, stack[0]->x, stack[0]->y, x, y);
+    auto path = FindPath(game, stack, stack[0]->X(), stack[0]->Y(), x, y);
     if (!path || path->empty()) return std::nullopt;
     int left = move::StackMoves(stack);
     int reach = 0;
@@ -337,7 +337,7 @@ move::WalkResult Pathfinder::MoveTo(Game& game, const move::Stack& stack, int x,
         result.stopped = move::WalkStop::kBlocked;
         return result;
     }
-    auto path = FindPath(game, stack, stack[0]->x, stack[0]->y, x, y);
+    auto path = FindPath(game, stack, stack[0]->X(), stack[0]->Y(), x, y);
     if (!path) {
         result.stopped = move::WalkStop::kNoRoute;
         return result;

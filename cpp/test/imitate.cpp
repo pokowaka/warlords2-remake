@@ -106,9 +106,9 @@ int LabelSnapshot(Game& game, int my_side, const ai::modern::MissionSnapshot& sn
     City* start_city =
             snapshot.start_city != kNone ? &game.map->cities[snapshot.start_city] : nullptr;
     auto stayed = [&](Army* army) {
-        if (army->x == kNone) return false;
-        if (start_city) return game::CityAt(game, army->x, army->y) == start_city;
-        return army->x == snapshot.start_x && army->y == snapshot.start_y;
+        if (army->X() == kNone) return false;
+        if (start_city) return game::CityAt(game, army->X(), army->Y()) == start_city;
+        return army->X() == snapshot.start_x && army->Y() == snapshot.start_y;
     };
 
     // The reference army: the first of the group (in the Modern AI's order) that left alive
@@ -148,7 +148,7 @@ int LabelSnapshot(Game& game, int my_side, const ai::modern::MissionSnapshot& sn
         return pick_size(holds, static_cast<int>(snapshot.group.size()));
     }
 
-    const int end_x = mover->x, end_y = mover->y;
+    const int end_x = mover->X(), end_y = mover->Y();
     if (end_x == kNone) return -1;
     City* end_city = game::CityAt(game, end_x, end_y);
     auto city_options = [&](int city_index) {
@@ -162,8 +162,8 @@ int LabelSnapshot(Game& game, int my_side, const ai::modern::MissionSnapshot& sn
     };
     std::vector<size_t> matches;
     const ClassicArmyOrder& mover_ord = ai::core::OrderOf(game, mover);
-    if (end_city && end_city->owner_index == my_side && end_city != start_city) {
-        matches = city_options(end_city->index);
+    if (end_city && end_city->OwnedBy(my_side) && end_city != start_city) {
+        matches = city_options(end_city->Index());
     } else if (mover_ord.order == ai::core::kOrderCity && mover_ord.dest != kNone) {
         matches = city_options(mover_ord.dest);
     } else {
@@ -196,9 +196,10 @@ int LabelSnapshot(Game& game, int my_side, const ai::modern::MissionSnapshot& sn
     int along = 0;
     for (std::uintptr_t army_id : snapshot.group) {
         Army* army = reinterpret_cast<Army*>(army_id);
-        if (!game.Alive(army) || army->x == kNone || stayed(army)) continue;
-        City* city = game::CityAt(game, army->x, army->y);
-        if ((end_city && city == end_city) || Dist(army->x, army->y, end_x, end_y) <= 1) along++;
+        if (!game.Alive(army) || army->X() == kNone || stayed(army)) continue;
+        City* city = game::CityAt(game, army->X(), army->Y());
+        if ((end_city && city == end_city) || Dist(army->X(), army->Y(), end_x, end_y) <= 1)
+            along++;
     }
     (void)movers;
     return pick_size(matches, std::max(1, along));
@@ -339,7 +340,7 @@ int main(int argc, char** argv) {
                 Game& game = *game_ptr;
                 std::vector<int> in_use;
                 for (int side = 0; side < 8; side++) {
-                    if (game.map->sides[side].in_use) in_use.push_back(side);
+                    if (game.map->sides[side].InUse()) in_use.push_back(side);
                     ai::SetSideClassicAi(game, game.map->sides[side], true);
                 }
                 if (in_use.empty()) continue;
@@ -352,16 +353,16 @@ int main(int argc, char** argv) {
                 int safety = 0;
                 while (current && !game.over && !game.won && game.turn <= turns &&
                        safety++ < turns * 12) {
-                    if (current->computer && current->alive) {
+                    if (current->IsComputerControlled() && current->IsAlive()) {
                         const bool recorded =
-                                (current->index == recorded_a || current->index == recorded_b);
+                                (current->Index() == recorded_a || current->Index() == recorded_b);
                         std::vector<ai::modern::MissionSnapshot> snaps;
                         if (recorded) snaps = ai::modern::SnapshotMissions(game, *current, net);
                         ai::PlayTurn(game, *current, nullptr);
                         for (auto& snapshot : snaps) {
                             local_snaps++;
                             if (snapshot.candidates.size() < 2) continue;
-                            int label = LabelSnapshot(game, current->index, snapshot);
+                            int label = LabelSnapshot(game, current->Index(), snapshot);
                             if (label < 0) continue;
                             Example example;
                             example.candidates = std::move(snapshot.candidates);

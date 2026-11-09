@@ -39,7 +39,7 @@ struct Levels : kit::Modal {
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(kTextGroup, 0), 320, 63);
-        const Font& head = font.Colours(side->colour, side->edge);
+        const Font& head = font.Colours(side->Colour(), side->Edge());
         head.Draw(kit::Text(kTextGroup, 1), 128, 105);
         head.Draw(kit::Text(kTextGroup, 2), 272, 105);
         const int column_x[4] = {392, 440, 488, 536};
@@ -48,20 +48,22 @@ struct Levels : kit::Modal {
         for (size_t i = 0; i < rows.size(); i++) {
             w2::Army* hero = rows[i];
             int y = 128 + 30 * static_cast<int>(i);
-            int level = hero->level ? hero->level : 1;
-            kit::Army(w2::armytype::kHero, side->index, 88, y, level == 4 ? side->index + 2 : 1);
+            int level = hero->Level() ? hero->Level() : 1;
+            kit::Army(w2::armytype::kHero, side->Index(), 88, y,
+                      level == 4 ? side->Index() + 2 : 1);
             gfx::SetColor(1, 1, 1);
-            font.Draw(hero->name, 128, y + 6);
-            font.Draw(kit::Text(hero->female ? kTitlesFemale : kTitlesMale, level - 1), 272, y + 6);
-            kit::Centred(font, absl::StrFormat("%d", hero->experience), 392, y + 6);
+            font.Draw(hero->Name(), 128, y + 6);
+            font.Draw(kit::Text(hero->IsFemale() ? kTitlesFemale : kTitlesMale, level - 1), 272,
+                      y + 6);
+            kit::Centred(font, absl::StrFormat("%d", hero->Experience()), 392, y + 6);
             kit::Centred(font,
                          Needs(level) != w2::kNone ? absl::StrFormat("%d", Needs(level)) : "-", 440,
                          y + 6);
-            kit::Centred(font, absl::StrFormat("%d", hero->strength), 488, y + 6);
-            kit::Centred(font, absl::StrFormat("%d", hero->max_moves), 536, y + 6);
+            kit::Centred(font, absl::StrFormat("%d", hero->Strength()), 488, y + 6);
+            kit::Centred(font, absl::StrFormat("%d", hero->MaxMoves()), 536, y + 6);
         }
         for (int i = static_cast<int>(rows.size()); i < 6; i++)
-            kit::Army(w2::kNone, side->index, 88, 128 + 30 * i, 1);
+            kit::Army(w2::kNone, side->Index(), 88, 128 + 30 * i, 1);
         kit::DrawControls(dialog_view);
     }
     void Mousepressed(int x, int y, int) override {
@@ -86,8 +88,8 @@ void Open() {
     for (int level = 4; level >= 1; level--) {
         for (int i = static_cast<int>(g_app.g->armies.size()) - 1; i >= 0; i--) {
             w2::Army* army = g_app.g->armies[i];
-            if (army->Hero() && army->owner == g_app.player->index &&
-                (army->level ? army->level : 1) == level)
+            if (army->Hero() && army->OwnerIndex() == g_app.player->Index() &&
+                (army->Level() ? army->Level() : 1) == level)
                 dialog->rows.push_back(army);
         }
     }

@@ -12,7 +12,7 @@
 
 namespace w2 {
 
-struct Army;
+class Army;
 struct HeroOffer;
 struct QuestResult;
 

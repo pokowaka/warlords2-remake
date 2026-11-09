@@ -30,7 +30,7 @@ const int kOffer[3] = {372, 380, 388};  // a row of 7 each: war, uneasy, peace
 
 /** @brief Whether side `side` is a valid index, in the scenario and still alive. */
 bool Playing(const w2::Game& game, int side) {
-    return side >= 0 && side < 8 && game.map->sides[side].in_use && game.map->sides[side].alive;
+    return side >= 0 && side < 8 && game.map->sides[side].IsActive();
 }
 
 /**
@@ -38,8 +38,8 @@ bool Playing(const w2::Game& game, int side) {
  * the first side still playing.
  */
 int ActiveViewerIndex(const w2::Game& game) {
-    if (g_app.player && g_app.player->index >= 0 && g_app.player->index < 8)
-        return g_app.player->index;
+    if (g_app.player && g_app.player->Index() >= 0 && g_app.player->Index() < 8)
+        return g_app.player->Index();
     for (int i = 0; i < 8; i++) {
         if (Playing(game, i)) return i;
     }
@@ -121,9 +121,9 @@ struct ClassicReport : kit::Modal {
         kit::Centred(font, kit::Text(0x6d, 0), 472, 116);
         for (size_t i = 0; i < order.size(); i++) {
             int y = 146 + 29 * static_cast<int>(i);
-            SmallShield(order[i]->index, 400, y);
+            SmallShield(order[i]->Index(), 400, y);
             gfx::SetColor(1, 1, 1);
-            font.Draw(titles[order[i]->index], 432, y);
+            font.Draw(titles[order[i]->Index()], 432, y);
         }
         kit::DrawControls(v, hidden);
     }
@@ -158,10 +158,10 @@ void OpenClassicReport() {
     if (!w2::game::HasActiveHuman(*g_app.g)) report->hidden.insert(kAction);
     report->titles = dip::Ratings(*g_app.g);
     for (w2::Side* side : g_app.g->sides)
-        if (side->alive) report->order.push_back(side);
+        if (side->IsAlive()) report->order.push_back(side);
     w2::LuaSort(report->order, [](w2::Side* lhs, w2::Side* rhs) {
-        if (lhs->diplo_score != rhs->diplo_score) return lhs->diplo_score < rhs->diplo_score;
-        return lhs->index < rhs->index;
+        if (lhs->DiploScore() != rhs->DiploScore()) return lhs->DiploScore() < rhs->DiploScore();
+        return lhs->Index() < rhs->Index();
     });
     kit::Push(report);
 }
@@ -185,7 +185,7 @@ struct ClassicAction : kit::Modal {
         kit::Shield(viewer, 96, 111);
         const Font& font = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
-        font.Draw(my_side.name, 144, 122);
+        font.Draw(my_side.Name(), 144, 122);
         const int row_ys[7] = {165, 205, 251, 271, 291, 311, 331};
         for (int i = 0; i < 7; i++) font.Draw(kit::Text(0x6e, i), 104, row_ys[i]);
         for (size_t col = 0; col < others.size(); col++) {
@@ -407,9 +407,9 @@ void DrawButton(int x, int y, int width, int height, const std::string& label, b
  * sides (the Lich King's) are lifted to readable tones.
  */
 const Font& SideBannerFont(const Font& big_font, const w2::Side& side) {
-    if (side.colour == 0) return big_font.Colours(15, side.edge == 0 ? 9 : side.edge);
-    if (side.colour == 6) return big_font.Colours(5, 0);
-    return big_font.Colours(side.colour, side.edge);
+    if (side.Colour() == 0) return big_font.Colours(15, side.Edge() == 0 ? 9 : side.Edge());
+    if (side.Colour() == 6) return big_font.Colours(5, 0);
+    return big_font.Colours(side.Colour(), side.Edge());
 }
 
 void OpenReport();
@@ -474,9 +474,9 @@ struct ReportDialog : kit::Modal {
         gfx::Rectangle(gfx::kFill, 394, 138, 156, 1);
         for (size_t i = 0; i < order.size(); i++) {
             int y = 146 + 29 * static_cast<int>(i);
-            SmallShield(order[i]->index, 400, y);
+            SmallShield(order[i]->Index(), 400, y);
             gfx::SetColor(1, 1, 1);
-            std::string title = FitText(font, titles[order[i]->index], 120, false);
+            std::string title = FitText(font, titles[order[i]->Index()], 120, false);
             font.Draw(title, 424, y);
         }
         // Centred between ACTION (96..160) and DONE (480..544)
@@ -504,7 +504,7 @@ struct ReportDialog : kit::Modal {
             }
         }
         for (size_t i = 0; i < order.size(); i++) {
-            int side_index = order[i]->index;
+            int side_index = order[i]->Index();
             if (side_index == viewer) continue;
             kit::Rect rate_row{394, 142 + 29 * static_cast<int>(i), 156, 26};
             if (rate_row.Contains(x, y)) {
@@ -541,10 +541,10 @@ void OpenReport() {
     report->v.state[kDone] = report->v.state[kAction] = w2::uidata::kNormal;
     report->titles = dip::Ratings(*g_app.g);
     for (w2::Side* side : g_app.g->sides)
-        if (side->alive) report->order.push_back(side);
+        if (side->IsAlive()) report->order.push_back(side);
     w2::LuaSort(report->order, [](w2::Side* lhs, w2::Side* rhs) {
-        if (lhs->diplo_score != rhs->diplo_score) return lhs->diplo_score < rhs->diplo_score;
-        return lhs->index < rhs->index;
+        if (lhs->DiploScore() != rhs->DiploScore()) return lhs->DiploScore() < rhs->DiploScore();
+        return lhs->Index() < rhs->Index();
     });
     kit::Push(report);
 }
@@ -569,7 +569,7 @@ struct ActionDialog : kit::Modal {
         const Font& font = kit::GetFont(2);
         const Font& tiny_font = kit::GetFont(0);
         gfx::SetColor(1, 1, 1);
-        SideBannerFont(font, my_side).Draw(FitText(font, my_side.name, 122, false), 144, 122);
+        SideBannerFont(font, my_side).Draw(FitText(font, my_side.Name(), 122, false), 144, 122);
         const int row_ys[7] = {165, 205, 251, 271, 291, 311, 331};
         for (int i = 0; i < 7; i++) font.Draw(kit::Text(0x6e, i), 104, row_ys[i]);
         for (size_t col = 0; col < others.size(); col++) {
@@ -775,7 +775,7 @@ struct ParleyModal : kit::Modal {
         std::string archetype_tag = "[" + CleanText(profile.archetype) + "]";
         int archetype_width = small_font.Width(archetype_tag);
         int max_title_width = 432 - archetype_width - 10;
-        std::string side_label = CleanText(other_side.name, false);
+        std::string side_label = CleanText(other_side.Name(), false);
         int side_width = big_font.Width(side_label);
         gfx::SetColor(1, 1, 1);
         SideBannerFont(big_font, other_side).Draw(side_label, 128, 77);
@@ -852,7 +852,7 @@ struct ParleyModal : kit::Modal {
         int war_target = dip::WarTarget(game, viewer, other);
         std::string war_target_name =
                 (war_target >= 0 && war_target < 8 && Playing(game, war_target))
-                        ? game.map->sides[war_target].name
+                        ? game.map->sides[war_target].Name()
                         : "None";
 
         DrawButton(btn_ally.x, btn_ally.y, btn_ally.w, btn_ally.h,
@@ -873,7 +873,7 @@ struct ParleyModal : kit::Modal {
                    "Gift -50g", false, gold_offer <= 0, 13);
         DrawButton(btn_gold_plus.x, btn_gold_plus.y, btn_gold_plus.w, btn_gold_plus.h,
                    absl::StrFormat("Gift +%dg", gold_offer + 50), gold_offer > 0,
-                   gold_offer + 50 > my_side.gold, 13);
+                   gold_offer + 50 > my_side.Gold(), 13);
 
         DrawButton(btn_joint_war.x, btn_joint_war.y, btn_joint_war.w, btn_joint_war.h,
                    "War Target: " + war_target_name, war_target != w2::kNone, false, 9);
@@ -881,7 +881,7 @@ struct ParleyModal : kit::Modal {
         // Bottom Panel: Diplomatic Forecast (72, 316, 496 x 72)
         DrawSunkenPanel(
                 72, 316, 496, 72, "DIPLOMATIC FORECAST",
-                absl::StrFormat("Treasury: %d gp   Gift Offer: %d gp", my_side.gold, gold_offer),
+                absl::StrFormat("Treasury: %d gp   Gift Offer: %d gp", my_side.Gold(), gold_offer),
                 5);
 
         gfx::SetScissor(74, 336, 492, 50);
@@ -893,11 +893,12 @@ struct ParleyModal : kit::Modal {
         }
         if (allied && dip::AlliedTargetCity(game, other) != w2::kNone) {
             if (const w2::City* target_city = game.map->City(dip::AlliedTargetCity(game, other))) {
-                std::string target_text = FitText(
-                        small_font,
-                        absl::StrFormat("Allied War Target: %s (%d, %d)", target_city->name.c_str(),
-                                        target_city->x, target_city->y),
-                        478);
+                std::string target_text =
+                        FitText(small_font,
+                                absl::StrFormat("Allied War Target: %s (%d, %d)",
+                                                target_city->Name().c_str(), target_city->X(),
+                                                target_city->Y()),
+                                478);
                 small_font.Colours(10, 0).Draw(target_text, 80, 369);
             }
         } else if (forecast_y <= 368) {
@@ -953,7 +954,7 @@ struct ParleyModal : kit::Modal {
             dip::SetGoldOffer(game, viewer, other, std::max(0, offer - 50));
         } else if (btn_gold_plus.Contains(x, y)) {
             int offer = dip::GoldOffer(game, viewer, other);
-            if (offer + 50 <= game.map->sides[viewer].gold) {
+            if (offer + 50 <= game.map->sides[viewer].Gold()) {
                 dip::SetGoldOffer(game, viewer, other, offer + 50);
             }
         } else if (btn_joint_war.Contains(x, y)) {
@@ -1081,7 +1082,8 @@ struct MissiveModal : kit::Modal {
         // Diplomatic Context Box
         DrawSunkenPanel(
                 100, 260, 440, 78, "DIPLOMATIC CONTEXT",
-                absl::StrFormat("Your Treasury: %d gp", g_app.player ? g_app.player->gold : 0), 5);
+                absl::StrFormat("Your Treasury: %d gp", g_app.player ? g_app.player->Gold() : 0),
+                5);
         gfx::SetScissor(102, 280, 436, 56);
         auto context_lines = WrapText(small_font, m.reason_summary, 420);
         int context_y = 283;
@@ -1092,7 +1094,7 @@ struct MissiveModal : kit::Modal {
         }
         gfx::SetScissor();
 
-        int my_gold = g_app.player ? g_app.player->gold : 0;
+        int my_gold = g_app.player ? g_app.player->Gold() : 0;
         bool can_afford = (m.gold_demand <= 0 || my_gold >= m.gold_demand);
         DrawButton(btn_accept.x, btn_accept.y, btn_accept.w, btn_accept.h,
                    m.gold_demand > 0 ? absl::StrFormat("Pay %dg + Accept", m.gold_demand)
@@ -1112,10 +1114,10 @@ struct MissiveModal : kit::Modal {
         w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         if (btn_accept.Contains(x, y)) {
-            if (m.gold_demand > 0 && game.map->sides[viewer].gold < m.gold_demand) return;
+            if (m.gold_demand > 0 && game.map->sides[viewer].Gold() < m.gold_demand) return;
             if (m.gold_demand > 0) {
-                game.map->sides[viewer].gold -= m.gold_demand;
-                game.map->sides[m.from_side].gold += m.gold_demand;
+                game.map->sides[viewer].SpendGold(m.gold_demand);
+                game.map->sides[m.from_side].AddGold(m.gold_demand);
             }
             dip::Propose(game, viewer, m.from_side, m.proposed_state);
             dip::Propose(game, m.from_side, viewer, m.proposed_state);
@@ -1176,7 +1178,7 @@ struct BrainInspectorModal : kit::Modal {
         w2::Game& game = *g_app.g;
         if (!Playing(game, side_idx)) {
             for (int candidate = 0; candidate < 8; candidate++) {
-                if (Playing(game, candidate) && game.map->sides[candidate].computer) {
+                if (Playing(game, candidate) && game.map->sides[candidate].IsComputerControlled()) {
                     side_idx = candidate;
                     break;
                 }
@@ -1211,7 +1213,7 @@ struct BrainInspectorModal : kit::Modal {
         DrawSunkenPanel(56, 67, 528, 58);
         kit::Shield(side_idx, 64, 76);
 
-        std::string side_title = CleanText(side.name, false);
+        std::string side_title = CleanText(side.Name(), false);
         int title_width = big_font.Width(side_title);
         gfx::SetColor(1, 1, 1);
         SideBannerFont(big_font, side).Draw(FitText(big_font, side_title, 260, false), 112, 71);
@@ -1224,11 +1226,11 @@ struct BrainInspectorModal : kit::Modal {
 
         int explored_percent =
                 static_cast<int>(std::round((1.0F - belief.frontier_ratio) * 100.0F));
-        float board_val = side.computer_player ? side.computer_player->LastBoardValue() : 0.0F;
+        float board_val = side.ComputerPlayer() ? side.ComputerPlayer()->LastBoardValue() : 0.0F;
         std::string evaluation =
                 absl::StrFormat("[%s]  V(s):%+.2f  Expl:%d%%  Cit:%d  Gold:%d gp",
                                 profile.archetype.c_str(), board_val, explored_percent,
-                                static_cast<int>(belief.visible_cities.size()), side.gold);
+                                static_cast<int>(belief.visible_cities.size()), side.Gold());
         int value_colour = board_val >= 0.05F ? 10 : (board_val <= -0.05F ? 8 : 7);
         small_font.Colours(value_colour, 0).Draw(FitText(small_font, evaluation, 464), 112, 106);
 
@@ -1282,7 +1284,7 @@ struct BrainInspectorModal : kit::Modal {
             if (rival == side_idx || !Playing(game, rival)) continue;
             if (rival_y > 279) break;
             SmallShield(rival, 284, rival_y - 1);
-            std::string rival_name = FitText(small_font, game.map->sides[rival].name, 106);
+            std::string rival_name = FitText(small_font, game.map->sides[rival].Name(), 106);
             small_font.Draw(rival_name, 304, rival_y);
             kit::Right(small_font.Colours(7, 0),
                        absl::StrFormat("%d", belief.visible_cities_by_side[rival]), 434, rival_y);
@@ -1303,8 +1305,8 @@ struct BrainInspectorModal : kit::Modal {
         DrawSunkenPanel(56, 301, 528, 135, "RECENT NEURAL POLICY DECISIONS",
                         "Left/Right: Switch Side", 1);
         gfx::SetScissor(58, 321, 524, 113);
-        auto thoughts = side.computer_player ? side.computer_player->Thoughts()
-                                             : w2::IComputerPlayer::ThoughtSpan{};
+        auto thoughts = side.ComputerPlayer() ? side.ComputerPlayer()->Thoughts()
+                                              : w2::IComputerPlayer::ThoughtSpan{};
         if (thoughts.empty()) {
             small_font.Colours(1, 0).Draw(
                     "No neural thoughts recorded yet (advance a turn to watch this AI act).", 66,
@@ -1433,16 +1435,16 @@ void OpenParley(int other_side, bool return_to_action) {
  */
 void PollMissives(kit::Done after) {
     if (!g_app.modern_ui) {
-        if (g_app.player) g_app.player->missives.clear();
+        if (g_app.player) g_app.player->ClearMissives();
         if (after) after();
         return;
     }
-    if (!g_app.g || !g_app.player || g_app.player->computer || g_app.player->missives.empty()) {
+    if (!g_app.g || !g_app.player || g_app.player->IsComputerControlled() ||
+        g_app.player->Missives().empty()) {
         if (after) after();
         return;
     }
-    w2::DiplomaticMissive missive = g_app.player->missives.front();
-    g_app.player->missives.erase(g_app.player->missives.begin());
+    w2::DiplomaticMissive missive = g_app.player->PopFrontMissive();
     if (!Playing(*g_app.g, missive.from_side)) {
         PollMissives(after);
         return;
@@ -1464,7 +1466,7 @@ void OpenBrainInspector(int initial_side) {
         inspector->side_idx = initial_side;
     } else {
         for (int i = 0; i < 8; i++) {
-            if (Playing(*g_app.g, i) && g_app.g->map->sides[i].computer) {
+            if (Playing(*g_app.g, i) && g_app.g->map->sides[i].IsComputerControlled()) {
                 inspector->side_idx = i;
                 break;
             }

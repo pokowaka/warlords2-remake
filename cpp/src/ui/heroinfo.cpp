@@ -64,7 +64,7 @@ std::string Effect(const w2::Item* item) {
  */
 int ItemSum(const w2::Army* hero, int item_type) {
     int total = 0;
-    for (w2::Item* item : hero->items) {
+    for (w2::Item* item : hero->Items()) {
         if (item->type == item_type) total += item->value;
         if (item_type == rules::kItemCommand && item->type == rules::kItemStandard) total++;
     }
@@ -138,32 +138,33 @@ struct HeroInfo : kit::Modal {
         front::DrawStrategicMap(kMapX, kMapY, nullptr, true);
         for (size_t i = 0; i < heroes.size(); i++)
             if (static_cast<int>(i) != current_hero)
-                front::DrawHeroFigure(kMapX, kMapY, heroes[i]->x, heroes[i]->y, true);
-        front::DrawHeroFigure(kMapX, kMapY, hero->x, hero->y);
+                front::DrawHeroFigure(kMapX, kMapY, heroes[i]->X(), heroes[i]->Y(), true);
+        front::DrawHeroFigure(kMapX, kMapY, hero->X(), hero->Y());
         kit::SetPal(0);
         kit::Outline(308, 206, 248, 129);
         kit::Bevel(307, 205, 250, 131, 4, 2);
         gfx::SetColor(1, 1, 1);
-        kit::Centred(kit::GetFont(1), hero->name, 432, 62);
-        kit::Army(w2::armytype::kHero, g_app.player->index, 304, 110, 1);
+        kit::Centred(kit::GetFont(1), hero->Name(), 432, 62);
+        kit::Army(w2::armytype::kHero, g_app.player->Index(), 304, 110, 1);
         // The rest of his stack, then empty rings up to eight.
         int stack_slot = 1;
-        for (w2::Army* army : w2::game::ArmiesAt(*g_app.g, hero->x, hero->y)) {
+        for (w2::Army* army : w2::game::ArmiesAt(*g_app.g, hero->X(), hero->Y())) {
             if (army != hero && stack_slot < 8) {
-                kit::Army(army->type, army->owner, 304 + stack_slot * 32, 110, 1);
+                kit::Army(army->TypeIndex(), army->OwnerIndex(), 304 + stack_slot * 32, 110, 1);
                 stack_slot++;
             }
         }
         for (int j = stack_slot; j <= 7; j++)
-            kit::Army(w2::kNone, g_app.player->index, 304 + j * 32, 110, 1);
-        w2::City* in_city = w2::game::CityAt(*g_app.g, hero->x, hero->y);
+            kit::Army(w2::kNone, g_app.player->Index(), 304 + j * 32, 110, 1);
+        w2::City* in_city = w2::game::CityAt(*g_app.g, hero->X(), hero->Y());
         // The nearest city the viewer has seen.
         w2::City* near = nullptr;
         int near_distance = w2::kNone;
         int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
         for (auto& city : g_app.g->map->cities) {
-            if (w2::game::Seen(*g_app.g, viewer, city.x, city.y)) {
-                int distance = std::max(std::abs(city.x - hero->x), std::abs(city.y - hero->y));
+            if (w2::game::Seen(*g_app.g, viewer, city.X(), city.Y())) {
+                int distance =
+                        std::max(std::abs(city.X() - hero->X()), std::abs(city.Y() - hero->Y()));
                 if (near_distance == w2::kNone || distance < near_distance) {
                     near = &city;
                     near_distance = distance;
@@ -171,7 +172,7 @@ struct HeroInfo : kit::Modal {
             }
         }
         int battle = ItemSum(hero, rules::kItemBattle);
-        int command = w2::combat::kHeroTable[std::max(0, std::min(9, hero->strength + battle))] +
+        int command = w2::combat::kHeroTable[std::max(0, std::min(9, hero->Strength() + battle))] +
                       ItemSum(hero, rules::kItemCommand);
         gfx::SetColor(1, 1, 1);
         kit::Right(font, kit::Text(kStringGroup, in_city ? 1 : 0), 384, 145);
@@ -179,11 +180,11 @@ struct HeroInfo : kit::Modal {
         kit::Right(font, kit::Text(kStringGroup, 3), 384, 185);
         kit::Right(font, kit::Text(kStringGroup, 4), 528, 165);
         kit::Right(font, kit::Text(kStringGroup, 5), 528, 185);
-        font.Draw(near ? near->name : "", 392, 145);
+        font.Draw(near ? near->Name() : "", 392, 145);
         font.Draw(absl::StrFormat("+%d", battle), 392, 165);
         font.Draw(absl::StrFormat("+%d", command), 392, 185);
-        font.Draw(absl::StrFormat("%d", hero->level ? hero->level : 1), 536, 165);
-        font.Draw(absl::StrFormat("%d", hero->experience), 536, 185);
+        font.Draw(absl::StrFormat("%d", hero->Level() ? hero->Level() : 1), 536, 165);
+        font.Draw(absl::StrFormat("%d", hero->Experience()), 536, 185);
         font.Draw(w2::Format(kit::Text(kStringGroup, 6), current_hero + 1,
                              static_cast<int>(heroes.size())),
                   312, 347);
@@ -259,16 +260,16 @@ void Open() {
     auto dialog = std::make_shared<HeroInfo>();
     for (int i = static_cast<int>(g_app.g->armies.size()) - 1; i >= 0; i--) {
         w2::Army* army = g_app.g->armies[i];
-        if (army->Hero() && army->owner == g_app.player->index && !army->transit &&
-            army->x != w2::kNone)
+        if (army->Hero() && army->OwnerIndex() == g_app.player->Index() && !army->InTransit() &&
+            army->X() != w2::kNone)
             dialog->heroes.push_back(army);
     }
     if (dialog->heroes.empty()) return;
     auto [centre_x, centre_y] = front::ViewCentre();
     int nearest = 0, best = w2::kNone;
     for (size_t i = 0; i < dialog->heroes.size(); i++) {
-        int distance = std::max(std::abs(dialog->heroes[i]->x - centre_x),
-                                std::abs(dialog->heroes[i]->y - centre_y));
+        int distance = std::max(std::abs(dialog->heroes[i]->X() - centre_x),
+                                std::abs(dialog->heroes[i]->Y() - centre_y));
         if (best == w2::kNone || distance < best) {
             nearest = static_cast<int>(i);
             best = distance;

@@ -37,7 +37,7 @@ struct BuyDialog : kit::Modal {
     void Refresh() {
         auto& states = dialog_view.state;
         states[kDone] = w2::uidata::kNormal;
-        bool full = city->slots.size() >= 4;
+        bool full = city->SlotCount() >= 4;
         for (int i = 0; i < 4; i++)
             states[kSlotFirst + i] = full ? w2::uidata::kNormal : w2::uidata::kDisabled;
         for (size_t type_index = 0; type_index < types.size(); type_index++)
@@ -62,13 +62,13 @@ struct BuyDialog : kit::Modal {
         if (!w2::game::CannotBuy(*g_app.g, *g_app.player, *city, *type).empty()) return;
         w2::game::BuyProduction(*g_app.g, *g_app.player, *city, slot, type->id);
         // On to the next empty slot, if there is one.
-        if (slot < 3 && slot + 1 >= static_cast<int>(city->slots.size())) slot++;
+        if (slot < 3 && slot + 1 >= city->SlotCount()) slot++;
         Refresh();
     }
 
     /** @brief Draws the title, the city's slots, the gold and the types for sale. */
     void Draw() override {
-        int side = g_app.player->index;
+        int side = g_app.player->Index();
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(kStringGroup, 0), 320, 64);
@@ -76,14 +76,15 @@ struct BuyDialog : kit::Modal {
         kit::Shield(side, 512, 64);
         const Font& body = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
-        kit::Centred(body, w2::Format(kit::Text(kStringGroup, 1), g_app.player->name, city->name),
+        kit::Centred(body,
+                     w2::Format(kit::Text(kStringGroup, 1), g_app.player->Name(), city->Name()),
                      320, 104);
-        kit::Centred(body, w2::Format(kit::Text(kStringGroup, 2), g_app.player->gold), 352, 365);
+        kit::Centred(body, w2::Format(kit::Text(kStringGroup, 2), g_app.player->Gold()), 352, 365);
         kit::Centred(body, kit::Text(kStringGroup, 3), 176, 348);
         for (int i = 0; i < 4; i++) {
-            bool have = i < static_cast<int>(city->slots.size());
+            bool have = i < city->SlotCount();
             int x = 104 + i * 40;
-            kit::Army(have ? city->slots[i].type : w2::kNone, side, x, 370, have ? side + 2 : 1);
+            kit::Army(have ? city->SlotAt(i).type : w2::kNone, side, x, 370, have ? side + 2 : 1);
             int frame_x = x - 2, frame_y = 368;
             if (slot == i) {
                 kit::SetPal(0);

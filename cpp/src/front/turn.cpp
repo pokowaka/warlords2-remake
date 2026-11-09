@@ -65,11 +65,11 @@ void AttackTile(int x, int y) {
     if (!g_app.selection || g_app.selection->stack.empty()) return;
     auto& sel = *g_app.selection;
     w2::Game& game_state = *g_app.g;
-    int player_index = g_app.player->index;
+    int player_index = g_app.player->Index();
     auto here = game::ArmiesAt(game_state, x, y);
     City* city = game::CityAt(game_state, x, y);
-    if (city && city->razed) city = nullptr;
-    int owner = !here.empty() ? here[0]->owner : (city ? city->owner_index : kNone);
+    if (city && city->IsRazed()) city = nullptr;
+    int owner = !here.empty() ? here[0]->OwnerIndex() : (city ? city->OwnerIndex() : kNone);
     if (w2::diplomacy::MustDeclare(game_state, player_index, owner, city)) {
         input::Options options;
         options.title = kit::Text(kWarGroup, 0);
@@ -118,8 +118,8 @@ void MoveSelection(int x, int y) {
         Say(absl::StrFormat("They cannot move: %s.", move::WalkStopName(walk_result.stopped)));
     } else {
         auto walked = sel.stack;
-        sel.x = sel.stack[0]->x;
-        sel.y = sel.stack[0]->y;
+        sel.x = sel.stack[0]->X();
+        sel.y = sel.stack[0]->Y();
         Reslot(SelectableAt(sel.x, sel.y));
         StratDirty();
         StartWalk(walked, walk_result.walked, walk_result.sea_before);
@@ -134,8 +134,8 @@ void MoveSelection(int x, int y) {
             PutDown(g_app.selection->stack);
     }
     if (g_app.selection && !g_app.selection->stack.empty()) {
-        g_app.selection->x = g_app.selection->stack[0]->x;
-        g_app.selection->y = g_app.selection->stack[0]->y;
+        g_app.selection->x = g_app.selection->stack[0]->X();
+        g_app.selection->y = g_app.selection->stack[0]->Y();
         if (!g_app.walk) CentreOn(g_app.selection->x, g_app.selection->y);
     }
     if (!g_app.walk) RefreshRoute();
@@ -149,7 +149,7 @@ static const int kBannerNameY = 85, kBannerTurnY = 130;
 
 /** @brief Raises the start-of-turn banner for the side, with its fanfare. */
 void ShowBanner(Side* side) {
-    g_app.banner = Banner{side->name, g_app.g->turn, side->colour, side->edge};
+    g_app.banner = Banner{side->Name(), g_app.g->turn, side->Colour(), side->Edge()};
     sound::Effect("turn");  // the fanfare, TURN.8SN
 }
 
@@ -185,8 +185,8 @@ bool offer_typing = false;
 bool HotseatHidden() {
     if (g_app.g->map->options.hidden_map == 0) return false;
     int humans = 0;
-    for (auto& side : g_app.g->map->sides)
-        if (side.in_use && side.alive && !side.computer) humans++;
+    for (const auto& side : g_app.g->map->sides)
+        if (side.IsHuman()) humans++;
     return humans > 1;
 }
 
@@ -211,11 +211,11 @@ static void AfterBanner() {
     // then the heroes promoted, each in its own popup, and the hero offer
     // with its music, or the turn's
     advisor::Say(says, []() {
-        auto& news = g_app.g->TurnNews(w2::SideId(g_app.player->index));
+        auto& news = g_app.g->TurnNews(g_app.player->Id());
         auto promoted = news.promoted;
         news.promoted.clear();
         honours::Promotions(promoted, []() {
-            const auto& offer = g_app.g->TurnNews(w2::SideId(g_app.player->index)).hero_offer;
+            const auto& offer = g_app.g->TurnNews(g_app.player->Id()).hero_offer;
             sound::Music(offer ? w2::cues::kHero : w2::cues::kPlay);
             std::vector<std::string> moments;
             if (g_app.g->turn == 2) moments.push_back("turn2");
@@ -236,9 +236,9 @@ static void AfterBanner() {
 static std::vector<std::string> HeroLines(const w2::HeroOffer& offer, bool female) {
     int first = female ? 8 : 0;
     auto line = [first](int idx) { return kit::Text(kHeroLineGroup, first + idx); };
-    if (offer.first) return {line(0), line(1), line(2), Format(line(3), offer.city->name)};
-    return {Format(line(4), offer.city->name), Format(line(5), offer.price),
-            Format(line(6), g_app.player->gold), line(7)};
+    if (offer.first) return {line(0), line(1), line(2), Format(line(3), offer.city->Name())};
+    return {Format(line(4), offer.city->Name()), Format(line(5), offer.price),
+            Format(line(6), g_app.player->Gold()), line(7)};
 }
 
 /**
@@ -246,7 +246,7 @@ static std::vector<std::string> HeroLines(const w2::HeroOffer& offer, bool femal
  * @return Whether it had one.
  */
 static bool PresentOffer(Side* side) {
-    const auto& side_offer = g_app.g->TurnNews(w2::SideId(side->index)).hero_offer;
+    const auto& side_offer = g_app.g->TurnNews(side->Id()).hero_offer;
     if (!side_offer) return false;
     if (!g_app.hero_view) g_app.hero_view = screen::MakeView(*g_app.screen, kHeroDialog);
     g_app.offer = side_offer;
@@ -267,8 +267,8 @@ void AcceptOffer() {
     auto hired = w2::hero::Recruit(*g_app.g, *g_app.player, *offer);
     Army* hero = hired.hero;
     g_app.offer.reset();
-    g_app.g->TurnNews(w2::SideId(g_app.player->index)).hero_offer.reset();
-    CentreOn(hero->x, hero->y);
+    g_app.g->TurnNews(g_app.player->Id()).hero_offer.reset();
+    CentreOn(hero->X(), hero->Y());
     if (hired.count > 0) {
         // "And the hero brings 1 ally!" / "... %d allies!": the number rolled,
         // placed or not
@@ -285,7 +285,7 @@ void AcceptOffer() {
  *        build -- or on turn 1 the capital's dialog opens in Production.
  */
 static void AfterOffer() {
-    if (g_app.player->computer) return;
+    if (g_app.player->IsComputerControlled()) return;
     game::HumanProduction(*g_app.g, *g_app.player);
     StratDirty();
     auto cap = CapOf(g_app.player);
@@ -294,17 +294,17 @@ static void AfterOffer() {
         city::Open(city, city::kProduction);
         return;
     }
-    if (g_app.modern_ui && !g_app.player->missives.empty()) {
+    if (g_app.modern_ui && !g_app.player->Missives().empty()) {
         diplomacyui::PollMissives();
     } else {
-        g_app.player->missives.clear();
+        g_app.player->ClearMissives();
     }
 }
 
 /** @brief Turns the hero offer down. */
 void RefuseOffer() {
     g_app.offer.reset();
-    g_app.g->TurnNews(w2::SideId(g_app.player->index)).hero_offer.reset();
+    g_app.g->TurnNews(g_app.player->Id()).hero_offer.reset();
     AfterOffer();
 }
 
@@ -349,8 +349,8 @@ void DrawHeroOffer() {
     DrawStrategicMap(kHeroMapX, kHeroMapY);
     gfx::SetScissor(popup_rect.x, popup_rect.y, popup_rect.w, popup_rect.h);
     gfx::SetColor(1, 1, 1);
-    int fig_x = std::max(0, (offer.city->x * 2 - 2) / 8 * 8);
-    int fig_y = std::max(0, offer.city->y * 2 - 6);
+    int fig_x = std::max(0, (offer.city->X() * 2 - 2) / 8 * 8);
+    int fig_y = std::max(0, offer.city->Y() * 2 - 6);
     gfx::Draw(g_app.atrans_shields, gfx::NewQuad(96, 0, 16, 15), kHeroMapX + fig_x,
               kHeroMapY + fig_y);
     gfx::Draw(g_app.offer_female ? g_app.hero_pic_f : g_app.hero_pic_m, kHeroPicX, kHeroPicY);
@@ -397,13 +397,13 @@ void BeginGame() {
     if (!first) return;
     // a computer that opens the game plays to the screen of the human who
     // follows it, on that human's hidden map
-    g_app.player = first->computer ? game::NextHuman(*g_app.g) : first;
+    g_app.player = first->IsComputerControlled() ? game::NextHuman(*g_app.g) : first;
     if (!g_app.player) g_app.player = first;
     g_app.cursor = CapOf(g_app.player);
     g_app.selection.reset();
     CentreOn(CapOf(g_app.player).first, CapOf(g_app.player).second);
     // The banner is shown for a human side.
-    if (!first->computer) {
+    if (!first->IsComputerControlled()) {
         g_app.map_after_banner = HotseatHidden();
         ShowBanner(g_app.player);
     }
@@ -441,11 +441,11 @@ void OpenStart() {
                     StratDirty();
                     SyncLayout();
                     BeginGame();
-                    if (g_app.g->side && g_app.g->side->computer) {
+                    if (g_app.g->side && g_app.g->side->IsComputerControlled()) {
                         // A game with no human in it says so as it begins.
                         bool human = false;
                         for (Side* side : g_app.g->sides)
-                            if (!side->computer) human = true;
+                            if (!side->IsComputerControlled()) human = true;
                         if (human)
                             PlayComputers(g_app.g->side);
                         else
@@ -515,11 +515,11 @@ absl::Status StartCliScenario(const std::string& scenario, double seed, bool for
     if (!created_game.ok()) return created_game.status();
     g_app.g = std::move(*created_game);
     for (size_t i = 0; i < g_app.g->sides.size(); i++)
-        g_app.g->sides[i]->computer = spectate_all_ai || (i > 0);
+        g_app.g->sides[i]->SetComputerControlled(spectate_all_ai || (i > 0));
     auto start_war = [=]() {
         SyncLayout();
         BeginGame();
-        if (g_app.g->side && g_app.g->side->computer) PlayComputers(g_app.g->side);
+        if (g_app.g->side && g_app.g->side->IsComputerControlled()) PlayComputers(g_app.g->side);
     };
     if (!HasScript() && !spectate_all_ai && sound::SpeechOn()) {
         sound::Music(w2::cues::kBegin);
