@@ -6,11 +6,14 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <utility>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 
 #include "nlohmann/json.hpp"
+#include "warlords/ai/belief.hpp"
 #include "warlords/ai/core.hpp"
 #include "warlords/model/computer_player.hpp"
 
@@ -69,9 +72,18 @@ class ClassicAiPlayer final : public IClassicBackedPlayer {
     ThoughtSpan Thoughts() const override { return {}; }
     float LastBoardValue() const override { return 0.0F; }
     bool IsClassic() const override { return true; }
+    const SideBelief* Belief() const override {
+        return inspection_belief_ ? &*inspection_belief_ : nullptr;
+    }
 
     const AIData& Data() const { return data_; }
     AIData& MutableData() { return data_; }
+
+    /** @brief Lazily allocates and returns a fair-information `SideBelief` for UI inspection. */
+    SideBelief& EnsureInspectionBelief() {
+        if (!inspection_belief_) inspection_belief_.emplace();
+        return *inspection_belief_;
+    }
 
     const ClassicArmyOrder& OrderFor(ArmyId army_id) const;
     ClassicArmyOrder& MutableOrderFor(ArmyId army_id);
@@ -92,7 +104,9 @@ class ClassicAiPlayer final : public IClassicBackedPlayer {
   private:
     AIData data_;                             ///< 1993 per-side AI state and assault groups.
     ArmyOrderMap orders_;                     ///< Per-`ArmyId` standing orders and flags.
-    SharedNeighbours neighbours_;             ///< Shared initial 6-nearest-city table.
+    ClassicArmyOrder invalid_order_scratch_;  ///< Instance-local scratch for invalid `ArmyId`s.
+    std::optional<SideBelief> inspection_belief_;  ///< Optional belief for F10 Brain Inspector.
+    SharedNeighbours neighbours_;                  ///< Shared initial 6-nearest-city table.
     const ArmyRegistry* registry_ = nullptr;  ///< Non-owning active army registry for save slots.
 };
 

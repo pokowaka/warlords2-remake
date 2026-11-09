@@ -53,6 +53,7 @@ class RaiderPlayer final : public IClassicBackedPlayer {
     ThoughtSpan Thoughts() const override { return {}; }
     float LastBoardValue() const override { return 0.0F; }
     bool IsClassic() const override { return true; }
+    const SideBelief* Belief() const override { return base_->Belief(); }
 
   private:
     SharedClassicPlayer base_;  ///< Underlying 1993 Classic AI strategy.

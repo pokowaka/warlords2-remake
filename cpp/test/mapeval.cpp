@@ -29,6 +29,7 @@
 #include "warlords/rng.hpp"
 #include "warlords/scn.hpp"
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
 ABSL_FLAG(std::string, generator, "classic",
           "Map generator to evaluate: classic, fair, scenario, or none.");
@@ -46,6 +47,7 @@ ABSL_FLAG(std::string, shape, "continents",
           "Scenario generator landmass shape: continents, pangaea, or islands.");
 ABSL_FLAG(std::string, sliders, "3,3,2,3",
           "Water,Hills,Cities,Forest sliders (0-6, or 7 for random).");
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
 

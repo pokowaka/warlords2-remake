@@ -105,7 +105,7 @@ TEST_P(ClassicAiGameTest, PlaysToTurnLimitMaintainingBoardInvariants) {
     EXPECT_GT(game.Armies().size(), game.GetMap().Cities().size());
 }
 
-// NOLINTNEXTLINE(readability-identifier-length)
+// NOLINTNEXTLINE(readability-identifier-length,cppcoreguidelines-avoid-non-const-global-variables)
 INSTANTIATE_TEST_SUITE_P(Scenarios, ClassicAiGameTest,
                          ::testing::Values(AiGameCase{"TUTORIA", 30}, AiGameCase{"ERYTHEA", 25}),
                          [](const ::testing::TestParamInfo<AiGameCase>& info) {

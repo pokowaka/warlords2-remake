@@ -8,6 +8,10 @@
 #include <memory>
 #include <utility>
 
+#include "absl/base/no_destructor.h"
+#include "absl/base/thread_annotations.h"
+#include "absl/synchronization/mutex.h"
+
 #include "warlords/ai/classic_ai_player.hpp"
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/modern_ml_player.hpp"
@@ -17,9 +21,26 @@ namespace w2::ai {
 
 namespace {
 
-bool& DefaultClassicAiFlag() {
-    static bool classic = true;
-    return classic;
+class DefaultAiModeStore {
+  public:
+    bool IsClassic() const ABSL_LOCKS_EXCLUDED(default_ai_mutex_) {
+        absl::MutexLock mode_lock(&default_ai_mutex_);
+        return classic_;
+    }
+
+    void SetClassic(bool classic) ABSL_LOCKS_EXCLUDED(default_ai_mutex_) {
+        absl::MutexLock mode_lock(&default_ai_mutex_);
+        classic_ = classic;
+    }
+
+  private:
+    mutable absl::Mutex default_ai_mutex_;
+    bool classic_ ABSL_GUARDED_BY(default_ai_mutex_) = true;
+};
+
+DefaultAiModeStore& GlobalDefaultAiMode() {
+    static absl::NoDestructor<DefaultAiModeStore> store;
+    return *store;
 }
 
 void LevelDefaults(Game& game, AIData& data, int level) {
@@ -309,11 +330,11 @@ const bool kRegisteredDefaults = []() {
 
 bool DefaultClassicAi() {
     (void)kRegisteredDefaults;
-    return DefaultClassicAiFlag();
+    return GlobalDefaultAiMode().IsClassic();
 }
 
 void SetDefaultClassicAi(bool classic) {
-    DefaultClassicAiFlag() = classic;
+    GlobalDefaultAiMode().SetClassic(classic);
 }
 
 std::shared_ptr<IComputerPlayer> MakeComputerPlayer(bool classic, Game& game, Side& side) {
@@ -339,9 +360,10 @@ AIData& InitSide(Game& game, Side& side) {
 void StartGame(Game& game) {
     Map& map = game.GetMap();
     auto neighbours = core::BuildNeighbours(game);
+    const bool use_classic = GlobalDefaultAiMode().IsClassic();
     for (auto& side : map.Sides()) {
         AIData data = RollInitialData(game, side);
-        if (DefaultClassicAiFlag()) {
+        if (use_classic) {
             side.SetComputerPlayer(
                     std::make_shared<ClassicAiPlayer>(std::move(data), neighbours, &game.Armies()));
         } else {
@@ -358,7 +380,7 @@ void StartGame(Game& game) {
 void PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
     ScopedAiTurnEvents turn_scope(game, events);
     if (!side.ComputerPlayer()) {
-        side.SetComputerPlayer(MakeComputerPlayer(DefaultClassicAiFlag(), game, side));
+        side.SetComputerPlayer(MakeComputerPlayer(GlobalDefaultAiMode().IsClassic(), game, side));
     }
     side.ComputerPlayer()->PlayTurn(game, side, events);
 }
@@ -373,14 +395,14 @@ bool Walked(Game& game, const std::vector<Army*>& stack, const move::WalkResult&
 
 City* HeroCity(Game& game, Side& side, City* fallback) {
     if (!side.ComputerPlayer()) {
-        side.SetComputerPlayer(MakeComputerPlayer(DefaultClassicAiFlag(), game, side));
+        side.SetComputerPlayer(MakeComputerPlayer(GlobalDefaultAiMode().IsClassic(), game, side));
     }
     return side.ComputerPlayer()->ChooseHeroCity(game, side, fallback);
 }
 
 bool QuestCapture(Game& game, Side& side, City& city, const std::vector<Army*>& stack) {
     if (!side.ComputerPlayer()) {
-        side.SetComputerPlayer(MakeComputerPlayer(DefaultClassicAiFlag(), game, side));
+        side.SetComputerPlayer(MakeComputerPlayer(GlobalDefaultAiMode().IsClassic(), game, side));
     }
     return side.ComputerPlayer()->OnQuestCapture(game, side, city, stack);
 }

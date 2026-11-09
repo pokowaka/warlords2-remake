@@ -275,10 +275,9 @@ const ClassicArmyOrder& ClassicAiPlayer::OrderFor(ArmyId army_id) const {
 }
 
 ClassicArmyOrder& ClassicAiPlayer::MutableOrderFor(ArmyId army_id) {
-    static ClassicArmyOrder fallback_scratch;
     if (!army_id.IsValid()) {
-        fallback_scratch = ClassicArmyOrder{};
-        return fallback_scratch;
+        invalid_order_scratch_ = ClassicArmyOrder{};
+        return invalid_order_scratch_;
     }
     return orders_[army_id];
 }

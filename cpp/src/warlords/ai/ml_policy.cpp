@@ -5,7 +5,9 @@
 #include <sstream>
 
 #include "absl/base/no_destructor.h"
+#include "absl/base/thread_annotations.h"
 #include "absl/strings/str_format.h"
+#include "absl/synchronization/mutex.h"
 
 #include "nlohmann/json.hpp"
 #include "util/util.hpp"
@@ -399,16 +401,37 @@ absl::Status PolicyNetwork::LoadJson(const std::filesystem::path& path) {
 }
 
 namespace {
-/// Process-wide deployment sampling temperature, changeable via SetDeployTemperature().
-float g_deploy_temperature = kDeployTemperature;
+
+class MlRuntimeConfig {
+  public:
+    float DeployTemp() const ABSL_LOCKS_EXCLUDED(deploy_temp_mutex_) {
+        absl::MutexLock temp_lock(&deploy_temp_mutex_);
+        return deploy_temperature_;
+    }
+
+    void SetDeployTemp(float temperature) ABSL_LOCKS_EXCLUDED(deploy_temp_mutex_) {
+        absl::MutexLock temp_lock(&deploy_temp_mutex_);
+        deploy_temperature_ = std::max(0.01F, temperature);
+    }
+
+  private:
+    mutable absl::Mutex deploy_temp_mutex_;
+    float deploy_temperature_ ABSL_GUARDED_BY(deploy_temp_mutex_) = kDeployTemperature;
+};
+
+MlRuntimeConfig& GlobalMlRuntimeConfig() {
+    static absl::NoDestructor<MlRuntimeConfig> config;
+    return *config;
+}
+
 }  // namespace
 
 float DeployTemperature() {
-    return g_deploy_temperature;
+    return GlobalMlRuntimeConfig().DeployTemp();
 }
 
 void SetDeployTemperature(float temperature) {
-    g_deploy_temperature = std::max(0.01F, temperature);
+    GlobalMlRuntimeConfig().SetDeployTemp(temperature);
 }
 
 float RolloutSampler::NextUniform01() {

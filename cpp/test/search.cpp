@@ -40,6 +40,7 @@
 #include "warlords/game.hpp"
 #include "warlords/save.hpp"
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
 ABSL_FLAG(std::string, mode, "probe", "Search mode: probe or play.");
 ABSL_FLAG(int, seeds, 16, "Number of seed pairs to evaluate.");
@@ -51,6 +52,7 @@ ABSL_FLAG(std::string, judge, "honest", "Candidate judge mode: peek, honest, or 
 ABSL_FLAG(double, cand_temp, 0.5, "Sampling temperature for candidate turns.");
 ABSL_FLAG(double, switch_z, 0.0, "Minimum standard-error margin to switch off greedy turn.");
 ABSL_FLAG(uint32_t, seed_offset, 0, "Offset added to development benchmark seeds.");
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
 namespace ml = w2::ai::ml;

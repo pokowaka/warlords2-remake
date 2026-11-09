@@ -14,6 +14,7 @@
 #include "util/util.hpp"
 #include "warlords/ailfm.hpp"
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
 
 /**

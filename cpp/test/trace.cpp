@@ -16,8 +16,10 @@
 #include "warlords/randommap.hpp"
 #include "warlords/save.hpp"
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
 ABSL_FLAG(bool, dump, false, "Print every army's coordinates and stats after each turn.");
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
 

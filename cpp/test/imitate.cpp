@@ -41,11 +41,13 @@
 #include "warlords/move.hpp"
 #include "warlords/randommap.hpp"
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
 ABSL_FLAG(int, games, 144, "Number of Classic AI games to record (0 = rewrite weights only).");
 ABSL_FLAG(int, turns, 40, "Maximum turns per recorded Classic AI game.");
 ABSL_FLAG(int, epochs, 6, "Behaviour-cloning epochs over the dataset.");
 ABSL_FLAG(double, lr, 1e-3, "Adam learning rate.");
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
 namespace ml = w2::ai::ml;

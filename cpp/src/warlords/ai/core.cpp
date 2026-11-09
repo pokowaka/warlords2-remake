@@ -4,10 +4,10 @@
 #include <climits>
 #include <cmath>
 #include <map>
-#include <mutex>
 #include <queue>
 
 #include "absl/base/no_destructor.h"
+#include "absl/log/absl_check.h"
 
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
@@ -146,10 +146,10 @@ const ClassicArmyOrder& OrderOf(const Game& game, const Army* army) {
 }
 
 ClassicArmyOrder& MutableOrderOf(Game& game, Army* army) {
-    static ClassicArmyOrder fallback_scratch;
-    if (!army || !game.HasMap() || army->OwnerIndex() < 0 || army->OwnerIndex() > 7) {
-        fallback_scratch = ClassicArmyOrder{};
-        return fallback_scratch;
+    ABSL_CHECK(army != nullptr && game.HasMap());
+    if (army->OwnerIndex() < 0 || army->OwnerIndex() > 7) {
+        return ClassicAiPlayer::EnsureOn(game, game.GetMap().Sides()[0])
+                .MutableOrderFor(ArmyId::None());
     }
     return ClassicAiPlayer::EnsureOn(game, game.GetMap().Sides()[army->OwnerIndex()])
             .MutableOrderFor(army->Id());

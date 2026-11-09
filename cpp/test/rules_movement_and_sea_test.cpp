@@ -12,6 +12,8 @@
 
 #include <gtest/gtest.h>
 
+#include "absl/strings/match.h"
+
 #include "test/test_helpers.hpp"
 #include "warlords/armytype.hpp"
 #include "warlords/combat.hpp"
@@ -197,7 +199,7 @@ TEST_P(MovementScenarioTest, StepCostsPathfindingAttacksAndRoutePreview) {
     game.Remove(scout);
 }
 
-// NOLINTNEXTLINE(readability-identifier-length)
+// NOLINTNEXTLINE(readability-identifier-length,cppcoreguidelines-avoid-non-const-global-variables)
 INSTANTIATE_TEST_SUITE_P(LandAndIsland, MovementScenarioTest,
                          ::testing::Values("ERYTHEA", "ISLADIA"), ScenarioParamName);
 
@@ -447,7 +449,7 @@ TEST(MovementTest, EmbarkingDisembarkingFlyingOverWaterAndPortSailing) {
 
     const ArmyType* dragon = nullptr;
     for (const auto& army_type : game->ArmyTypes().all) {
-        if (army_type.flies && army_type.name.find("Dragon") != std::string::npos) {
+        if (army_type.flies && absl::StrContains(army_type.name, "Dragon")) {
             dragon = &army_type;
         }
     }

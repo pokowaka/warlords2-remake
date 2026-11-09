@@ -3,8 +3,10 @@
 PROJECT_NAME           = "Warlords II Remake"
 PROJECT_BRIEF          = "Cross-platform C++23 remake of Warlords II (1993) with ML-driven AI"
 OUTPUT_DIRECTORY       = build/docs
-INPUT                  = cpp/src docs/ARCHITECTURE.md docs/STYLE.md
+INPUT                  = cpp/src cpp/test/opponents.hpp docs/ARCHITECTURE.md docs/STYLE.md
 USE_MDFILE_AS_MAINPAGE = docs/ARCHITECTURE.md
+STRIP_FROM_PATH        = cpp/src
+STRIP_FROM_INC_PATH    = cpp/src
 RECURSIVE              = YES
 FILE_PATTERNS          = *.hpp *.cpp *.md
 
@@ -14,6 +16,15 @@ EXTRACT_STATIC         = YES
 JAVADOC_AUTOBRIEF      = YES
 QT_AUTOBRIEF           = YES
 MARKDOWN_SUPPORT       = YES
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = "ABSL_GUARDED_BY(x)=" \
+                         "ABSL_PT_GUARDED_BY(x)=" \
+                         "ABSL_EXCLUSIVE_LOCKS_REQUIRED(x)=" \
+                         "ABSL_SHARED_LOCKS_REQUIRED(x)=" \
+                         "ABSL_LOCKS_EXCLUDED(x)="
 
 GENERATE_HTML          = YES
 GENERATE_LATEX         = NO

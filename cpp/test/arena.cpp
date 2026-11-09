@@ -67,6 +67,7 @@
 #include "warlords/randommap.hpp"
 #include "warlords/save.hpp"
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(int, iterations, 300, "Training iterations to run.");
 ABSL_FLAG(int, games_per_iter, 48, "Rollout games per iteration.");
 ABSL_FLAG(int, turns, 40, "Training games cut-off turn.");
@@ -109,6 +110,7 @@ ABSL_FLAG(int, search_r, 2, "Rollout copies per candidate turn.");
 ABSL_FLAG(int, search_h, 2, "Rounds played forward after a candidate turn.");
 ABSL_FLAG(std::string, eval_opponent, "classic",
           "Evaluation opponent personality: classic, raider, or frozen.");
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
 namespace ml = w2::ai::ml;
@@ -217,7 +219,8 @@ struct Config {
     int search_r = 2;  ///< --search-r: rollouts (dice copies) per candidate
     int search_h = 2;  ///< --search-h: rounds played on after a candidate turn
     opponents::Kind eval_opponent =
-            opponents::Kind::kClassic;  ///< --eval-opponent classic|raider|frozen
+            opponents::Kind::kClassic;                 ///< --eval-opponent classic|raider|frozen
+    const ml::PolicyNetwork* frozen_policy = nullptr;  ///< Loaded --frozen-opponent checkpoint.
 };
 
 /**
@@ -309,13 +312,6 @@ enum class Opponent {
 };
 
 /**
- * @brief The fixed Modern checkpoint Frozen opponents play (--frozen-opponent).
- *
- * Set once in main before any game starts.
- */
-const ml::PolicyNetwork* g_frozen = nullptr;
-
-/**
  * @brief Records which of a turn's moves left an own city to be taken.
  *
  * Departure credit: for each move of `turn` that left an own city empty (and
@@ -399,12 +395,12 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
                 static_cast<float>(1U << 24);
         classic_kind[side_index] =
                 raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
-        if (classic[side_index] && g_frozen && frozen_roll < cfg.frozen_frac) {
+        if (classic[side_index] && cfg.frozen_policy && frozen_roll < cfg.frozen_frac) {
             classic_kind[side_index] = opponents::Kind::kFrozen;
             ai::SetSideClassicAi(game, side, false);  // a Modern AI seat, just not a learning one
         }
         if (classic[side_index]) {
-            opponents::InstallOpponent(game, side, classic_kind[side_index], g_frozen);
+            opponents::InstallOpponent(game, side, classic_kind[side_index], cfg.frozen_policy);
         }
         episodes[side_index].side_index = side_index;
         samplers[side_index].rng_state =
@@ -427,7 +423,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
                 ai::modern::PlayTurn(game, *current, nullptr, &learner, &samplers[side_index]);
                 samplers[side_index].current_turn = nullptr;
             } else if (classic[side_index]) {
-                opponents::PlayTurn(game, *current, classic_kind[side_index], g_frozen);
+                opponents::PlayTurn(game, *current, classic_kind[side_index], cfg.frozen_policy);
             } else {
                 ml::RolloutSampler opponent_sampler;
                 opponent_sampler.rng_state = samplers[side_index].rng_state ^
@@ -536,12 +532,12 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                 static_cast<float>(1U << 24);
         kind[side_index] =
                 raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
-        if (!is_learner && g_frozen && frozen_roll < cfg.frozen_frac) {
+        if (!is_learner && cfg.frozen_policy && frozen_roll < cfg.frozen_frac) {
             kind[side_index] = opponents::Kind::kFrozen;
             ai::SetSideClassicAi(*current_game, side, false);
         }
         if (!is_learner) {
-            opponents::InstallOpponent(*current_game, side, kind[side_index], g_frozen);
+            opponents::InstallOpponent(*current_game, side, kind[side_index], cfg.frozen_policy);
         }
     }
 
@@ -550,7 +546,7 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
         if (side.Index() == learner_side)
             ai::modern::PlayTurn(game, side, nullptr, &learner, nullptr);
         else
-            opponents::PlayTurn(game, side, kind[side.Index()], g_frozen);
+            opponents::PlayTurn(game, side, kind[side.Index()], cfg.frozen_policy);
     };
     // Plays a copy on for --search-h rounds and returns the learner's empire score
     auto rollout_value = [&](Game& game) {
@@ -1047,7 +1043,7 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
             eval_case.modern_sides++;
         } else {
             opponents::InstallOpponent(game, game.GetMap().Sides()[side_index], cfg.eval_opponent,
-                                       g_frozen);
+                                       cfg.frozen_policy);
         }
         eval_case.sides++;
         seat++;
@@ -1061,7 +1057,7 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
             if (modern[current->Index()])
                 ai::modern::PlayTurn(game, *current, nullptr, &policy, nullptr);
             else
-                opponents::PlayTurn(game, *current, cfg.eval_opponent, g_frozen);
+                opponents::PlayTurn(game, *current, cfg.eval_opponent, cfg.frozen_policy);
         }
         current = game::EndTurn(game);
     }
@@ -1335,9 +1331,9 @@ int main(int argc, char** argv) {
                          cfg.frozen_path.c_str());
             return 1;
         }
-        g_frozen = &frozen;
+        cfg.frozen_policy = &frozen;
     }
-    if (cfg.eval_opponent == opponents::Kind::kFrozen && !g_frozen) {
+    if (cfg.eval_opponent == opponents::Kind::kFrozen && !cfg.frozen_policy) {
         std::fprintf(stderr, "--eval-opponent frozen needs --frozen-opponent PATH.\n");
         return 2;
     }

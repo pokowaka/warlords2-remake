@@ -426,7 +426,7 @@ TEST_P(SitesScenarioTest, RuinsItemsTemplesAndGuardianSurvival) {
     EXPECT_GT(died, 0);
 }
 
-// NOLINTNEXTLINE(readability-identifier-length)
+// NOLINTNEXTLINE(readability-identifier-length,cppcoreguidelines-avoid-non-const-global-variables)
 INSTANTIATE_TEST_SUITE_P(ErytheaAndDragon, SitesScenarioTest,
                          ::testing::Values("ERYTHEA", "DRAGON"), ScenarioParamName);
 

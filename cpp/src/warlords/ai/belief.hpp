@@ -107,32 +107,7 @@ void RecordBattleObservation(Game& game, int observer_side, int x, int y);
 CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Army*>& attackers,
                               int target_x, int target_y, float caution_bias = 0.0F);
 
-/**
- * @brief Answers belief's per-tile army queries from an index built once.
- *
- * While alive, ArmiesAt() reads an index built from `game` (in the same
- * order as game::ArmiesAt) instead of scanning every army per tile. Only
- * valid while no army moves: open it around read-only work such as scoring
- * a stack's options, never across a walk or a battle. Scopes nest.
- */
-class ScopedTileIndex {
-  public:
-    explicit ScopedTileIndex(const Game& game);
-    ~ScopedTileIndex();
-    ScopedTileIndex(const ScopedTileIndex&) = delete;
-    ScopedTileIndex& operator=(const ScopedTileIndex&) = delete;
-    /** @brief The armies on a tile, newest first; empty off the map. */
-    const std::vector<Army*>& At(int x, int y) const;
-    /** @brief The game the index was built from. */
-    const Game& GetGame() const { return game_; }
-
-  private:
-    const Game& game_;                         ///< The game the index was built from.
-    std::vector<std::vector<Army*>> by_tile_;  ///< Armies by tile, row by row.
-    const ScopedTileIndex* prev_;              ///< The enclosing index, if any.
-};
-
-/** @brief game::ArmiesAt, answered by the innermost ScopedTileIndex for `game` when one is open. */
+/** @brief Returns active armies on `(x, y)` in top-down slot order via `Game::ArmiesOnTile`. */
 std::vector<Army*> ArmiesAt(const Game& game, int x, int y);
 
 }  // namespace ai::belief

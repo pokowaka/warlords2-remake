@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 
+#include "warlords/ai/classic_ai_player.hpp"
 #include "warlords/ai/modern_ml_player.hpp"
 #include "warlords/combat.hpp"
 #include "warlords/diplomacy.hpp"
@@ -18,11 +19,10 @@ SideBelief& Ensure(Side& side) {
     if (ModernMlPlayer* modern = ModernMlPlayer::FindMutableOn(side)) {
         return modern->MutableBelief();
     }
-    if (!side.ComputerPlayer()) {
-        return ModernMlPlayer::EnsureOn(side).MutableBelief();
+    if (ClassicAiPlayer* classic = ClassicAiPlayer::FindMutableOn(side)) {
+        return classic->EnsureInspectionBelief();
     }
-    thread_local std::array<SideBelief, 8> inspector_belief;
-    return inspector_belief[std::clamp(side.Index(), 0, 7)];
+    return ModernMlPlayer::EnsureOn(side).MutableBelief();
 }
 
 bool IsTileVisible(const Game& game, int side_index, int x, int y) {
@@ -50,39 +50,7 @@ bool IsSiteVisible(const Game& game, int side_index, const Site& site) {
     return viewer && site::ShownTo(site, *viewer);
 }
 
-namespace {
-/// The innermost open ScopedTileIndex on this thread, or null.
-thread_local const ScopedTileIndex* active_index = nullptr;
-}  // namespace
-
-ScopedTileIndex::ScopedTileIndex(const Game& game) : game_(game), prev_(active_index) {
-    const Map& map = game.GetMap();
-    int width = map.Width(), height = map.Height();
-    by_tile_.resize(static_cast<size_t>(width) * height);
-    // newest army first, as game::ArmiesAt lists them
-    for (int i = static_cast<int>(game.Armies().size()) - 1; i >= 0; i--) {
-        Army* army = game.Armies()[i];
-        if (army->InTransit() || army->X() < 0 || army->Y() < 0 || army->X() >= width ||
-            army->Y() >= height)
-            continue;
-        by_tile_[static_cast<size_t>(army->Y()) * width + army->X()].push_back(army);
-    }
-    active_index = this;
-}
-
-ScopedTileIndex::~ScopedTileIndex() {
-    active_index = prev_;
-}
-
-const std::vector<Army*>& ScopedTileIndex::At(int x, int y) const {
-    static const std::vector<Army*> kNoArmies;
-    const Map& map = game_.GetMap();
-    if (x < 0 || y < 0 || x >= map.Width() || y >= map.Height()) return kNoArmies;
-    return by_tile_[static_cast<size_t>(y) * map.Width() + x];
-}
-
 std::vector<Army*> ArmiesAt(const Game& game, int x, int y) {
-    if (active_index && &active_index->GetGame() == &game) return active_index->At(x, y);
     return game::ArmiesAt(game, x, y);
 }
 
@@ -132,7 +100,6 @@ void RecordBattleObservation(Game& game, int observer_side, int x, int y) {
 
 void Update(Game& game, Side& side) {
     SideBelief& belief = Ensure(side);
-    ScopedTileIndex tile_index(game);  // nothing moves while the belief is rebuilt
     Map& map = game.GetMap();
     belief.updated_turn = game.Turn();
     int side_index = side.Index();

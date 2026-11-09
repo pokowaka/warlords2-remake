@@ -59,7 +59,7 @@ TEST_P(ShippedMapEvalTest, DesignerMapBreaksNoHardRuleAndSpreadsCities) {
     EXPECT_GT(evaluation.Metric("clarkEvansR"), 1.3) << scenario;
 }
 
-// NOLINTNEXTLINE(readability-identifier-length)
+// NOLINTNEXTLINE(readability-identifier-length,cppcoreguidelines-avoid-non-const-global-variables)
 INSTANTIATE_TEST_SUITE_P(DesignerMaps, ShippedMapEvalTest,
                          ::testing::Values("ERYTHEA", "HADESHA", "ISLADIA", "DRAGON", "SORCERY"),
                          ScenarioParamName);

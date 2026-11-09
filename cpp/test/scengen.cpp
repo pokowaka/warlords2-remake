@@ -32,6 +32,7 @@
 #include "warlords/scenarios.hpp"
 #include "warlords/scn.hpp"
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(int64_t, seed, 1, "Starting random seed.");
 ABSL_FLAG(int, count, 1, "Number of worlds to generate.");
 ABSL_FLAG(std::string, shape, "continents", "Landmass shape: continents, pangaea, or islands.");
@@ -46,6 +47,7 @@ ABSL_FLAG(bool, quiet, false, "Suppress progress output.");
 ABSL_FLAG(std::string, preview, "", "Only render DATA/NAME/NAME.png for an existing scenario.");
 ABSL_FLAG(std::string, dump, "",
           "Write raw generated files to DIR/<shape>-<seed>/RANDOM.* for cross-port comparison.");
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
 

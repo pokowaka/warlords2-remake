@@ -112,6 +112,8 @@ TEST(ArmyTypesTest, LoadsDocumentedTypesAndSignedModifiers) {
  */
 class SlotsTest : public ::testing::Test {
   protected:
+    using ArmyList = std::vector<Army*>;
+
     /** @brief Populates `game_` with `n` ungrouped armies ranked highest-first in fight order. */
     void BuildStandInStack(int n) {
         game_ = std::make_unique<Game>();
@@ -128,15 +130,19 @@ class SlotsTest : public ::testing::Test {
         }
     }
 
+    Game& ActiveGame() { return *game_; }
+    const ArmyList& Armies() const { return armies_; }
+
+  private:
     std::unique_ptr<Game> game_;  ///< Stand-in game state owning the armies and fight order.
-    std::vector<Army*> armies_;   ///< Pointers to armies placed into the selection bar.
+    ArmyList armies_;             ///< Pointers to armies placed into the selection bar.
 };
 
 TEST_F(SlotsTest, InitialClickSelectsHighestRankedSingleArmy) {
     BuildStandInStack(3);
-    auto bar = slots::Build(*game_, armies_, 0);
+    auto bar = slots::Build(ActiveGame(), Armies(), 0);
     EXPECT_EQ(bar.n, 3);
-    EXPECT_EQ(bar.army[0], armies_[0]);
+    EXPECT_EQ(bar.army[0], Armies()[0]);
     EXPECT_TRUE(bar.in_group[0] && !bar.in_group[1] && !bar.in_group[2]);
     EXPECT_EQ(bar.group[0], 0);
     EXPECT_EQ(bar.group[2], 2);
@@ -149,81 +155,81 @@ TEST_F(SlotsTest, InitialClickSelectsHighestRankedSingleArmy) {
 
 TEST_F(SlotsTest, ToggleAddsAndDropsMembersWhileKeepingLastArmy) {
     BuildStandInStack(3);
-    auto bar = slots::Build(*game_, armies_, 0);
-    slots::Toggle(bar, *game_, 1);
+    auto bar = slots::Build(ActiveGame(), Armies(), 0);
+    slots::Toggle(bar, ActiveGame(), 1);
     EXPECT_TRUE(bar.in_group[1] && bar.group[1] == bar.group[0]);
     EXPECT_EQ(bar.mark[1], slots::kNomark);
     EXPECT_EQ(slots::Moves(bar), 11);
 
-    slots::Toggle(bar, *game_, 1);
+    slots::Toggle(bar, ActiveGame(), 1);
     EXPECT_FALSE(bar.in_group[1]);
     EXPECT_NE(bar.group[1], bar.group[0]);
 
-    slots::Toggle(bar, *game_, 0);
+    slots::Toggle(bar, ActiveGame(), 0);
     EXPECT_TRUE(bar.in_group[0]) << "the last army of a group cannot be dropped";
 }
 
 TEST_F(SlotsTest, GroupAllSingleAndPickGroupSwitchSelection) {
     BuildStandInStack(3);
-    auto bar = slots::Build(*game_, armies_, 0);
-    slots::All(bar, *game_);
+    auto bar = slots::Build(ActiveGame(), Armies(), 0);
+    slots::All(bar, ActiveGame());
     EXPECT_EQ(slots::Selected(bar).size(), 3U);
     EXPECT_TRUE(slots::Grouped(bar));
     EXPECT_EQ(bar.mark[1], slots::kNomark);
 
-    slots::Single(bar, *game_);
+    slots::Single(bar, ActiveGame());
     EXPECT_EQ(slots::Selected(bar).size(), 1U);
     EXPECT_FALSE(slots::Grouped(bar));
 
-    slots::PickGroup(bar, *game_, 2);
+    slots::PickGroup(bar, ActiveGame(), 2);
     EXPECT_TRUE(bar.in_group[2] && !bar.in_group[0]);
     EXPECT_EQ(bar.mark[2], slots::kTick);
 
     BuildStandInStack(3);
-    auto full_bar = slots::Build(*game_, armies_, 0);
-    slots::All(full_bar, *game_);
+    auto full_bar = slots::Build(ActiveGame(), Armies(), 0);
+    slots::All(full_bar, ActiveGame());
     full_bar.in_group[2] = false;
-    slots::PickGroup(full_bar, *game_, 0);
+    slots::PickGroup(full_bar, ActiveGame(), 0);
     EXPECT_TRUE(full_bar.in_group[2]) << "picking a group takes all of it";
 }
 
 TEST_F(SlotsTest, CommitPersistsGroupIdsAndKeepRetainsSurvivors) {
     BuildStandInStack(3);
-    auto bar = slots::Build(*game_, armies_, 0);
-    slots::All(bar, *game_);
-    slots::Commit(bar, *game_);
-    int group_id = armies_[0]->Group();
+    auto bar = slots::Build(ActiveGame(), Armies(), 0);
+    slots::All(bar, ActiveGame());
+    slots::Commit(bar, ActiveGame());
+    int group_id = Armies()[0]->Group();
     EXPECT_NE(group_id, slots::kUngrouped);
-    EXPECT_EQ(armies_[1]->Group(), group_id);
-    EXPECT_EQ(armies_[2]->Group(), group_id);
+    EXPECT_EQ(Armies()[1]->Group(), group_id);
+    EXPECT_EQ(Armies()[2]->Group(), group_id);
 
-    auto again = slots::Build(*game_, armies_, 0);
+    auto again = slots::Build(ActiveGame(), Armies(), 0);
     EXPECT_EQ(slots::Selected(again).size(), 3U);
     EXPECT_TRUE(slots::Grouped(again));
     EXPECT_EQ(again.group[0], again.group[2]);
-    slots::Commit(again, *game_);
-    EXPECT_EQ(armies_[0]->Group(), group_id);
+    slots::Commit(again, ActiveGame());
+    EXPECT_EQ(Armies()[0]->Group(), group_id);
 
-    slots::Toggle(again, *game_, 2);
-    slots::Commit(again, *game_);
-    auto third = slots::Build(*game_, armies_, 0);
+    slots::Toggle(again, ActiveGame(), 2);
+    slots::Commit(again, ActiveGame());
+    auto third = slots::Build(ActiveGame(), Armies(), 0);
     EXPECT_EQ(slots::Selected(third).size(), 2U);
-    EXPECT_EQ(armies_[2]->Group(), slots::kUngrouped);
-    EXPECT_EQ(armies_[0]->Group(), group_id);
+    EXPECT_EQ(Armies()[2]->Group(), slots::kUngrouped);
+    EXPECT_EQ(Armies()[0]->Group(), group_id);
 
-    slots::Single(third, *game_);
-    slots::Commit(third, *game_);
-    EXPECT_EQ(armies_[0]->Group(), slots::kUngrouped);
-    EXPECT_EQ(slots::Selected(slots::Build(*game_, armies_, 0)).size(), 1U);
+    slots::Single(third, ActiveGame());
+    slots::Commit(third, ActiveGame());
+    EXPECT_EQ(Armies()[0]->Group(), slots::kUngrouped);
+    EXPECT_EQ(slots::Selected(slots::Build(ActiveGame(), Armies(), 0)).size(), 1U);
 
     BuildStandInStack(3);
-    auto combat_bar = slots::Build(*game_, armies_, 0);
-    slots::All(combat_bar, *game_);
-    auto left = slots::Keep(combat_bar, *game_, {armies_[0], armies_[2]});
+    auto combat_bar = slots::Build(ActiveGame(), Armies(), 0);
+    slots::All(combat_bar, ActiveGame());
+    auto left = slots::Keep(combat_bar, ActiveGame(), {Armies()[0], Armies()[2]});
     ASSERT_TRUE(left.has_value());
     EXPECT_EQ(left->n, 2);
     EXPECT_TRUE(left->in_group[0] && left->in_group[1]);
-    EXPECT_FALSE(slots::Keep(combat_bar, *game_, {}).has_value());
+    EXPECT_FALSE(slots::Keep(combat_bar, ActiveGame(), {}).has_value());
 }
 
 TEST(ScreenLayoutTest, UiDataDialogsShortcutsAndSpriteSheets) {

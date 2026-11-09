@@ -105,7 +105,7 @@ TEST_P(GameScenarioTest, InitialStateGarrisonsAndSeedDeterminism) {
     }
 }
 
-// NOLINTNEXTLINE(readability-identifier-length)
+// NOLINTNEXTLINE(readability-identifier-length,cppcoreguidelines-avoid-non-const-global-variables)
 INSTANTIATE_TEST_SUITE_P(AllScenarios, GameScenarioTest, ::testing::ValuesIn(kScenarios),
                          ScenarioParamName);
 

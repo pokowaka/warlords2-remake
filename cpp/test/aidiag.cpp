@@ -26,6 +26,7 @@
 #include "warlords/game.hpp"
 #include "warlords/randommap.hpp"
 
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
 ABSL_FLAG(std::string, scenario, "ERYTHEA", "Scenario directory name (or RANDOM).");
 ABSL_FLAG(int, seed, 800001, "Random seed.");
@@ -36,6 +37,7 @@ ABSL_FLAG(int, crop_margin, 0, "Crop margin around active capitals (0 = full map
 ABSL_FLAG(int, solo_seat, -1, "Solo Modern seat index (-1 = alternating 4v4).");
 ABSL_FLAG(int, diplomacy, 0, "Diplomacy option (0 or 1).");
 ABSL_FLAG(std::string, opponent, "classic", "Opponent personality: classic or raider.");
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
 

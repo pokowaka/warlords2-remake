@@ -454,11 +454,9 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             std::vector<JointOption> options;
             options.reserve(targets.size() * pre_stacks.size());
 
-            // Scoring options only reads the board: answer per-tile army queries
-            // (combat estimates) from one index instead of scanning every army.
-            // The scope closes before the chosen stack moves.
+            // Scoring options only reads the board; per-tile army queries resolve
+            // in O(1) via Game::ArmiesOnTile before the chosen stack moves.
             {
-                belief::ScopedTileIndex scoring_index(game);
                 for (size_t ti = 0; ti < targets.size(); ti++) {
                     if (blocked_targets.count(ti)) continue;
                     const CandidateTarget& tgt = targets[ti];
