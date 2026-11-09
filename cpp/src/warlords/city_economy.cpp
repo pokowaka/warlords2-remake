@@ -69,9 +69,9 @@ std::vector<Produced> CityEconomy::RunProduction(Side& side) {
                 if (std::holds_alternative<PlantedStandard>(dest_target)) {
                     auto [std_x, std_y] = StandardAt(side);
                     army->ClearTransit();
-                    if (std_x != kNone &&
-                        static_cast<int>(game::ArmiesAt(game_, std_x, std_y).size()) <
-                                rules::kMaxStack) {
+                    auto here = game::ArmiesAt(game_, std_x, std_y);
+                    if (std_x != kNone && (here.empty() || here[0]->OwnedBy(side.Id())) &&
+                        static_cast<int>(here.size()) < rules::kMaxStack) {
                         army->ArriveAt(TilePos(std_x, std_y));
                         arrived.push_back(Produced{ProducedKind::kArrived, army->TypeIndex(),
                                                    CityId::None(), true});

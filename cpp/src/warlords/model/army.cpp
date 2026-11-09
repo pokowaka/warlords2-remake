@@ -95,6 +95,9 @@ void Army::CopyAttributesFrom(const Army& other) {
     done_ = other.done_;
     offered_ = other.offered_;
     disbanded_ = other.disbanded_;
+    ai_order_ = other.ai_order_;
+    ai_dest_ = other.ai_dest_;
+    ai_group_ = other.ai_group_;
 }
 
 void Army::MoveAttributesFrom(Army&& other) noexcept {
@@ -126,6 +129,9 @@ void Army::MoveAttributesFrom(Army&& other) noexcept {
     done_ = other.done_;
     offered_ = other.offered_;
     disbanded_ = other.disbanded_;
+    ai_order_ = other.ai_order_;
+    ai_dest_ = other.ai_dest_;
+    ai_group_ = other.ai_group_;
 }
 
 void Army::PlaceAt(TilePos pos) {

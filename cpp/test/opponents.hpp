@@ -1,12 +1,15 @@
 /**
  * @file
- * @brief Training opponent `IComputerPlayer` strategies (`RaiderPlayer`, `FrozenPlayer`) for
- * reinforcement learning and diagnostic evaluation (`w2arena`, `w2aidiag`).
+ * @brief Training opponent `IComputerPlayer` strategies (`RaiderPlayer`, `WardenPlayer`,
+ * `FrozenPlayer`) for reinforcement learning and diagnostic evaluation (`w2arena`, `w2aidiag`,
+ * `w2evolve`).
  *
  * `RaiderPlayer` decorates a `ClassicAiPlayer` with an opening raid pass that sends cheap units
  * to capture reachable undefended enemy cities before executing the nineteen-phase 1993 Classic
- * AI. `FrozenPlayer` runs a fixed, non-learning `PolicyNetwork` checkpoint through
- * `ModernMlPlayer` so a training policy cannot co-adapt with a single rule-based adversary.
+ * AI. `WardenPlayer` runs a post-turn garrison pass after the Classic AI so owned cities keep at
+ * least one defender (two when threatened by nearby enemies). `FrozenPlayer` runs a fixed,
+ * non-learning `PolicyNetwork` checkpoint through `ModernMlPlayer` so a training policy cannot
+ * co-adapt with a single rule-based adversary.
  */
 #pragma once
 
@@ -23,23 +26,19 @@
 namespace w2 {
 
 /**
- * @brief Classic-backed `IComputerPlayer` decorator that raids reachable undefended enemy cities
- * at the start of its turn before delegating to an underlying `ClassicAiPlayer`.
+ * @brief Shared `IClassicBackedPlayer` decorator delegating all standard AI hooks to a wrapped
+ * `ClassicAiPlayer`.
  *
  * Not thread-safe without external synchronization.
  */
-class RaiderPlayer final : public IClassicBackedPlayer {
+class ClassicDecoratorPlayer : public IClassicBackedPlayer {
   public:
     /** @brief Shared handle to the decorated `ClassicAiPlayer`. */
     using SharedClassicPlayer = std::shared_ptr<ClassicAiPlayer>;
 
-    explicit RaiderPlayer(SharedClassicPlayer base);
-    RaiderPlayer(Game& game, Side& side);
-
     ClassicAiPlayer& ClassicImpl() override { return *base_; }
     const ClassicAiPlayer& ClassicImpl() const override { return *base_; }
 
-    void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) override;
     void OnTurnStarted(Side& side) override;
     AttitudeBreakdown EvaluateProposal(const Game& game, SideId ai_side,
                                        SideId proposer_side) const override;
@@ -48,15 +47,51 @@ class RaiderPlayer final : public IClassicBackedPlayer {
     void RecordBattle(Game& game, SideId defender, SideId attacker, TilePos pos, int heroes_lost,
                       int armies_lost, bool all_lost, bool city_tile) override;
     void RecordBattleObservation(Game& game, SideId observer, TilePos pos) override;
-    nlohmann::ordered_json SaveState() const override;
     absl::Status LoadState(const nlohmann::ordered_json& state, const Game& game) override;
     ThoughtSpan Thoughts() const override { return {}; }
     float LastBoardValue() const override { return 0.0F; }
     bool IsClassic() const override { return true; }
     const SideBelief* Belief() const override { return base_->Belief(); }
 
+  protected:
+    explicit ClassicDecoratorPlayer(SharedClassicPlayer base);
+    ClassicDecoratorPlayer(Game& game, Side& side);
+
+    ClassicAiPlayer& Base() { return *base_; }
+    const ClassicAiPlayer& Base() const { return *base_; }
+
   private:
     SharedClassicPlayer base_;  ///< Underlying 1993 Classic AI strategy.
+};
+
+/**
+ * @brief Classic-backed `IComputerPlayer` decorator that raids reachable undefended enemy cities
+ * at the start of its turn before delegating to an underlying `ClassicAiPlayer`.
+ *
+ * Not thread-safe without external synchronization.
+ */
+class RaiderPlayer final : public ClassicDecoratorPlayer {
+  public:
+    explicit RaiderPlayer(SharedClassicPlayer base);
+    RaiderPlayer(Game& game, Side& side);
+
+    void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) override;
+    nlohmann::ordered_json SaveState() const override;
+};
+
+/**
+ * @brief Classic-backed `IComputerPlayer` decorator that reinforces empty/threatened cities after
+ * the Classic AI turn so lone raiders face a garrison.
+ *
+ * Not thread-safe without external synchronization.
+ */
+class WardenPlayer final : public ClassicDecoratorPlayer {
+  public:
+    explicit WardenPlayer(SharedClassicPlayer base);
+    WardenPlayer(Game& game, Side& side);
+
+    void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) override;
+    nlohmann::ordered_json SaveState() const override;
 };
 
 /**
@@ -103,6 +138,7 @@ enum class Kind {
     kClassic,  ///< Unmodified 1993 `ClassicAiPlayer`.
     kRaider,   ///< `RaiderPlayer` pre-phase over `ClassicAiPlayer`.
     kFrozen,   ///< `FrozenPlayer` running a fixed `PolicyNetwork` checkpoint.
+    kWarden,   ///< `WardenPlayer` post-phase garrisoning cities after `ClassicAiPlayer`.
 };
 
 /**
@@ -112,9 +148,11 @@ void InstallOpponent(Game& game, Side& side, Kind kind,
                      const ai::ml::PolicyNetwork* frozen = nullptr);
 
 /**
- * @brief Executes one opponent turn for `side` using `kind` (and `frozen` when `Kind::kFrozen`).
+ * @brief Executes one opponent turn for `side` using `kind` (and `frozen` when `Kind::kFrozen`),
+ * optionally reporting turn events to `events`.
  */
-void PlayTurn(Game& game, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen = nullptr);
+void PlayTurn(Game& game, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen = nullptr,
+              IAiTurnEvents* events = nullptr);
 
 /**
  * @brief Executes only the Raider's pre-phase, marching cheap units into reachable undefended
@@ -122,6 +160,13 @@ void PlayTurn(Game& game, Side& side, Kind kind, const ai::ml::PolicyNetwork* fr
  * @return Number of enemy cities captured during the raid pass.
  */
 int RaidEmptyCities(Game& game, Side& side);
+
+/**
+ * @brief Executes only the Warden's post-phase, garrisoning owned cities (1 defender, or 2 when
+ * an enemy army is within 8 tiles).
+ * @return Number of armies moved into cities.
+ */
+int GarrisonCities(Game& game, Side& side);
 
 }  // namespace opponents
 }  // namespace w2

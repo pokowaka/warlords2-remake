@@ -86,7 +86,7 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
 
     std::vector<float> scores(cand_inputs.size());
     for (size_t i = 0; i < cand_inputs.size(); i++) {
-        scores[i] = policy.EconHead().Forward(cand_inputs[i])[0];
+        scores[i] = policy.ForwardEcon(cand_inputs[i])[0];
     }
     float log_prob = 0.0F;
     int pick = ml::SelectFromLogits(scores, sampler, &log_prob);
@@ -123,7 +123,8 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
 bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, CandidateTarget& tgt,
                          bool stage_near, const ml::PolicyNetwork& policy,
                          const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
-                         MovedArmySet& moved_armies) {
+                         MovedArmySet& moved_armies, const MissionFight& plan, bool* blocked_out) {
+    if (blocked_out) *blocked_out = false;
     stack.erase(std::remove_if(stack.begin(), stack.end(),
                                [&](Army* army) { return !game.Alive(army) || army->Moves() <= 0; }),
                 stack.end());
@@ -229,8 +230,13 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
     if (sel.armies.empty() || !sel.leader) return false;
 
     bool is_fog_mission = (tgt.kind == TargetKind::kFogFrontier);
+    bool is_combat_mission =
+            (tgt.kind == TargetKind::kNeutralCity || tgt.kind == TargetKind::kEnemyCity ||
+             tgt.kind == TargetKind::kEnemyStack);
+    MissionFight cur_plan = plan;
     bool made_progress = false;
     bool completed_objective = false;
+    bool blocked = false;
 
     for (int pass = 0; pass < 24 && !sel.armies.empty() && sel.min_moves > 0; pass++) {
         if (IAiTurnEvents* events = game.ActiveAiEvents(); events && events->IsAborted()) break;
@@ -243,7 +249,71 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         auto path = move::FindPath(game, sel.armies, leader_x, leader_y, dest_x, dest_y);
         if (!path || path->empty()) break;
 
+        int blocker_x = kNone, blocker_y = kNone;
+        int blocker_cum_cost = 0, blocker_vis_count = 1;
+        int cum_step_cost = 0;
+        for (const move::Step& step : *path) {
+            bool on_tgt = tgt.city ? (game::CityAt(game, step.x, step.y) == tgt.city)
+                                   : (step.x == dest_x && step.y == dest_y);
+            if (on_tgt) break;
+            cum_step_cost += std::min(step.cost, 16);
+            if (cum_step_cost > sel.min_moves + 8) break;
+            City* city_tile = game::CityAt(game, step.x, step.y);
+            if (city_tile && !city_tile->IsRazed()) continue;
+            if (!belief::IsTileVisible(game, our_side, step.x, step.y)) continue;
+            auto occ = game::ArmiesAt(game, step.x, step.y);
+            if (!occ.empty() && occ[0]->OwnerIndex() != our_side &&
+                diplomacy::MayAttack(game, our_side, occ[0]->OwnerIndex())) {
+                blocker_x = step.x;
+                blocker_y = step.y;
+                blocker_cum_cost = cum_step_cost;
+                blocker_vis_count =
+                        (game::TowerAt(game, step.x, step.y) && map.GameOptions().view_enemies == 0)
+                                ? 4
+                                : static_cast<int>(occ.size());
+                break;
+            }
+        }
+
         std::vector<move::Step> walk_steps = *path;
+        if (policy.AvoidBlockers() && blocker_x != kNone) {
+            auto clear_path =
+                    move::FindPathClear(game, sel.armies, leader_x, leader_y, dest_x, dest_y);
+            if (clear_path && !clear_path->empty()) {
+                int direct_cost = move::PathMoveCost(game, sel.armies, *path);
+                int clear_cost = move::PathMoveCost(game, sel.armies, *clear_path);
+                if (clear_cost <= direct_cost + 8) {
+                    ml::StackVec cur_sv = BuildStackFeatures(game, sel.armies, sel.min_moves);
+                    ml::TargetVec tv_detour = BuildTargetFeatures(
+                            game, side, sel.armies, tgt, 0.0F, 0.0F, clear_cost, policy.Version());
+                    ml::TargetVec tv_through{};
+                    if (is_combat_mission && !stage_near) {
+                        CandidateTarget tgt_plus_kill = tgt;
+                        tgt_plus_kill.value += static_cast<float>(blocker_vis_count) * 8.0F;
+                        tv_through = BuildTargetFeatures(game, side, sel.armies, tgt_plus_kill,
+                                                         0.0F, 0.0F, direct_cost, policy.Version(),
+                                                         blocker_x, blocker_y);
+                    } else {
+                        CandidateTarget blk_tgt;
+                        blk_tgt.kind = TargetKind::kEnemyStack;
+                        blk_tgt.x = blocker_x;
+                        blk_tgt.y = blocker_y;
+                        blk_tgt.value = static_cast<float>(blocker_vis_count) * 8.0F;
+                        tv_through = BuildTargetFeatures(game, side, sel.armies, blk_tgt, 0.0F,
+                                                         0.0F, blocker_cum_cost, policy.Version());
+                    }
+                    float u_detour =
+                            policy.ForwardMission(ml::PackMissionInput(ctx, cur_sv, tv_detour))[0];
+                    float u_through =
+                            policy.ForwardMission(ml::PackMissionInput(ctx, cur_sv, tv_through))[0];
+                    if (u_detour + policy.DetourBias() > u_through) {
+                        walk_steps = *clear_path;
+                    } else {
+                        cur_plan.decided_win = tv_through[10];
+                    }
+                }
+            }
+        }
         if (is_fog_mission && walk_steps.size() > 6) {
             walk_steps.resize(6);
         }
@@ -285,6 +355,12 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         }
 
         if (attack_x != kNone && attack_y != kNone) {
+            bool on_target = tgt.city ? (game::CityAt(game, attack_x, attack_y) == tgt.city)
+                                      : (attack_x == tgt.x && attack_y == tgt.y);
+            if (policy.YieldToBlockers() && !on_target) {
+                blocked = true;
+                break;
+            }
             auto def_armies = game::ArmiesAt(game, attack_x, attack_y);
             int def_owner = def_armies.empty() ? (att_city ? att_city->OwnerIndex() : kNone)
                                                : def_armies[0]->OwnerIndex();
@@ -305,7 +381,13 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
 
             core::Sel comb_sel = core::Select(game, combined_here);
             int prev_owner = att_city ? att_city->OwnerIndex() : kNone;
+            int fight_size = static_cast<int>(comb_sel.armies.size());
             Battle b_res = core::Fight(game, comb_sel, attack_x, attack_y);
+            MissionFight fight = cur_plan;
+            fight.at_target =
+                    tgt.city ? (att_city == tgt.city) : (attack_x == tgt.x && attack_y == tgt.y);
+            fight.fight_size = fight_size;
+            NotifyMissionFight(game, fight, b_res);
             made_progress = true;
             belief::RecordBattleObservation(game, our_side, attack_x, attack_y);
             if (att_city && att_city->OwnerIndex() == our_side && prev_owner != our_side &&
@@ -388,8 +470,11 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         if (!game.Alive(army)) continue;
         auto found = start_moves.find(army);
         bool spent_moves = (found != start_moves.end() && army->Moves() < found->second);
-        if (completed_objective && spent_moves && army->Moves() >= 2 && !stage_near &&
-            tgt.kind != TargetKind::kReinforceCity) {
+        if (blocked && army->Moves() >= 2) {
+            // Blocked on the way: MissionNet chooses again in the next wave
+            moved_armies.erase(army->Id());
+        } else if (completed_objective && spent_moves && army->Moves() >= 2 && !stage_near &&
+                   tgt.kind != TargetKind::kReinforceCity) {
             // Allow remaining movement points to be dispatched in the next wave of this turn
             moved_armies.erase(army->Id());
         } else if (made_progress) {
@@ -398,6 +483,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             moved_armies.erase(army->Id());
         }
     }
+    if (blocked_out) *blocked_out = blocked;
     return made_progress;
 }
 

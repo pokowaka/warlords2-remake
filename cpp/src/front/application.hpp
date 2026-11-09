@@ -42,6 +42,8 @@ struct ApplicationConfig {
     bool force_hidden_map = false;       ///< True when `--hidden-map` was passed.
     int military_advisor_override = -1;  ///< `1` force on, `0` force off, `-1` default.
     bool spectate_all_ai = false;        ///< True when `--spectate` / `--all-ai` is active.
+    int force_personalities = -1;        ///< `1` force on, `0` force off, `-1` weights default.
+    bool warlord_lookahead = false;      ///< True when `--warlord_lookahead` is active.
 };
 
 /**

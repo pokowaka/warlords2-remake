@@ -45,16 +45,17 @@ struct SideBelief {
     std::map<int, ObservedStack> stacks_by_tile;  ///< Enemy stacks seen, by tile key.
     /// Running average of each side's army strength, as seen.
     std::array<float, 8> seen_enemy_avg_strength{4.0F, 4.0F, 4.0F, 4.0F, 4.0F, 4.0F, 4.0F, 4.0F};
-    std::vector<City*> visible_cities;             ///< Cities the side can see.
-    std::vector<Site*> visible_sites;              ///< Ruins and temples it can see.
-    std::vector<Item*> visible_ground_items;       ///< Items lying on seen tiles.
-    std::vector<FrontierCluster> fog_frontiers;    ///< Where to explore, nearest first.
-    std::vector<float> city_threat1_turn;          ///< Enemy strength a turn away, by city.
-    std::vector<float> city_threat2_turn;          ///< Enemy strength two turns away, by city.
-    std::vector<float> city_nearest_enemy_dist;    ///< Distance to the nearest enemy, by city.
-    std::array<float, 8> my_border_strength{};     ///< Own strength near each side's cities.
-    std::array<float, 8> their_border_strength{};  ///< Each side's strength near ours.
-    std::array<int, 8> visible_cities_by_side{};   ///< Visible cities, by owner.
+    std::vector<City*> visible_cities;               ///< Cities the side can see.
+    std::vector<Site*> visible_sites;                ///< Ruins and temples it can see.
+    std::vector<Item*> visible_ground_items;         ///< Items lying on seen tiles.
+    std::vector<FrontierCluster> fog_frontiers;      ///< Where to explore, nearest first.
+    std::vector<float> city_threat1_turn;            ///< Enemy strength a turn away, by city.
+    std::vector<float> city_threat2_turn;            ///< Enemy strength two turns away, by city.
+    std::vector<float> city_nearest_enemy_dist;      ///< Distance to the nearest enemy, by city.
+    std::array<float, 8> my_border_strength{};       ///< Own strength near each side's cities.
+    std::array<float, 8> their_border_strength{};    ///< Each side's strength near ours.
+    std::array<int, 8> visible_cities_by_side{};     ///< Visible cities, by owner.
+    std::array<int, 2> muster_cities{kNone, kNone};  ///< Top-2 elected Muster Hub city indices.
 };
 
 namespace ai::belief {

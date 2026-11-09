@@ -94,6 +94,12 @@ int Application::Execute(const ApplicationConfig& config) {
                 weights_path.empty() ? "(none found)" : "'", weights_path.c_str(),
                 weights_path.empty() ? "" : "'");
     }
+    if (config.force_personalities >= 0) {
+        ai::ml::ActivePolicy().SetUsePersonalities(config.force_personalities != 0);
+    }
+    if (config.warlord_lookahead) {
+        ai::ml::ActivePolicy().SetWarlordLookahead(true);
+    }
 
     if (!FileExists(config.data_dir / "TERRAIN0/ARMYTYPE.DAT")) {
         return FailStartup("cannot find the game's files in '" + config.data_dir.string() +

@@ -47,6 +47,11 @@ struct CandidateTarget {
     float nearby_friendly_str = 0.0F;  ///< Friendly mobile strength within 14 tiles.
     int assigned_stacks = 0;           ///< Stacks already assigned to this target.
     float assigned_strength = 0.0F;    ///< Combined strength already assigned here.
+    bool is_muster_hub = false;        ///< True when this reinforce target is a MusterNet hub.
+    int hub_armies = 0;                ///< Current armies stationed at this muster hub.
+    int hub_incoming_flow = 0;         ///< Vectored streams + marching stacks bound for this hub.
+    bool hub_has_hero = false;         ///< Whether a hero is at or bound for this muster hub.
+    float en_route_strength = 0.0F;    ///< Friendly strength carrying persistent orders here.
     std::string label;                 ///< Human-readable description for AIThoughts.
 };
 
@@ -62,10 +67,15 @@ ml::StackVec BuildStackFeatures(const Game& game, const std::vector<Army*>& stac
 /** @brief Returns the minimum movement-point cost in `flood` to reach `tgt`. */
 int TargetPathCost(const Game& game, const core::Flood& flood, const CandidateTarget& tgt);
 
-/** @brief Builds the 21-dimensional feature vector describing `tgt` for `stack` in MissionNet. */
+/** @brief Encodes `tgt` into a compact integer key for cross-turn order persistence (`ai_dest_`).
+ */
+int TargetOrderKey(const Game& game, const CandidateTarget& tgt);
+
+/** @brief Builds the 29-dimensional feature vector describing `tgt` for `stack` in MissionNet. */
 ml::TargetVec BuildTargetFeatures(Game& game, const Side& side, const std::vector<Army*>& stack,
                                   const CandidateTarget& tgt, float nearby_friendly_str,
-                                  float caution_bias, int path_cost);
+                                  float caution_bias, int path_cost, int policy_version,
+                                  int blocker_x = kNone, int blocker_y = kNone);
 
 /** @brief Evaluates diplomatic proposals and turn-start missives using DiploNet. */
 void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
@@ -82,11 +92,25 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
 bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, CandidateTarget& tgt,
                          bool stage_near, const ml::PolicyNetwork& policy,
                          const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
-                         MovedArmySet& moved_armies);
+                         MovedArmySet& moved_armies, const MissionFight& plan,
+                         bool* blocked_out = nullptr);
 
 /** @brief Returns the distinct candidate stack sizes to consider for a group led by `seed`. */
 std::vector<size_t> BuildCoalitionSizes(const Game& game, Army* seed,
                                         const std::vector<Army*>& escorts);
+
+/** @brief Pre-allocates garrison defenders in owned cities before forming expedition coalitions. */
+void RunCityGuardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
+                       const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
+                       MovedArmySet& moved_armies);
+
+/** @brief Selects up to 2 strategic muster hubs using MusterNet (`policy.Version() >= 8`). */
+void RunMusterSelectionPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
+                             const ml::ContextVec& ctx, ml::RolloutSampler* sampler);
+
+/** @brief Plants or retrieves the faction Standard (`policy.Version() >= 8`). */
+void RunStandardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
+                      const ml::ContextVec& ctx, ml::RolloutSampler* sampler);
 
 /** @brief Forms army coalitions, scores mission options with MissionNet, and executes moves. */
 void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,

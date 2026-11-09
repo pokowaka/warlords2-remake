@@ -277,6 +277,25 @@ class Army {
         offered_ = false;
     }
 
+    /** @brief Returns the persisted Modern AI cross-turn order (`0` = none). */
+    int AiOrder() const { return ai_order_; }
+    /** @brief Sets the persisted Modern AI cross-turn order. */
+    void SetAiOrder(int order) { ai_order_ = order; }
+    /** @brief Returns the persisted Modern AI destination index (`kNone` if unset). */
+    int AiDest() const { return ai_dest_; }
+    /** @brief Sets the persisted Modern AI destination index. */
+    void SetAiDest(int dest) { ai_dest_ = dest; }
+    /** @brief Returns the persisted Modern AI group identifier (`0` if ungrouped). */
+    int AiGroup() const { return ai_group_; }
+    /** @brief Sets the persisted Modern AI group identifier. */
+    void SetAiGroup(int group) { ai_group_ = group; }
+    /** @brief Resets persisted Modern AI order memory (`ai_order_`, `ai_dest_`, `ai_group_`). */
+    void ClearAiOrder() {
+        ai_order_ = 0;
+        ai_dest_ = kNone;
+        ai_group_ = 0;
+    }
+
   private:
     friend class ArmyRegistry;
 
@@ -313,6 +332,9 @@ class Army {
     bool done_ = false;                  ///< Done for the current turn.
     bool offered_ = false;               ///< Already offered in this cycle pass.
     bool disbanded_ = false;             ///< Marked disbanded during transit delivery.
+    int ai_order_ = 0;                   ///< Persisted Modern AI cross-turn order.
+    int ai_dest_ = kNone;                ///< Persisted Modern AI destination index.
+    int ai_group_ = 0;                   ///< Persisted Modern AI group identifier.
 };
 
 }  // namespace w2

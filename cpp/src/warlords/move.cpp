@@ -290,6 +290,35 @@ std::optional<Path> FindPath(Game& game, const Stack& stack, int start_x, int st
     return game.GetPathfinder().FindPath(game, stack, start_x, start_y, dest_x, dest_y);
 }
 
+std::optional<Path> FindPathClear(Game& game, const Stack& stack, int start_x, int start_y,
+                                  int dest_x, int dest_y) {
+    return game.GetPathfinder().FindPathClear(game, stack, start_x, start_y, dest_x, dest_y);
+}
+
+std::optional<Path> FindPathNoCache(Game& game, const Stack& stack, int start_x, int start_y,
+                                    int dest_x, int dest_y) {
+    return game.GetPathfinder().FindPathNoCache(game, stack, start_x, start_y, dest_x, dest_y);
+}
+
+int PathMoveCost(Game& game, const Stack& stack, const Path& path) {
+    if (path.empty()) return 0;
+    int side = stack.empty() ? kNone : stack[0]->OwnerIndex();
+    Mode movement = StackMode(game, stack);
+    const std::vector<int>& grid = Grid(game, side);
+    int width = game.GetMap().Width();
+    int total = 0;
+    bool at_sea = movement.at_sea;
+    for (const Step& step : path) {
+        int byte = grid[static_cast<size_t>(step.y) * width + step.x];
+        total += WalkCost(byte, movement.mode, movement.woods, movement.hills);
+        if (movement.mode == kLand && CrossesShore(byte, at_sea)) {
+            total += kWaterPenalty;
+            at_sea = !at_sea;
+        }
+    }
+    return total;
+}
+
 std::optional<Preview> PreviewRoute(Game& game, const Stack& stack, int x, int y) {
     return game.GetPathfinder().PreviewRoute(game, stack, x, y);
 }
@@ -297,6 +326,12 @@ std::optional<Preview> PreviewRoute(Game& game, const Stack& stack, int x, int y
 std::vector<int> Flood(Game& game, int grid_side, int x, int y, int range, int mode, bool woods,
                        bool hills, int fog_side) {
     return game.GetPathfinder().Flood(game, grid_side, x, y, range, mode, woods, hills, fog_side);
+}
+
+std::vector<int> FloodClear(Game& game, int grid_side, int x, int y, int range, int mode,
+                            bool woods, bool hills, int fog_side) {
+    return game.GetPathfinder().FloodClear(game, grid_side, x, y, range, mode, woods, hills,
+                                           fog_side);
 }
 
 WalkResult Walk(Game& game, const Stack& stack, const Path& path) {

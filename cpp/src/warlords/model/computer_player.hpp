@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
@@ -263,6 +264,13 @@ using ComputerPlayerFactory =
 /** @brief Hook callable initializing computer strategies and initial claims/scores for `game`. */
 using GameComputerSetupFn = std::function<void(Game& game)>;
 
+/** @brief Hook callable encoding a `Game` into a serialized snapshot string. */
+using GameEncodeFn = std::function<std::string(const Game& game)>;
+
+/** @brief Hook callable decoding a serialized snapshot string into a fresh `Game`, or null. */
+using GameDecodeFn = std::function<std::unique_ptr<Game>(std::string_view text,
+                                                         const std::filesystem::path& data_dir)>;
+
 /** @brief Registers the process-wide default `ComputerPlayerFactory` (installed by `//cpp:ai`). */
 void RegisterDefaultComputerPlayerFactory(ComputerPlayerFactory factory);
 
@@ -275,5 +283,16 @@ void RegisterDefaultGameComputerSetup(GameComputerSetupFn setup_fn);
 
 /** @brief Runs the registered default game computer setup on `game` if present. */
 void RunDefaultGameComputerSetup(Game& game);
+
+/** @brief Registers the process-wide game snapshot codec (installed by `//cpp:persistence`). */
+void RegisterDefaultGameSnapshotCodec(GameEncodeFn encode_fn, GameDecodeFn decode_fn);
+
+/** @brief Encodes `game` using the registered default snapshot codec, or empty string if unset. */
+std::string EncodeDefaultGameSnapshot(const Game& game);
+
+/** @brief Decodes `text` using the registered default snapshot codec, or `nullptr` if unset/error.
+ */
+std::unique_ptr<Game> DecodeDefaultGameSnapshot(std::string_view text,
+                                                const std::filesystem::path& data_dir);
 
 }  // namespace w2

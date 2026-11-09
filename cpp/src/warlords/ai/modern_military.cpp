@@ -43,6 +43,10 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
     Map& map = game.GetMap();
     SideBelief& belief = belief::Ensure(side);
     float caution = 0.0F;
+    auto is_muster_city = [&](int city_idx) {
+        return policy.Version() >= 8 && policy.UseMuster() && city_idx != kNone &&
+               (belief.muster_cities[0] == city_idx || belief.muster_cities[1] == city_idx);
+    };
 
     std::vector<CandidateTarget> targets;
     targets.reserve(80);
@@ -65,16 +69,35 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             float existing_garrison_str = 0.0F;
             float stationary_garrison_str = 0.0F;
             int existing_count = 0;
+            bool city_has_hero = false;
             for (int dy = 0; dy <= 1; dy++) {
                 for (int dx = 0; dx <= 1; dx++) {
                     for (Army* army : game::ArmiesAt(game, city->X() + dx, city->Y() + dy)) {
                         if (army->OwnerIndex() == our_side) {
                             existing_garrison_str += static_cast<float>(army->Strength());
                             existing_count++;
+                            if (army->Hero()) city_has_hero = true;
                             if (army->Moves() <= 0 || moved_armies.contains(army->Id())) {
                                 stationary_garrison_str += static_cast<float>(army->Strength());
                             }
                         }
+                    }
+                }
+            }
+            const bool hub = is_muster_city(city->Index());
+            int hub_flow = 0;
+            if (hub) {
+                hub_flow = static_cast<int>(game::VectoredTo(game, city).size());
+                for (Army* army : game.Armies()) {
+                    if (army->OwnerIndex() != our_side || army->IsDisbanded()) continue;
+                    if (army->InTransit() &&
+                        std::holds_alternative<CityId>(army->TransitState()->dest) &&
+                        std::get<CityId>(army->TransitState()->dest) == city->Id()) {
+                        hub_flow++;
+                    } else if (army->X() != kNone &&
+                               game::CityAt(game, army->X(), army->Y()) != city &&
+                               army->AiOrder() >= 100 && army->AiDest() == city->Index()) {
+                        hub_flow++;
                     }
                 }
             }
@@ -87,12 +110,34 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             hold.value =
                     static_cast<float>(city->Income()) + static_cast<float>(city->Defence()) * 3.0F;
             hold.is_quest_or_own_cap = is_quest_or_own;
+            hold.is_muster_hub = hub;
+            hold.hub_armies = existing_count;
+            hold.hub_incoming_flow = hub_flow;
+            hold.hub_has_hero = city_has_hero;
             hold.enemy_threat = threat;
             hold.assigned_strength = stationary_garrison_str;
             hold.label = "Hold " + city->Name();
             targets.push_back(std::move(hold));
 
-            if (existing_count < 32) {
+            if (hub && existing_count < 16) {
+                CandidateTarget mst;
+                mst.kind = TargetKind::kReinforceCity;
+                mst.is_muster_hub = true;
+                mst.hub_armies = existing_count;
+                mst.hub_incoming_flow = hub_flow;
+                mst.hub_has_hero = city_has_hero;
+                mst.x = city->X();
+                mst.y = city->Y();
+                mst.city = city;
+                mst.owner = our_side;
+                mst.value = static_cast<float>(city->Income()) +
+                            static_cast<float>(city->Defence()) * 3.0F;
+                mst.is_quest_or_own_cap = is_quest_or_own;
+                mst.enemy_threat = threat;
+                mst.assigned_strength = existing_garrison_str;
+                mst.label = "Muster " + city->Name();
+                targets.push_back(std::move(mst));
+            } else if (!hub && existing_count < 32) {
                 CandidateTarget reinf;
                 reinf.kind = TargetKind::kReinforceCity;
                 reinf.x = city->X();
@@ -200,9 +245,100 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         targets.push_back(std::move(fog_target));
     }
 
+    // v7: Rally targets onto friendly field hero stacks or staged siege stacks (< 8 units)
+    // so reinforcements can merge into a concentrated 4-8 unit assault force.
+    // Disabled when an MoE includes pre-v7 experts so legacy experts see their native target menu.
+    bool allow_field_rally = (policy.Version() >= 7);
+    for (const auto& exp : policy.Experts()) {
+        if (exp.version < 7) allow_field_rally = false;
+    }
+    if (allow_field_rally) {
+        auto [std_x, std_y] = game::StandardAt(game, side);
+        if (std_x != kNone && std_y != kNone) {
+            auto std_here = game::ArmiesAt(game, std_x, std_y);
+            if ((std_here.empty() || std_here[0]->OwnerIndex() == our_side) &&
+                static_cast<int>(std_here.size()) < rules::kMaxStack) {
+                bool std_hero = false;
+                float std_str = 0.0F;
+                for (Army* army : std_here) {
+                    std_str += static_cast<float>(army->Strength());
+                    if (army->Hero()) std_hero = true;
+                }
+                int std_flow = static_cast<int>(game::VectoredTo(game, nullptr, &side).size());
+                for (Army* army : game.Armies()) {
+                    if (army->OwnerIndex() == our_side && army->InTransit() &&
+                        std::holds_alternative<PlantedStandard>(army->TransitState()->dest)) {
+                        std_flow++;
+                    }
+                }
+                CandidateTarget std_tgt;
+                std_tgt.kind = TargetKind::kReinforceCity;
+                std_tgt.x = std_x;
+                std_tgt.y = std_y;
+                std_tgt.owner = our_side;
+                std_tgt.is_muster_hub =
+                        (policy.Version() >= 8 && (policy.UseMuster() || policy.UseStandard()));
+                std_tgt.hub_armies = static_cast<int>(std_here.size());
+                std_tgt.hub_incoming_flow = std_flow;
+                std_tgt.hub_has_hero = std_hero;
+                std_tgt.value = 24.0F;
+                std_tgt.is_quest_or_own_cap = std_hero;
+                std_tgt.assigned_strength = std_str;
+                std_tgt.label = absl::StrFormat("Rally standard (%d,%d)", std_x, std_y);
+                targets.push_back(std::move(std_tgt));
+            }
+        }
+        std::map<int, std::vector<Army*>> field_tiles;
+        for (Army* army : game.Armies()) {
+            if (army->OwnerIndex() != our_side || army->IsDisbanded() || army->InTransit() ||
+                army->X() == kNone)
+                continue;
+            if (game::CityAt(game, army->X(), army->Y())) continue;
+            if (army->X() == std_x && army->Y() == std_y) continue;
+            field_tiles[army->Y() * map.Width() + army->X()].push_back(army);
+        }
+        int rally_added = 0;
+        for (const auto& [t_key, units] : field_tiles) {
+            if (static_cast<int>(units.size()) >= rules::kMaxStack || rally_added >= 8) continue;
+            bool has_hero = false, is_staged = false;
+            float str = 0.0F;
+            for (Army* army : units) {
+                str += static_cast<float>(army->Strength());
+                if (army->Hero()) has_hero = true;
+                if (army->AiOrder() >= 120) is_staged = true;
+            }
+            if (!has_hero && !is_staged) continue;
+            CandidateTarget ral;
+            ral.kind = TargetKind::kReinforceCity;
+            ral.x = units[0]->X();
+            ral.y = units[0]->Y();
+            ral.owner = our_side;
+            ral.value = has_hero ? 26.0F : 18.0F;
+            ral.is_quest_or_own_cap = has_hero;
+            ral.assigned_strength = str;
+            ral.label = absl::StrFormat("Rally stack (%d,%d)", ral.x, ral.y);
+            targets.push_back(std::move(ral));
+            rally_added++;
+        }
+    }
+
     if (targets.empty()) return;
 
+    std::map<int, float> order_strength_by_dest;
+    if (policy.Version() >= 7) {
+        for (Army* army : game.Armies()) {
+            if (army->OwnerIndex() == our_side && !army->IsDisbanded() && army->X() != kNone &&
+                !army->InTransit() && army->AiOrder() >= 100 && army->AiDest() != kNone) {
+                order_strength_by_dest[army->AiDest()] += static_cast<float>(army->Strength());
+            }
+        }
+    }
+
     for (auto& target : targets) {
+        if (policy.Version() >= 7) {
+            auto found = order_strength_by_dest.find(TargetOrderKey(game, target));
+            if (found != order_strength_by_dest.end()) target.en_route_strength = found->second;
+        }
         if (target.kind == TargetKind::kNeutralCity || target.kind == TargetKind::kEnemyCity ||
             target.kind == TargetKind::kEnemyStack) {
             float near_str = 0.0F;
@@ -240,10 +376,40 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
     int best_enemy_city_target = kNone;
     float best_enemy_city_score = -1e9F;
 
-    for (auto& [loc_key, loc_group] : groups_by_loc) {
+    std::vector<LocGroup*> ordered_groups;
+    ordered_groups.reserve(groups_by_loc.size());
+    for (auto& [loc_key, loc_group] : groups_by_loc) ordered_groups.push_back(&loc_group);
+    if (policy.Version() >= 8) {
+        // Dispatch non-hub feeder cities and field stacks BEFORE Muster Hubs so newly
+        // arriving reinforcements can join the Muster Hub's strike force this same turn!
+        std::stable_sort(ordered_groups.begin(), ordered_groups.end(),
+                         [&](const LocGroup* lhs, const LocGroup* rhs) {
+                             bool lhs_hub = lhs->city && is_muster_city(lhs->city->Index());
+                             bool rhs_hub = rhs->city && is_muster_city(rhs->city->Index());
+                             return static_cast<int>(lhs_hub) < static_cast<int>(rhs_hub);
+                         });
+    }
+
+    for (LocGroup* group_ptr : ordered_groups) {
+        LocGroup& loc_group = *group_ptr;
         if (IAiTurnEvents* active_events = game.ActiveAiEvents();
             active_events && active_events->IsAborted()) {
             return;
+        }
+        if (policy.Version() >= 8 && loc_group.city && is_muster_city(loc_group.city->Index())) {
+            loc_group.units.clear();
+            for (int dy = 0; dy <= 1; dy++) {
+                for (int dx = 0; dx <= 1; dx++) {
+                    for (Army* army :
+                         game::ArmiesAt(game, loc_group.city->X() + dx, loc_group.city->Y() + dy)) {
+                        if (army->OwnerIndex() == our_side && army->Moves() > 0 &&
+                            !moved_armies.contains(army->Id())) {
+                            loc_group.units.push_back(army);
+                        }
+                    }
+                }
+            }
+            if (loc_group.units.empty()) continue;
         }
         std::vector<Army*> pool = loc_group.units;
         std::sort(pool.begin(), pool.end(), [&](Army* lhs, Army* rhs) {
@@ -293,9 +459,9 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                             if (core::FloodAt(land_flood, fog_x, fog_y) >= core::kUnreached)
                                 continue;
                             int adj_u = 0;
-                            for (int oy = -1; oy <= 1; oy++) {
-                                for (int ox = -1; ox <= 1; ox++) {
-                                    int unseen_x = fog_x + ox, unseen_y = fog_y + oy;
+                            for (int off_y = -1; off_y <= 1; off_y++) {
+                                for (int off_x = -1; off_x <= 1; off_x++) {
+                                    int unseen_x = fog_x + off_x, unseen_y = fog_y + off_y;
                                     if (unseen_x >= 0 && unseen_y >= 0 && unseen_x < width &&
                                         unseen_y < height &&
                                         !belief::IsTileVisible(game, our_side, unseen_x,
@@ -343,16 +509,16 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         std::set<size_t> local_fog_indices;
         if (map.GameOptions().hidden_map != 0) {
             std::vector<std::pair<int, size_t>> land_fogs, sea_fogs;
-            for (size_t ti = 0; ti < targets.size(); ti++) {
-                if (targets[ti].kind != TargetKind::kFogFrontier) continue;
-                int d_land = core::FloodAt(land_flood, targets[ti].x, targets[ti].y);
-                int d_fly = fly_dist(targets[ti].x, targets[ti].y);
+            for (size_t tgt_idx = 0; tgt_idx < targets.size(); tgt_idx++) {
+                if (targets[tgt_idx].kind != TargetKind::kFogFrontier) continue;
+                int d_land = core::FloodAt(land_flood, targets[tgt_idx].x, targets[tgt_idx].y);
+                int d_fly = fly_dist(targets[tgt_idx].x, targets[tgt_idx].y);
                 int best_d = std::min(d_land, d_fly);
                 if (best_d >= core::kUnreached) continue;
-                if (targets[ti].is_water)
-                    sea_fogs.emplace_back(best_d, ti);
+                if (targets[tgt_idx].is_water)
+                    sea_fogs.emplace_back(best_d, tgt_idx);
                 else
-                    land_fogs.emplace_back(best_d, ti);
+                    land_fogs.emplace_back(best_d, tgt_idx);
             }
             std::sort(land_fogs.begin(), land_fogs.end());
             std::sort(sea_fogs.begin(), sea_fogs.end());
@@ -417,7 +583,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             struct PrebuiltStack {
                 size_t size = 1;           ///< Number of units in the coalition.
                 std::vector<Army*> units;  ///< The armies in the coalition.
-                ml::StackVec sv{};         ///< Precomputed StackVec features.
+                ml::StackVec stack_vec{};  ///< Precomputed StackVec features.
                 bool flies = false;        ///< Whether the entire coalition flies.
                 float str = 0.0F;          ///< Sum of army strengths in the coalition.
             };
@@ -437,8 +603,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                 ? (committed_city_guard_str +
                                    std::max(0.0F, rem_group_str - prebuilt.str))
                                 : 20.0F;
-                prebuilt.sv = BuildStackFeatures(game, prebuilt.units, seed->Moves(),
-                                                 rem_guard_after_leave, origin_threat);
+                prebuilt.stack_vec = BuildStackFeatures(game, prebuilt.units, seed->Moves(),
+                                                        rem_guard_after_leave, origin_threat);
                 prebuilt.flies = (move::ModeOf(game, prebuilt.units) == move::kFlying);
                 pre_stacks.push_back(std::move(prebuilt));
             }
@@ -448,7 +614,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                 size_t target_idx = 0;      ///< Index into `targets`.
                 size_t stack_opt_idx = 0;   ///< Index into `pre_stacks`.
                 ml::MissionInVec in_vec{};  ///< Packed MissionNet input.
-                ml::TargetVec tv{};         ///< Target feature vector.
+                ml::TargetVec tgt_vec{};    ///< Target feature vector.
                 ml::MissionOutput out{};    ///< MissionNet output (utility and stage logit).
             };
             std::vector<JointOption> options;
@@ -457,9 +623,9 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             // Scoring options only reads the board; per-tile army queries resolve
             // in O(1) via Game::ArmiesOnTile before the chosen stack moves.
             {
-                for (size_t ti = 0; ti < targets.size(); ti++) {
-                    if (blocked_targets.count(ti)) continue;
-                    const CandidateTarget& tgt = targets[ti];
+                for (size_t tgt_idx = 0; tgt_idx < targets.size(); tgt_idx++) {
+                    if (blocked_targets.count(tgt_idx)) continue;
+                    const CandidateTarget& tgt = targets[tgt_idx];
 
                     if ((tgt.kind == TargetKind::kNeutralCity ||
                          tgt.kind == TargetKind::kEnemyCity) &&
@@ -482,11 +648,12 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     }
                     if (tgt.kind == TargetKind::kFogFrontier && map.GameOptions().hidden_map != 0) {
                         if (tgt.assigned_stacks >= 1) continue;
-                        if (!local_fog_indices.empty() && !local_fog_indices.count(ti)) continue;
+                        if (!local_fog_indices.empty() && !local_fog_indices.count(tgt_idx))
+                            continue;
                         bool still_has_unseen = false;
-                        for (int oy = -1; oy <= 1 && !still_has_unseen; oy++) {
-                            for (int ox = -1; ox <= 1 && !still_has_unseen; ox++) {
-                                int unseen_x = tgt.x + ox, unseen_y = tgt.y + oy;
+                        for (int off_y = -1; off_y <= 1 && !still_has_unseen; off_y++) {
+                            for (int off_x = -1; off_x <= 1 && !still_has_unseen; off_x++) {
+                                int unseen_x = tgt.x + off_x, unseen_y = tgt.y + off_y;
                                 if (unseen_x >= 0 && unseen_y >= 0 && unseen_x < map.Width() &&
                                     unseen_y < map.Height() &&
                                     !belief::IsTileVisible(game, our_side, unseen_x, unseen_y)) {
@@ -499,7 +666,11 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
 
                     if (tgt.kind == TargetKind::kHoldGarrison && tgt.city != loc_group.city)
                         continue;
-                    if (tgt.kind == TargetKind::kReinforceCity && tgt.city == loc_group.city)
+                    if (tgt.kind == TargetKind::kReinforceCity && tgt.city &&
+                        tgt.city == loc_group.city)
+                        continue;
+                    if (tgt.kind == TargetKind::kReinforceCity && !tgt.city &&
+                        tgt.x == loc_group.x && tgt.y == loc_group.y)
                         continue;
                     if (tgt.kind == TargetKind::kRuinOrSage && !seed->Hero()) continue;
                     if (tgt.kind == TargetKind::kTempleOrItem && tgt.item && !seed->Hero())
@@ -514,14 +685,14 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     bool is_combat_tgt = (tgt.kind == TargetKind::kNeutralCity ||
                                           tgt.kind == TargetKind::kEnemyCity ||
                                           tgt.kind == TargetKind::kEnemyStack);
-                    for (size_t si = 0; si < pre_stacks.size(); si++) {
-                        const PrebuiltStack& prebuilt = pre_stacks[si];
+                    for (size_t stk_idx = 0; stk_idx < pre_stacks.size(); stk_idx++) {
+                        const PrebuiltStack& prebuilt = pre_stacks[stk_idx];
                         const core::Flood& active_flood = prebuilt.flies ? fly_flood : land_flood;
                         int p_cost = TargetPathCost(game, active_flood, tgt);
                         if (p_cost >= core::kUnreached) continue;
 
                         float near_str = 0.0F;
-                        ml::StackVec opt_sv = prebuilt.sv;
+                        ml::StackVec opt_sv = prebuilt.stack_vec;
                         if (tgt.kind == TargetKind::kHoldGarrison) {
                             near_str = rem_group_str;
                             opt_sv[14] =
@@ -530,11 +701,33 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                             near_str = std::max(0.0F, tgt.nearby_friendly_str - rem_group_str);
                         }
 
-                        ml::TargetVec target_vec = BuildTargetFeatures(
-                                game, side, prebuilt.units, tgt, near_str, caution, p_cost);
+                        if (tgt.kind == TargetKind::kReinforceCity && !tgt.city) {
+                            if (static_cast<int>(belief::ArmiesAt(game, tgt.x, tgt.y).size() +
+                                                 prebuilt.units.size()) +
+                                        tgt.assigned_stacks * 2 >
+                                rules::kMaxStack) {
+                                continue;
+                            }
+                        }
+                        if (tgt.is_muster_hub && tgt.kind == TargetKind::kReinforceCity &&
+                            tgt.hub_armies + static_cast<int>(prebuilt.units.size()) +
+                                            tgt.assigned_stacks * 2 >
+                                    12) {
+                            continue;
+                        }
+
+                        ml::TargetVec target_vec =
+                                BuildTargetFeatures(game, side, prebuilt.units, tgt, near_str,
+                                                    caution, p_cost, policy.Version());
+                        if (tgt.is_muster_hub && tgt.kind == TargetKind::kReinforceCity &&
+                            (target_vec[19] > 0.5F || target_vec[8] < 0.33F)) {
+                            // Only rally nearby same-landmass (or flying) stacks within ~2 turns;
+                            // never embark slow boats across water just to reach a Meeting Point.
+                            continue;
+                        }
                         ml::MissionInVec m_in = ml::PackMissionInput(ctx, opt_sv, target_vec);
-                        auto raw = policy.MissionHead().Forward(m_in);
-                        options.push_back(JointOption{ti, si, m_in, target_vec,
+                        auto raw = policy.ForwardMission(m_in);
+                        options.push_back(JointOption{tgt_idx, stk_idx, m_in, target_vec,
                                                       ml::MissionOutput{raw[0], raw[1]}});
                     }
                 }
@@ -594,7 +787,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             // it reuses the privileged features computed as the turn began.
             const bool recording = sampler && sampler->current_turn;
             ml::StackValueInVec pre_group_state =
-                    recording ? ml::PackStackValueInput(ctx, pre_stacks.back().sv,
+                    recording ? ml::PackStackValueInput(ctx, pre_stacks.back().stack_vec,
                                                         sampler->current_turn->start_critic)
                               : ml::StackValueInVec{};
             float pre_group_value = recording ? policy.EvaluateStackValue(pre_group_state) : 0.0F;
@@ -631,7 +824,14 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                          : 0.0F;
 
             if (chosen_tgt.kind == TargetKind::kHoldGarrison) {
-                for (Army* army : current_stack) moved_armies.insert(army->Id());
+                for (Army* army : current_stack) {
+                    moved_armies.insert(army->Id());
+                    if (policy.Version() >= 7) {
+                        army->SetAiOrder(100);
+                        army->SetAiDest(TargetOrderKey(game, chosen_tgt));
+                        army->SetAiGroup(1);
+                    }
+                }
                 chosen_tgt.assigned_stacks++;
                 chosen_tgt.assigned_strength += stack_str;
             } else {
@@ -644,20 +844,61 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     best_enemy_city_target = chosen_tgt.city->Index();
                 }
 
+                MissionFight plan;
+                plan.side_idx = our_side;
+                plan.target_kind = static_cast<int>(chosen_tgt.kind);
+                plan.decided_win = chosen_opt.tgt_vec[10];
+                plan.decided_turns = chosen_opt.tgt_vec[8] > 1e-4F
+                                             ? (1.0F / chosen_opt.tgt_vec[8] - 1.0F)
+                                             : 99.0F;
+                plan.decided_size = static_cast<int>(current_stack.size());
+                bool blocked_on_way = false;
                 bool moved = ExecuteStackMission(game, side, current_stack, chosen_tgt, stage_near,
-                                                 policy, ctx, sampler, moved_armies);
+                                                 policy, ctx, sampler, moved_armies, plan,
+                                                 &blocked_on_way);
                 if (!moved) {
                     blocked_targets.insert(chosen_opt.target_idx);
                     chosen_tgt.assigned_stacks = std::max(0, chosen_tgt.assigned_stacks - 1);
                     chosen_tgt.assigned_strength =
                             std::max(0.0F, chosen_tgt.assigned_strength - stack_str);
-                    for (Army* army : current_stack) {
-                        if (game.Alive(army) && army->Moves() > 0) moved_armies.insert(army->Id());
+                    if (blocked_on_way) {
+                        std::vector<Army*> again;
+                        for (Army* army : current_stack) {
+                            if (game.Alive(army) && army->Moves() > 0) again.push_back(army);
+                        }
+                        pool.insert(pool.begin(), again.begin(), again.end());
+                    } else {
+                        for (Army* army : current_stack) {
+                            if (game.Alive(army) && army->Moves() > 0)
+                                moved_armies.insert(army->Id());
+                        }
                     }
                 } else {
+                    if (policy.Version() >= 7) {
+                        bool done_obj =
+                                (chosen_tgt.city && chosen_tgt.city->OwnerIndex() == our_side &&
+                                 chosen_tgt.kind != TargetKind::kReinforceCity);
+                        int ord_key = TargetOrderKey(game, chosen_tgt);
+                        int ord_code =
+                                100 + static_cast<int>(chosen_tgt.kind) + (stage_near ? 20 : 0);
+                        for (Army* army : current_stack) {
+                            if (!game.Alive(army)) continue;
+                            if (done_obj) {
+                                army->ClearAiOrder();
+                            } else {
+                                army->SetAiGroup(
+                                        (army->AiOrder() >= 100 && army->AiDest() == ord_key)
+                                                ? std::min(250, army->AiGroup() + 1)
+                                                : 1);
+                                army->SetAiOrder(ord_code);
+                                army->SetAiDest(ord_key);
+                            }
+                        }
+                    }
                     if (!current_stack.empty() && game.Alive(current_stack[0])) {
-                        float inv_disc =
-                                chosen_opt.tv[8] > 1e-4F ? (1.0F / chosen_opt.tv[8] - 1.0F) : 0.0F;
+                        float inv_disc = chosen_opt.tgt_vec[8] > 1e-4F
+                                                 ? (1.0F / chosen_opt.tgt_vec[8] - 1.0F)
+                                                 : 0.0F;
                         if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
                             modern_player->PushThought(AIThought{
                                 "Mission",
@@ -666,10 +907,10 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                                 current_stack[0]->Name()),
                                 chosen_tgt.label, current_stack[0]->X(), current_stack[0]->Y(),
                                 chosen_tgt.x, chosen_tgt.y, chosen_opt.out.utility,
-                                chosen_opt.tv[10], stage_near,
+                                chosen_opt.tgt_vec[10], stage_near,
                                 absl::StrFormat("U=%.2f Win=%.0f%% Turns=%.1f %s",
-                                                chosen_opt.out.utility, chosen_opt.tv[10] * 100.0F,
-                                                inv_disc,
+                                                chosen_opt.out.utility,
+                                                chosen_opt.tgt_vec[10] * 100.0F, inv_disc,
                                                 stage_near ? "[STAGE FOR SYNC]" : "[EXECUTE]")});
                         }
                     }

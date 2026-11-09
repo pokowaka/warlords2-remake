@@ -223,6 +223,7 @@ cc_library(
 # Layer 6: Persistence (save game serialization).
 cc_library(
     name = "persistence",
+    alwayslink = True,
     copts = W2_COPTS,
     srcs = [
         "src/warlords/save.cpp",
@@ -732,6 +733,20 @@ cc_binary(
         ":opponents",
         ":w2core",
         "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/strings:str_format",
+    ],
+)
+
+cc_binary(
+    name = "w2evolve",
+    copts = W2_COPTS,
+    srcs = ["test/evolve.cpp"],
+    deps = [
+        ":opponents",
+        ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/strings:str_format",
     ],
 )

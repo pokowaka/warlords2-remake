@@ -34,6 +34,10 @@ ABSL_FLAG(bool, military_advisor, false, "Force the Military Advisor option enab
 ABSL_FLAG(bool, no_military_advisor, false, "Force the Military Advisor option disabled.");
 ABSL_FLAG(bool, spectate, false, "Run all sides as computer players (AI-vs-AI spectator mode).");
 ABSL_FLAG(bool, all_ai, false, "Alias for --spectate.");
+ABSL_FLAG(bool, personalities, false, "Force 27-card evolved AI personalities enabled.");
+ABSL_FLAG(bool, no_personalities, false, "Force 27-card evolved AI personalities disabled.");
+ABSL_FLAG(bool, warlord_lookahead, false,
+          "Enable 1-ply Warlord tactical lookahead against the Imperial anchor.");
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 int main(int argc, char** argv) {
@@ -58,6 +62,9 @@ int main(int argc, char** argv) {
     if (absl::GetFlag(FLAGS_military_advisor)) config.military_advisor_override = 1;
     if (absl::GetFlag(FLAGS_no_military_advisor)) config.military_advisor_override = 0;
     config.spectate_all_ai = absl::GetFlag(FLAGS_spectate) || absl::GetFlag(FLAGS_all_ai);
+    if (absl::GetFlag(FLAGS_personalities)) config.force_personalities = 1;
+    if (absl::GetFlag(FLAGS_no_personalities)) config.force_personalities = 0;
+    config.warlord_lookahead = absl::GetFlag(FLAGS_warlord_lookahead);
 
     return w2::Application::Run(config);
 }

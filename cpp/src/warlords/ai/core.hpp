@@ -350,6 +350,12 @@ Flood FloodFrom(Game& game, int side_index, int x, int y, int range, const Sel* 
 /** @brief Floods the map from (x, y) in a movement mode, without woods or hills moves. */
 Flood FloodFrom(Game& game, int side_index, int x, int y, int range, int mode,
                 int fog_side = kSameSide);
+/**
+ * @brief Floods the map from (x, y) in a movement mode, shutting visible tiles occupied by hostile
+ * field stacks.
+ */
+Flood FloodClearFrom(Game& game, int side_index, int x, int y, int range, int mode,
+                     int fog_side = kSameSide);
 /** @brief The flood's cost to (x, y), plus 1, or kUnreached. */
 int FloodAt(const Flood& flood, int x, int y);
 /**

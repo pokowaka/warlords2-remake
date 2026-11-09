@@ -1,6 +1,7 @@
 #include "warlords/ai/personality.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace w2::ai::personality {
 
@@ -197,6 +198,67 @@ const Profile& ProfileFor(int level, int card) {
 
 const Profile& ForSide(const Side& side) {
     return ProfileFor(side.Level(), side.Card());
+}
+
+const char* ArchetypeName(int arch_id) {
+    switch (arch_id) {
+    case kArchImperial:
+        return "Imperial";
+    case kArchBerserker:
+        return "Berserker";
+    case kArchGuardian:
+        return "Guardian";
+    case kArchSchemer:
+        return "Schemer";
+    case kArchQuestor:
+        return "Questor";
+    default:
+        return "Unknown";
+    }
+}
+
+ArchetypeWeightArray ArchetypeWeights(const Profile& profile) {
+    const auto& traits = profile.traits;
+    const float aggr = traits[kAggression];
+    const float hon = traits[kHonour];
+    const float avar = traits[kAvarice];
+    const float scor = traits[kScorchedEarth];
+    const float hero = traits[kHeroFocus];
+    const float coal = traits[kCoalitionDrive];
+    const float cav = traits[kCavalryAffinity];
+    const float fly = traits[kFlierAffinity];
+    const float siege = traits[kSiegeAffinity];
+    const float caut = traits[kCaution];
+
+    std::array<float, kNumArchetypes> scores{};
+    scores[kArchImperial] = 0.85F + (profile.card == 0 ? 1.65F : 0.0F) -
+                            0.25F * (std::fabs(aggr) + std::fabs(caut));
+    scores[kArchBerserker] = 1.25F * aggr + 0.95F * scor + 0.70F * cav - 0.80F * caut - 0.30F * hon;
+    scores[kArchGuardian] =
+            1.10F * caut + 0.95F * hon - 0.85F * aggr - 0.55F * scor + 0.35F * siege;
+    scores[kArchSchemer] = 1.25F * avar + 1.10F * coal - 0.70F * hon +
+                           0.80F * std::max(0.0F, cav) * std::max(0.0F, caut);
+    scores[kArchQuestor] = 1.25F * hero + 0.95F * siege + 0.60F * fly;
+
+    float max_score = scores[0];
+    for (int i = 1; i < kNumArchetypes; i++) max_score = std::max(max_score, scores[i]);
+
+    ArchetypeWeightArray weights{};
+    float sum = 0.0F;
+    for (int i = 0; i < kNumArchetypes; i++) {
+        weights[i] = std::exp(1.15F * (scores[i] - max_score));
+        sum += weights[i];
+    }
+    if (sum > 0.0F) {
+        for (int i = 0; i < kNumArchetypes; i++) weights[i] /= sum;
+    }
+    return weights;
+}
+
+float DifficultyTemperature(int level, float warlord_temp) {
+    if (level <= 0) return std::max(warlord_temp, 0.35F);
+    if (level == 1) return std::max(warlord_temp, 0.12F);
+    return warlord_temp;
 }
 
 }  // namespace w2::ai::personality

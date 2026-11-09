@@ -1001,4 +1001,20 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     return game_ptr;
 }
 
+namespace {
+
+const bool kRegisteredSnapshotCodec = []() {
+    RegisterDefaultGameSnapshotCodec(
+            &Encode,
+            [](std::string_view text,
+               const std::filesystem::path& data_dir) -> std::unique_ptr<Game> {
+                auto decoded = Decode(text, data_dir);
+                if (!decoded.ok()) return nullptr;
+                return std::move(*decoded);
+            });
+    return true;
+}();
+
+}  // namespace
+
 }  // namespace w2::save

@@ -16,7 +16,17 @@
 
 namespace w2::ai::personality {
 
-constexpr int kTraitDim = 10;  ///< Number of traits in a PersonalityVector.
+constexpr int kTraitDim = 10;      ///< Number of traits in a PersonalityVector.
+constexpr int kNumArchetypes = 5;  ///< Number of evolved specialist archetypes.
+
+/** @brief Identifier for each evolved archetype specialist (`0..4`). */
+enum ArchetypeId : int {
+    kArchImperial = 0,   ///< Balanced Hegemon (`damped_v7_soup` generalist anchor).
+    kArchBerserker = 1,  ///< Blitzkrieg Raider & Scorched-Earth Conqueror.
+    kArchGuardian = 2,   ///< Chivalrous Defender, Garrison Turtle & Builder.
+    kArchSchemer = 3,    ///< Machiavellian Coalitionist, Extortionist & Flanker.
+    kArchQuestor = 4,    ///< Hero Champion, Ruin Hunter, Banner-Lord & Heavy Siege.
+};
 
 /** @brief The position of each trait in a PersonalityVector. */
 enum TraitIndex : int {
@@ -34,6 +44,8 @@ enum TraitIndex : int {
 
 /** @brief One value in [-1, 1] per trait, indexed by TraitIndex. */
 using PersonalityVector = std::array<float, kTraitDim>;
+/** @briefConvex combination weights across the 5 evolved specialist archetypes. */
+using ArchetypeWeightArray = std::array<float, kNumArchetypes>;
 
 /** @brief A computer character: who it is and how it plays. */
 struct Profile {
@@ -61,5 +73,20 @@ const Profile& ProfileFor(int level, int card);
  * @return A reference to the static profile.
  */
 const Profile& ForSide(const Side& side);
+
+/** @brief Short human-readable label for each evolved archetype specialist (`0..4`). */
+const char* ArchetypeName(int arch_id);
+
+/**
+ * @brief Projects a character card's 10D trait vector smoothly onto the 5-simplex of evolved
+ * specialist brains (`Imperial`, `Berserker`, `Guardian`, `Schemer`, `Questor`).
+ */
+ArchetypeWeightArray ArchetypeWeights(const Profile& profile);
+
+/**
+ * @brief Maps a side's difficulty tier (`0` = Knight, `1` = Lord, `2` = Warlord) to a policy
+ * sampling temperature without hardcoded tactical handicaps.
+ */
+float DifficultyTemperature(int level, float warlord_temp);
 
 }  // namespace w2::ai::personality

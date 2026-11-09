@@ -23,7 +23,7 @@ std::array<float, OutDim> ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Forward(
     std::array<float, H1Dim> hidden1{};
     for (int i = 0; i < H1Dim; i++) {
         float sum = b1[i];
-        const float* row = &w1[i * InDim];
+        const float* row = &w1[static_cast<size_t>(i) * InDim];
         for (int j = 0; j < InDim; j++) sum += row[j] * input[j];
         hidden1[i] = std::tanh(sum);
     }
@@ -31,7 +31,7 @@ std::array<float, OutDim> ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Forward(
     std::array<float, H2Dim> hidden2{};
     for (int i = 0; i < H2Dim; i++) {
         float sum = b2[i];
-        const float* row = &w2[i * H1Dim];
+        const float* row = &w2[static_cast<size_t>(i) * H1Dim];
         for (int j = 0; j < H1Dim; j++) sum += row[j] * hidden1[j];
         hidden2[i] = std::tanh(sum);
     }
@@ -39,9 +39,9 @@ std::array<float, OutDim> ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Forward(
     std::array<float, OutDim> out{};
     for (int i = 0; i < OutDim; i++) {
         float sum = b3[i];
-        const float* skip_row = &w_skip[i * InDim];
+        const float* skip_row = &w_skip[static_cast<size_t>(i) * InDim];
         for (int j = 0; j < InDim; j++) sum += skip_row[j] * input[j];
-        const float* row3 = &w3[i * H2Dim];
+        const float* row3 = &w3[static_cast<size_t>(i) * H2Dim];
         for (int j = 0; j < H2Dim; j++) sum += row3[j] * hidden2[j];
         out[i] = sum;
     }
@@ -55,7 +55,7 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Backward(const std::array<float, 
     std::array<float, H1Dim> hidden1{};
     for (int i = 0; i < H1Dim; i++) {
         float sum = b1[i];
-        const float* row = &w1[i * InDim];
+        const float* row = &w1[static_cast<size_t>(i) * InDim];
         for (int j = 0; j < InDim; j++) sum += row[j] * input[j];
         hidden1[i] = std::tanh(sum);
     }
@@ -63,7 +63,7 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Backward(const std::array<float, 
     std::array<float, H2Dim> hidden2{};
     for (int i = 0; i < H2Dim; i++) {
         float sum = b2[i];
-        const float* row = &w2[i * H1Dim];
+        const float* row = &w2[static_cast<size_t>(i) * H1Dim];
         for (int j = 0; j < H1Dim; j++) sum += row[j] * hidden1[j];
         hidden2[i] = std::tanh(sum);
     }
@@ -72,9 +72,9 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Backward(const std::array<float, 
         float grad_out = d_out[out_idx];
         if (grad_out == 0.0F) continue;
         grad_accum.b3[out_idx] += grad_out;
-        float* grad_skip = &grad_accum.w_skip[out_idx * InDim];
+        float* grad_skip = &grad_accum.w_skip[static_cast<size_t>(out_idx) * InDim];
         for (int j = 0; j < InDim; j++) grad_skip[j] += grad_out * input[j];
-        float* grad_w3 = &grad_accum.w3[out_idx * H2Dim];
+        float* grad_w3 = &grad_accum.w3[static_cast<size_t>(out_idx) * H2Dim];
         for (int j = 0; j < H2Dim; j++) grad_w3[j] += grad_out * hidden2[j];
     }
 
@@ -82,20 +82,21 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Backward(const std::array<float, 
     for (int i = 0; i < H2Dim; i++) {
         float grad_hidden2 = 0.0F;
         for (int out_idx = 0; out_idx < OutDim; out_idx++)
-            grad_hidden2 += d_out[out_idx] * w3[out_idx * H2Dim + i];
+            grad_hidden2 += d_out[out_idx] * w3[static_cast<size_t>(out_idx) * H2Dim + i];
         float grad2 = grad_hidden2 * (1.0F - hidden2[i] * hidden2[i]);
         grad_z2[i] = grad2;
         grad_accum.b2[i] += grad2;
-        float* grad_w2 = &grad_accum.w2[i * H1Dim];
+        float* grad_w2 = &grad_accum.w2[static_cast<size_t>(i) * H1Dim];
         for (int j = 0; j < H1Dim; j++) grad_w2[j] += grad2 * hidden1[j];
     }
 
     for (int j = 0; j < H1Dim; j++) {
         float grad_hidden1 = 0.0F;
-        for (int i = 0; i < H2Dim; i++) grad_hidden1 += grad_z2[i] * w2[i * H1Dim + j];
+        for (int i = 0; i < H2Dim; i++)
+            grad_hidden1 += grad_z2[i] * w2[static_cast<size_t>(i) * H1Dim + j];
         float grad1 = grad_hidden1 * (1.0F - hidden1[j] * hidden1[j]);
         grad_accum.b1[j] += grad1;
-        float* grad_w1 = &grad_accum.w1[j * InDim];
+        float* grad_w1 = &grad_accum.w1[static_cast<size_t>(j) * InDim];
         for (int in_idx = 0; in_idx < InDim; in_idx++) grad_w1[in_idx] += grad1 * input[in_idx];
     }
 }
@@ -152,7 +153,9 @@ size_t ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::FromFlatWidenInput(const std::v
             for (int col = 0; col < old_in_dim; col++) {
                 float weight = next();
                 int new_col = col < insert_at ? col : col + insert_count;
-                if (new_col < InDim) arr[row * InDim + new_col] = weight;
+                if (new_col < InDim) {
+                    arr[static_cast<size_t>(row) * InDim + new_col] = weight;
+                }
             }
         }
     };
@@ -174,12 +177,15 @@ template struct ResidualMLP<kMissionInDim, 32, 16, kMissionOutDim>;
 template struct ResidualMLP<kEconInDim, 24, 12, kEconOutDim>;
 template struct ResidualMLP<kValueInDim, 24, 12, kValueOutDim>;
 template struct ResidualMLP<kStackValueInDim, 24, 12, kValueOutDim>;
+template struct ResidualMLP<PolicyNetwork::kGateInDim, 10, 6, PolicyNetwork::kMaxExperts>;
+template struct ResidualMLP<kMusterInDim, 12, 6, kMusterOutDim>;
 
 PolicyNetwork::PolicyNetwork() {
     InitRandomWeights(42);
 }
 
 void PolicyNetwork::InitRandomWeights(uint32_t seed) {
+    version_ = 8;
     uint32_t state = seed ? seed : 1U;
     auto next_sym = [&]() -> float {
         state ^= state << 13;
@@ -191,7 +197,6 @@ void PolicyNetwork::InitRandomWeights(uint32_t seed) {
     };
     auto init_arr = [&](auto& arr, float scale) {
         for (float& weight : arr) {
-            // Sum of 2 uniforms in [-1, 1] gives smooth zero-mean triangular distribution
             weight = 0.5F * (next_sym() + next_sym()) * scale;
         }
     };
@@ -212,6 +217,7 @@ void PolicyNetwork::InitRandomWeights(uint32_t seed) {
     init_mlp(econ_net_);
     init_mlp(value_net_);
     init_mlp(stack_value_net_);
+    muster_net_.Zero();
 }
 
 void PolicyNetwork::Zero() {
@@ -220,6 +226,7 @@ void PolicyNetwork::Zero() {
     econ_net_.Zero();
     value_net_.Zero();
     stack_value_net_.Zero();
+    muster_net_.Zero();
 }
 
 DiploInVec PackDiploInput(const ContextVec& context, const RivalVec& rival) {
@@ -245,6 +252,13 @@ EconInVec PackEconInput(const ContextVec& context, const EconVec& econ) {
     return packed;
 }
 
+MusterInVec PackMusterInput(const ContextVec& context, const MusterVec& muster) {
+    MusterInVec packed{};
+    std::copy(context.begin(), context.end(), packed.begin());
+    std::copy(muster.begin(), muster.end(), packed.begin() + kContextDim);
+    return packed;
+}
+
 ValueInVec PackValueInput(const ContextVec& context, const CriticVec& critic) {
     ValueInVec packed{};
     std::copy(context.begin(), context.end(), packed.begin());
@@ -261,8 +275,102 @@ StackValueInVec PackStackValueInput(const ContextVec& context, const StackVec& s
     return packed;
 }
 
+namespace {
+
+template <size_t DimN>
+std::array<float, PolicyNetwork::kMaxExperts> ComputeExpertGates(
+        const PolicyNetwork& net, const std::array<float, DimN>& input) {
+    std::array<float, PolicyNetwork::kGateInDim> gate_in{};
+    for (int i = 0; i < PolicyNetwork::kGateInDim; i++) gate_in[i] = input[i];
+    auto raw = net.GateHead().Forward(gate_in);
+    int num_exp = std::min(static_cast<int>(net.Experts().size()), PolicyNetwork::kMaxExperts);
+    float max_logit = -1e30F;
+    for (int i = 0; i < num_exp; i++) max_logit = std::max(max_logit, raw[i]);
+    std::array<float, PolicyNetwork::kMaxExperts> gates{};
+    float sum = 0.0F;
+    for (int i = 0; i < num_exp; i++) {
+        gates[i] = std::exp(std::clamp(raw[i] - max_logit, -25.0F, 0.0F));
+        sum += gates[i];
+    }
+    if (sum > 0.0F) {
+        for (int i = 0; i < num_exp; i++) gates[i] /= sum;
+    }
+    return gates;
+}
+
+template <size_t DimN>
+void ApplyExpertContext(const PolicyNetwork::ExpertHeads& expert,
+                        std::array<float, DimN>& local_in) {
+    if (expert.version < 7) {
+        for (int col = kGlobalDim; col < kContextDim; col++) local_in[col] = 0.0F;
+        return;
+    }
+    if (expert.use_commander) {
+        for (int i = 0; i < 5; i++) {
+            float acc = expert.commander_b[i];
+            for (int j = 0; j < PolicyNetwork::kGateInDim; j++) {
+                acc += expert.commander_w[static_cast<size_t>(i) * PolicyNetwork::kGateInDim + j] *
+                       local_in[j];
+            }
+            local_in[25 + i] = std::tanh(acc);
+        }
+    } else {
+        for (int col = 25; col < kContextDim; col++) local_in[col] = 0.0F;
+    }
+}
+
+}  // namespace
+
+std::array<float, kDiploOutDim> PolicyNetwork::ForwardDiplo(const DiploInVec& input) const {
+    if (experts_.empty()) return diplo_net_.Forward(input);
+    auto gates = ComputeExpertGates(*this, input);
+    int num_exp = std::min(static_cast<int>(experts_.size()), kMaxExperts);
+    std::array<float, kDiploOutDim> acc{};
+    for (int exp_idx = 0; exp_idx < num_exp; exp_idx++) {
+        DiploInVec local_in = input;
+        ApplyExpertContext(experts_[exp_idx], local_in);
+        auto raw = experts_[exp_idx].diplo_net.Forward(local_in);
+        for (int out_idx = 0; out_idx < kDiploOutDim; out_idx++)
+            acc[out_idx] += gates[exp_idx] * raw[out_idx];
+    }
+    return acc;
+}
+
+std::array<float, kMissionOutDim> PolicyNetwork::ForwardMission(const MissionInVec& input) const {
+    if (experts_.empty()) return mission_net_.Forward(input);
+    auto gates = ComputeExpertGates(*this, input);
+    int num_exp = std::min(static_cast<int>(experts_.size()), kMaxExperts);
+    std::array<float, kMissionOutDim> acc{};
+    for (int exp_idx = 0; exp_idx < num_exp; exp_idx++) {
+        MissionInVec local_in = input;
+        ApplyExpertContext(experts_[exp_idx], local_in);
+        auto raw = experts_[exp_idx].mission_net.Forward(local_in);
+        for (int out_idx = 0; out_idx < kMissionOutDim; out_idx++)
+            acc[out_idx] += gates[exp_idx] * raw[out_idx];
+    }
+    return acc;
+}
+
+std::array<float, kEconOutDim> PolicyNetwork::ForwardEcon(const EconInVec& input) const {
+    if (experts_.empty()) return econ_net_.Forward(input);
+    auto gates = ComputeExpertGates(*this, input);
+    int num_exp = std::min(static_cast<int>(experts_.size()), kMaxExperts);
+    std::array<float, kEconOutDim> acc{};
+    for (int exp_idx = 0; exp_idx < num_exp; exp_idx++) {
+        EconInVec local_in = input;
+        ApplyExpertContext(experts_[exp_idx], local_in);
+        auto raw = experts_[exp_idx].econ_net.Forward(local_in);
+        acc[0] += gates[exp_idx] * raw[0];
+    }
+    return acc;
+}
+
+std::array<float, kMusterOutDim> PolicyNetwork::ForwardMuster(const MusterInVec& input) const {
+    return muster_net_.Forward(input);
+}
+
 DiploOutput PolicyNetwork::ScoreDiplomacy(const ContextVec& context, const RivalVec& rival) const {
-    auto raw = diplo_net_.Forward(PackDiploInput(context, rival));
+    auto raw = ForwardDiplo(PackDiploInput(context, rival));
     DiploOutput out;
     out.stance_logits = {raw[0], raw[1], raw[2], raw[3]};
     out.tribute_logit = raw[4];
@@ -272,17 +380,15 @@ DiploOutput PolicyNetwork::ScoreDiplomacy(const ContextVec& context, const Rival
 
 MissionOutput PolicyNetwork::ScoreMission(const ContextVec& context, const StackVec& stack,
                                           const TargetVec& target) const {
-    auto raw = mission_net_.Forward(PackMissionInput(context, stack, target));
+    auto raw = ForwardMission(PackMissionInput(context, stack, target));
     return MissionOutput{raw[0], raw[1]};
 }
 
 float PolicyNetwork::ScoreEconomy(const ContextVec& context, const EconVec& econ) const {
-    return econ_net_.Forward(PackEconInput(context, econ))[0];
+    return ForwardEcon(PackEconInput(context, econ))[0];
 }
 
 float PolicyNetwork::EvaluateValue(const ContextVec& context, const CriticVec& critic) const {
-    // Linear: the critic predicts discounted return in empire-score units, which
-    // is not bounded to [-1, 1]
     return value_net_.Forward(PackValueInput(context, critic))[0];
 }
 
@@ -310,47 +416,289 @@ void PolicyNetwork::Unflatten(const std::vector<float>& params) {
     stack_value_net_.FromFlat(params, offset);
 }
 
+namespace {
+
+size_t WidenFlatMlp(const std::vector<float>& flat, size_t offset, int out_dim, int h1_dim,
+                    int h2_dim, int old_in, int new_in, int insert_at, int insert_count,
+                    std::vector<float>& out) {
+    auto next = [&]() { return offset < flat.size() ? flat[offset++] : 0.0F; };
+    auto copy_mat = [&](int rows) {
+        size_t base = out.size();
+        out.insert(out.end(), static_cast<size_t>(rows) * new_in, 0.0F);
+        for (int row = 0; row < rows; row++) {
+            for (int col = 0; col < old_in; col++) {
+                float weight = next();
+                int new_col = col < insert_at ? col : col + insert_count;
+                if (new_col < new_in) {
+                    out[base + static_cast<size_t>(row) * new_in + new_col] = weight;
+                }
+            }
+        }
+    };
+    auto copy_vec = [&](int count) {
+        for (int i = 0; i < count; i++) out.push_back(next());
+    };
+    copy_mat(out_dim);
+    copy_mat(h1_dim);
+    copy_vec(h1_dim);
+    copy_vec(h2_dim * h1_dim);
+    copy_vec(h2_dim);
+    copy_vec(out_dim * h2_dim);
+    copy_vec(out_dim);
+    return offset;
+}
+
+template <typename Mlp>
+void ZeroContextColumns(Mlp& mlp, int col_begin, int col_end) {
+    for (int row = 0; row < Mlp::kOutDim; row++) {
+        for (int col = col_begin; col < col_end && col < Mlp::kInDim; col++) {
+            mlp.w_skip[static_cast<size_t>(row) * Mlp::kInDim + col] = 0.0F;
+        }
+    }
+    for (int row = 0; row < Mlp::kH1Dim; row++) {
+        for (int col = col_begin; col < col_end && col < Mlp::kInDim; col++) {
+            mlp.w1[static_cast<size_t>(row) * Mlp::kInDim + col] = 0.0F;
+        }
+    }
+}
+
+}  // namespace
+
 void PolicyNetwork::UnflattenLegacy(const std::vector<float>& params) {
-    // Legacy files lack the 6 added context features (inserted after the 14
-    // original ones); v3/v4 also lack the critics' privileged inputs (at the
-    // end); v3 has no StackValueNet. Missing columns start at zero.
+    if (params.size() == static_cast<size_t>(kLegacyV7Params)) {
+        const int old_mission_in = MissionNet::kInDim - kAddedV8TargetDim;
+        const int old_econ_in = EconNet::kInDim - kAddedV8EconDim;
+        size_t offset = 0;
+        offset = diplo_net_.FromFlat(params, offset);
+        offset = mission_net_.FromFlatWidenInput(params, offset, old_mission_in, old_mission_in,
+                                                 kAddedV8TargetDim);
+        offset = econ_net_.FromFlatWidenInput(params, offset, old_econ_in, old_econ_in,
+                                              kAddedV8EconDim);
+        offset = value_net_.FromFlat(params, offset);
+        stack_value_net_.FromFlat(params, offset);
+        version_ = 7;
+        return;
+    }
+    if (params.size() == static_cast<size_t>(kLegacyV6Params)) {
+        const int old_mission_in = MissionNet::kInDim - kAddedTargetDim;
+        const int old_econ_in = EconNet::kInDim - kAddedEconDim;
+        size_t offset = 0;
+        offset = diplo_net_.FromFlat(params, offset);
+        offset = mission_net_.FromFlatWidenInput(params, offset, old_mission_in, old_mission_in,
+                                                 kAddedTargetDim);
+        offset = econ_net_.FromFlatWidenInput(params, offset, old_econ_in, old_econ_in,
+                                              kAddedEconDim);
+        offset = value_net_.FromFlat(params, offset);
+        stack_value_net_.FromFlat(params, offset);
+        version_ = 6;
+        return;
+    }
+    // Older files (v5/v4/v3) first widen to v6, then v6 -> v8.
     const bool is_v5 = params.size() == static_cast<size_t>(kLegacyV5Params);
     const bool is_v3 = params.size() == static_cast<size_t>(kLegacyV3Params);
     const int insert_at = kLegacyGlobalDim, insert_count = kAddedGlobalDim;
     const int critic_drop = is_v5 ? kV5Dropped : kV4CriticDropped;
+    const int v6_mission_in = MissionNet::kInDim - kAddedTargetDim;
+    const int v6_econ_in = EconNet::kInDim - kAddedEconDim;
+    std::vector<float> v6_flat;
+    v6_flat.reserve(kLegacyV6Params);
     size_t offset = 0;
-    offset = diplo_net_.FromFlatWidenInput(params, offset, DiploNet::kInDim - kV5Dropped, insert_at,
-                                           insert_count);
-    offset = mission_net_.FromFlatWidenInput(params, offset, MissionNet::kInDim - kV5Dropped,
-                                             insert_at, insert_count);
-    offset = econ_net_.FromFlatWidenInput(params, offset, EconNet::kInDim - kV5Dropped, insert_at,
-                                          insert_count);
-    offset = value_net_.FromFlatWidenInput(params, offset, ValueNet::kInDim - critic_drop,
-                                           insert_at, insert_count);
+    offset = WidenFlatMlp(params, offset, DiploNet::kOutDim, DiploNet::kH1Dim, DiploNet::kH2Dim,
+                          DiploNet::kInDim - kV5Dropped, DiploNet::kInDim, insert_at, insert_count,
+                          v6_flat);
+    offset = WidenFlatMlp(params, offset, MissionNet::kOutDim, MissionNet::kH1Dim,
+                          MissionNet::kH2Dim, v6_mission_in - kV5Dropped, v6_mission_in, insert_at,
+                          insert_count, v6_flat);
+    offset = WidenFlatMlp(params, offset, EconNet::kOutDim, EconNet::kH1Dim, EconNet::kH2Dim,
+                          v6_econ_in - kV5Dropped, v6_econ_in, insert_at, insert_count, v6_flat);
+    offset = WidenFlatMlp(params, offset, ValueNet::kOutDim, ValueNet::kH1Dim, ValueNet::kH2Dim,
+                          ValueNet::kInDim - critic_drop, ValueNet::kInDim, insert_at, insert_count,
+                          v6_flat);
     if (is_v3) {
-        stack_value_net_.Zero();
+        v6_flat.insert(v6_flat.end(), StackValueNet::kParamCount, 0.0F);
     } else {
-        stack_value_net_.FromFlatWidenInput(params, offset, StackValueNet::kInDim - critic_drop,
-                                            insert_at, insert_count);
+        WidenFlatMlp(params, offset, StackValueNet::kOutDim, StackValueNet::kH1Dim,
+                     StackValueNet::kH2Dim, StackValueNet::kInDim - critic_drop,
+                     StackValueNet::kInDim, insert_at, insert_count, v6_flat);
     }
+    UnflattenLegacy(v6_flat);
+    version_ = is_v5 ? 5 : (is_v3 ? 3 : 4);
+}
+
+void PolicyNetwork::UpgradeToV7() {
+    if (version_ >= 7) return;
+    ZeroContextColumns(diplo_net_, kGlobalDim, kContextDim);
+    ZeroContextColumns(mission_net_, kGlobalDim, kContextDim);
+    ZeroContextColumns(econ_net_, kGlobalDim, kContextDim);
+    ZeroContextColumns(value_net_, kGlobalDim, kContextDim);
+    ZeroContextColumns(stack_value_net_, kGlobalDim, kContextDim);
+    econ_net_.w_skip[kContextDim + kEconGuard1] = -0.15F;
+    econ_net_.w_skip[kContextDim + kEconGuard2] = -0.15F;
+    version_ = 7;
+}
+
+void PolicyNetwork::UpgradeToV8() {
+    if (version_ < 7) UpgradeToV7();
+    if (version_ >= 8) return;
+    version_ = 8;
+}
+
+PolicyNetwork::ArchetypeHead PolicyNetwork::ExtractArchetypeHead() const {
+    ArchetypeHead head;
+    head.use_muster = use_muster_;
+    head.use_standard = use_standard_;
+    head.avoid_blockers = avoid_blockers_;
+    head.detour_bias = detour_bias_;
+    size_t offset = 0;
+    auto pack = [&](const auto& mlp) {
+        for (float val : mlp.w_skip) head.params[offset++] = val;
+        for (float val : mlp.w3) head.params[offset++] = val;
+        for (float val : mlp.b3) head.params[offset++] = val;
+    };
+    pack(diplo_net_);
+    pack(mission_net_);
+    pack(econ_net_);
+    pack(muster_net_);
+    return head;
+}
+
+void PolicyNetwork::ApplyArchetypeHead(const ArchetypeHead& head) {
+    use_muster_ = head.use_muster;
+    use_standard_ = head.use_standard;
+    avoid_blockers_ = head.avoid_blockers;
+    detour_bias_ = head.detour_bias;
+    size_t offset = 0;
+    auto unpack = [&](auto& mlp) {
+        for (float& val : mlp.w_skip) val = head.params[offset++];
+        for (float& val : mlp.w3) val = head.params[offset++];
+        for (float& val : mlp.b3) val = head.params[offset++];
+    };
+    unpack(diplo_net_);
+    unpack(mission_net_);
+    unpack(econ_net_);
+    unpack(muster_net_);
+}
+
+PolicyNetwork PolicyNetwork::MaterializeForWeights(
+        const personality::ArchetypeWeightArray& weights) const {
+    if (!has_archetypes_) return *this;
+    ArchetypeHead blended{};
+    float muster_vote = 0.0F;
+    float std_vote = 0.0F;
+    float avoid_vote = 0.0F;
+    float bias_acc = 0.0F;
+    for (int arch_idx = 0; arch_idx < personality::kNumArchetypes; arch_idx++) {
+        float weight = weights[arch_idx];
+        if (weight <= 0.0F) continue;
+        const ArchetypeHead& head = archetypes_[arch_idx];
+        for (size_t i = 0; i < ArchetypeHead::kParamCount; i++) {
+            blended.params[i] += weight * head.params[i];
+        }
+        if (head.use_muster) muster_vote += weight;
+        if (head.use_standard) std_vote += weight;
+        if (head.avoid_blockers) avoid_vote += weight;
+        bias_acc += weight * head.detour_bias;
+    }
+    blended.use_muster = muster_vote >= 0.35F;
+    blended.use_standard = std_vote >= 0.35F;
+    blended.avoid_blockers = avoid_vote >= 0.25F;
+    blended.detour_bias = bias_acc;
+
+    PolicyNetwork out = *this;
+    out.ApplyArchetypeHead(blended);
+    out.use_personalities_ = false;
+    return out;
+}
+
+PolicyNetwork PolicyNetwork::MaterializeForSide(const Side& side) const {
+    if (!use_personalities_ || !has_archetypes_) return *this;
+    return MaterializeForWeights(personality::ArchetypeWeights(personality::ForSide(side)));
 }
 
 absl::Status PolicyNetwork::SaveJson(const std::filesystem::path& path, int generation,
                                      float selection_city_share) const {
     std::ostringstream out;
     auto weights = Flatten();
+    auto write_vec = [&](const std::vector<float>& vec, const char* indent) {
+        out << "[";
+        for (size_t i = 0; i < vec.size(); i++) {
+            if (i % 16 == 0) out << "\n" << indent;
+            out << vec[i];
+            if (i + 1 < vec.size()) out << ", ";
+        }
+        out << "\n  ]";
+    };
     out << "{\n";
-    out << "  \"version\": 6,\n";
+    out << "  \"version\": " << version_ << ",\n";
+    out << "  \"enableCityGuard\": " << (enable_city_guard_ ? 1 : 0) << ",\n";
     out << "  \"generation\": " << generation << ",\n";
     out << "  \"selectionCityShare\": " << selection_city_share << ",\n";
     out << "  \"paramCount\": " << weights.size() << ",\n";
-    out << "  \"weights\": [";
-    for (size_t i = 0; i < weights.size(); i++) {
-        if (i % 16 == 0) out << "\n    ";
-        out << weights[i];
-        if (i + 1 < weights.size()) out << ", ";
+    out << "  \"weights\": ";
+    write_vec(weights, "    ");
+    if (use_commander_) {
+        std::vector<float> cmd;
+        cmd.insert(cmd.end(), commander_w_.begin(), commander_w_.end());
+        cmd.insert(cmd.end(), commander_b_.begin(), commander_b_.end());
+        out << ",\n  \"commander\": ";
+        write_vec(cmd, "    ");
     }
-    out << "\n  ]\n}\n";
+    if (use_muster_ || use_standard_ || has_archetypes_) {
+        out << ",\n  \"useMuster\": " << (use_muster_ ? 1 : 0);
+        out << ",\n  \"useStandard\": " << (use_standard_ ? 1 : 0);
+        std::vector<float> mst;
+        muster_net_.ToFlat(mst);
+        out << ",\n  \"muster\": ";
+        write_vec(mst, "    ");
+    }
+    if (avoid_blockers_) {
+        out << ",\n  \"avoidBlockers\": 1";
+        out << ",\n  \"detourBias\": " << detour_bias_;
+    }
+    if (has_archetypes_) {
+        out << ",\n  \"usePersonalities\": " << (use_personalities_ ? 1 : 0);
+        out << ",\n  \"archetypes\": [\n";
+        for (int arch_idx = 0; arch_idx < personality::kNumArchetypes; arch_idx++) {
+            const ArchetypeHead& head = archetypes_[arch_idx];
+            std::vector<float> p_vec(head.params.begin(), head.params.end());
+            out << "    {\"name\": \"" << personality::ArchetypeName(arch_idx) << "\""
+                << ", \"useMuster\": " << (head.use_muster ? 1 : 0)
+                << ", \"useStandard\": " << (head.use_standard ? 1 : 0)
+                << ", \"avoidBlockers\": " << (head.avoid_blockers ? 1 : 0)
+                << ", \"detourBias\": " << head.detour_bias << ", \"params\": ";
+            write_vec(p_vec, "      ");
+            out << "}" << (arch_idx + 1 < personality::kNumArchetypes ? "," : "") << "\n";
+        }
+        out << "  ]";
+    }
+    if (!experts_.empty()) {
+        std::vector<float> gate_flat;
+        gate_net_.ToFlat(gate_flat);
+        out << ",\n  \"gate\": ";
+        write_vec(gate_flat, "    ");
+        out << ",\n  \"experts\": [\n";
+        for (size_t exp_idx = 0; exp_idx < experts_.size(); exp_idx++) {
+            std::vector<float> exp_flat;
+            experts_[exp_idx].diplo_net.ToFlat(exp_flat);
+            experts_[exp_idx].mission_net.ToFlat(exp_flat);
+            experts_[exp_idx].econ_net.ToFlat(exp_flat);
+            out << "    {\"version\": " << experts_[exp_idx].version;
+            if (experts_[exp_idx].use_commander) {
+                std::vector<float> exp_cmd;
+                exp_cmd.insert(exp_cmd.end(), experts_[exp_idx].commander_w.begin(),
+                               experts_[exp_idx].commander_w.end());
+                exp_cmd.insert(exp_cmd.end(), experts_[exp_idx].commander_b.begin(),
+                               experts_[exp_idx].commander_b.end());
+                out << ", \"commander\": ";
+                write_vec(exp_cmd, "      ");
+            }
+            out << ", \"weights\": ";
+            write_vec(exp_flat, "      ");
+            out << "}" << (exp_idx + 1 < experts_.size() ? "," : "") << "\n";
+        }
+        out << "  ]";
+    }
+    out << "\n}\n";
     return WriteFile(path, out.str());
 }
 
@@ -369,18 +717,20 @@ absl::Status PolicyNetwork::LoadJson(const std::filesystem::path& path) {
     if (weights_it == root.end() || !weights_it->is_array()) {
         return absl::InvalidArgumentError(absl::StrFormat(
                 "Failed to load PolicyNetwork weights '%s': missing JSON array field \"weights\". "
-                "Provide a valid v3..v6 ai_weights.json file.",
+                "Provide a valid v3..v8 ai_weights.json file.",
                 path.string()));
     }
     const auto& arr = *weights_it;
     int param_count = static_cast<int>(arr.size());
-    if (param_count != kTotalParams && param_count != kLegacyV5Params &&
+    if (param_count != kTotalParams && param_count != kLegacyV7Params &&
+        param_count != kLegacyV6Params && param_count != kLegacyV5Params &&
         param_count != kLegacyV4Params && param_count != kLegacyV3Params) {
         return absl::InvalidArgumentError(absl::StrFormat(
-                "Failed to load PolicyNetwork weights '%s': weight count %d does not match v6 (%d) "
-                "or supported legacy counts (%d, %d, %d). Re-train or restore matching weights.",
-                path.string(), param_count, kTotalParams, kLegacyV5Params, kLegacyV4Params,
-                kLegacyV3Params));
+                "Failed to load PolicyNetwork weights '%s': weight count %d does not match v8 (%d) "
+                "or supported legacy counts (%d, %d, %d, %d, %d). Re-train or restore matching "
+                "weights.",
+                path.string(), param_count, kTotalParams, kLegacyV7Params, kLegacyV6Params,
+                kLegacyV5Params, kLegacyV4Params, kLegacyV3Params));
     }
     std::vector<float> weights(static_cast<size_t>(param_count));
     for (int i = 0; i < param_count; i++) {
@@ -394,8 +744,143 @@ absl::Status PolicyNetwork::LoadJson(const std::filesystem::path& path) {
     }
     if (param_count == kTotalParams) {
         Unflatten(weights);
+        auto ver_it = root.find("version");
+        version_ = (ver_it != root.end() && ver_it->is_number_integer()) ? ver_it->get<int>() : 8;
     } else {
         UnflattenLegacy(weights);
+        if (param_count == kLegacyV7Params) {
+            auto ver_it = root.find("version");
+            if (ver_it != root.end() && ver_it->is_number_integer()) {
+                version_ = ver_it->get<int>();
+            }
+        }
+    }
+
+    auto int_field = [&](const nlohmann::ordered_json& obj, const char* key, int def_val) -> int {
+        auto found = obj.find(key);
+        return (found != obj.end() && found->is_number()) ? found->get<int>() : def_val;
+    };
+    auto float_field = [&](const nlohmann::ordered_json& obj, const char* key,
+                           float def_val) -> float {
+        auto found = obj.find(key);
+        return (found != obj.end() && found->is_number()) ? found->get<float>() : def_val;
+    };
+
+    enable_city_guard_ = int_field(root, "enableCityGuard", 0) != 0;
+    use_commander_ = false;
+    commander_w_.fill(0.0F);
+    commander_b_.fill(0.0F);
+    auto cmd_it = root.find("commander");
+    if (cmd_it != root.end() && cmd_it->is_array() &&
+        cmd_it->size() == commander_w_.size() + commander_b_.size()) {
+        use_commander_ = true;
+        for (size_t i = 0; i < commander_w_.size(); i++) {
+            commander_w_[i] = (*cmd_it)[i].get<float>();
+        }
+        for (size_t i = 0; i < commander_b_.size(); i++) {
+            commander_b_[i] = (*cmd_it)[commander_w_.size() + i].get<float>();
+        }
+    }
+
+    use_muster_ = false;
+    use_standard_ = false;
+    muster_net_.Zero();
+    auto mst_it = root.find("muster");
+    if (mst_it != root.end() && mst_it->is_array() &&
+        static_cast<int>(mst_it->size()) == MusterNet::kParamCount) {
+        use_muster_ = int_field(root, "useMuster", 1) != 0;
+        use_standard_ = int_field(root, "useStandard", 0) != 0;
+        std::vector<float> mst_flat(mst_it->size());
+        for (size_t i = 0; i < mst_it->size(); i++) mst_flat[i] = (*mst_it)[i].get<float>();
+        muster_net_.FromFlat(mst_flat, 0);
+    }
+
+    avoid_blockers_ = int_field(root, "avoidBlockers", 0) != 0;
+    detour_bias_ = float_field(root, "detourBias", -0.05F);
+    use_personalities_ = false;
+    has_archetypes_ = false;
+    archetypes_ = {};
+    auto arch_it = root.find("archetypes");
+    if (arch_it != root.end() && arch_it->is_array() &&
+        static_cast<int>(arch_it->size()) == personality::kNumArchetypes) {
+        bool ok_arch = true;
+        for (int arch_idx = 0; arch_idx < personality::kNumArchetypes; arch_idx++) {
+            const auto& arch_json = (*arch_it)[static_cast<size_t>(arch_idx)];
+            auto params_it = arch_json.find("params");
+            if (params_it == arch_json.end() || !params_it->is_array() ||
+                static_cast<int>(params_it->size()) != ArchetypeHead::kParamCount) {
+                ok_arch = false;
+                break;
+            }
+            ArchetypeHead head;
+            head.use_muster = int_field(arch_json, "useMuster", 0) != 0;
+            head.use_standard = int_field(arch_json, "useStandard", 0) != 0;
+            head.avoid_blockers = int_field(arch_json, "avoidBlockers", 0) != 0;
+            head.detour_bias = float_field(arch_json, "detourBias", -0.05F);
+            for (int i = 0; i < ArchetypeHead::kParamCount; i++) {
+                head.params[static_cast<size_t>(i)] =
+                        (*params_it)[static_cast<size_t>(i)].get<float>();
+            }
+            archetypes_[arch_idx] = head;
+        }
+        if (ok_arch) {
+            has_archetypes_ = true;
+            use_personalities_ = int_field(root, "usePersonalities", 1) != 0;
+        }
+    }
+
+    experts_.clear();
+    gate_net_.Zero();
+    auto gate_it = root.find("gate");
+    auto exp_it = root.find("experts");
+    if (gate_it != root.end() && gate_it->is_array() && exp_it != root.end() &&
+        exp_it->is_array()) {
+        std::vector<float> gate_flat(gate_it->size());
+        for (size_t i = 0; i < gate_it->size(); i++) gate_flat[i] = (*gate_it)[i].get<float>();
+        gate_net_.FromFlat(gate_flat, 0);
+        const size_t exp_actor_params =
+                DiploNet::kParamCount + MissionNet::kParamCount + EconNet::kParamCount;
+        const size_t exp_v7_params =
+                DiploNet::kParamCount +
+                MlpParamsWithInput<MissionNet>(MissionNet::kInDim - kAddedV8TargetDim) +
+                MlpParamsWithInput<EconNet>(EconNet::kInDim - kAddedV8EconDim);
+        for (size_t exp_idx = 0;
+             exp_idx < exp_it->size() && exp_idx < static_cast<size_t>(kMaxExperts); exp_idx++) {
+            const auto& exp_json = (*exp_it)[exp_idx];
+            auto exp_w_it = exp_json.find("weights");
+            if (exp_w_it == exp_json.end() || !exp_w_it->is_array()) continue;
+            if (exp_w_it->size() != exp_actor_params && exp_w_it->size() != exp_v7_params) continue;
+            std::vector<float> exp_flat(exp_w_it->size());
+            for (size_t i = 0; i < exp_w_it->size(); i++) exp_flat[i] = (*exp_w_it)[i].get<float>();
+            ExpertHeads exp_head;
+            exp_head.version = int_field(exp_json, "version", 6);
+            auto exp_cmd_it = exp_json.find("commander");
+            if (exp_cmd_it != exp_json.end() && exp_cmd_it->is_array() &&
+                exp_cmd_it->size() == exp_head.commander_w.size() + exp_head.commander_b.size()) {
+                exp_head.use_commander = true;
+                for (size_t i = 0; i < exp_head.commander_w.size(); i++) {
+                    exp_head.commander_w[i] = (*exp_cmd_it)[i].get<float>();
+                }
+                for (size_t i = 0; i < exp_head.commander_b.size(); i++) {
+                    exp_head.commander_b[i] =
+                            (*exp_cmd_it)[exp_head.commander_w.size() + i].get<float>();
+                }
+            }
+            size_t offset = 0;
+            offset = exp_head.diplo_net.FromFlat(exp_flat, offset);
+            if (exp_w_it->size() == exp_v7_params) {
+                const int old_m = MissionNet::kInDim - kAddedV8TargetDim;
+                const int old_e = EconNet::kInDim - kAddedV8EconDim;
+                offset = exp_head.mission_net.FromFlatWidenInput(exp_flat, offset, old_m, old_m,
+                                                                 kAddedV8TargetDim);
+                exp_head.econ_net.FromFlatWidenInput(exp_flat, offset, old_e, old_e,
+                                                     kAddedV8EconDim);
+            } else {
+                offset = exp_head.mission_net.FromFlat(exp_flat, offset);
+                exp_head.econ_net.FromFlat(exp_flat, offset);
+            }
+            experts_.push_back(std::move(exp_head));
+        }
     }
     return absl::OkStatus();
 }
@@ -414,9 +899,20 @@ class MlRuntimeConfig {
         deploy_temperature_ = std::max(0.01F, temperature);
     }
 
+    float ArmyWeight() const ABSL_LOCKS_EXCLUDED(deploy_temp_mutex_) {
+        absl::MutexLock temp_lock(&deploy_temp_mutex_);
+        return army_score_weight_;
+    }
+
+    void SetArmyWeight(float weight) ABSL_LOCKS_EXCLUDED(deploy_temp_mutex_) {
+        absl::MutexLock temp_lock(&deploy_temp_mutex_);
+        army_score_weight_ = weight;
+    }
+
   private:
     mutable absl::Mutex deploy_temp_mutex_;
     float deploy_temperature_ ABSL_GUARDED_BY(deploy_temp_mutex_) = kDeployTemperature;
+    float army_score_weight_ ABSL_GUARDED_BY(deploy_temp_mutex_) = 0.25F;
 };
 
 MlRuntimeConfig& GlobalMlRuntimeConfig() {
@@ -434,6 +930,10 @@ void SetDeployTemperature(float temperature) {
     GlobalMlRuntimeConfig().SetDeployTemp(temperature);
 }
 
+void SetArmyScoreWeight(float weight) {
+    GlobalMlRuntimeConfig().SetArmyWeight(weight);
+}
+
 float RolloutSampler::NextUniform01() {
     if (rng_state == 0) rng_state = 0x9e3779b9U;
     rng_state ^= rng_state << 13;
@@ -448,10 +948,6 @@ int SelectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, 
         if (out_log_prob) *out_log_prob = 0.0F;
         return 0;
     }
-    // Option i has policy probability p_i ~ exp(-logMult_i) * exp(u_i / T), i.e.
-    // effective logit z_i = u_i / T - logMult_i, so the multiplicity prior q_i ~ 1/M_i
-    // keeps family probabilities invariant to temperature T rather than raising (1/M_i)
-    // to the 1/T power at deployment temperature.
     auto log_mult_of = [&](size_t index) {
         return (log_mult && index < log_mult->size()) ? (*log_mult)[index] : 0.0F;
     };
@@ -534,7 +1030,6 @@ float ComputeEmpireScore(const Game& game, int side_index) {
     total_standing = std::max(1, total_standing);
     total_income = std::max(1, total_income);
 
-    // Reconnaissance only counts under Hidden Map, and stays small next to cities
     float recon_term = 0.0F;
     if (map.GameOptions().hidden_map != 0) {
         int sampled = 0, seen_sampled = 0;
@@ -555,8 +1050,6 @@ float ComputeEmpireScore(const Game& game, int side_index) {
         recon_term = 0.08F * rev_city_frac + 0.02F * seen_tile_frac;
     }
 
-    // Army combat power (Lanchester square law in sequential 1v1 duels, including
-    // vectored units in transit) as a zero-sum share of all sides' forces.
     float my_army_str = 0.0F, all_army_str = 0.0F;
     for (const Army* army : game.Armies()) {
         if (army->IsDisbanded() || (army->X() == kNone && !army->InTransit()) ||
@@ -570,7 +1063,8 @@ float ComputeEmpireScore(const Game& game, int side_index) {
 
     float city_share = static_cast<float>(my_cities) / static_cast<float>(total_standing);
     float inc_share = static_cast<float>(my_income) / static_cast<float>(total_income);
-    return 2.0F * city_share + 0.5F * inc_share + 0.25F * army_share + recon_term;
+    return 2.0F * city_share + 0.5F * inc_share +
+           GlobalMlRuntimeConfig().ArmyWeight() * army_share + recon_term;
 }
 
 PolicyNetwork& ActivePolicy() {
@@ -584,7 +1078,7 @@ PolicyNetwork& ActivePolicy() {
     return *instance;
 }
 
-ContextVec BuildContext(const Game& game, const Side& side) {
+ContextVec BuildContext(const Game& game, const Side& side, const PolicyNetwork* policy) {
     const Map& map = game.GetMap();
     ContextVec context{};
     int our_side = side.Index();
@@ -619,8 +1113,6 @@ ContextVec BuildContext(const Game& game, const Side& side) {
         }
     }
 
-    // Own cities without a single own army inside, and those of them a visible
-    // hostile stack could reach within a turn (belief threat map: fair information)
     std::vector<char> garrisoned(map.Cities().size(), 0);
     for (Army* army : game.Armies()) {
         if (army->OwnerIndex() != our_side || army->IsDisbanded() || army->InTransit() ||
@@ -691,10 +1183,31 @@ ContextVec BuildContext(const Game& game, const Side& side) {
             static_cast<float>(income - upkeep) / static_cast<float>(std::max(1, income)), -1.0F,
             1.0F);
 
-    // Keep the 10D personality conditioning channels neutral (0.0f) for the base tabula-rasa
-    // policy so no hand-authored trait biases fragment hidden-layer activations across sides.
     for (int i = 0; i < personality::kTraitDim; i++) {
         context[kGlobalDim + i] = 0.0F;
+    }
+    if (policy && policy->Version() >= 7) {
+        context[20] = map.GameOptions().diplomacy == 0 ? 1.0F : 0.0F;
+        context[21] = map.GameOptions().hidden_map != 0 ? 1.0F : 0.0F;
+        context[22] = map.GameOptions().neutral_cities <= 0 ? 1.0F : 0.0F;
+        context[23] = map.GameOptions().neutral_cities >= 2 ? 1.0F : 0.0F;
+        int act_w = std::max(1, map.ActiveX1() - map.ActiveX0() + 1);
+        int act_h = std::max(1, map.ActiveY1() - map.ActiveY0() + 1);
+        context[24] = std::clamp(
+                static_cast<float>(act_w * act_h) / static_cast<float>(kMapW * kMapH), 0.0F, 1.0F);
+        for (int i = 0; i < 5; i++) {
+            if (policy->UseCommander()) {
+                float acc = policy->CommanderB()[i];
+                for (int j = 0; j < PolicyNetwork::kGateInDim; j++) {
+                    acc += policy->CommanderW()[static_cast<size_t>(i) * PolicyNetwork::kGateInDim +
+                                                j] *
+                           context[j];
+                }
+                context[25 + i] = std::tanh(acc);
+            } else {
+                context[25 + i] = policy->Posture()[i];
+            }
+        }
     }
     return context;
 }
@@ -742,7 +1255,6 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
         max_rival_power = std::max(max_rival_power, power[side_idx]);
     }
 
-    // Cities where hostile strength within 6 tiles outweighs our own within 2
     constexpr int kThreatRadius = 6, kGuardRadius = 2;
     int my_cities = 0, threatened = 0;
     for (const auto& city : map.Cities()) {

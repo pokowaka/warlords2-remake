@@ -449,6 +449,15 @@ Flood FloodFrom(Game& game, int side_index, int x, int y, int range, int mode, i
     return flood;
 }
 
+Flood FloodClearFrom(Game& game, int side_index, int x, int y, int range, int mode, int fog_side) {
+    Flood flood;
+    flood.w = game.GetMap().Width();
+    flood.h = game.GetMap().Height();
+    flood.dist = move::FloodClear(game, side_index, x, y, range, mode, false, false,
+                                  fog_side == kSameSide ? side_index : fog_side);
+    return flood;
+}
+
 int FloodAt(const Flood& flood, int x, int y) {
     if (x < 0 || y < 0 || x >= flood.w || y >= flood.h) return kUnreached;
     int cost = flood.dist[y * flood.w + x];

@@ -42,7 +42,7 @@
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
-ABSL_FLAG(std::string, mode, "probe", "Search mode: probe or play.");
+ABSL_FLAG(std::string, mode, "probe", "Search mode: probe, play, or portfolio.");
 ABSL_FLAG(int, seeds, 16, "Number of seed pairs to evaluate.");
 ABSL_FLAG(int, candidates, 4, "Sampled candidate turns K besides the greedy turn.");
 ABSL_FLAG(int, rollouts, 4, "Rollout copies R per candidate.");
@@ -91,13 +91,15 @@ enum class Judge {
 /** @brief The search parameters, from the command line. */
 struct Settings {
     const ml::PolicyNetwork* policy = nullptr;  ///< The network every Modern side plays.
-    Judge judge = Judge::kHonest;               ///< How candidates are judged.
-    int candidates = 4;                         ///< K: sampled turns besides the greedy one.
-    int rollouts = 4;                           ///< R: copies per candidate.
-    int horizon = 2;                            ///< H: rounds played on after the candidate turn.
-    float cand_temp = 0.5F;  ///< Temperature the sampled candidates are drawn at.
-    float switch_z = 0.0F;   ///< Only leave the greedy turn when a candidate beats it by
-                             ///< this many standard errors.
+    std::vector<const ml::PolicyNetwork*>
+            specialists;           ///< Portfolio mode: candidate k > 0 plays specialists[k - 1].
+    Judge judge = Judge::kHonest;  ///< How candidates are judged.
+    int candidates = 4;            ///< K: sampled turns besides the greedy one.
+    int rollouts = 4;              ///< R: copies per candidate.
+    int horizon = 2;               ///< H: rounds played on after the candidate turn.
+    float cand_temp = 0.5F;        ///< Temperature the sampled candidates are drawn at.
+    float switch_z = 0.0F;         ///< Only leave the greedy turn when a candidate beats it by
+                                   ///< this many standard errors.
 };
 
 /** @brief A deep copy of @p game, made through a save/load round trip. */
@@ -133,14 +135,20 @@ void RestrictToView(Game& game, int my_side) {
 /**
  * @brief Plays the side's turn as candidate number @p candidate.
  *
- * Candidate 0 is the greedy turn; candidate k > 0 is the policy sampled at the
- * candidate temperature with seed k.
+ * Candidate 0 is the greedy turn; candidate k > 0 either plays specialist k - 1 greedily
+ * (portfolio mode) or samples the policy at `cand_temp` with seed k.
  */
 void PlayCandidate(Game& game, int side_index, int candidate, uint32_t base_seed,
                    const Settings& settings) {
     Side& side = *game.GetMap().SideAt(side_index);
     if (candidate == 0) {
         ai::modern::PlayTurn(game, side, nullptr, settings.policy, nullptr);
+        return;
+    }
+    if (!settings.specialists.empty()) {
+        const ml::PolicyNetwork* spec = settings.specialists[static_cast<size_t>(candidate - 1) %
+                                                             settings.specialists.size()];
+        ai::modern::PlayTurn(game, side, nullptr, spec, nullptr);
         return;
     }
     ml::RolloutSampler sampler;
@@ -299,15 +307,15 @@ double ModernShare(const Game& game, const std::array<bool, 8>& modern) {
  * See the file comment for the arguments.
  */
 int main(int argc, char** argv) {
-    auto args = ParseCliFlags(
-            argc, argv,
-            "w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] [peek|honest|fair] "
-            "[CAND_TEMP] [SWITCH_Z] [SEED_OFFSET]");
+    auto args = ParseCliFlags(argc, argv,
+                              "w2search WEIGHTS [probe|play|portfolio] [SEEDS] [K] [R] [H] [TURNS] "
+                              "[peek|honest|fair] "
+                              "[CAND_TEMP] [SWITCH_Z] [SEED_OFFSET] [SPEC1 SPEC2 ...]");
     if (args.empty()) {
         std::fprintf(stderr,
-                     "usage: w2search WEIGHTS [probe|play] [SEEDS] [K] [R] [H] [TURNS] "
+                     "usage: w2search WEIGHTS [probe|play|portfolio] [SEEDS] [K] [R] [H] [TURNS] "
                      "[peek|honest|fair] [CAND_TEMP] [SWITCH_Z] "
-                     "[SEED_OFFSET]\n");
+                     "[SEED_OFFSET] [SPEC1 SPEC2 ...]\n");
         return 2;
     }
     std::string data_dir = absl::GetFlag(FLAGS_data);
@@ -340,10 +348,35 @@ int main(int argc, char** argv) {
     const uint32_t seed_offset = args.size() > 10
                                          ? static_cast<uint32_t>(ToInt(args[10]).value_or(0))
                                          : absl::GetFlag(FLAGS_seed_offset);
-    const bool play = (mode == "play");
+    const bool is_portfolio = (mode == "portfolio");
+    const bool play = (mode == "play" || is_portfolio);
+
+    std::vector<std::unique_ptr<ml::PolicyNetwork>> spec_nets;
+    if (is_portfolio) {
+        for (size_t arg_idx = 11; arg_idx < args.size(); arg_idx++) {
+            auto spec_net = std::make_unique<ml::PolicyNetwork>();
+            if (absl::Status status = spec_net->LoadJson(args[arg_idx]); !status.ok()) {
+                std::fprintf(stderr, "w2search: cannot load specialist '%s': %s\n",
+                             args[arg_idx].c_str(), std::string(status.message()).c_str());
+                return 1;
+            }
+            settings.specialists.push_back(spec_net.get());
+            spec_nets.push_back(std::move(spec_net));
+        }
+        if (settings.specialists.empty()) {
+            std::fprintf(stderr,
+                         "w2search: portfolio mode requires at least one specialist path after "
+                         "SEED_OFFSET\n");
+            return 2;
+        }
+        settings.candidates = static_cast<int>(settings.specialists.size());
+    }
 
     const int cases = seeds * 2;
     std::vector<double> shares(cases, 0.5);
+    std::vector<double> plain_shares(cases, 0.5);
+    std::vector<int> case_preset(cases, 0);
+    std::vector<long> chosen_counts(settings.candidates + 1, 0);
     std::mutex results_mutex;
     // probe statistics
     long probes = 0;
@@ -361,11 +394,31 @@ int main(int argc, char** argv) {
                 int preset = 0;
                 std::string scenario;
                 uint32_t seed = kSeedBase + seed_offset + static_cast<uint32_t>(case_index / 2);
+
+                double plain_share = 0.5;
+                if (play) {
+                    auto plain_game =
+                            NewBenchmarkGame(case_index + 2 * static_cast<int>(seed_offset), seed,
+                                             preset, scenario, data_dir);
+                    auto modern_plain = AssignSeats(*plain_game, case_index % 2);
+                    Side* plain_cur = game::Begin(*plain_game);
+                    int plain_safety = 0;
+                    while (plain_cur && !plain_game->IsOver() && !plain_game->IsWon() &&
+                           plain_game->Turn() <= turns && plain_safety++ < turns * 12) {
+                        if (plain_cur->IsComputerControlled() && plain_cur->IsAlive()) {
+                            PlayOwnTurn(*plain_game, *plain_cur, policy);
+                        }
+                        plain_cur = game::EndTurn(*plain_game);
+                    }
+                    plain_share = ModernShare(*plain_game, modern_plain);
+                }
+
                 auto game = NewBenchmarkGame(case_index + 2 * static_cast<int>(seed_offset), seed,
                                              preset, scenario, data_dir);
                 auto modern = AssignSeats(*game, case_index % 2);
                 Side* current = game::Begin(*game);
                 int safety = 0;
+                std::vector<long> local_chosen(settings.candidates + 1, 0);
                 while (current && !game->IsOver() && !game->IsWon() && game->Turn() <= turns &&
                        safety++ < turns * 12) {
                     const int side_index = current->Index();
@@ -391,6 +444,7 @@ int main(int argc, char** argv) {
                                 settings.switch_z * std_error)
                                 best = 0;
                         }
+                        if (best < local_chosen.size()) local_chosen[best]++;
                         if (!play) {
                             std::lock_guard<std::mutex> lock(results_mutex);
                             probes++;
@@ -420,8 +474,14 @@ int main(int argc, char** argv) {
                 double share = ModernShare(*game, modern);
                 std::lock_guard<std::mutex> lock(results_mutex);
                 shares[case_index] = share;
-                std::printf("  case %3d %-8s %-14s share %.3f\n", case_index, scenario.c_str(),
-                            kPresets[preset].label, share);
+                plain_shares[case_index] = plain_share;
+                case_preset[case_index] = preset;
+                for (size_t idx = 0; idx < local_chosen.size(); idx++) {
+                    chosen_counts[idx] += local_chosen[idx];
+                }
+                std::printf("  case %3d %-8s %-14s plain %.3f -> search %.3f (%+.3f)\n", case_index,
+                            scenario.c_str(), kPresets[preset].label, plain_share, share,
+                            share - plain_share);
                 std::fflush(stdout);
             }
         });
@@ -430,17 +490,70 @@ int main(int argc, char** argv) {
     double sec =
             std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();
 
-    double mean = 0.0;
-    for (double share : shares) mean += share;
+    double mean = 0.0, plain_mean = 0.0;
+    for (int idx = 0; idx < cases; idx++) {
+        mean += shares[idx];
+        plain_mean += plain_shares[idx];
+    }
     mean /= std::max(1, cases);
-    double var = 0.0;
-    for (double share : shares) var += (share - mean) * (share - mean);
+    plain_mean /= std::max(1, cases);
+    double var = 0.0, diff_var = 0.0;
+    int better = 0, worse = 0, tied = 0;
+    for (int idx = 0; idx < cases; idx++) {
+        var += (shares[idx] - mean) * (shares[idx] - mean);
+        double diff = shares[idx] - plain_shares[idx];
+        double diff_mean = mean - plain_mean;
+        diff_var += (diff - diff_mean) * (diff - diff_mean);
+        if (diff > 1e-6) {
+            better++;
+        } else if (diff < -1e-6) {
+            worse++;
+        } else {
+            tied++;
+        }
+    }
     var /= std::max(1, cases - 1);
+    diff_var /= std::max(1, cases - 1);
     std::printf("=== %s | %s | %d games | K=%d R=%d H=%d T=%.2f z=%.1f | %.0f s ===\n",
                 mode.c_str(), judge.c_str(), cases, settings.candidates, settings.rollouts,
                 settings.horizon, settings.cand_temp, settings.switch_z, sec);
     std::printf("Modern city share %.1f%% +/- %.1f%% (95%%)\n", 100.0 * mean,
                 196.0 * std::sqrt(var / std::max(1, cases)));
+    if (play) {
+        std::printf(
+                "Plain P0 share    %.1f%% | Paired diff (search - plain): %+.2f%% +/- %.2f%% "
+                "(95%%) | %d better, %d worse, %d tied\n",
+                100.0 * plain_mean, 100.0 * (mean - plain_mean),
+                196.0 * std::sqrt(diff_var / std::max(1, cases)), better, worse, tied);
+        long total_decisions = 0;
+        for (long count : chosen_counts) total_decisions += count;
+        if (total_decisions > 0) {
+            std::printf("Candidate pick share (%ld turns):", total_decisions);
+            for (size_t idx = 0; idx < chosen_counts.size(); idx++) {
+                std::printf(" [%zu]=%.1f%%", idx,
+                            100.0 * static_cast<double>(chosen_counts[idx]) /
+                                    static_cast<double>(total_decisions));
+            }
+            std::printf("\n");
+        }
+        for (int preset_idx = 0; preset_idx < 4; preset_idx++) {
+            double plain_sum = 0.0, search_sum = 0.0;
+            int cnt = 0;
+            for (int idx = 0; idx < cases; idx++) {
+                if (case_preset[idx] == preset_idx) {
+                    plain_sum += plain_shares[idx];
+                    search_sum += shares[idx];
+                    cnt++;
+                }
+            }
+            if (cnt > 0) {
+                std::printf(
+                        "  preset %-14s (%3d games): plain %5.1f%% -> search %5.1f%% (%+.1f%%)\n",
+                        kPresets[preset_idx].label, cnt, 100.0 * plain_sum / cnt,
+                        100.0 * search_sum / cnt, 100.0 * (search_sum - plain_sum) / cnt);
+            }
+        }
+    }
     if (!play && probes > 0) {
         std::printf(
                 "probes %ld | a sampled turn scored best in %.0f%% | clearly best (> 2 SE) in "

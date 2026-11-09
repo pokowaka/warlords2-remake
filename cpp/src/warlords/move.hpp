@@ -185,9 +185,37 @@ struct CachedRoute {
 std::optional<Path> FindPath(Game& game, const Stack& stack, int start_x, int start_y, int dest_x,
                              int dest_y);
 
+/**
+ * @brief Like `FindPath`, but marks visible tiles occupied by hostile field stacks (other than the
+ * destination itself) as impassable so Modern AI stacks detour around visible road blockers when an
+ * unblocked route exists. Never reads or writes the route cache.
+ */
+std::optional<Path> FindPathClear(Game& game, const Stack& stack, int start_x, int start_y,
+                                  int dest_x, int dest_y);
+
+/**
+ * @brief Like `FindPath`, without reading or writing the route cache (safe during read-only AI
+ * option scoring).
+ */
+std::optional<Path> FindPathNoCache(Game& game, const Stack& stack, int start_x, int start_y,
+                                    int dest_x, int dest_y);
+
+/**
+ * @brief Total movement-point cost of walking `path` (including shore-crossing penalties for land
+ * stacks), independent of current remaining moves.
+ */
+int PathMoveCost(Game& game, const Stack& stack, const Path& path);
+
 /** @brief The flood the computer players measure distance with. */
 std::vector<int> Flood(Game& game, int grid_side, int x, int y, int range, int mode, bool woods,
                        bool hills, int fog_side);
+
+/**
+ * @brief Like `Flood`, but shuts visible tiles occupied by hostile field stacks (other than
+ * `(x, y)` itself) so Modern AI distance queries account for road blockers.
+ */
+std::vector<int> FloodClear(Game& game, int grid_side, int x, int y, int range, int mode,
+                            bool woods, bool hills, int fog_side);
 
 /** @brief Where a walk stopped to attack. */
 struct Attack {
@@ -291,6 +319,20 @@ class Pathfinder {
     std::optional<move::Path> FindPath(Game& game, const move::Stack& stack, int start_x,
                                        int start_y, int dest_x, int dest_y);
 
+    /**
+     * @brief Computes a clear detour path for `stack` from `(start_x, start_y)` to
+     * `(dest_x, dest_y)` avoiding visible hostile field stacks without modifying `route_slots_`.
+     */
+    std::optional<move::Path> FindPathClear(Game& game, const move::Stack& stack, int start_x,
+                                            int start_y, int dest_x, int dest_y);
+
+    /**
+     * @brief Computes a path for `stack` from `(start_x, start_y)` to `(dest_x, dest_y)` without
+     * reading or writing `route_slots_`.
+     */
+    std::optional<move::Path> FindPathNoCache(Game& game, const move::Stack& stack, int start_x,
+                                              int start_y, int dest_x, int dest_y);
+
     /** @brief Previews the route `stack` would take to `(x, y)` and its current-turn reach. */
     std::optional<move::Preview> PreviewRoute(Game& game, const move::Stack& stack, int x, int y);
 
@@ -298,6 +340,13 @@ class Pathfinder {
      */
     std::vector<int> Flood(Game& game, int grid_side, int x, int y, int range, int mode, bool woods,
                            bool hills, int fog_side);
+
+    /**
+     * @brief Runs a bounded `range`-sweep wavefront flood from `(x, y)` over `grid_side`'s grid,
+     * shutting visible tiles occupied by hostile field stacks.
+     */
+    std::vector<int> FloodClear(Game& game, int grid_side, int x, int y, int range, int mode,
+                                bool woods, bool hills, int fog_side);
 
     /** @brief Walks `stack` along `path`, updating positions, fog of war, and encampments. */
     move::WalkResult Walk(Game& game, const move::Stack& stack, const move::Path& path);

@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
 #include "warlords/move.hpp"
 #include "warlords/scn.hpp"
@@ -278,6 +279,26 @@ std::optional<std::vector<int>> CacheHit(const Game& game,
     return std::nullopt;
 }
 
+void ShutVisibleHostileStacks(const Game& game, int side, int start_x, int start_y, int dest_x,
+                              int dest_y, std::vector<int>& dist) {
+    if (side == kNone) return;
+    const Map& map = game.GetMap();
+    int width = map.Width();
+    for (const Army* army : game.Armies()) {
+        if (army->InTransit() || !map.InBounds(army->X(), army->Y())) continue;
+        if (army->OwnedBy(side)) continue;
+        if ((army->X() == start_x && army->Y() == start_y) ||
+            (army->X() == dest_x && army->Y() == dest_y))
+            continue;
+        const City* city_tile = map.CityAtFootprint(army->X(), army->Y());
+        if (city_tile && !city_tile->IsRazed()) continue;
+        if (!game::Seen(game, side, army->X(), army->Y())) continue;
+        if (diplomacy::MayAttack(game, side, army->OwnerIndex())) {
+            dist[static_cast<size_t>(army->Y()) * width + army->X()] = move::kShut;
+        }
+    }
+}
+
 }  // namespace
 
 void Pathfinder::Invalidate() {
@@ -473,6 +494,175 @@ std::optional<move::Path> Pathfinder::FindPath(Game& game, const move::Stack& st
     return path;
 }
 
+std::optional<move::Path> Pathfinder::FindPathClear(Game& game, const move::Stack& stack,
+                                                    int start_x, int start_y, int dest_x,
+                                                    int dest_y) {
+    if (start_x == dest_x && start_y == dest_y) return move::Path{};
+    const Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
+    if (!map.InBounds(dest_x, dest_y)) return std::nullopt;
+
+    int side = stack.empty() ? kNone : stack[0]->OwnerIndex();
+    move::Mode movement = move::StackMode(game, stack);
+    std::vector<int>& grid = GridFor(game, side);
+    int distance = move::Distance(dest_x, dest_y, start_x, start_y);
+
+    std::optional<move::Path> path;
+    if (distance == 1 && SingleStep(game, movement.mode, start_x, start_y, dest_x, dest_y)) {
+        path = move::Path{move::Step{dest_x, dest_y, 0}};
+    } else {
+        int goal = dest_y * width + dest_x;
+        auto restore = OpenCityAt(game, grid, dest_x, dest_y);
+        int penalty = 0;
+        if (movement.mode == move::kLand) {
+            int dest_terrain = scn::TerrainAt(map, dest_x, dest_y);
+            penalty = (dest_terrain == move::kWater || dest_terrain == move::kShore)
+                              ? move::kWaterPenaltyTo
+                              : move::kWaterPenalty;
+        }
+        int bound_x0 = std::max(0, std::min(start_x, dest_x) - 6);
+        int bound_x1 = std::min(width - 1, std::max(start_x, dest_x) + 6);
+        int bound_y0 = std::max(0, std::min(start_y, dest_y) - 6);
+        int bound_y1 = std::min(height - 1, std::max(start_y, dest_y) + 6);
+        const Side* side_ptr = map.SideAt(side);
+        bool fog = map.GameOptions().hidden_map != 0 && side_ptr &&
+                   (!side_ptr->IsComputerControlled() || !side_ptr->IsClassicAi());
+        const City* dest_city = map.CityAtFootprint(dest_x, dest_y);
+        bool dest_city_seen = false;
+        if (dest_city && fog && side_ptr && side_ptr->IsComputerControlled() &&
+            !side_ptr->IsClassicAi()) {
+            for (int oy = 0; oy <= 1; oy++) {
+                for (int ox = 0; ox <= 1; ox++) {
+                    if (game::Seen(game, side, dest_city->X() + ox, dest_city->Y() + oy))
+                        dest_city_seen = true;
+                }
+            }
+        }
+        std::vector<int> dist(static_cast<size_t>(width) * height, move::kShut);
+        for (int y = bound_y0; y <= bound_y1; y++) {
+            for (int x = bound_x0; x <= bound_x1; x++) {
+                int tile = y * width + x;
+                int byte = grid[tile];
+                bool is_dest_city_tile = dest_city_seen && map.CityAtFootprint(x, y) == dest_city;
+                bool hidden = fog && !is_dest_city_tile && !game::Seen(game, side, x, y);
+                bool shut = false;
+                if (movement.mode == move::kLand) {
+                    bool embarks_water = !movement.at_sea && move::Has(byte, move::kWaterF) &&
+                                         !move::Has(byte, move::kCrossF) &&
+                                         !(x == dest_x && y == dest_y);
+                    shut = byte % 8 == 0 || embarks_water ||
+                           (hidden && !(x == dest_x && y == dest_y));
+                } else if (movement.mode == move::kBoat) {
+                    shut = !move::Has(byte, move::kWaterF) ||
+                           (hidden && x != dest_x && y != dest_y);
+                } else {
+                    shut = (byte % 8 == 0 && move::Has(byte, move::kCityF)) ||
+                           (hidden && x != dest_x && y != dest_y);
+                }
+                dist[tile] = shut ? move::kShut : kUnreached;
+            }
+        }
+        Query query{width, height,        start_x,        start_y,        dest_x,  dest_y,
+                    &grid, movement.mode, movement.woods, movement.hills, penalty, std::move(dist),
+                    0,     false,         nullptr};
+        ShutVisibleHostileStacks(game, side, start_x, start_y, dest_x, dest_y, query.dist);
+        int found = 0;
+        if (query.dist[goal] != move::kShut || move::Has(grid[goal], move::kCityF)) {
+            query.dist[goal] = -1;
+            found = Wavefront(query, 0);
+        }
+        if (found == 1) {
+            path = Trace(query);
+        }
+        for (auto& [tile, byte] : restore) grid[tile] = byte;
+    }
+
+    if (path) {
+        bool ashore = false;
+        for (move::Step& step : *path) {
+            int byte = grid[step.y * width + step.x];
+            if (ashore) {
+                step.cost = move::kPastShore;
+            } else {
+                step.cost = move::WalkCost(byte, movement.mode, movement.woods, movement.hills);
+                ashore = movement.mode == move::kLand && move::CrossesShore(byte, movement.at_sea);
+            }
+        }
+    }
+    if (path && path->empty()) path.reset();
+    return path;
+}
+
+std::optional<move::Path> Pathfinder::FindPathNoCache(Game& game, const move::Stack& stack,
+                                                      int start_x, int start_y, int dest_x,
+                                                      int dest_y) {
+    if (start_x == dest_x && start_y == dest_y) return move::Path{};
+    const Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
+    if (!map.InBounds(dest_x, dest_y)) return std::nullopt;
+
+    int side = stack.empty() ? kNone : stack[0]->OwnerIndex();
+    move::Mode movement = move::StackMode(game, stack);
+    std::vector<int>& grid = GridFor(game, side);
+    int distance = move::Distance(dest_x, dest_y, start_x, start_y);
+
+    std::optional<move::Path> path;
+    if (distance == 1 && SingleStep(game, movement.mode, start_x, start_y, dest_x, dest_y)) {
+        path = move::Path{move::Step{dest_x, dest_y, 0}};
+    } else {
+        int goal = dest_y * width + dest_x;
+        auto restore = OpenCityAt(game, grid, dest_x, dest_y);
+        int penalty = 0;
+        if (movement.mode == move::kLand) {
+            int dest_terrain = scn::TerrainAt(map, dest_x, dest_y);
+            penalty = (dest_terrain == move::kWater || dest_terrain == move::kShore)
+                              ? move::kWaterPenaltyTo
+                              : move::kWaterPenalty;
+        }
+        Query query{width,
+                    height,
+                    start_x,
+                    start_y,
+                    dest_x,
+                    dest_y,
+                    &grid,
+                    movement.mode,
+                    movement.woods,
+                    movement.hills,
+                    penalty,
+                    move::Prepare(game, grid, side, movement.mode, dest_x, dest_y),
+                    0,
+                    false,
+                    nullptr};
+        int found = 0;
+        if (query.dist[goal] != move::kShut || move::Has(grid[goal], move::kCityF)) {
+            query.dist[goal] = -1;
+            for (int pass = 0; pass <= 1; pass++) {
+                if (found == 0) found = Wavefront(query, pass);
+            }
+        }
+        if (found == 1) {
+            path = Trace(query);
+        }
+        for (auto& [tile, byte] : restore) grid[tile] = byte;
+    }
+
+    if (path) {
+        bool ashore = false;
+        for (move::Step& step : *path) {
+            int byte = grid[step.y * width + step.x];
+            if (ashore) {
+                step.cost = move::kPastShore;
+            } else {
+                step.cost = move::WalkCost(byte, movement.mode, movement.woods, movement.hills);
+                ashore = movement.mode == move::kLand && move::CrossesShore(byte, movement.at_sea);
+            }
+        }
+    }
+    if (path && path->empty()) path.reset();
+    return path;
+}
+
 std::vector<int> Pathfinder::Flood(Game& game, int grid_side, int x, int y, int range, int mode,
                                    bool woods, bool hills, int fog_side) {
     const Map& map = game.GetMap();
@@ -490,6 +680,32 @@ std::vector<int> Pathfinder::Flood(Game& game, int grid_side, int x, int y, int 
                 x,     y,      &grid,   mode,
                 woods, hills,  penalty, move::Prepare(game, grid, fog_side, mode, x, y),
                 0,     false,  nullptr, range};
+    if (query.dist[goal] != move::kShut || move::Has(grid[goal], move::kCityF)) {
+        query.dist[goal] = -1;
+        if (Wavefront(query, 0) == 0) Wavefront(query, 1);
+    }
+    for (auto& [tile, byte] : restore) grid[tile] = byte;
+    return query.dist;
+}
+
+std::vector<int> Pathfinder::FloodClear(Game& game, int grid_side, int x, int y, int range,
+                                        int mode, bool woods, bool hills, int fog_side) {
+    const Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
+    std::vector<int>& grid = GridFor(game, grid_side);
+    int goal = y * width + x;
+    auto restore = OpenCityAt(game, grid, x, y);
+    int penalty = 0;
+    if (mode == move::kLand) {
+        int terrain = scn::TerrainAt(map, x, y);
+        penalty = (terrain == move::kWater || terrain == move::kShore) ? move::kWaterPenaltyTo
+                                                                       : move::kWaterPenalty;
+    }
+    Query query{width, height, x,       y,
+                x,     y,      &grid,   mode,
+                woods, hills,  penalty, move::Prepare(game, grid, fog_side, mode, x, y),
+                0,     false,  nullptr, range};
+    ShutVisibleHostileStacks(game, grid_side, x, y, kNone, kNone, query.dist);
     if (query.dist[goal] != move::kShut || move::Has(grid[goal], move::kCityF)) {
         query.dist[goal] = -1;
         if (Wavefront(query, 0) == 0) Wavefront(query, 1);

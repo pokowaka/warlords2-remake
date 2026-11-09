@@ -11,6 +11,7 @@
  */
 #pragma once
 
+#include <functional>
 #include <vector>
 
 #include "warlords/ai/ml_policy.hpp"
@@ -18,6 +19,29 @@
 #include "warlords/types.hpp"
 
 namespace w2::ai::modern {
+
+/**
+ * @brief Diagnostic record of what MissionNet believed when it sent a stack on the
+ * mission that just triggered a battle.
+ */
+struct MissionFight {
+    int side_idx = kNone;        ///< Side index of the attacking stack.
+    int target_kind = 0;         ///< TargetKind index of the chosen mission.
+    bool at_target = false;      ///< True when the battle is the chosen mission target.
+    float decided_win = 0.0F;    ///< target[10] (`win_now`) at mission-decision time.
+    float decided_turns = 0.0F;  ///< `turns_to_reach` at mission-decision time.
+    int decided_size = 0;        ///< Coalition size at mission-decision time.
+    int fight_size = 0;          ///< Attackers that actually entered the battle.
+};
+
+/** @brief Callback invoked after each battle initiated by `ExecuteStackMission`. */
+using MissionFightCallback = std::function<void(Game&, const MissionFight&, const Battle&)>;
+
+/** @brief Registers or clears the diagnostic callback invoked after mission-initiated battles. */
+void SetMissionFightCallback(MissionFightCallback callback);
+
+/** @brief Invokes the registered `MissionFightCallback` if one is active. */
+void NotifyMissionFight(Game& game, const MissionFight& fight, const Battle& battle);
 
 /**
  * @brief Plays a full turn for `side` using `custom_policy` (or ActivePolicy() when null)

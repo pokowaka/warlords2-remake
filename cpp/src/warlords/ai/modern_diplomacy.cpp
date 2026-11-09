@@ -122,11 +122,21 @@ int TargetPathCost(const Game& game, const core::Flood& flood, const CandidateTa
 }
 
 /**
- * @brief Builds the 21-dimensional feature vector describing mission target `tgt` for `stack`.
+ * @brief Encodes `tgt` into a compact integer key for cross-turn order persistence (`ai_dest_`):
+ * city index when targeting a city, or `10000 + y * width + x` for tile targets.
+ */
+int TargetOrderKey(const Game& game, const CandidateTarget& tgt) {
+    if (tgt.city) return tgt.city->Index();
+    return 10000 + tgt.y * game.GetMap().Width() + tgt.x;
+}
+
+/**
+ * @brief Builds the 29-dimensional feature vector describing mission target `tgt` for `stack`.
  */
 ml::TargetVec BuildTargetFeatures(Game& game, const Side& side, const std::vector<Army*>& stack,
                                   const CandidateTarget& tgt, float nearby_friendly_str,
-                                  float caution_bias, int path_cost) {
+                                  float caution_bias, int path_cost, int policy_version,
+                                  int blocker_x, int blocker_y) {
     ml::TargetVec features{};
     features[static_cast<int>(tgt.kind)] = 1.0F;
 
@@ -140,6 +150,7 @@ ml::TargetVec BuildTargetFeatures(Game& game, const Side& side, const std::vecto
     float seen_fraction = 1.0F;
     bool is_combat = (tgt.kind == TargetKind::kNeutralCity || tgt.kind == TargetKind::kEnemyCity ||
                       tgt.kind == TargetKind::kEnemyStack);
+    float extra_en_route = policy_version >= 7 ? tgt.en_route_strength : 0.0F;
     if (is_combat) {
         auto est = belief::EstimateCombat(game, side, stack, tgt.x, tgt.y, caution_bias);
         win_now = est.win_prob;
@@ -149,14 +160,24 @@ ml::TargetVec BuildTargetFeatures(Game& game, const Side& side, const std::vecto
         float my_str = 0.0F;
         for (Army* army : stack) my_str += static_cast<float>(army->Strength());
         int free_slots = std::max(0, rules::kMaxStack - static_cast<int>(stack.size()));
-        float add_str = std::min(nearby_friendly_str + tgt.assigned_strength,
-                                 static_cast<float>(free_slots) * 5.0F);
+        float add_str =
+                std::min(nearby_friendly_str + tgt.assigned_strength + extra_en_route * 0.5F,
+                         static_cast<float>(free_slots) * 5.0F);
         if (add_str > 0.5F && est.estimated_defender_strength > 0.0F) {
             float combined_ratio =
                     (my_str + add_str) / (my_str + add_str + est.estimated_defender_strength);
             win_converged = std::clamp(std::max(win_now, combined_ratio), 0.0F, 1.0F);
         } else {
             win_converged = win_now;
+        }
+        if (blocker_x != kNone && !(blocker_x == tgt.x && blocker_y == tgt.y)) {
+            auto b_est =
+                    belief::EstimateCombat(game, side, stack, blocker_x, blocker_y, caution_bias);
+            win_now *= b_est.win_prob;
+            float b_surv = b_est.expected_survivors /
+                           static_cast<float>(std::max<size_t>(1, stack.size()));
+            surv_ratio = std::min(surv_ratio, b_surv);
+            win_converged = std::min(win_converged, b_est.win_prob);
         }
     }
 
@@ -182,6 +203,44 @@ ml::TargetVec BuildTargetFeatures(Game& game, const Side& side, const std::vecto
     features[18] = std::tanh(static_cast<float>(tgt.assigned_stacks) / 2.0F);
     features[19] = requires_boat_embark ? 1.0F : 0.0F;
     features[20] = seen_fraction;
+    if (policy_version >= 7) {
+        int ord_key = TargetOrderKey(game, tgt);
+        int matched = 0, max_committed = 0;
+        bool staged_here = false;
+        for (Army* army : stack) {
+            if (army->AiOrder() >= 100 && army->AiDest() == ord_key) {
+                matched++;
+                max_committed = std::max(max_committed, army->AiGroup());
+                if (army->AiOrder() >= 120) staged_here = true;
+            }
+        }
+        features[21] =
+                static_cast<float>(matched) / static_cast<float>(std::max<size_t>(1, stack.size()));
+        features[22] = staged_here ? 1.0F : 0.0F;
+        features[23] = std::tanh(static_cast<float>(max_committed) / 4.0F);
+        features[24] = std::tanh(tgt.en_route_strength / 25.0F);
+    }
+    if (policy_version >= 8) {
+        bool stack_has_hero = false;
+        for (Army* army : stack) {
+            if (army->Hero()) stack_has_hero = true;
+        }
+        if (tgt.is_muster_hub && tgt.kind == TargetKind::kReinforceCity) {
+            features[25] = 1.0F;
+            features[26] = std::clamp(
+                    (8.0F - static_cast<float>(tgt.hub_armies + tgt.assigned_stacks * 2)) / 8.0F,
+                    0.0F, 1.0F);
+            features[27] = std::tanh(
+                    static_cast<float>(tgt.hub_incoming_flow + tgt.assigned_stacks) / 4.0F);
+            features[28] = (tgt.hub_has_hero || stack_has_hero) ? 1.0F : 0.0F;
+        } else if (tgt.is_muster_hub && tgt.kind == TargetKind::kHoldGarrison) {
+            features[25] = 0.0F;
+            features[26] =
+                    std::clamp((7.0F - static_cast<float>(tgt.hub_armies)) / 6.0F, 0.0F, 1.0F);
+            features[27] = std::tanh(static_cast<float>(tgt.hub_incoming_flow) / 4.0F);
+            features[28] = tgt.hub_has_hero ? 1.0F : 0.0F;
+        }
+    }
     return features;
 }
 
@@ -328,7 +387,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         rival_vec[17] = std::tanh(static_cast<float>(other_wars) / 3.0F);
 
         ml::DiploInVec d_in = ml::PackDiploInput(ctx, rival_vec);
-        auto raw = policy.DiploHead().Forward(d_in);
+        auto raw = policy.ForwardDiplo(d_in);
         std::vector<float> stance_vec = {raw[0], raw[1], raw[2], raw[3]};
         ml::DiploStepRecord rec;
         rec.input = d_in;

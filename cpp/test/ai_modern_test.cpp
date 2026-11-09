@@ -23,6 +23,7 @@
 #include "warlords/ai/personality.hpp"
 #include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
+#include "warlords/hero.hpp"
 #include "warlords/move.hpp"
 #include "warlords/randommap.hpp"
 #include "warlords/rng.hpp"
@@ -456,18 +457,24 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
 TEST(ModernAiTest, PolicyNetworkWeightsLegacyMigrationAndTemperaturePrior) {
     namespace ml = ai::ml;
     using PolicyNet = ml::PolicyNetwork;
-    EXPECT_EQ(PolicyNet::kTotalParams, 9700);
+    EXPECT_EQ(PolicyNet::kTotalParams, 10097);
+    EXPECT_EQ(PolicyNet::kLegacyV7Params, 9886);
+    EXPECT_EQ(PolicyNet::kLegacyV6Params, 9700);
     EXPECT_EQ(PolicyNet::kLegacyV5Params, 8866);
     EXPECT_EQ(PolicyNet::kLegacyV4Params, 8066);
     EXPECT_EQ(PolicyNet::kLegacyV3Params, 6729);
 
     PolicyNet net;
     EXPECT_TRUE(net.LoadJson("cpp/ai_weights.json").ok());
-    EXPECT_EQ(net.Flatten().size(), 9700U);
+    EXPECT_EQ(net.Flatten().size(), 10097U);
 
     PolicyNet src;
     src.InitRandomWeights(7);
     auto added_ctx = [](int col) { return col >= ml::kLegacyGlobalDim && col < ml::kGlobalDim; };
+    auto v8_mission_tail = [](int col) { return col >= ml::kMissionInDim - ml::kAddedV8TargetDim; };
+    auto v8_econ_tail = [](int col) { return col >= ml::kEconInDim - ml::kAddedV8EconDim; };
+    auto v7_mission_tail = [](int col) { return col >= ml::kMissionInDim - ml::kAddedTargetDim; };
+    auto v7_econ_tail = [](int col) { return col >= ml::kEconInDim - ml::kAddedEconDim; };
     auto narrow = [](const auto& mlp, auto dropped, std::vector<float>& out) {
         using MlpType = std::decay_t<decltype(mlp)>;
         for (int row = 0; row < MlpType::kOutDim; ++row) {
@@ -486,16 +493,35 @@ TEST(ModernAiTest, PolicyNetworkWeightsLegacyMigrationAndTemperaturePrior) {
         out.insert(out.end(), mlp.w3.begin(), mlp.w3.end());
         out.insert(out.end(), mlp.b3.begin(), mlp.b3.end());
     };
+    auto no_drop = [](int) { return false; };
     auto critic_dropped = [&](int in_dim) {
         return [&, in_dim](int col) { return added_ctx(col) || col >= in_dim - ml::kCriticDim; };
     };
 
+    std::vector<float> vec_v7;
+    std::vector<float> vec_v6;
     std::vector<float> vec_v5;
     std::vector<float> vec_v4;
+    narrow(src.DiploHead(), no_drop, vec_v7);
+    narrow(src.MissionHead(), v8_mission_tail, vec_v7);
+    narrow(src.EconHead(), v8_econ_tail, vec_v7);
+    narrow(src.ValueHead(), no_drop, vec_v7);
+    narrow(src.StackValueHead(), no_drop, vec_v7);
+    EXPECT_EQ(vec_v7.size(), 9886U);
+
+    narrow(src.DiploHead(), no_drop, vec_v6);
+    narrow(src.MissionHead(), v7_mission_tail, vec_v6);
+    narrow(src.EconHead(), v7_econ_tail, vec_v6);
+    narrow(src.ValueHead(), no_drop, vec_v6);
+    narrow(src.StackValueHead(), no_drop, vec_v6);
+    EXPECT_EQ(vec_v6.size(), 9700U);
+
     for (auto* out : {&vec_v5, &vec_v4}) {
         narrow(src.DiploHead(), added_ctx, *out);
-        narrow(src.MissionHead(), added_ctx, *out);
-        narrow(src.EconHead(), added_ctx, *out);
+        narrow(
+                src.MissionHead(), [&](int col) { return added_ctx(col) || v7_mission_tail(col); },
+                *out);
+        narrow(src.EconHead(), [&](int col) { return added_ctx(col) || v7_econ_tail(col); }, *out);
     }
     narrow(src.ValueHead(), added_ctx, vec_v5);
     narrow(src.StackValueHead(), added_ctx, vec_v5);
@@ -523,6 +549,33 @@ TEST(ModernAiTest, PolicyNetworkWeightsLegacyMigrationAndTemperaturePrior) {
     econ_vec[7] = 0.5F;
     ml::RivalVec rival_vec{};
     rival_vec[0] = 0.3F;
+
+    PolicyNet migrated_v7;
+    migrated_v7.UnflattenLegacy(vec_v7);
+    EXPECT_EQ(migrated_v7.Version(), 7);
+    EXPECT_NEAR(migrated_v7.ScoreMission(ctx_vec, stack_vec, target_vec).utility,
+                src.ScoreMission(ctx_vec, stack_vec, target_vec).utility, 1e-5F);
+    EXPECT_NEAR(migrated_v7.ScoreEconomy(ctx_vec, econ_vec), src.ScoreEconomy(ctx_vec, econ_vec),
+                1e-5F);
+
+    PolicyNet muster_net;
+    muster_net.InitRandomWeights(303);
+    muster_net.SetUseMuster(true);
+    muster_net.MusterHead().b3[0] = 0.25F;
+    ScopedTempPath tmp_muster("w2_muster_test.json");
+    EXPECT_TRUE(muster_net.SaveJson(tmp_muster.Path(), 1, 0.50F).ok());
+    PolicyNet muster_loaded;
+    EXPECT_TRUE(muster_loaded.LoadJson(tmp_muster.Path()).ok());
+    EXPECT_TRUE(muster_loaded.UseMuster());
+    EXPECT_NEAR(muster_loaded.MusterHead().b3[0], 0.25F, 1e-5F);
+
+    PolicyNet migrated_v6;
+    migrated_v6.UnflattenLegacy(vec_v6);
+    EXPECT_EQ(migrated_v6.Version(), 6);
+    EXPECT_NEAR(migrated_v6.ScoreMission(ctx_vec, stack_vec, target_vec).utility,
+                src.ScoreMission(ctx_vec, stack_vec, target_vec).utility, 1e-5F);
+    EXPECT_NEAR(migrated_v6.ScoreEconomy(ctx_vec, econ_vec), src.ScoreEconomy(ctx_vec, econ_vec),
+                1e-5F);
 
     PolicyNet migrated_v5;
     migrated_v5.InitRandomWeights(99);
@@ -573,6 +626,44 @@ TEST(ModernAiTest, PolicyNetworkWeightsLegacyMigrationAndTemperaturePrior) {
         if (ml::SelectFromLogits(utilities, &samp, nullptr, &log_mults) == 0) ++picks0;
     }
     EXPECT_TRUE(picks0 > 880 && picks0 < 1120);
+
+    // v7 Commander & Mixture-of-Experts JSON round-trip and exact uniform-gate blend
+    PolicyNet exp_a;
+    PolicyNet exp_b;
+    exp_a.InitRandomWeights(101);
+    exp_b.InitRandomWeights(202);
+    exp_b.SetUseCommander(true);
+    exp_b.CommanderB() = {0.3F, -0.2F, 0.1F, 0.0F, -0.4F};
+    PolicyNet moe;
+    moe.Zero();
+    moe.GateHead().Zero();  // zero GateNet => exact 50/50 uniform logit blend
+    for (const PolicyNet* exp_ptr : {&exp_a, &exp_b}) {
+        PolicyNet::ExpertHeads exp_heads;
+        exp_heads.version = exp_ptr->Version();
+        exp_heads.use_commander = exp_ptr->UseCommander();
+        exp_heads.commander_w = exp_ptr->CommanderW();
+        exp_heads.commander_b = exp_ptr->CommanderB();
+        exp_heads.diplo_net = exp_ptr->DiploHead();
+        exp_heads.mission_net = exp_ptr->MissionHead();
+        exp_heads.econ_net = exp_ptr->EconHead();
+        moe.Experts().push_back(exp_heads);
+    }
+    ScopedTempPath tmp_moe("w2_moe_test.json");
+    EXPECT_TRUE(moe.SaveJson(tmp_moe.Path(), 3, 0.52F).ok());
+    PolicyNet moe_loaded;
+    EXPECT_TRUE(moe_loaded.LoadJson(tmp_moe.Path()).ok());
+    EXPECT_EQ(moe_loaded.Experts().size(), 2U);
+    EXPECT_TRUE(moe_loaded.Experts()[1].use_commander);
+    ml::ContextVec cx_a = ctx_vec;
+    ml::ContextVec cx_b = ctx_vec;
+    for (int i = 0; i < 5; ++i) {
+        cx_a[25 + i] = 0.0F;
+        cx_b[25 + i] = std::tanh(exp_b.CommanderB()[i]);
+    }
+    float expected_blend = 0.5F * (exp_a.ScoreMission(cx_a, stack_vec, target_vec).utility +
+                                   exp_b.ScoreMission(cx_b, stack_vec, target_vec).utility);
+    EXPECT_NEAR(moe_loaded.ScoreMission(ctx_vec, stack_vec, target_vec).utility, expected_blend,
+                1e-5F);
 }
 
 TEST(ModernAiTest, RaiderAndFrozenComputerPlayerStrategiesExecutePolymorphically) {
@@ -593,6 +684,373 @@ TEST(ModernAiTest, RaiderAndFrozenComputerPlayerStrategiesExecutePolymorphically
         cur = game::EndTurn(*game);
     }
     EXPECT_FALSE(game->Sides()[1]->ComputerPlayer()->Thoughts().empty());
+}
+
+TEST(ModernAiTest, FairRoadBlockerDetourAndStandardPlantingVectoring) {
+    auto road_game = SetupGame("ERYTHEA", SeedWith(21, {{"hiddenMap", 1}, {"diplomacy", 0}}));
+    Map& road_map = road_game->GetMap();
+    Side& side0 = road_map.Sides()[0];
+    Side& side1 = road_map.Sides()[1];
+    side0.SetComputerControlled(true);
+    ai::SetSideClassicAi(*road_game, side0, false);
+
+    // Find a clear 3x5 plain corridor on ERYTHEA and place a blocker on the midpoint.
+    int start_x = kNone;
+    int start_y = kNone;
+    int mid_x = kNone;
+    int mid_y = kNone;
+    int dest_x = kNone;
+    int dest_y = kNone;
+    for (int y = 20; y < road_map.Height() - 20 && start_x == kNone; ++y) {
+        for (int x = 20; x < road_map.Width() - 20 && start_x == kNone; ++x) {
+            bool all_plain = true;
+            for (int off_y = -1; off_y <= 1 && all_plain; ++off_y) {
+                for (int off_x = -1; off_x <= 3 && all_plain; ++off_x) {
+                    int terr = scn::TerrainAt(road_map, x + off_x, y + off_y);
+                    if ((terr != movement::kPlain && terr != movement::kRoad) ||
+                        game::CityAt(*road_game, x + off_x, y + off_y) != nullptr) {
+                        all_plain = false;
+                    }
+                }
+            }
+            if (all_plain) {
+                start_x = x;
+                start_y = y;
+                mid_x = x + 1;
+                mid_y = y;
+                dest_x = x + 2;
+                dest_y = y;
+            }
+        }
+    }
+    ASSERT_NE(start_x, kNone);
+    for (int off_y = -2; off_y <= 2; ++off_y) {
+        for (int off_x = -2; off_x <= 4; ++off_x) {
+            game::Reveal(*road_game, side0.Index(), start_x + off_x, start_y + off_y, false);
+        }
+    }
+    road_map.SetRoadByte(start_x, start_y, 1);
+    road_map.SetRoadByte(mid_x, mid_y, 1);
+    road_map.SetRoadByte(dest_x, dest_y, 1);
+    movement::Invalidate(*road_game);
+
+    Army* runner = test::AddArmy(*road_game, start_x, start_y, side0.Index(), 11, 3, 14, 14);
+    Army* blocker = test::AddArmy(*road_game, mid_x, mid_y, side1.Index(), 4, 7, 12, 12);
+
+    auto direct_path = movement::FindPath(*road_game, {runner}, start_x, start_y, dest_x, dest_y);
+    ASSERT_TRUE(direct_path.has_value() && !direct_path->empty());
+    bool direct_hits_blocker = false;
+    for (const auto& step : *direct_path) {
+        if (step.x == mid_x && step.y == mid_y) direct_hits_blocker = true;
+    }
+    EXPECT_TRUE(direct_hits_blocker);
+
+    auto clear_path =
+            movement::FindPathClear(*road_game, {runner}, start_x, start_y, dest_x, dest_y);
+    ASSERT_TRUE(clear_path.has_value() && !clear_path->empty());
+    bool clear_hits_blocker = false;
+    for (const auto& step : *clear_path) {
+        if (step.x == mid_x && step.y == mid_y) clear_hits_blocker = true;
+    }
+    EXPECT_FALSE(clear_hits_blocker);
+
+    road_map.MutableOptions().diplomacy = 1;
+    road_game->Diplomacy().SetSymmetricState(side0.Id(), side1.Id(), diplomacy::kPeace);
+    auto peace_path =
+            movement::FindPathClear(*road_game, {runner}, start_x, start_y, dest_x, dest_y);
+    bool peace_uses_road = false;
+    if (peace_path.has_value()) {
+        for (const auto& step : *peace_path) {
+            if (step.x == mid_x && step.y == mid_y) peace_uses_road = true;
+        }
+    }
+    EXPECT_TRUE(peace_uses_road);
+    road_game->Remove(runner);
+    road_game->Remove(blocker);
+
+    // Side Standard planting, vectoring to PlantedStandard, and enemy-occupied bounce safety.
+    auto std_game = SetupGame("ERYTHEA", Seed(33));
+    Side* std_side = game::Begin(*std_game);
+    ASSERT_NE(std_side, nullptr);
+    std_side->SetComputerControlled(true);
+    ai::SetSideClassicAi(*std_game, *std_side, false);
+    std_side->SetGold(500);
+    Army* hero0 = nullptr;
+    if (const auto& offer = std_game->TurnNews(std_side->Id()).hero_offer) {
+        hero0 = hero::Recruit(*std_game, *std_side, *offer).hero;
+    }
+    ASSERT_NE(hero0, nullptr);
+
+    City* second_city = nullptr;
+    for (City& city : std_game->GetMap().Cities()) {
+        if (city.IsNeutral() && !city.IsRazed() && !city.Slots().empty()) {
+            game::SetCityOwner(*std_game, city, std_side->Index());
+            for (Army* garrison : game::ArmiesAt(*std_game, city.X(), city.Y())) {
+                garrison->SetOwner(std_side->Id());
+            }
+            second_city = &city;
+            break;
+        }
+    }
+    ASSERT_NE(second_city, nullptr);
+
+    TilePos cap_pos = std_side->CapitalPosition();
+    int plant_x = kNone;
+    int plant_y = kNone;
+    for (int off_y = -4; off_y <= 5 && plant_x == kNone; ++off_y) {
+        for (int off_x = -4; off_x <= 5 && plant_x == kNone; ++off_x) {
+            int tile_x = cap_pos.x + off_x;
+            int tile_y = cap_pos.y + off_y;
+            int terr = scn::TerrainAt(std_game->GetMap(), tile_x, tile_y);
+            if ((terr == movement::kPlain || terr == movement::kRoad) &&
+                game::CityAt(*std_game, tile_x, tile_y) == nullptr &&
+                game::ArmiesAt(*std_game, tile_x, tile_y).empty()) {
+                plant_x = tile_x;
+                plant_y = tile_y;
+            }
+        }
+    }
+    ASSERT_NE(plant_x, kNone);
+    hero0->PlaceAt(TilePos(plant_x, plant_y));
+    hero0->SetMoves(0);  // Keep hero0 on (plant_x, plant_y) through military waves.
+
+    ai::ml::PolicyNetwork std_net;
+    std_net.Zero();
+    std_net.SetVersion(8);
+    std_net.SetUseStandard(true);
+    std_net.MusterHead().w_skip[ai::ml::kContextDim + 0] = -8.0F;
+    std_net.MusterHead().b3[0] = 4.0F;
+    std_net.EconHead().w_skip[ai::ml::kContextDim + 1] = 6.0F;
+    std_net.EconHead().w_skip[ai::ml::kContextDim + ai::ml::kEconMusterHub] = 8.0F;
+
+    ScopedTempPath tmp_std("w2_std_test.json");
+    EXPECT_TRUE(std_net.SaveJson(tmp_std.Path(), 1, 0.5F).ok());
+    ai::ml::PolicyNetwork std_loaded;
+    EXPECT_TRUE(std_loaded.LoadJson(tmp_std.Path()).ok());
+    EXPECT_TRUE(std_loaded.UseStandard());
+    EXPECT_FALSE(std_loaded.UseMuster());
+
+    ai::modern::PlayTurn(*std_game, *std_side, nullptr, &std_loaded, nullptr);
+    EXPECT_EQ(game::StandardAt(*std_game, *std_side).first, plant_x);
+    bool any_vec_std = false;
+    for (City* city : game::SideCities(*std_game, *std_side)) {
+        if (city->IsVectoredToStandard()) any_vec_std = true;
+    }
+    EXPECT_TRUE(any_vec_std);
+
+    // Verify transit army bounces back to home city if an enemy occupies (plant_x, plant_y).
+    hero0->PlaceAt(cap_pos);
+    Side* foe = std_game->Sides().back();
+    Army* enemy_on_flag = test::AddArmy(*std_game, plant_x, plant_y, foe->Index(), 4, 6, 0, 12);
+    Army arriving;
+    arriving.SetOwner(std_side->Id());
+    arriving.SetType(ArmyTypeId(11));
+    arriving.SetStrength(3);
+    arriving.SetMaxMoves(10);
+    arriving.SetMoves(10);
+    arriving.SetHomeCity(std_side->CapitalCityId());
+    arriving.SendIntoTransit(Transit{1, PlantedStandard{}});
+    Army* arr_ptr = std_game->Add(arriving);
+
+    int guard = 0;
+    do {
+        test::EndTurn(*std_game);
+        guard++;
+    } while (std_game->CurrentSide() != std_side && guard < 16);
+
+    EXPECT_TRUE(arr_ptr->IsReturning());
+    EXPECT_TRUE(arr_ptr->X() == kNone && arr_ptr->InTransit());
+    std_game->Remove(enemy_on_flag);
+}
+
+TEST(ModernAiTest, EvolvedPersonalitiesAffineEquivalenceAndJsonRoundTrip) {
+    namespace pers = ai::personality;
+    namespace ml = ai::ml;
+
+    for (int level = 0; level < 3; ++level) {
+        for (int card = 0; card < 9; ++card) {
+            auto weights = pers::ArchetypeWeights(pers::ProfileFor(level, card));
+            float weight_sum = 0.0F;
+            for (float weight : weights) {
+                EXPECT_GE(weight, 0.0F);
+                EXPECT_LE(weight, 1.0F);
+                weight_sum += weight;
+            }
+            EXPECT_NEAR(weight_sum, 1.0F, 1e-4F);
+        }
+    }
+
+    auto top_arch = [](int level, int card) {
+        auto weights = pers::ArchetypeWeights(pers::ProfileFor(level, card));
+        int best = 0;
+        for (int arch_idx = 1; arch_idx < pers::kNumArchetypes; ++arch_idx) {
+            if (weights[arch_idx] > weights[best]) best = arch_idx;
+        }
+        return best;
+    };
+    EXPECT_EQ(top_arch(1, 0), static_cast<int>(pers::kArchImperial));
+    EXPECT_EQ(top_arch(2, 0), static_cast<int>(pers::kArchImperial));
+    EXPECT_EQ(top_arch(1, 2), static_cast<int>(pers::kArchBerserker));
+    EXPECT_EQ(top_arch(2, 1), static_cast<int>(pers::kArchBerserker));
+    EXPECT_EQ(top_arch(0, 2), static_cast<int>(pers::kArchGuardian));
+    EXPECT_EQ(top_arch(0, 3), static_cast<int>(pers::kArchGuardian));
+    EXPECT_EQ(top_arch(1, 4), static_cast<int>(pers::kArchSchemer));
+    EXPECT_EQ(top_arch(2, 8), static_cast<int>(pers::kArchSchemer));
+    EXPECT_EQ(top_arch(2, 7), static_cast<int>(pers::kArchQuestor));
+    EXPECT_EQ(top_arch(2, 3), static_cast<int>(pers::kArchQuestor));
+
+    float temp_knight = pers::DifficultyTemperature(0, 0.02F);
+    float temp_lord = pers::DifficultyTemperature(1, 0.02F);
+    float temp_warlord = pers::DifficultyTemperature(2, 0.02F);
+    EXPECT_GT(temp_knight, temp_lord);
+    EXPECT_GT(temp_lord, temp_warlord);
+    EXPECT_NEAR(temp_warlord, 0.02F, 1e-6F);
+
+    ml::PolicyNetwork trunk;
+    trunk.InitRandomWeights(777);
+    for (float& val : trunk.MusterHead().w1) val = 0.05F;
+    for (float& val : trunk.MusterHead().w2) val = -0.04F;
+    trunk.SetHasArchetypes(true);
+    trunk.SetUsePersonalities(true);
+
+    std::array<ml::PolicyNetwork, pers::kNumArchetypes> spec_nets;
+    for (int arch_idx = 0; arch_idx < pers::kNumArchetypes; ++arch_idx) {
+        ml::PolicyNetwork tmp;
+        tmp.InitRandomWeights(static_cast<uint32_t>(1000 + arch_idx * 37));
+        spec_nets[arch_idx] = trunk;
+        spec_nets[arch_idx].DiploHead().w_skip = tmp.DiploHead().w_skip;
+        spec_nets[arch_idx].DiploHead().w3 = tmp.DiploHead().w3;
+        spec_nets[arch_idx].DiploHead().b3 = tmp.DiploHead().b3;
+        spec_nets[arch_idx].MissionHead().w_skip = tmp.MissionHead().w_skip;
+        spec_nets[arch_idx].MissionHead().w3 = tmp.MissionHead().w3;
+        spec_nets[arch_idx].MissionHead().b3 = tmp.MissionHead().b3;
+        spec_nets[arch_idx].EconHead().w_skip = tmp.EconHead().w_skip;
+        spec_nets[arch_idx].EconHead().w3 = tmp.EconHead().w3;
+        spec_nets[arch_idx].EconHead().b3 = tmp.EconHead().b3;
+        for (size_t i = 0; i < spec_nets[arch_idx].MusterHead().w_skip.size(); ++i) {
+            spec_nets[arch_idx].MusterHead().w_skip[i] =
+                    0.03F * static_cast<float>(arch_idx - 2) * static_cast<float>((i % 5) + 1);
+        }
+        for (size_t i = 0; i < spec_nets[arch_idx].MusterHead().w3.size(); ++i) {
+            spec_nets[arch_idx].MusterHead().w3[i] = 0.05F * static_cast<float>(arch_idx - 1);
+        }
+        spec_nets[arch_idx].MusterHead().b3[0] = 0.1F * static_cast<float>(arch_idx);
+        spec_nets[arch_idx].SetUseMuster(arch_idx == pers::kArchGuardian ||
+                                         arch_idx == pers::kArchQuestor);
+        spec_nets[arch_idx].SetUseStandard(arch_idx == pers::kArchQuestor);
+        spec_nets[arch_idx].SetAvoidBlockers(arch_idx == pers::kArchGuardian ||
+                                             arch_idx == pers::kArchSchemer);
+        spec_nets[arch_idx].SetDetourBias(-0.02F * static_cast<float>(arch_idx + 1));
+        trunk.Archetypes()[arch_idx] = spec_nets[arch_idx].ExtractArchetypeHead();
+    }
+
+    auto weights_robin = pers::ArchetypeWeights(pers::ProfileFor(0, 2));
+    ml::PolicyNetwork robin_net = trunk.MaterializeForWeights(weights_robin);
+    EXPECT_TRUE(robin_net.AvoidBlockers() && robin_net.UseMuster() && !robin_net.UseStandard());
+
+    auto weights_attila = pers::ArchetypeWeights(pers::ProfileFor(2, 1));
+    ml::PolicyNetwork attila_net = trunk.MaterializeForWeights(weights_attila);
+    EXPECT_FALSE(attila_net.AvoidBlockers());
+    EXPECT_FALSE(attila_net.UseStandard());
+
+    auto weights_roger = pers::ArchetypeWeights(pers::ProfileFor(2, 7));
+    ml::PolicyNetwork roger_net = trunk.MaterializeForWeights(weights_roger);
+    EXPECT_TRUE(roger_net.UseStandard() && roger_net.UseMuster() && !roger_net.AvoidBlockers());
+
+    ml::ContextVec ctx_vec{};
+    ml::RivalVec rival_vec{};
+    ml::StackVec stack_vec{};
+    ml::TargetVec target_vec{};
+    ml::EconVec econ_vec{};
+    ml::MusterVec muster_vec{};
+    for (size_t i = 0; i < ctx_vec.size(); ++i) {
+        ctx_vec[i] = 0.1F * std::sin(static_cast<float>(i + 1));
+    }
+    for (size_t i = 0; i < rival_vec.size(); ++i) {
+        rival_vec[i] = 0.2F * std::cos(static_cast<float>(i + 2));
+    }
+    for (size_t i = 0; i < stack_vec.size(); ++i) {
+        stack_vec[i] = -0.15F * std::sin(static_cast<float>(i + 3));
+    }
+    for (size_t i = 0; i < target_vec.size(); ++i) {
+        target_vec[i] = 0.25F * std::cos(static_cast<float>(i + 4));
+    }
+    for (size_t i = 0; i < econ_vec.size(); ++i) {
+        econ_vec[i] = 0.12F * std::sin(static_cast<float>(i + 5));
+    }
+    for (size_t i = 0; i < muster_vec.size(); ++i) {
+        muster_vec[i] = 0.18F * std::cos(static_cast<float>(i + 6));
+    }
+
+    float exp_diplo = 0.0F;
+    float exp_mission = 0.0F;
+    float exp_econ = 0.0F;
+    float exp_muster = 0.0F;
+    for (int arch_idx = 0; arch_idx < pers::kNumArchetypes; ++arch_idx) {
+        exp_diplo += weights_roger[arch_idx] *
+                     spec_nets[arch_idx].ScoreDiplomacy(ctx_vec, rival_vec).stance_logits[3];
+        exp_mission += weights_roger[arch_idx] *
+                       spec_nets[arch_idx].ScoreMission(ctx_vec, stack_vec, target_vec).utility;
+        exp_econ += weights_roger[arch_idx] * spec_nets[arch_idx].ScoreEconomy(ctx_vec, econ_vec);
+        exp_muster +=
+                weights_roger[arch_idx] *
+                spec_nets[arch_idx].ForwardMuster(ml::PackMusterInput(ctx_vec, muster_vec))[0];
+    }
+    EXPECT_NEAR(roger_net.ScoreDiplomacy(ctx_vec, rival_vec).stance_logits[3], exp_diplo, 1e-5F);
+    EXPECT_NEAR(roger_net.ScoreMission(ctx_vec, stack_vec, target_vec).utility, exp_mission, 1e-5F);
+    EXPECT_NEAR(roger_net.ScoreEconomy(ctx_vec, econ_vec), exp_econ, 1e-5F);
+    EXPECT_NEAR(roger_net.ForwardMuster(ml::PackMusterInput(ctx_vec, muster_vec))[0], exp_muster,
+                1e-5F);
+
+    ScopedTempPath tmp_pers("w2_personalities_test.json");
+    EXPECT_TRUE(trunk.SaveJson(tmp_pers.Path(), 5, 0.49F).ok());
+    ml::PolicyNetwork loaded_pers;
+    EXPECT_TRUE(loaded_pers.LoadJson(tmp_pers.Path()).ok());
+    EXPECT_TRUE(loaded_pers.HasArchetypes() && loaded_pers.UsePersonalities());
+    ml::PolicyNetwork reloaded_roger = loaded_pers.MaterializeForWeights(weights_roger);
+    EXPECT_NEAR(reloaded_roger.ScoreMission(ctx_vec, stack_vec, target_vec).utility, exp_mission,
+                1e-4F);
+
+    game::NewGameOptions pers_opts;
+    pers_opts.seed = 4242;
+    pers_opts.active_sides = 2;
+    pers_opts.crop_margin = 16;
+    for (int i = 0; i < 8; ++i) {
+        pers_opts.sides[i].computer = true;
+        pers_opts.sides[i].level = 2;
+        pers_opts.sides[i].card = 8;  // William the Wily
+    }
+    auto pers_game_res = game::NewGame(kData, "ERYTHEA", pers_opts);
+    ASSERT_TRUE(pers_game_res.ok());
+    Game& pers_game = **pers_game_res;
+    Side* pers_cur = game::Begin(pers_game);
+    ASSERT_NE(pers_cur, nullptr);
+    ai::SetSideClassicAi(pers_game, *pers_cur, false);
+    ai::modern::PlayTurn(pers_game, *pers_cur, nullptr, &loaded_pers, nullptr);
+    bool saw_persona = false;
+    for (const AIThought& thought : pers_cur->ComputerPlayer()->Thoughts()) {
+        if (thought.category == "Persona" && thought.actor_name == "William the Wily") {
+            saw_persona = true;
+        }
+    }
+    EXPECT_TRUE(saw_persona);
+}
+
+TEST(ModernAiTest, WardenPlayerGarrisonsCitiesAndExecutesPolymorphically) {
+    GameOpts opts = Seed(21);
+    for (int i = 0; i < 8; ++i) opts.sides[i].computer = true;
+    auto game = SetupGame("TUTORIA", opts);
+    Side& warden_side = *game->Sides()[0];
+    opponents::InstallOpponent(*game, warden_side, opponents::Kind::kWarden);
+    EXPECT_TRUE(warden_side.IsClassicAi());
+
+    Side* cur = game::Begin(*game);
+    while (cur != nullptr && !game->IsOver() && game->Turn() <= 3) {
+        cur->ComputerPlayer()->PlayTurn(*game, *cur);
+        cur = game::EndTurn(*game);
+    }
+    opponents::GarrisonCities(*game, warden_side);
+    EXPECT_TRUE(warden_side.ComputerPlayer() != nullptr);
 }
 
 }  // namespace

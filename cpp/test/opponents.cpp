@@ -1,10 +1,12 @@
 /**
  * @file
- * @brief Implementation of `RaiderPlayer`, `FrozenPlayer`, and training-opponent helpers.
+ * @brief Implementation of `RaiderPlayer`, `WardenPlayer`, `FrozenPlayer`, and training-opponent
+ * helpers.
  */
 #include "opponents.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -63,55 +65,84 @@ std::shared_ptr<ClassicAiPlayer> ExtractOrMakeClassic(Game& game, Side& side) {
 
 }  // namespace
 
-// ------------------------------------------------------------------ RaiderPlayer
+// ------------------------------------------------------------------ ClassicDecoratorPlayer
 
-RaiderPlayer::RaiderPlayer(SharedClassicPlayer base)
+ClassicDecoratorPlayer::ClassicDecoratorPlayer(SharedClassicPlayer base)
         : base_(base ? std::move(base) : std::make_shared<ClassicAiPlayer>()) {}
 
-RaiderPlayer::RaiderPlayer(Game& game, Side& side) : base_(ExtractOrMakeClassic(game, side)) {}
+ClassicDecoratorPlayer::ClassicDecoratorPlayer(Game& game, Side& side)
+        : base_(ExtractOrMakeClassic(game, side)) {}
+
+void ClassicDecoratorPlayer::OnTurnStarted(Side& side) {
+    base_->OnTurnStarted(side);
+}
+
+AttitudeBreakdown ClassicDecoratorPlayer::EvaluateProposal(const Game& game, SideId ai_side,
+                                                           SideId proposer_side) const {
+    return base_->EvaluateProposal(game, ai_side, proposer_side);
+}
+
+City* ClassicDecoratorPlayer::ChooseHeroCity(Game& game, Side& side, City* fallback) {
+    return base_->ChooseHeroCity(game, side, fallback);
+}
+
+bool ClassicDecoratorPlayer::OnQuestCapture(Game& game, Side& side, City& city,
+                                            const ArmyStack& stack) {
+    return base_->OnQuestCapture(game, side, city, stack);
+}
+
+void ClassicDecoratorPlayer::RecordBattle(Game& game, SideId defender, SideId attacker, TilePos pos,
+                                          int heroes_lost, int armies_lost, bool all_lost,
+                                          bool city_tile) {
+    base_->RecordBattle(game, defender, attacker, pos, heroes_lost, armies_lost, all_lost,
+                        city_tile);
+}
+
+void ClassicDecoratorPlayer::RecordBattleObservation(Game& game, SideId observer, TilePos pos) {
+    base_->RecordBattleObservation(game, observer, pos);
+}
+
+absl::Status ClassicDecoratorPlayer::LoadState(const nlohmann::ordered_json& state,
+                                               const Game& game) {
+    return base_->LoadState(state, game);
+}
+
+// ------------------------------------------------------------------ RaiderPlayer
+
+RaiderPlayer::RaiderPlayer(SharedClassicPlayer base) : ClassicDecoratorPlayer(std::move(base)) {}
+
+RaiderPlayer::RaiderPlayer(Game& game, Side& side) : ClassicDecoratorPlayer(game, side) {}
 
 void RaiderPlayer::PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
     ScopedAiTurnEvents turn_scope(game, events);
     opponents::RaidEmptyCities(game, side);
     if (events && events->IsAborted()) return;
-    base_->PlayTurn(game, side, events);
-}
-
-void RaiderPlayer::OnTurnStarted(Side& side) {
-    base_->OnTurnStarted(side);
-}
-
-AttitudeBreakdown RaiderPlayer::EvaluateProposal(const Game& game, SideId ai_side,
-                                                 SideId proposer_side) const {
-    return base_->EvaluateProposal(game, ai_side, proposer_side);
-}
-
-City* RaiderPlayer::ChooseHeroCity(Game& game, Side& side, City* fallback) {
-    return base_->ChooseHeroCity(game, side, fallback);
-}
-
-bool RaiderPlayer::OnQuestCapture(Game& game, Side& side, City& city, const ArmyStack& stack) {
-    return base_->OnQuestCapture(game, side, city, stack);
-}
-
-void RaiderPlayer::RecordBattle(Game& game, SideId defender, SideId attacker, TilePos pos,
-                                int heroes_lost, int armies_lost, bool all_lost, bool city_tile) {
-    base_->RecordBattle(game, defender, attacker, pos, heroes_lost, armies_lost, all_lost,
-                        city_tile);
-}
-
-void RaiderPlayer::RecordBattleObservation(Game& game, SideId observer, TilePos pos) {
-    base_->RecordBattleObservation(game, observer, pos);
+    Base().PlayTurn(game, side, events);
 }
 
 nlohmann::ordered_json RaiderPlayer::SaveState() const {
-    nlohmann::ordered_json obj = base_->SaveState();
+    nlohmann::ordered_json obj = Base().SaveState();
     obj["kind"] = "raider";
     return obj;
 }
 
-absl::Status RaiderPlayer::LoadState(const nlohmann::ordered_json& state, const Game& game) {
-    return base_->LoadState(state, game);
+// ------------------------------------------------------------------ WardenPlayer
+
+WardenPlayer::WardenPlayer(SharedClassicPlayer base) : ClassicDecoratorPlayer(std::move(base)) {}
+
+WardenPlayer::WardenPlayer(Game& game, Side& side) : ClassicDecoratorPlayer(game, side) {}
+
+void WardenPlayer::PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
+    ScopedAiTurnEvents turn_scope(game, events);
+    Base().PlayTurn(game, side, events);
+    if (events && events->IsAborted()) return;
+    opponents::GarrisonCities(game, side);
+}
+
+nlohmann::ordered_json WardenPlayer::SaveState() const {
+    nlohmann::ordered_json obj = Base().SaveState();
+    obj["kind"] = "warden";
+    return obj;
 }
 
 // ------------------------------------------------------------------ FrozenPlayer
@@ -218,6 +249,78 @@ int RaidEmptyCities(Game& game, Side& side) {
     return taken;
 }
 
+int GarrisonCities(Game& game, Side& side) {
+    const int side_index = side.Index();
+    constexpr int kNearEnemy = 8;
+    constexpr int kMoveCostPerTile = 2;
+    struct Need {
+        City* city;
+        int want;
+        int have;
+    };
+    std::vector<Need> needs;
+    for (auto& city : game.GetMap().Cities()) {
+        if (city.IsRazed() || !city.OwnedBy(side_index)) continue;
+        bool threatened = false;
+        for (Army* army : game.Armies()) {
+            if (army->OwnerIndex() < 0 || army->OwnedBy(side_index) || army->X() == kNone ||
+                diplomacy::IsAllied(game, side_index, army->OwnerIndex())) {
+                continue;
+            }
+            if (move::Distance(army->X(), army->Y(), city.X(), city.Y()) <= kNearEnemy) {
+                threatened = true;
+                break;
+            }
+        }
+        needs.push_back({&city, threatened ? 2 : 1, Defenders(game, city)});
+    }
+    std::sort(needs.begin(), needs.end(), [](const Need& lhs, const Need& rhs) {
+        if ((lhs.have == 0) != (rhs.have == 0)) return lhs.have == 0;
+        return lhs.want > rhs.want;
+    });
+    auto spare = [&](Army* army) {
+        City* home = game::CityAt(game, army->X(), army->Y());
+        if (!home || !home->OwnedBy(side_index)) return true;
+        for (const Need& need : needs) {
+            if (need.city == home) return Defenders(game, *home) > need.want;
+        }
+        return Defenders(game, *home) > 1;
+    };
+    int moved = 0;
+    for (Need& need : needs) {
+        while (Defenders(game, *need.city) < need.want) {
+            Army* best = nullptr;
+            int best_dist = std::numeric_limits<int>::max();
+            for (Army* army : game.Armies()) {
+                if (!army->OwnedBy(side_index) || army->X() == kNone || army->InTransit() ||
+                    army->Moves() <= 0 || army->Hero()) {
+                    continue;
+                }
+                if (game::CityAt(game, army->X(), army->Y()) == need.city) continue;
+                int dist = move::Distance(army->X(), army->Y(), need.city->X(), need.city->Y());
+                if (dist * kMoveCostPerTile > army->Moves() + 2 || dist >= best_dist ||
+                    !spare(army)) {
+                    continue;
+                }
+                best = army;
+                best_dist = dist;
+            }
+            if (!best) break;
+            auto path = move::FindPath(game, {best}, best->X(), best->Y(), need.city->X(),
+                                       need.city->Y());
+            if (!path || path->empty()) {
+                best->SetMoves(0);
+                continue;
+            }
+            move::WalkResult walk = move::Walk(game, {best}, *path);
+            if (walk.steps > 0) ai::Walked(game, {best}, walk);
+            if (!game.Alive(best) || game::CityAt(game, best->X(), best->Y()) != need.city) break;
+            moved++;
+        }
+    }
+    return moved;
+}
+
 void InstallOpponent(Game& game, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen) {
     if (kind == Kind::kFrozen && frozen != nullptr) {
         if (const auto* existing = dynamic_cast<const FrozenPlayer*>(side.ComputerPlayer());
@@ -232,13 +335,19 @@ void InstallOpponent(Game& game, Side& side, Kind kind, const ai::ml::PolicyNetw
         side.SetComputerPlayer(std::make_shared<RaiderPlayer>(game, side));
         return;
     }
+    if (kind == Kind::kWarden) {
+        if (dynamic_cast<const WardenPlayer*>(side.ComputerPlayer()) != nullptr) return;
+        side.SetComputerPlayer(std::make_shared<WardenPlayer>(game, side));
+        return;
+    }
     if (dynamic_cast<const ClassicAiPlayer*>(side.ComputerPlayer()) != nullptr) return;
     side.SetComputerPlayer(ExtractOrMakeClassic(game, side));
 }
 
-void PlayTurn(Game& game, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen) {
+void PlayTurn(Game& game, Side& side, Kind kind, const ai::ml::PolicyNetwork* frozen,
+              IAiTurnEvents* events) {
     InstallOpponent(game, side, kind, frozen);
-    ai::PlayTurn(game, side, nullptr);
+    ai::PlayTurn(game, side, events);
 }
 
 }  // namespace opponents
