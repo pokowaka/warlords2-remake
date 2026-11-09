@@ -11,10 +11,6 @@
 #include <SDL.h>
 #include <SDL_opengl.h>
 
-#include "absl/base/no_destructor.h"
-
-#include "platform/display.hpp"
-
 namespace crt {
 
 namespace {
@@ -132,11 +128,6 @@ void DrawWarpedMesh(SDL_Renderer* sdl_renderer, SDL_Texture* tex, std::vector<SD
     SDL_SetTextureBlendMode(tex, mode);
     SDL_RenderGeometry(sdl_renderer, tex, verts.data(), static_cast<int>(verts.size()),
                        indices.data(), static_cast<int>(indices.size()));
-}
-
-CrtShader& DefaultCrtShader() {
-    static absl::NoDestructor<CrtShader> instance;
-    return *instance;
 }
 
 }  // namespace
@@ -530,14 +521,6 @@ void CrtShader::Present(SDL_Renderer* sdl_renderer, SDL_Texture* canvas,
         BuildShade(aspect);
     }
     DrawWarpedMesh(sdl_renderer, shade_.tex, on_frame, indices, SDL_BLENDMODE_MOD);
-}
-
-void Present(SDL_Renderer* sdl_renderer, SDL_Texture* canvas) {
-    DefaultCrtShader().Present(sdl_renderer, canvas, display::DefaultWindow().CrtGeometry());
-}
-
-CanvasPoint Unwarp(double x, double y) {
-    return DefaultCrtShader().Unwarp(display::DefaultWindow().CrtGeometry(), x, y);
 }
 
 }  // namespace crt

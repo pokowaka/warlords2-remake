@@ -11,16 +11,13 @@
  */
 #pragma once
 
-#include <functional>
 #include <vector>
 
 #include "warlords/ai/ml_policy.hpp"
+#include "warlords/model/computer_player.hpp"
 #include "warlords/types.hpp"
 
 namespace w2::ai::modern {
-
-/** @brief Optional callback invoked between turn phases to pace UI updates. */
-using PauseCallback = std::function<void(const char*)>;
 
 /**
  * @brief Plays a full turn for `side` using `custom_policy` (or ActivePolicy() when null)
@@ -28,11 +25,11 @@ using PauseCallback = std::function<void(const char*)>;
  *
  * @param game Active game state.
  * @param side Computer side whose turn is executing.
- * @param pause Optional UI pacing hook invoked between turn phases.
+ * @param events Optional UI pacing and turn-event observer.
  * @param custom_policy Optional policy network override (used during arena evaluation/training).
  * @param sampler Optional stochastic rollout sampler and trajectory recorder for PPO training.
  */
-void PlayTurn(Game& game, Side& side, const PauseCallback& pause = nullptr,
+void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr,
               const ml::PolicyNetwork* custom_policy = nullptr,
               ml::RolloutSampler* sampler = nullptr);
 

@@ -98,13 +98,19 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
     int best_mode = modes[pick];
     if (best_mode == 1) {
         game::Pillage(game, side, city, attackers);
-        if (ai::hooks.on_spoils) ai::hooks.on_spoils(game, side, city, "pillaged");
+        if (IAiTurnEvents* events = game.ActiveAiEvents()) {
+            (void)events->OnSpoils(game, side, city, "pillaged");
+        }
     } else if (best_mode == 2) {
         game::Sack(game, side, city, attackers);
-        if (ai::hooks.on_spoils) ai::hooks.on_spoils(game, side, city, "sacked");
+        if (IAiTurnEvents* events = game.ActiveAiEvents()) {
+            (void)events->OnSpoils(game, side, city, "sacked");
+        }
     } else if (best_mode == 3) {
         game::Raze(game, side, city, attackers);
-        if (ai::hooks.on_spoils) ai::hooks.on_spoils(game, side, city, "razed");
+        if (IAiTurnEvents* events = game.ActiveAiEvents()) {
+            (void)events->OnSpoils(game, side, city, "razed");
+        }
     } else {
         game::Occupy(game, side, city, attackers);
     }
@@ -151,7 +157,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             move::WalkResult join_result = move::Walk(game, {army}, *path);
             if (game.Alive(army) && army->X() == leader_x && army->Y() == leader_y &&
                 join_result.steps > 0) {
-                ai::Walked(game, {army}, join_result);
+                if (!ai::Walked(game, {army}, join_result)) return false;
                 joined.push_back(army);
                 on_leader_tile++;
             }
@@ -227,6 +233,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
     bool completed_objective = false;
 
     for (int pass = 0; pass < 24 && !sel.armies.empty() && sel.min_moves > 0; pass++) {
+        if (IAiTurnEvents* events = game.ActiveAiEvents(); events && events->IsAborted()) break;
         int leader_x = sel.leader->X(), leader_y = sel.leader->Y();
         if (leader_x == dest_x && leader_y == dest_y) {
             if (is_fog_mission) completed_objective = true;
@@ -258,7 +265,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         move::WalkResult walk_result = move::Walk(game, sel.armies, walk_steps);
         if (walk_result.steps > 0) {
             made_progress = true;
-            ai::Walked(game, sel.armies, walk_result);
+            if (!ai::Walked(game, sel.armies, walk_result)) break;
         }
         core::Refresh(game, sel);
         core::PickUp(game, sel);

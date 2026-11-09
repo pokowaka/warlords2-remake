@@ -1,14 +1,17 @@
 /**
  * @file
- * @brief A quest's end, as quest_check tells a human it.
+ * @brief A quest's end, as `quest_check` tells a human it.
  *
- * Failed: the message box with the two lines of its cause, STRING.DAT groups
+ * Failed: the message box with the two lines of its cause, `STRING.DAT` groups
  * 32-42. Done: the triumph's music, and the reward: popup 2 with dialog 17 --
- * Done (331); the strategic map with no city shields and the hero's figure
- * on it; "Quest" in font 1; SCROLL.PCK at (304, 95) and on it, black on
+ * Done (`331`); the strategic map with no city shields and the hero's figure
+ * on it; `"Quest"` in font 1; `SCROLL.PCK` at `(304, 95)` and on it, black on
  * yellow, the hero's quest, the priests' words and what was given.
  */
-#include "platform/sound.hpp"
+#include <memory>
+#include <string>
+#include <utility>
+
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/cues.hpp"
@@ -18,107 +21,126 @@ namespace questnews {
 using w2::Format;
 
 namespace {
-const kit::Rect kPopupRect{80, 60, 480, 312};  ///< Popup 2.
-const int kMapX = 80,                          ///< The strategic map's left edge.
-        kMapY = 60;                            ///< The strategic map's top edge.
-const int kDialog = 17,                        ///< The dialog with the button.
-        kDone = 331;                           ///< The Done button.
 
-/** @brief The reward popup for a quest done. */
-struct Reward : kit::Modal {
-    std::shared_ptr<w2::QuestResult> news;  ///< The quest's end being told.
-    screen::View dialog_view;               ///< Dialog 17's button.
-    kit::Done after;                        ///< Runs once the popup has closed.
-    int reward_group = 0x1f;                ///< STRING.DAT group that words the reward.
-    std::string reward_line;                ///< The last line: what was given.
-    /** @brief Takes the popup down, then runs `after`. */
-    void Close() {
-        auto after_copy = after;  // the popup (and its `after`) dies in Pop
-        kit::Pop(this);
-        if (after_copy) after_copy();
+constexpr kit::Rect kPopupRect{80, 60, 480, 312};  ///< Popup 2.
+constexpr int kMapX = 80;                          ///< The strategic map's left edge.
+constexpr int kMapY = 60;                          ///< The strategic map's top edge.
+constexpr int kDialog = 17;                        ///< The dialog with the button.
+constexpr int kDone = 331;                         ///< The Done button.
+
+/**
+ * @brief Modal displaying the completed quest reward scroll and strategic map target.
+ */
+class Reward final : public kit::Modal {
+  public:
+    Reward(w2::UiContext& ctx, SharedQuestResult news, kit::Done after, int reward_group,
+           std::string reward_line)
+            : kit::Modal(ctx)
+            , news_(std::move(news))
+            , view_(kit::View(ctx, kDialog))
+            , after_(std::move(after))
+            , reward_group_(reward_group)
+            , reward_line_(std::move(reward_line)) {
+        view_.state[kDone] = w2::uidata::kNormal;
+        SetDialogView(&view_);
     }
+
     void Draw() override {
-        const w2::Quest& quest = *news->quest;
-        const w2::Reward& reward = *news->reward;
-        const w2::Army* hero = g_app.g ? quest.ResolveHero(*g_app.g) : nullptr;
-        kit::Popup(kPopupRect);
-        front::DrawStrategicMap(kMapX, kMapY, nullptr, true);
-        if (reward.kind == "revealed" && reward.site && hero && hero->X() != w2::kNone)
-            kit::MapTarget(kMapX, kMapY, hero->X(), hero->Y(), reward.site->x, reward.site->y);
-        if (hero && hero->X() != w2::kNone)
-            front::DrawHeroFigure(kMapX, kMapY, hero->X(), hero->Y());
-        gfx::SetColor(1, 1, 1);
-        kit::Centred(kit::GetFont(1), "Quest", 432, 64);
-        gfx::Draw(g_app.scroll_pic, 304, 95);
-        const Font& font = kit::GetFont(2).Colours(0, 7);
+        w2::UiContext& ctx = Ctx();
+        gfx::Renderer& ren = ctx.Renderer();
+        const w2::Quest& quest = *news_->quest;
+        const w2::Reward& reward = *news_->reward;
+        const w2::Army* hero = ctx.GamePtr() ? quest.ResolveHero(*ctx.GamePtr()) : nullptr;
+        kit::Popup(ctx, kPopupRect);
+        ctx.Actions().DrawStrategicMap(kMapX, kMapY, nullptr, true);
+        if (reward.kind == "revealed" && reward.site && hero && hero->X() != w2::kNone) {
+            kit::MapTarget(ctx, kMapX, kMapY, hero->X(), hero->Y(), reward.site->x, reward.site->y);
+        }
+        if (hero && hero->X() != w2::kNone) {
+            ctx.Actions().DrawHeroFigure(kMapX, kMapY, hero->X(), hero->Y());
+        }
+        ren.SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(ctx, 1), "Quest", 432, 64);
+        ren.Draw(ctx.Assets().ScrollPic(), 304, 95);
+        const Font& font = kit::GetFont(ctx, 2).Colours(0, 7);
         kit::Centred(font, (hero ? hero->Name() : std::string()) + "'s Quest", 440, 145);
-        kit::SetPal(0);
-        gfx::Rectangle(gfx::kFill, 360, 165, 160, 1);
-        kit::Centred(font, kit::Text(0x1c, 0), 440, 175);
-        kit::Centred(font, kit::Text(0x1c, 1), 440, 195);
-        kit::Centred(font, kit::Text(reward_group, 0), 440, 225);
-        kit::Centred(font, kit::Text(reward_group, 1), 440, 245);
-        kit::Centred(font, reward_line, 440, 265);
-        kit::DrawControls(dialog_view);
+        kit::SetPal(ctx, 0);
+        ren.Rectangle(gfx::kFill, 360, 165, 160, 1);
+        kit::Centred(font, kit::Text(ctx, 0x1c, 0), 440, 175);
+        kit::Centred(font, kit::Text(ctx, 0x1c, 1), 440, 195);
+        kit::Centred(font, kit::Text(ctx, reward_group_, 0), 440, 225);
+        kit::Centred(font, kit::Text(ctx, reward_group_, 1), 440, 245);
+        kit::Centred(font, reward_line_, 440, 265);
+        kit::DrawControls(ctx, view_);
     }
+
     void Mousepressed(int x, int y, int) override {
-        auto control = kit::ControlAt(dialog_view, x, y);
+        const auto* control = kit::ControlAt(view_, x, y);
         if (control && control->id == kDone) Close();
     }
+
     void Keypressed(const std::string& key) override {
         if (key == "escape" || key == "return" || key == "kpenter") Close();
     }
+
+  private:
+    void Close() {
+        kit::Done after_copy = std::move(after_);
+        PopSelf();
+        if (after_copy) after_copy();
+    }
+
+    SharedQuestResult news_;   ///< The quest's end being told.
+    screen::View view_;        ///< Dialog 17's button.
+    kit::Done after_;          ///< Runs once the popup has closed.
+    int reward_group_ = 0x1f;  ///< STRING.DAT group that words the reward.
+    std::string reward_line_;  ///< The last line: what was given.
 };
+
 }  // namespace
 
-/**
- * @brief Tells a quest's end: a failure's cause in the message box, or a
- * success's reward in its own popup to the triumph's music; then `after`.
- */
-void Show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
+void Show(w2::UiContext& ctx, SharedQuestResult news, kit::Done after) {
     if (!news) return;
     if (!news->failed.empty() || !news->reward) {
         int cause_group = news->why ? news->why : 0x20;
-        search::ShowMessage(kit::Text(cause_group, 0), kit::Text(cause_group, 1), after);
+        search::ShowMessage(ctx, kit::Text(ctx, cause_group, 0), kit::Text(ctx, cause_group, 1),
+                            std::move(after));
         return;
     }
-    sound::Music(w2::cues::kTriumph);
-    auto dialog = std::make_shared<Reward>();
-    dialog->news = news;
-    dialog->after = after;
-    dialog->dialog_view = kit::View(kDialog);
-    dialog->view = &dialog->dialog_view;
-    dialog->dialog_view.state[kDone] = w2::uidata::kNormal;
+    if (ctx.GamePtr()) {
+        ctx.Audio().Music(w2::cues::kTriumph, ctx.GamePtr()->Sides());
+    } else {
+        ctx.Audio().Music(w2::cues::kTriumph);
+    }
+    int reward_group = 0x1f;
+    std::string reward_line;
     const w2::Reward& reward = *news->reward;
     if (reward.kind == "revealed") {
-        dialog->reward_group = 0x1d;
-        dialog->reward_line = reward.site ? reward.site->name : "";
+        reward_group = 0x1d;
+        reward_line = reward.site ? reward.site->name : "";
     } else if (reward.kind == "item") {
-        dialog->reward_group = 0x1e;
-        dialog->reward_line = reward.item ? reward.item->name : "";
+        reward_group = 0x1e;
+        reward_line = reward.item ? reward.item->name : "";
     } else if (reward.kind == "allies") {
-        dialog->reward_group = 0x1f;
-        dialog->reward_line = Format(kit::Text(0x1f, 2), static_cast<int>(reward.armies.size()),
-                                     reward.type ? reward.type->name : "");
+        reward_group = 0x1f;
+        reward_line = Format(kit::Text(ctx, 0x1f, 2), static_cast<int>(reward.armies.size()),
+                             reward.type ? reward.type->name : "");
     } else {
-        dialog->reward_group = 0x1f;
-        dialog->reward_line = Format(kit::Text(0x1f, 2), reward.gold, "gold");
+        reward_group = 0x1f;
+        reward_line = Format(kit::Text(ctx, 0x1f, 2), reward.gold, "gold");
     }
-    kit::Push(dialog);
+    kit::Push(ctx, std::make_shared<Reward>(ctx, std::move(news), std::move(after), reward_group,
+                                            std::move(reward_line)));
 }
 
-/**
- * @brief Tells the human player of a quest that ended, once, when the screen
- * is theirs again.
- */
-void Poll() {
-    w2::Side* side = g_app.player;
-    if (!g_app.g || !side || side->IsComputerControlled()) return;
-    auto& quest_news = g_app.g->TurnNews(side->Id()).quest_news;
+void Poll(w2::UiContext& ctx) {
+    w2::Side* side = ctx.Player();
+    if (!ctx.GamePtr() || !side || side->IsComputerControlled()) return;
+    auto& quest_news = ctx.ActiveGame().TurnNews(side->Id()).quest_news;
     if (!quest_news) return;
-    auto news = quest_news;
+    SharedQuestResult news = quest_news;
     quest_news.reset();
-    Show(news);
+    Show(ctx, std::move(news));
 }
 
 }  // namespace questnews

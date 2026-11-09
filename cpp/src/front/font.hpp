@@ -29,12 +29,15 @@
  */
 class Font {
   public:
-    /** @brief Loads DATA/<name>.FIN and .FNT, keying out palette index `key_index` (-1 for none).
+    using SharedFont = std::shared_ptr<Font>;
+
+    /** @brief Loads DATA/<name>.FIN and .FNT onto `renderer`, keying out palette index `key_index`
+     * (-1 for none).
      */
-    static absl::StatusOr<std::shared_ptr<Font>> Load(const std::filesystem::path& data_dir,
-                                                      const std::string& name,
-                                                      const w2::pal::Palette& palette,
-                                                      int key_index);
+    static absl::StatusOr<SharedFont> Load(gfx::Renderer& renderer,
+                                           const std::filesystem::path& data_dir,
+                                           const std::string& name, const w2::pal::Palette& palette,
+                                           int key_index);
     /** @brief How far the pen moves drawing `text`, in pixels. */
     int Width(const std::string& text) const;
     /** @brief Draws `text` with its top left at (x, y); returns the width drawn. */
@@ -49,8 +52,10 @@ class Font {
      * `outline`. Each pair is made once and kept.
      */
     const Font& Colours(int glyph, int outline) const;
-    int line_height = 0;  ///< Pixels from one line's top to the next's.
-    int baseline = 0;     ///< Pixels from a line's top to its baseline.
+    /** @brief Pixels from one line's top to the next's. */
+    int LineHeight() const { return line_height_; }
+    /** @brief Pixels from a line's top to its baseline. */
+    int Baseline() const { return baseline_; }
 
   private:
     /** @brief What the .FIN says about the glyphs. */
@@ -61,14 +66,19 @@ class Font {
         std::array<int, 256> ink{};    ///< How wide each character's art is.
         std::array<int, 256> width{};  ///< How far the pen moves past each character.
     };
-    std::shared_ptr<Metrics> m_;                      ///< The glyphs' metrics.
-    std::shared_ptr<std::map<int, gfx::Quad>> quad_;  ///< Each character's cell on the sheet.
-    gfx::ImageP image_;                               ///< The glyph sheet in this font's colours.
+    using QuadMap = std::map<int, gfx::Quad>;
+    using VariantMap = std::map<int, SharedFont>;
+
+    gfx::Renderer* renderer_ = nullptr;          ///< Bound renderer owning glyph textures.
+    int line_height_ = 0;                        ///< Pixels from one line's top to the next's.
+    int baseline_ = 0;                           ///< Pixels from a line's top to its baseline.
+    std::shared_ptr<Metrics> m_;                 ///< The glyphs' metrics.
+    std::shared_ptr<QuadMap> quad_;              ///< Each character's cell on the sheet.
+    gfx::ImageP image_;                          ///< The glyph sheet in this font's colours.
     std::shared_ptr<const w2::pck::Pixels> px_;  ///< The sheet's palette indices, for recolouring.
     w2::pal::Palette palette_;                   ///< The palette the sheet is drawn in.
     int key_ = -1;                               ///< The index keyed out, -1 for none.
-    /** Recoloured copies by glyph * 16 + outline, shared by every copy. */
-    mutable std::shared_ptr<std::map<int, std::shared_ptr<Font>>> variants_;
+    mutable std::shared_ptr<VariantMap> variants_;  ///< Recoloured copies by glyph * 16 + outline.
 };
 /** A loaded font, shared. */
 using FontP = std::shared_ptr<Font>;

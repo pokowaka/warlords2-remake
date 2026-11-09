@@ -216,67 +216,6 @@ class Renderer {
     int clip_h_ = 0;                        ///< Scissor clip height in device pixels.
 };
 
-/** @brief Returns the process-default `Renderer` instance. */
-Renderer& DefaultRenderer();
-/** @brief Binds `sdl_renderer` on the default `Renderer`. */
-void Init(SDL_Renderer* sdl_renderer);
-/** @brief Detaches the default `Renderer`. */
-void Shutdown();
-/** @brief Returns the active `SDL_Renderer*` on the default `Renderer`. */
-SDL_Renderer* ActiveSdlRenderer();
-/** @brief Creates an `Image` from RGBA bytes on the default `Renderer`. */
-ImageP NewImageRgba(int width, int height, const uint8_t* rgba);
-/** @brief Resets frame state on the default `Renderer`. */
-void Begin();
-/** @brief Clears the render target on the default `Renderer`. */
-void Clear(float red = 0.0F, float green = 0.0F, float blue = 0.0F);
-/** @brief Pushes the transform on the default `Renderer`. */
-void Push();
-/** @brief Pops the transform on the default `Renderer`. */
-void Pop();
-/** @brief Resets the transform on the default `Renderer`. */
-void Origin();
-/** @brief Translates the transform on the default `Renderer`. */
-void Translate(double x, double y);
-/** @brief Uniformly scales the transform on the default `Renderer`. */
-void Scale(double factor);
-/** @brief Scales the transform by `(scale_x, scale_y)` on the default `Renderer`. */
-void Scale(double scale_x, double scale_y);
-/** @brief Transforms `(x, y)` into device coordinates on the default `Renderer`. */
-void TransformPoint(double x, double y, double& out_x, double& out_y);
-/** @brief Inverse-transforms `(x, y)` from device coordinates on the default `Renderer`. */
-void InverseTransformPoint(double x, double y, double& out_x, double& out_y);
-/** @brief Sets the active colour on the default `Renderer`. */
-void SetColor(float red, float green, float blue, float alpha = 1.0F);
-/** @brief Sets the active colour on the default `Renderer`. */
-void SetColor(const Color& col);
-/** @brief Gets the active colour on the default `Renderer`. */
-Color GetColor();
-/** @brief Sets the scissor clip rectangle on the default `Renderer`. */
-void SetScissor(double x, double y, double width, double height);
-/** @brief Clears the scissor clip rectangle on the default `Renderer`. */
-void SetScissor();
-/** @brief Draws a rectangle on the default `Renderer`. */
-void Rectangle(Mode mode, double x, double y, double width, double height);
-/** @brief Draws a line on the default `Renderer`. */
-void Line(double from_x, double from_y, double to_x, double to_y);
-/** @brief Draws `img` at `(x, y)` on the default `Renderer`. */
-void Draw(const Image* img, double x, double y);
-/** @brief Draws `quad` of `img` at `(x, y)` on the default `Renderer`. */
-void Draw(const Image* img, const Quad& quad, double x, double y);
-/** @brief Draws `img` at `(x, y)` on the default `Renderer`. */
-inline void Draw(const ImageP& img, double x, double y) {
-    Draw(img.get(), x, y);
-}
-/** @brief Draws `quad` of `img` at `(x, y)` on the default `Renderer`. */
-inline void Draw(const ImageP& img, const Quad& quad, double x, double y) {
-    Draw(img.get(), quad, x, y);
-}
-/** @brief Reads RGBA pixels from the default `Renderer`. */
-ByteBuffer ReadPixels(int& width, int& height);
-/** @brief Writes a `.bmp` screenshot from the default `Renderer`. */
-void SaveShot(const std::filesystem::path& file_path);
-
 }  // namespace gfx
 
 namespace w2 {

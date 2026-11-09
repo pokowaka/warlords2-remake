@@ -2,74 +2,76 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "util/util.hpp"
 #include "warlords/game.hpp"
 
 namespace kit {
 
-ModalP Push(ModalP modal) {
-    g_app.modals.push_back(modal);
-    return modal;
+void Modal::PopSelf() {
+    ctx_.Modals().Pop(this);
 }
 
-void Pop(const Modal* modal) {
-    for (int i = static_cast<int>(g_app.modals.size()) - 1; i >= 0; i--) {
-        if (g_app.modals[i].get() == modal) {
-            g_app.modals.erase(g_app.modals.begin() + i);
-            return;
-        }
-    }
+ModalP Push(w2::UiContext& ctx, ModalP modal) {
+    return ctx.Modals().Push(std::move(modal));
 }
 
-Modal* Top() {
-    return g_app.modals.empty() ? nullptr : g_app.modals.back().get();
+void Pop(w2::UiContext& ctx, const Modal* modal) {
+    ctx.Modals().Pop(modal);
 }
 
-ModalP TopShared() {
-    return g_app.modals.empty() ? nullptr : g_app.modals.back();
+Modal* Top(const w2::UiContext& ctx) {
+    return ctx.Modals().Top();
 }
 
-void SetPal(int index) {
-    const auto& colour = index >= 0 && index < static_cast<int>(g_app.palette.size())
-                                 ? g_app.palette[index]
-                                 : g_app.palette[0];
-    gfx::SetColor(static_cast<float>(colour[0]), static_cast<float>(colour[1]),
-                  static_cast<float>(colour[2]));
+ModalP TopShared(const w2::UiContext& ctx) {
+    return ctx.Modals().TopShared();
 }
 
-void Outline(double x, double y, double width, double height) {
-    gfx::Rectangle(gfx::kFill, x, y, width, 1);
-    gfx::Rectangle(gfx::kFill, x, y + height - 1, width, 1);
-    gfx::Rectangle(gfx::kFill, x, y, 1, height);
-    gfx::Rectangle(gfx::kFill, x + width - 1, y, 1, height);
+void SetPal(w2::UiContext& ctx, int index) {
+    const auto& palette = ctx.Assets().Palette();
+    const auto& colour =
+            index >= 0 && index < static_cast<int>(palette.size()) ? palette[index] : palette[0];
+    ctx.Renderer().SetColor(static_cast<float>(colour[0]), static_cast<float>(colour[1]),
+                            static_cast<float>(colour[2]));
 }
 
-void PopupFrame(const Rect& rect) {
-    gfx::SetColor(0, 0, 0);
-    Outline(rect.x - 1, rect.y - 1, rect.w + 2, rect.h + 2);
-    gfx::Rectangle(gfx::kFill, rect.x + 1, rect.y + rect.h + 1, rect.w + 2, 2);
-    gfx::Rectangle(gfx::kFill, rect.x + rect.w + 1, rect.y + 1, 2, rect.h + 2);
+void Outline(w2::UiContext& ctx, double x, double y, double width, double height) {
+    gfx::Renderer& ren = ctx.Renderer();
+    ren.Rectangle(gfx::kFill, x, y, width, 1);
+    ren.Rectangle(gfx::kFill, x, y + height - 1, width, 1);
+    ren.Rectangle(gfx::kFill, x, y, 1, height);
+    ren.Rectangle(gfx::kFill, x + width - 1, y, 1, height);
 }
 
-void Popup(const Rect& rect) {
-    PopupFrame(rect);
-    gfx::SetColor(1, 1, 1);
-    gfx::SetScissor(rect.x, rect.y, rect.w, rect.h);
-    gfx::Draw(g_app.marble, rect.x, rect.y);
+void PopupFrame(w2::UiContext& ctx, const Rect& rect) {
+    gfx::Renderer& ren = ctx.Renderer();
+    ren.SetColor(0, 0, 0);
+    Outline(ctx, rect.x - 1, rect.y - 1, rect.w + 2, rect.h + 2);
+    ren.Rectangle(gfx::kFill, rect.x + 1, rect.y + rect.h + 1, rect.w + 2, 2);
+    ren.Rectangle(gfx::kFill, rect.x + rect.w + 1, rect.y + 1, 2, rect.h + 2);
+}
+
+void Popup(w2::UiContext& ctx, const Rect& rect) {
+    PopupFrame(ctx, rect);
+    gfx::Renderer& ren = ctx.Renderer();
+    const gfx::ImageP& marble = ctx.Assets().Marble();
+    ren.SetColor(1, 1, 1);
+    ren.SetScissor(rect.x, rect.y, rect.w, rect.h);
+    ren.Draw(marble, rect.x, rect.y);
     // Past the marble's 480 columns the blit reads on into the next row.
-    int marble_w = g_app.marble->w, marble_h = g_app.marble->h;
-    if (rect.w > marble_w)
-        gfx::Draw(g_app.marble,
-                  gfx::NewQuad(0, 1, rect.w - marble_w, std::min(rect.h, marble_h - 1)),
-                  rect.x + marble_w, rect.y);
-    gfx::SetScissor();
+    int marble_w = marble->w;
+    int marble_h = marble->h;
+    if (rect.w > marble_w) {
+        ren.Draw(marble, gfx::NewQuad(0, 1, rect.w - marble_w, std::min(rect.h, marble_h - 1)),
+                 rect.x + marble_w, rect.y);
+    }
+    ren.SetScissor();
 }
 
-const Font& GetFont(int n) {
-    if (n == 1) return *g_app.title_font;
-    if (n == 2) return *g_app.big_font;
-    return *g_app.font;
+const Font& GetFont(const w2::UiContext& ctx, int n) {
+    return ctx.Assets().GetFont(n);
 }
 
 void Centred(const Font& font, const std::string& text, double x, double y) {
@@ -80,16 +82,18 @@ void Right(const Font& font, const std::string& text, double x, double y) {
     font.Draw(text, x - font.Width(text), y);
 }
 
-void Bevel(double x, double y, double width, double height, int top_col, int bot_col) {
+void Bevel(w2::UiContext& ctx, double x, double y, double width, double height, int top_col,
+           int bot_col) {
+    gfx::Renderer& ren = ctx.Renderer();
     auto top_left = [&]() {
-        SetPal(top_col);
-        gfx::Rectangle(gfx::kFill, x, y, width, 1);
-        gfx::Rectangle(gfx::kFill, x, y, 1, height);
+        SetPal(ctx, top_col);
+        ren.Rectangle(gfx::kFill, x, y, width, 1);
+        ren.Rectangle(gfx::kFill, x, y, 1, height);
     };
     auto bottom_right = [&]() {
-        SetPal(bot_col);
-        gfx::Rectangle(gfx::kFill, x + width - 1, y, 1, height);
-        gfx::Rectangle(gfx::kFill, x, y + height - 1, width, 1);
+        SetPal(ctx, bot_col);
+        ren.Rectangle(gfx::kFill, x + width - 1, y, 1, height);
+        ren.Rectangle(gfx::kFill, x, y + height - 1, width, 1);
     };
     if (bot_col < top_col) {
         bottom_right();
@@ -100,13 +104,13 @@ void Bevel(double x, double y, double width, double height, int top_col, int bot
     }
 }
 
-void Field(double x, double y, double width, double height, const std::string* text,
-           const Font* font) {
-    SetPal(3);
-    gfx::Rectangle(gfx::kFill, x, y, width, height);
-    Bevel(x, y, width, height, 4, 2);
-    gfx::SetColor(1, 1, 1);
-    if (text) (font ? *font : *g_app.big_font).Draw(*text, x + 3, y + 2);
+void Field(w2::UiContext& ctx, double x, double y, double width, double height,
+           const std::string* text, const Font* font) {
+    SetPal(ctx, 3);
+    ctx.Renderer().Rectangle(gfx::kFill, x, y, width, height);
+    Bevel(ctx, x, y, width, height, 4, 2);
+    ctx.Renderer().SetColor(1, 1, 1);
+    if (text) (font ? *font : ctx.Assets().BigFont()).Draw(*text, x + 3, y + 2);
 }
 
 gfx::Quad ArmyQuad(int type_id) {
@@ -116,28 +120,34 @@ gfx::Quad ArmyQuad(int type_id) {
     return gfx::NewQuad((cell % 16) * 32, (cell / 16) * 30, 32, 29);
 }
 
-void Army(int type_id, int side, double x, double y, int ring, bool shadow) {
-    if (side < 0 || side == 15 || side > 8) side = 8;
-    gfx::SetColor(1, 1, 1);
-    if (ring > 0) gfx::Draw(g_app.abits, gfx::NewQuad((ring - 1) * 32, 0, 32, 30), x, y);
-    if (type_id != w2::kNone)
-        gfx::Draw(shadow ? g_app.shadow_img : g_app.army_img[side], ArmyQuad(type_id), x, y);
+void Army(w2::UiContext& ctx, int type_id, int side, double x, double y, int ring, bool shadow) {
+    gfx::Renderer& ren = ctx.Renderer();
+    ren.SetColor(1, 1, 1);
+    if (ring > 0) ren.Draw(ctx.Assets().Abits(), gfx::NewQuad((ring - 1) * 32, 0, 32, 30), x, y);
+    if (type_id != w2::kNone) {
+        ren.Draw(shadow ? ctx.Assets().ShadowImg() : ctx.Assets().ArmyImg(side), ArmyQuad(type_id),
+                 x, y);
+    }
 }
 
-void Shield(int side, double x, double y) {
+void Shield(w2::UiContext& ctx, int side, double x, double y) {
     if (side < 0 || side == 15 || side > 8) side = 8;
-    if (!g_app.shields_img) return;
-    gfx::SetColor(1, 1, 1);
-    gfx::Draw(g_app.shields_img, gfx::NewQuad(side * 40, 0, 40, 40), x, y);
+    const gfx::ImageP& shields = ctx.Assets().ShieldsImg();
+    if (!shields) return;
+    ctx.Renderer().SetColor(1, 1, 1);
+    ctx.Renderer().Draw(shields, gfx::NewQuad(side * 40, 0, 40, 40), x, y);
 }
 
-void Line(int colour_index, int from_x, int from_y, int to_x, int to_y) {
-    SetPal(colour_index);
-    int dx = std::abs(to_x - from_x), dy = -std::abs(to_y - from_y);
-    int step_x = from_x < to_x ? 1 : -1, step_y = from_y < to_y ? 1 : -1;
+void Line(w2::UiContext& ctx, int colour_index, int from_x, int from_y, int to_x, int to_y) {
+    SetPal(ctx, colour_index);
+    gfx::Renderer& ren = ctx.Renderer();
+    int dx = std::abs(to_x - from_x);
+    int dy = -std::abs(to_y - from_y);
+    int step_x = from_x < to_x ? 1 : -1;
+    int step_y = from_y < to_y ? 1 : -1;
     int err = dx + dy;
     for (;;) {
-        gfx::Rectangle(gfx::kFill, from_x, from_y, 1, 1);
+        ren.Rectangle(gfx::kFill, from_x, from_y, 1, 1);
         if (from_x == to_x && from_y == to_y) break;
         int err2 = 2 * err;
         if (err2 >= dy) {
@@ -151,41 +161,42 @@ void Line(int colour_index, int from_x, int from_y, int to_x, int to_y) {
     }
 }
 
-void MapTarget(int map_x, int map_y, int hero_x, int hero_y, int target_x, int target_y) {
-    // With the hidden map nothing is drawn over ground the player has not
-    // seen: the line needs both its ends seen, and the box and its frame need
-    // the target's tile.
-    auto seen = [](int x, int y) {
-        return w2::game::Seen(*g_app.g, w2::game::ViewerSide(*g_app.g, g_app.player), x, y);
-    };
+void MapTarget(w2::UiContext& ctx, int map_x, int map_y, int hero_x, int hero_y, int target_x,
+               int target_y) {
+    const w2::Game& game = ctx.ActiveGame();
+    int viewer = w2::game::ViewerSide(game, ctx.Player());
+    auto seen = [&](int x, int y) { return w2::game::Seen(game, viewer, x, y); };
     if (!seen(target_x, target_y)) return;
-    gfx::SetScissor(map_x, map_y, 224, 312);
-    if (seen(hero_x, hero_y))
-        Line(8, map_x + hero_x * 2 - 2, map_y + hero_y * 2 - 2, map_x + target_x * 2 - 2,
+    gfx::Renderer& ren = ctx.Renderer();
+    ren.SetScissor(map_x, map_y, 224, 312);
+    if (seen(hero_x, hero_y)) {
+        Line(ctx, 8, map_x + hero_x * 2 - 2, map_y + hero_y * 2 - 2, map_x + target_x * 2 - 2,
              map_y + target_y * 2 - 2);
-    SetPal(8);
-    int box_x = map_x + target_x * 2, box_y = map_y + target_y * 2 - 1;
-    gfx::Rectangle(gfx::kFill, box_x, box_y, 4, 5);
-    SetPal(0);
-    gfx::Rectangle(gfx::kFill, box_x - 1, box_y, 6, 1);
-    gfx::Rectangle(gfx::kFill, box_x, box_y + 5, 4, 1);
-    gfx::Rectangle(gfx::kFill, box_x - 1, box_y, 1, 5);
-    gfx::Rectangle(gfx::kFill, box_x + 4, box_y, 1, 5);
-    SetPal(8);
-    Outline(map_x + target_x * 2 - 2, map_y + target_y * 2 - 2, 8, 8);
-    gfx::SetScissor();
+    }
+    SetPal(ctx, 8);
+    int box_x = map_x + target_x * 2;
+    int box_y = map_y + target_y * 2 - 1;
+    ren.Rectangle(gfx::kFill, box_x, box_y, 4, 5);
+    SetPal(ctx, 0);
+    ren.Rectangle(gfx::kFill, box_x - 1, box_y, 6, 1);
+    ren.Rectangle(gfx::kFill, box_x, box_y + 5, 4, 1);
+    ren.Rectangle(gfx::kFill, box_x - 1, box_y, 1, 5);
+    ren.Rectangle(gfx::kFill, box_x + 4, box_y, 1, 5);
+    SetPal(ctx, 8);
+    Outline(ctx, map_x + target_x * 2 - 2, map_y + target_y * 2 - 2, 8, 8);
+    ren.SetScissor();
 }
 
-screen::View View(int dialog_id) {
-    return screen::MakeView(*g_app.screen, dialog_id);
+screen::View View(w2::UiContext& ctx, int dialog_id) {
+    return screen::MakeView(ctx.Assets().MainScreen(), dialog_id);
 }
 
-void DrawControls(const screen::View& view, const std::set<int>* hidden) {
-    screen::DrawDialogControls(*g_app.screen, view, hidden);
+void DrawControls(w2::UiContext& ctx, const screen::View& view, const ControlIdSet* hidden) {
+    screen::DrawDialogControls(ctx.Renderer(), ctx.Assets().MainScreen(), view, hidden);
 }
 
 const w2::uidata::Control* ControlAt(const screen::View& view, int x, int y,
-                                     const std::set<int>* hidden) {
+                                     const ControlIdSet* hidden) {
     for (const auto& control : view.dialog.controls) {
         if (control.w > 0 && control.h > 0 && !(hidden && hidden->count(control.id)) &&
             x >= control.x && x < control.x + control.w && y >= control.y &&
@@ -201,8 +212,8 @@ const w2::uidata::Control* FindControl(const screen::View& view, int control_id)
     return screen::DialogControl(view, control_id);
 }
 
-std::string Text(int group, int index) {
-    return w2::uidata::Text(g_app.screen->ui, group, index);
+std::string Text(const w2::UiContext& ctx, int group, int index) {
+    return w2::uidata::Text(ctx.Assets().MainScreen().ui, group, index);
 }
 
 double Now() {

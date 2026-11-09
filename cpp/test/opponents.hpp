@@ -39,7 +39,7 @@ class RaiderPlayer final : public IClassicBackedPlayer {
     ClassicAiPlayer& ClassicImpl() override { return *base_; }
     const ClassicAiPlayer& ClassicImpl() const override { return *base_; }
 
-    void PlayTurn(Game& game, Side& side, const PauseCallback& pause = nullptr) override;
+    void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) override;
     void OnTurnStarted(Side& side) override;
     AttitudeBreakdown EvaluateProposal(const Game& game, SideId ai_side,
                                        SideId proposer_side) const override;
@@ -73,7 +73,7 @@ class FrozenPlayer final : public IModernBackedPlayer {
     ModernMlPlayer& ModernImpl() override { return *inner_; }
     const ModernMlPlayer& ModernImpl() const override { return *inner_; }
 
-    void PlayTurn(Game& game, Side& side, const PauseCallback& pause = nullptr) override;
+    void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) override;
     AttitudeBreakdown EvaluateProposal(const Game& game, SideId ai_side,
                                        SideId proposer_side) const override;
     City* ChooseHeroCity(Game& game, Side& side, City* fallback) override;

@@ -8,6 +8,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/status/status.h"
@@ -21,10 +23,93 @@ namespace w2 {
 
 struct AIThought;
 class Army;
+struct Battle;
 class City;
 class Game;
 class Side;
 struct SideBelief;
+
+/**
+ * @brief Optional observer notified during computer-turn execution for UI pacing,
+ * movement/combat animation handoff, and cooperative cancellation.
+ *
+ * Returning `false` from any callback signals cooperative cancellation (`IsAborted()`),
+ * causing the executing `IComputerPlayer` strategy to unwind cleanly via normal early
+ * returns without exceptions.
+ */
+class IAiTurnEvents {
+  public:
+    /** @brief Ordered list of army pointers forming a stack. */
+    using ArmyStack = std::vector<Army*>;
+    /** @brief Ordered list of `(x, y)` tile coordinates visited along a movement path. */
+    using TileCoords = std::vector<std::pair<int, int>>;
+
+    virtual ~IAiTurnEvents() = default;
+
+    /**
+     * @brief Invoked after a computer turn phase completes.
+     * @param phase Phase identifier (e.g. `"diplomacy"`, `"production"`).
+     * @return True to continue turn execution, or false to abort early.
+     */
+    virtual bool OnPhase(std::string_view phase) {
+        (void)phase;
+        return true;
+    }
+
+    /**
+     * @brief Invoked after `stack` walks one or more steps along `walked`.
+     * @param game Active game aggregate.
+     * @param stack Moving stack in fighting order.
+     * @param walked Tile coordinates traversed in step order.
+     * @param sea_before True when the stack began this step embarked at sea.
+     * @return True to continue turn execution, or false to abort early.
+     */
+    virtual bool OnWalk(Game& game, const ArmyStack& stack, const TileCoords& walked,
+                        bool sea_before) {
+        (void)game;
+        (void)stack;
+        (void)walked;
+        (void)sea_before;
+        return true;
+    }
+
+    /**
+     * @brief Invoked after combat `result` is decided at `(x, y)` before applying casualties.
+     * @param game Active game aggregate.
+     * @param attackers Attacking stack.
+     * @param x Attacked map tile x coordinate.
+     * @param y Attacked map tile y coordinate.
+     * @param result Decided battle outcome.
+     * @return True to continue turn execution, or false to abort early.
+     */
+    virtual bool OnFight(Game& game, const ArmyStack& attackers, int x, int y, Battle& result) {
+        (void)game;
+        (void)attackers;
+        (void)x;
+        (void)y;
+        (void)result;
+        return true;
+    }
+
+    /**
+     * @brief Invoked when a computer side pillages, sacks, or razes `city`.
+     * @param game Active game aggregate.
+     * @param side Acting computer faction.
+     * @param city Captured city acted upon.
+     * @param action Action label (`"pillaged"`, `"sacked"`, or `"razed"`).
+     * @return True to continue turn execution, or false to abort early.
+     */
+    virtual bool OnSpoils(Game& game, Side& side, City& city, std::string_view action) {
+        (void)game;
+        (void)side;
+        (void)city;
+        (void)action;
+        return true;
+    }
+
+    /** @brief True when cooperative cancellation has been requested. */
+    virtual bool IsAborted() const { return false; }
+};
 
 /** @brief One labelled contribution to an AI side's diplomatic attitude score. */
 struct AttitudeFactor {
@@ -69,8 +154,6 @@ struct AttitudeBreakdown {
  */
 class IComputerPlayer {
   public:
-    /** @brief Optional callback invoked between turn phases to pace UI progress updates. */
-    using PauseCallback = std::function<void(const char*)>;
     /** @brief Read-only span of scored macro-action thoughts for the Brain Inspector UI. */
     using ThoughtSpan = absl::Span<const AIThought>;
     /** @brief Ordered list of army pointers forming a stack. */
@@ -82,9 +165,9 @@ class IComputerPlayer {
      * @brief Executes one full computer turn for `side` on `game`.
      * @param game Active game aggregate root.
      * @param side Side whose turn is being played.
-     * @param pause Optional callback invoked between phases with the phase label.
+     * @param events Optional observer notified of phase, movement, combat, and spoils events.
      */
-    virtual void PlayTurn(Game& game, Side& side, const PauseCallback& pause = nullptr) = 0;
+    virtual void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) = 0;
 
     /**
      * @brief Notifies the strategy that `side`'s turn has opened (e.g. resetting army-cycle

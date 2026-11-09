@@ -183,27 +183,6 @@ class DisplayWindow {
     crt::CrtShader crt_shader_;                   ///< Owned CRT post-processing pass.
 };
 
-/** @brief Returns the process-default `DisplayWindow` instance. */
-DisplayWindow& DefaultWindow();
-/// Reference to `DefaultWindow().MutableState()` for free-function callers.
-extern State& state;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-
-SDL_Window* Open(const char* title, bool windowed, int size_w = 0, int size_h = 0);
-SDL_Window* Window();
-void Measure();
-void BeginFrame();
-void Present();
-void Choose(int n);
-UiDimensions UiSize();
-void SetFrame(int width, int height);
-void PushUi();
-void PushMap(int x, int y, int cam_x, int cam_y, int zoom);
-UiDimensions ToUi(double x, double y);
-WindowPoint FromUi(double x, double y);
-OptionalUiPoint OffFrame(double x, double y);
-void SetWindowed(bool enabled);
-bool PointerAway();
-
 }  // namespace display
 
 namespace w2 {

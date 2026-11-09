@@ -28,11 +28,11 @@ std::filesystem::path FindArt(const std::filesystem::path& data_dir, const std::
     return {};
 }
 
-/** @brief Sets the drawing colour to the screen palette's entry `palette_index`. */
-void SetPal(const Screen& main_screen, int palette_index) {
+/** @brief Sets the drawing colour on `renderer` to the screen palette's entry `palette_index`. */
+void SetPal(gfx::Renderer& renderer, const Screen& main_screen, int palette_index) {
     const auto& colour = main_screen.palette[palette_index];
-    gfx::SetColor(static_cast<float>(colour[0]), static_cast<float>(colour[1]),
-                  static_cast<float>(colour[2]));
+    renderer.SetColor(static_cast<float>(colour[0]), static_cast<float>(colour[1]),
+                      static_cast<float>(colour[2]));
 }
 
 const int kLight = 2;  ///< The palette index of a bevel's lit edge.
@@ -59,7 +59,7 @@ const Panel kPanels[] = {
  * Puts the four background quadrants together into one 640x480 image, and
  * cuts the stone tile out of it (see stonetile.hpp).
  */
-void ComposedArt(Screen& main_screen) {
+void ComposedArt(gfx::Renderer& renderer, Screen& main_screen) {
     if (main_screen.bg_image) return;
     w2::pck::Pixels whole;
     whole.w = 640;
@@ -75,7 +75,7 @@ void ComposedArt(Screen& main_screen) {
                             quadrant->px[y * quadrant->w + x];
         }
     }
-    main_screen.bg_image = pckimage::FromPixels(whole, main_screen.palette);
+    main_screen.bg_image = pckimage::FromPixels(renderer, whole, main_screen.palette);
     w2::pck::Pixels tile;
     tile.w = stonetile::kWidth;
     tile.h = stonetile::kHeight;
@@ -89,18 +89,19 @@ void ComposedArt(Screen& main_screen) {
                 tile.px[(tile_y + y) * stonetile::kWidth + tile_x + x] =
                         whole.px[(source_y + y) * 640 + source_x + x];
     }
-    main_screen.stone_img = pckimage::FromPixels(tile, main_screen.palette);
+    main_screen.stone_img = pckimage::FromPixels(renderer, tile, main_screen.palette);
     main_screen.stone_img->wrap = true;
 }
 
 /** @brief A one-pixel bevel just outside the rect: dark above and left, light below and right. */
-void Bevel(const Screen& main_screen, int x, int y, int width, int height) {
-    SetPal(main_screen, kDark);
-    gfx::Rectangle(gfx::kFill, x - 1, y - 1, width + 2, 1);
-    gfx::Rectangle(gfx::kFill, x - 1, y, 1, height + 1);
-    SetPal(main_screen, kLight);
-    gfx::Rectangle(gfx::kFill, x, y + height, width + 1, 1);
-    gfx::Rectangle(gfx::kFill, x + width, y, 1, height);
+void Bevel(gfx::Renderer& renderer, const Screen& main_screen, int x, int y, int width,
+           int height) {
+    SetPal(renderer, main_screen, kDark);
+    renderer.Rectangle(gfx::kFill, x - 1, y - 1, width + 2, 1);
+    renderer.Rectangle(gfx::kFill, x - 1, y, 1, height + 1);
+    SetPal(renderer, main_screen, kLight);
+    renderer.Rectangle(gfx::kFill, x, y + height, width + 1, 1);
+    renderer.Rectangle(gfx::kFill, x + width, y, 1, height);
 }
 
 /** @brief True when two controls have exactly the same rect. */
@@ -129,10 +130,10 @@ bool IsCovered(const Screen& main_screen, const Control& control, size_t index) 
 }
 
 /** @brief Draws the two-pixel black ring, with cut corners, round a default button. */
-void DefaultRing(const Screen& main_screen, const Control& control) {
-    SetPal(main_screen, 0);
-    auto across = [](int x, int y, int n) { gfx::Rectangle(gfx::kFill, x, y, n, 1); };
-    auto down = [](int x, int y, int n) { gfx::Rectangle(gfx::kFill, x, y, 1, n); };
+void DefaultRing(gfx::Renderer& renderer, const Screen& main_screen, const Control& control) {
+    SetPal(renderer, main_screen, 0);
+    auto across = [&](int x, int y, int n) { renderer.Rectangle(gfx::kFill, x, y, n, 1); };
+    auto down = [&](int x, int y, int n) { renderer.Rectangle(gfx::kFill, x, y, 1, n); };
     int ring_x = control.x - 2, ring_y = control.y - 2, ring_w = control.w + 3,
         ring_h = control.h + 3;
     for (int pass = 0; pass < 2; pass++) {
@@ -153,11 +154,11 @@ void DefaultRing(const Screen& main_screen, const Control& control) {
         ring_w += 2;
         ring_h += 2;
     }
-    gfx::SetColor(1, 1, 1);
+    renderer.SetColor(1, 1, 1);
 }
 }  // namespace
 
-const Art* Screen::ArtFor(int bitmap_id) {
+const Art* Screen::ArtFor(gfx::Renderer& renderer, int bitmap_id) {
     auto cached = art.find(bitmap_id);
     if (cached != art.end()) return cached->second.image ? &cached->second : nullptr;
     Art loaded;
@@ -166,7 +167,7 @@ const Art* Screen::ArtFor(int bitmap_id) {
         std::filesystem::path path = FindArt(data_dir, name->second, terrain);
         if (!path.empty()) {
             if (auto pixels = w2::pck::Decode(path); pixels.ok()) {
-                loaded.image = pckimage::FromPixels(**pixels, palette);
+                loaded.image = pckimage::FromPixels(renderer, **pixels, palette);
                 loaded.w = (*pixels)->w;
                 loaded.h = (*pixels)->h;
             }
@@ -176,9 +177,8 @@ const Art* Screen::ArtFor(int bitmap_id) {
     return loaded.image ? &art[bitmap_id] : nullptr;
 }
 
-absl::StatusOr<std::unique_ptr<Screen>> Load(const std::filesystem::path& data_dir,
-                                             const w2::pal::Palette& palette, int dialog_id,
-                                             int terrain) {
+absl::StatusOr<ScreenHandle> Load(gfx::Renderer& renderer, const std::filesystem::path& data_dir,
+                                  const w2::pal::Palette& palette, int dialog_id, int terrain) {
     auto loaded = std::make_unique<Screen>();
     auto ui_data = w2::uidata::Load(data_dir);
     if (!ui_data.ok()) return ui_data.status();
@@ -196,7 +196,8 @@ absl::StatusOr<std::unique_ptr<Screen>> Load(const std::filesystem::path& data_d
             auto quad_px = w2::pck::Decode(path);
             if (!quad_px.ok()) return quad_px.status();
             loaded->background_px[i] = std::move(*quad_px);
-            loaded->background[i] = pckimage::FromPixels(*loaded->background_px[i], palette);
+            loaded->background[i] =
+                    pckimage::FromPixels(renderer, *loaded->background_px[i], palette);
         }
     }
     // TERRAIN<n>/MAPCOLOR.DAT, the strategic map's own colour table: a colour
@@ -246,54 +247,56 @@ void Relayout(Screen& main_screen, const layout::Layout& screen_layout) {
     }
 }
 
-void DrawBackground(Screen& main_screen, const layout::Layout& screen_layout) {
-    gfx::SetColor(1, 1, 1);
+void DrawBackground(gfx::Renderer& renderer, Screen& main_screen,
+                    const layout::Layout& screen_layout) {
+    renderer.SetColor(1, 1, 1);
     if (screen_layout.classic) {
         for (int i = 0; i < 4; i++)
             if (main_screen.background[i])
-                gfx::Draw(main_screen.background[i], (i % 2) * 320, (i / 2) * 240);
+                renderer.Draw(main_screen.background[i], (i % 2) * 320, (i / 2) * 240);
         return;
     }
-    ComposedArt(main_screen);
-    gfx::Draw(main_screen.stone_img, gfx::NewQuad(0, 0, screen_layout.w, screen_layout.h), 0, 0);
-    SetPal(main_screen, kLight);
-    gfx::Rectangle(gfx::kFill, 0, 0, screen_layout.w - 1, 1);
-    gfx::Rectangle(gfx::kFill, 0, 1, 1, screen_layout.h - 2);
-    SetPal(main_screen, kDark);
-    gfx::Rectangle(gfx::kFill, 0, screen_layout.h - 1, screen_layout.w, 1);
-    gfx::Rectangle(gfx::kFill, screen_layout.w - 1, 0, 1, screen_layout.h - 1);
+    ComposedArt(renderer, main_screen);
+    renderer.Draw(main_screen.stone_img, gfx::NewQuad(0, 0, screen_layout.w, screen_layout.h), 0,
+                  0);
+    SetPal(renderer, main_screen, kLight);
+    renderer.Rectangle(gfx::kFill, 0, 0, screen_layout.w - 1, 1);
+    renderer.Rectangle(gfx::kFill, 0, 1, 1, screen_layout.h - 2);
+    SetPal(renderer, main_screen, kDark);
+    renderer.Rectangle(gfx::kFill, 0, screen_layout.h - 1, screen_layout.w, 1);
+    renderer.Rectangle(gfx::kFill, screen_layout.w - 1, 0, 1, screen_layout.h - 1);
     const layout::Rect& map_rect = screen_layout.map_rect;
-    Bevel(main_screen, map_rect.x - 1, map_rect.y - 1, map_rect.w + 2, map_rect.h + 2);
-    gfx::SetColor(0, 0, 0);
-    gfx::Rectangle(gfx::kFill, map_rect.x - 1, map_rect.y - 1, map_rect.w + 2, 1);
-    gfx::Rectangle(gfx::kFill, map_rect.x - 1, map_rect.y + map_rect.h, map_rect.w + 2, 1);
-    gfx::Rectangle(gfx::kFill, map_rect.x - 1, map_rect.y - 1, 1, map_rect.h + 2);
-    gfx::Rectangle(gfx::kFill, map_rect.x + map_rect.w, map_rect.y - 1, 1, map_rect.h + 2);
+    Bevel(renderer, main_screen, map_rect.x - 1, map_rect.y - 1, map_rect.w + 2, map_rect.h + 2);
+    renderer.SetColor(0, 0, 0);
+    renderer.Rectangle(gfx::kFill, map_rect.x - 1, map_rect.y - 1, map_rect.w + 2, 1);
+    renderer.Rectangle(gfx::kFill, map_rect.x - 1, map_rect.y + map_rect.h, map_rect.w + 2, 1);
+    renderer.Rectangle(gfx::kFill, map_rect.x - 1, map_rect.y - 1, 1, map_rect.h + 2);
+    renderer.Rectangle(gfx::kFill, map_rect.x + map_rect.w, map_rect.y - 1, 1, map_rect.h + 2);
     for (const Panel& panel : kPanels) {
         layout::Rect placed = layout::Move(screen_layout, panel.group,
                                            layout::Rect{panel.x, panel.y, panel.w, panel.h});
         // on a short screen the strategic map's frame stops above the panel
         int height = std::string(panel.group) == "strat" ? panel.h - screen_layout.cut : panel.h;
-        Bevel(main_screen, placed.x, placed.y, panel.w, height);
-        gfx::SetColor(1, 1, 1);
-        gfx::Draw(main_screen.bg_image, gfx::NewQuad(panel.x, panel.y, panel.w, height), placed.x,
-                  placed.y);
+        Bevel(renderer, main_screen, placed.x, placed.y, panel.w, height);
+        renderer.SetColor(1, 1, 1);
+        renderer.Draw(main_screen.bg_image, gfx::NewQuad(panel.x, panel.y, panel.w, height),
+                      placed.x, placed.y);
     }
 }
 
-void DrawControls(Screen& main_screen) {
-    gfx::SetColor(1, 1, 1);
+void DrawControls(gfx::Renderer& renderer, Screen& main_screen) {
+    renderer.SetColor(1, 1, 1);
     const auto& controls = main_screen.dialog.controls;
     for (size_t i = 0; i < controls.size(); i++) {
         const Control& control = controls[i];
         if (control.bitmap != 0 && control.w > 0 && control.h > 0 &&
             !IsCovered(main_screen, control, i)) {
             int state = main_screen.StateOf(control.id);
-            const Art* art = main_screen.ArtFor(control.bitmap);
+            const Art* art = main_screen.ArtFor(renderer, control.bitmap);
             auto src = control.src[state];
             if (art && src.x + control.w <= art->w && src.y + control.h <= art->h)
-                gfx::Draw(art->image, gfx::NewQuad(src.x, src.y, control.w, control.h), control.x,
-                          control.y);
+                renderer.Draw(art->image, gfx::NewQuad(src.x, src.y, control.w, control.h),
+                              control.x, control.y);
         }
     }
 }
@@ -306,25 +309,26 @@ View MakeView(Screen& main_screen, int dialog_id) {
     return view;
 }
 
-const std::set<int> kDefaultIds = {123, 103, 141, 174, 189, 192, 201, 223, 287, 242, 285, 251,
-                                   292, 294, 330, 331, 332, 172, 356, 359, 368, 370, 396, 421,
-                                   424, 425, 457, 469, 282, 485, 484, 483, 474, 489, 490, 495};
+const HiddenIdSet kDefaultIds = {123, 103, 141, 174, 189, 192, 201, 223, 287, 242, 285, 251,
+                                 292, 294, 330, 331, 332, 172, 356, 359, 368, 370, 396, 421,
+                                 424, 425, 457, 469, 282, 485, 484, 483, 474, 489, 490, 495};
 
-void DrawDialogControls(Screen& main_screen, const View& view, const std::set<int>* hidden) {
-    gfx::SetColor(1, 1, 1);
+void DrawDialogControls(gfx::Renderer& renderer, Screen& main_screen, const View& view,
+                        const HiddenIdSet* hidden) {
+    renderer.SetColor(1, 1, 1);
     for (const Control& control : view.dialog.controls) {
         if (hidden && hidden->count(control.id)) continue;
         if (control.bitmap != 0 && control.w > 0 && control.h > 0) {
-            const Art* art = main_screen.ArtFor(control.bitmap);
+            const Art* art = main_screen.ArtFor(renderer, control.bitmap);
             auto src = control.src[view.StateOf(control.id)];
             if (art && src.x + control.w <= art->w && src.y + control.h <= art->h) {
-                gfx::SetColor(1, 1, 1);
-                gfx::Draw(art->image, gfx::NewQuad(src.x, src.y, control.w, control.h), control.x,
-                          control.y);
+                renderer.SetColor(1, 1, 1);
+                renderer.Draw(art->image, gfx::NewQuad(src.x, src.y, control.w, control.h),
+                              control.x, control.y);
             }
         }
         if (kDefaultIds.count(control.id) && !view.screen && control.w > 0 && control.h > 0)
-            DefaultRing(main_screen, control);
+            DefaultRing(renderer, main_screen, control);
     }
 }
 
@@ -343,7 +347,8 @@ const Control* DialogControlAt(const View& view, int x, int y) {
     return nullptr;
 }
 
-gfx::ImageP StrategicImage(Screen& main_screen, const w2::Game& game, int side) {
+gfx::ImageP StrategicImage(gfx::Renderer& renderer, Screen& main_screen, const w2::Game& game,
+                           int side) {
     const w2::Map& map = game.GetMap();
     int width = map.Width(), height = map.Height();
     const auto& colours = main_screen.map_colour;
@@ -398,7 +403,7 @@ gfx::ImageP StrategicImage(Screen& main_screen, const w2::Game& game, int side) 
             put(x * 2 + 1, y * 2 + 1, pixel_colour[3]);
         }
     }
-    return gfx::NewImageRgba(width * 2, height * 2, out.data());
+    return renderer.NewImageRgba(width * 2, height * 2, out.data());
 }
 
 const Region* RegionAt(const Screen& main_screen, int x, int y) {

@@ -306,25 +306,119 @@ cc_library(
     visibility = ["//cpp:__subpackages__"],
 )
 
-# Layer 8: SDL2 UI front-end and modal dialogs.
+# Layer 8a: Core UI primitives, AssetCatalog, Viewport, ModalStack, IScreenActions, and UiContext.
+UI_CORE_SRCS = [
+    "src/front/font.cpp",
+    "src/front/layout.cpp",
+    "src/front/menu.cpp",
+    "src/front/pckimage.cpp",
+    "src/front/screen.cpp",
+    "src/ui/asset_catalog.cpp",
+    "src/ui/kit.cpp",
+    "src/ui/modal_stack.cpp",
+    "src/ui/ui_context.cpp",
+    "src/ui/viewport.cpp",
+]
+
+UI_CORE_HDRS = [
+    "src/front/font.hpp",
+    "src/front/layout.hpp",
+    "src/front/menu.hpp",
+    "src/front/pckimage.hpp",
+    "src/front/screen.hpp",
+    "src/front/stonetile.hpp",
+    "src/ui/asset_catalog.hpp",
+    "src/ui/kit.hpp",
+    "src/ui/modal_stack.hpp",
+    "src/ui/screen_actions.hpp",
+    "src/ui/ui_context.hpp",
+    "src/ui/viewport.hpp",
+]
+
 cc_library(
-    name = "ui_front",
+    name = "ui_core",
     copts = W2_COPTS,
-    srcs = glob([
-        "src/ui/*.cpp",
-        "src/front/*.cpp",
-    ]),
-    hdrs = glob([
-        "src/ui/*.hpp",
-        "src/front/*.hpp",
-    ]),
+    srcs = UI_CORE_SRCS,
+    hdrs = UI_CORE_HDRS,
     defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
         ":config",
+        ":formats",
+        ":model",
         ":platform",
-        ":w2core",
-        "@abseil-cpp//absl/base:no_destructor",
+        ":rules",
+        ":util",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@nlohmann_json//:json",
+        "@sdl2",
+        "@sdl2//:sdl2_headers_flat",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 8b: Modal dialogs operating exclusively over UiContext (zero dependency on :ui_front).
+cc_library(
+    name = "ui_dialogs",
+    copts = W2_COPTS,
+    srcs = glob(
+        ["src/ui/*.cpp"],
+        exclude = UI_CORE_SRCS,
+    ),
+    hdrs = glob(
+        ["src/ui/*.hpp"],
+        exclude = UI_CORE_HDRS,
+    ),
+    defines = ["W2_VORBIS=1"],
+    includes = ["src"],
+    deps = [
+        ":ai",
+        ":config",
+        ":formats",
+        ":model",
+        ":persistence",
+        ":platform",
+        ":rules",
+        ":ui_core",
+        ":util",
+        ":worldgen",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings:str_format",
+        "@nlohmann_json//:json",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 8c: Main map screen controller, explicit screen states, script player, and Application.
+cc_library(
+    name = "ui_front",
+    copts = W2_COPTS,
+    srcs = glob(
+        ["src/front/*.cpp"],
+        exclude = UI_CORE_SRCS,
+    ),
+    hdrs = glob(
+        ["src/front/*.hpp"],
+        exclude = UI_CORE_HDRS,
+    ),
+    defines = ["W2_VORBIS=1"],
+    includes = ["src"],
+    deps = [
+        ":ai",
+        ":config",
+        ":formats",
+        ":model",
+        ":persistence",
+        ":platform",
+        ":rules",
+        ":ui_core",
+        ":ui_dialogs",
+        ":util",
+        ":worldgen",
         "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/strings:str_format",
@@ -335,7 +429,7 @@ cc_library(
     visibility = ["//cpp:__subpackages__"],
 )
 
-# The game: the slim entry point over :ui_front.
+# Layer 9: Slim CLI entry point over Application (:ui_front).
 cc_binary(
     name = "warlords2",
     copts = W2_COPTS,
@@ -343,12 +437,11 @@ cc_binary(
     defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
-        ":platform",
+        ":config",
+        ":ui_dialogs",
         ":ui_front",
-        ":w2core",
+        ":util",
         "@abseil-cpp//absl/flags:flag",
-        "@sdl2",
-        "@sdl2//:sdl2_headers_flat",
     ],
 )
 
@@ -560,6 +653,29 @@ cc_test(
         ":config",
         ":platform",
         ":test_helpers",
+        ":w2core",
+        "@googletest//:gtest_main",
+        "@sdl2",
+        "@sdl2//:sdl2_headers_flat",
+    ],
+)
+
+cc_test(
+    name = "ui_core_test",
+    copts = W2_COPTS,
+    size = "small",
+    srcs = ["test/ui_core_test.cpp"],
+    data = DATA,
+    env = {
+        "SDL_AUDIODRIVER": "dummy",
+        "SDL_RENDER_DRIVER": "software",
+        "SDL_VIDEODRIVER": "dummy",
+    },
+    deps = [
+        ":config",
+        ":platform",
+        ":test_helpers",
+        ":ui_core",
         ":w2core",
         "@googletest//:gtest_main",
         "@sdl2",

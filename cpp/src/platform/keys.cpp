@@ -2,8 +2,6 @@
 
 #include <SDL.h>
 
-#include "absl/base/no_destructor.h"
-
 namespace keys {
 
 void KeyboardState::Press(std::string_view name) {
@@ -127,30 +125,6 @@ std::string KeyboardState::LoveName(int sdl_keycode) {
         return std::string(1, chr);
     }
     return "";
-}
-
-KeyboardState& DefaultKeyboard() {
-    static absl::NoDestructor<KeyboardState> instance;
-    return *instance;
-}
-
-void Press(const std::string& name) {
-    DefaultKeyboard().Press(name);
-}
-void Release(const std::string& name) {
-    DefaultKeyboard().Release(name);
-}
-void Clear() {
-    DefaultKeyboard().Clear();
-}
-bool IsDown(KeyNameList names) {
-    return DefaultKeyboard().IsDown(names);
-}
-bool IsDown(const std::string& name) {
-    return DefaultKeyboard().IsDown(name);
-}
-std::string LoveName(int sdl_keycode) {
-    return KeyboardState::LoveName(sdl_keycode);
 }
 
 }  // namespace keys

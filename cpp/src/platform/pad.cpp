@@ -5,8 +5,6 @@
 
 #include <SDL.h>
 
-#include "absl/base/no_destructor.h"
-
 namespace pad {
 
 namespace {
@@ -155,30 +153,6 @@ bool GamepadInput::ConsumeWarp(int win_x, int win_y) {
     if (found == pending_warps_.end()) return false;
     pending_warps_.erase(pending_warps_.begin(), found + 1);
     return true;
-}
-
-GamepadInput& DefaultGamepad() {
-    static absl::NoDestructor<GamepadInput> instance;
-    return *instance;
-}
-
-void Hints() {
-    GamepadInput::ApplyHints();
-}
-bool TranslateEvent(const SDL_Event& event, int& button, bool& down) {
-    return DefaultGamepad().TranslateEvent(event, button, down);
-}
-bool Trigger(int& button, bool& down) {
-    return DefaultGamepad().PollTrigger(button, down);
-}
-Sticks ReadSticks() {
-    return DefaultGamepad().ReadSticks();
-}
-void Script(const Sticks& sticks) {
-    DefaultGamepad().SetScriptedSticks(sticks);
-}
-int FromName(const std::string& name) {
-    return GamepadInput::ButtonFromName(name);
 }
 
 }  // namespace pad

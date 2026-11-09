@@ -6,8 +6,6 @@
 
 #include <SDL.h>
 
-#include "absl/base/no_destructor.h"
-
 #include "platform/gfx.hpp"
 
 namespace display {
@@ -277,60 +275,6 @@ void DisplayWindow::SetWindowed(bool enabled) {
 crt::FrameGeometry DisplayWindow::CrtGeometry() const {
     return crt::FrameGeometry{state_.pw, state_.ph,    state_.ox,  state_.oy,    state_.w,
                               state_.h,  state_.scale, state_.dpi, state_.shrink};
-}
-
-DisplayWindow& DefaultWindow() {
-    static absl::NoDestructor<DisplayWindow> instance;
-    return *instance;
-}
-
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-State& state = DefaultWindow().MutableState();
-
-SDL_Window* Open(const char* title, bool windowed, int size_w, int size_h) {
-    return DefaultWindow().Open(title, windowed, size_w, size_h);
-}
-SDL_Window* Window() {
-    return DefaultWindow().Window();
-}
-void Measure() {
-    DefaultWindow().Measure();
-}
-void BeginFrame() {
-    DefaultWindow().BeginFrame(gfx::DefaultRenderer());
-}
-void Present() {
-    DefaultWindow().Present(gfx::DefaultRenderer());
-}
-void Choose(int n) {
-    DefaultWindow().Choose(n);
-}
-UiDimensions UiSize() {
-    return DefaultWindow().UiSize();
-}
-void SetFrame(int width, int height) {
-    DefaultWindow().SetFrame(width, height);
-}
-void PushUi() {
-    DefaultWindow().PushUi(gfx::DefaultRenderer());
-}
-void PushMap(int x, int y, int cam_x, int cam_y, int zoom) {
-    DefaultWindow().PushMap(gfx::DefaultRenderer(), x, y, cam_x, cam_y, zoom);
-}
-UiDimensions ToUi(double x, double y) {
-    return DefaultWindow().ToUi(x, y);
-}
-WindowPoint FromUi(double x, double y) {
-    return DefaultWindow().FromUi(x, y);
-}
-OptionalUiPoint OffFrame(double x, double y) {
-    return DefaultWindow().OffFrame(x, y);
-}
-void SetWindowed(bool enabled) {
-    DefaultWindow().SetWindowed(enabled);
-}
-bool PointerAway() {
-    return DefaultWindow().PointerAway();
 }
 
 }  // namespace display

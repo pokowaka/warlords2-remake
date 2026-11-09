@@ -15,8 +15,6 @@
 
 namespace w2::ai {
 
-Hooks hooks;
-
 namespace {
 
 bool& DefaultClassicAiFlag() {
@@ -357,15 +355,20 @@ void StartGame(Game& game) {
     }
 }
 
-void PlayTurn(Game& game, Side& side, const std::function<void(const char*)>& pause) {
+void PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
+    ScopedAiTurnEvents turn_scope(game, events);
     if (!side.ComputerPlayer()) {
         side.SetComputerPlayer(MakeComputerPlayer(DefaultClassicAiFlag(), game, side));
     }
-    side.ComputerPlayer()->PlayTurn(game, side, pause);
+    side.ComputerPlayer()->PlayTurn(game, side, events);
 }
 
-void Walked(Game& game, const std::vector<Army*>& stack, const move::WalkResult& walk) {
-    if (hooks.on_walk && walk.steps > 0) hooks.on_walk(game, stack, walk);
+bool Walked(Game& game, const std::vector<Army*>& stack, const move::WalkResult& walk) {
+    IAiTurnEvents* events = game.ActiveAiEvents();
+    if (events != nullptr && walk.steps > 0) {
+        return events->OnWalk(game, stack, walk.walked, walk.sea_before) && !events->IsAborted();
+    }
+    return events == nullptr || !events->IsAborted();
 }
 
 City* HeroCity(Game& game, Side& side, City* fallback) {

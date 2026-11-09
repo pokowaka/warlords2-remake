@@ -43,8 +43,8 @@ ModernMlPlayer::ModernMlPlayer(const ai::ml::PolicyNetwork* custom_policy,
                                ai::ml::RolloutSampler* sampler)
         : custom_policy_(custom_policy), sampler_(sampler) {}
 
-void ModernMlPlayer::PlayTurn(Game& game, Side& side, const PauseCallback& pause) {
-    ai::modern::PlayTurn(game, side, pause, custom_policy_, sampler_);
+void ModernMlPlayer::PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
+    ai::modern::PlayTurn(game, side, events, custom_policy_, sampler_);
 }
 
 AttitudeBreakdown ModernMlPlayer::EvaluateProposal(const Game& game, SideId ai_side,
@@ -73,7 +73,9 @@ bool ModernMlPlayer::OnQuestCapture(Game& game, Side& side, City& city, const Ar
             ai::groups::Sack(game, side, city);
         } else {
             game::Raze(game, side, city, stack);
-            if (ai::hooks.on_spoils) ai::hooks.on_spoils(game, side, city, "razed");
+            if (IAiTurnEvents* events = game.ActiveAiEvents()) {
+                (void)events->OnSpoils(game, side, city, "razed");
+            }
         }
         return true;
     }

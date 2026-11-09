@@ -5,20 +5,55 @@
  *
  * The pages are FILE.DAT group 0x19 -- TUTORIA\T*.GFX -- shown as help files.
  */
-#include <map>
+#include <array>
+#include <cstddef>
+#include <string>
+#include <string_view>
 
 #include "ui/dialogs.hpp"
 
 namespace tutorial {
 
 namespace {
-/// Each moment's page: its index in kFiles.
-const std::map<std::string, int> kPages = {
-    {"hero", 0},   {"prod", 1},  {"select", 2}, {"move", 3},    {"fight", 4},
-    {"search", 5}, {"prod2", 6}, {"turn2", 7},  {"endturn", 9}, {"fresult", 10}};
-/// The pages' help files in TUTORIA\, without the .GFX.
-const char* const kFiles[] = {"THERO",  "TPROD",  "TSELECT",  "TMOVE",    "TFIGHT",  "TSEARCH",
-                              "TPROD2", "TTURN2", "TWARLORD", "TENDTURN", "TFRESULT"};
+
+/** @brief Associates a tutorial moment identifier with its `TUTORIA\` help stem. */
+struct MomentPage {
+    std::string_view moment;  ///< Moment key passed to `Show`.
+    const char* file;         ///< Help file stem under `TUTORIA\`, without `.GFX`.
+};
+
+/// Each moment's help page stem under `TUTORIA\`.
+constexpr std::array<MomentPage, 10> kPages = {{
+    {"hero", "THERO"},
+    {"prod", "TPROD"},
+    {"select", "TSELECT"},
+    {"move", "TMOVE"},
+    {"fight", "TFIGHT"},
+    {"search", "TSEARCH"},
+    {"prod2", "TPROD2"},
+    {"turn2", "TTURN2"},
+    {"endturn", "TENDTURN"},
+    {"fresult", "TFRESULT"},
+}};
+
+/** @brief Looks up the `TUTORIA\` file stem for `moment`, or `nullptr` if unknown. */
+const char* FindTutorialFile(std::string_view moment) {
+    for (const auto& entry : kPages) {
+        if (entry.moment == moment) return entry.file;
+    }
+    return nullptr;
+}
+
+/** @brief Shows the pages for `moments` from index `next` onward, one after another. */
+void ChainFrom(w2::UiContext& ctx, const MomentList& moments, size_t next, kit::Done after) {
+    if (next < moments.size()) {
+        Show(ctx, moments[next],
+             [&ctx, moments, next, after]() { ChainFrom(ctx, moments, next + 1, after); });
+    } else if (after) {
+        after();
+    }
+}
+
 }  // namespace
 
 /**
@@ -26,29 +61,21 @@ const char* const kFiles[] = {"THERO",  "TPROD",  "TSELECT",  "TMOVE",    "TFIGH
  * tutorial is on; `after` runs once it is closed, or at once when there is
  * nothing to show.
  */
-void Show(const std::string& moment, kit::Done after) {
-    auto done = [after]() {
+void Show(w2::UiContext& ctx, const std::string& moment, kit::Done after) {
+    auto done = [&after]() {
         if (after) after();
     };
-    auto page = kPages.find(moment);
-    if (!g_app.g || page == kPages.end() || g_app.g->GetMap().GameOptions().tutorial == 0)
-        return done();
-    if (g_app.g->HasSeenTutorial(moment)) return done();
-    g_app.g->MarkTutorialSeen(moment);
-    if (!help::Open(std::string("TUTORIA\\") + kFiles[page->second] + ".GFX", after)) done();
-}
-
-/** @brief Shows the pages for `moments` from number `next` on, one after another. */
-static void ChainFrom(std::vector<std::string> moments, size_t next, kit::Done after) {
-    if (next < moments.size())
-        Show(moments[next], [moments, next, after]() { ChainFrom(moments, next + 1, after); });
-    else if (after)
-        after();
+    const char* file = FindTutorialFile(moment);
+    w2::Game* game = ctx.GamePtr();
+    if (!game || !file || game->GetMap().GameOptions().tutorial == 0) return done();
+    if (game->HasSeenTutorial(moment)) return done();
+    game->MarkTutorialSeen(moment);
+    if (!help::Open(ctx, std::string("TUTORIA\\") + file + ".GFX", after)) done();
 }
 
 /** @brief Shows the pages for `moments` in turn, then runs `after`. */
-void Chain(const std::vector<std::string>& moments, kit::Done after) {
-    ChainFrom(moments, 0, after);
+void Chain(w2::UiContext& ctx, const MomentList& moments, kit::Done after) {
+    ChainFrom(ctx, moments, 0, std::move(after));
 }
 
 }  // namespace tutorial

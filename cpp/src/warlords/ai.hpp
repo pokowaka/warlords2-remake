@@ -1,37 +1,24 @@
 /**
  * @file
- * @brief Computer player facade, frontend turn hooks, and default strategy registration.
+ * @brief Computer player facade, turn observer delegation, and default strategy registration.
  *
  * Bridges the nineteen-phase 1993 Classic AI (`ClassicAiPlayer`) and the fair-information
  * neural-policy AI (`ModernMlPlayer`) through `Side::computer_player`.
  */
 #pragma once
 
-#include <functional>
 #include <memory>
-#include <string>
 #include <vector>
 
+#include "warlords/model/computer_player.hpp"
 #include "warlords/move.hpp"
 #include "warlords/types.hpp"
 
 namespace w2 {
 struct AIData;
-struct Battle;
 }  // namespace w2
 
 namespace w2::ai {
-
-/** @brief Callbacks the front end registers to animate computer turns. */
-struct Hooks {
-    /// Invoked after a computer stack walks one or more steps.
-    std::function<void(Game&, const std::vector<Army*>&, const move::WalkResult&)> on_walk;
-    /// Invoked when a computer stack initiates combat at a tile.
-    std::function<void(Game&, const std::vector<Army*>&, int, int, Battle&)> on_fight;
-    /// Invoked when a computer side razes, sacks, or pillages a city.
-    std::function<void(Game&, Side&, City&, const std::string&)> on_spoils;
-};
-extern Hooks hooks;  ///< Active front-end hooks; empty callbacks are skipped.
 
 /**
  * @brief Returns whether newly initialized sides default to `ClassicAiPlayer` (`true`, for 1993
@@ -63,12 +50,15 @@ void StartGame(Game& game);
 
 /**
  * @brief Executes one computer turn on `side` via `side.computer_player`.
- * @param pause Optional callback invoked between phases with the phase's name.
+ * @param events Optional observer notified between phases and during walks/battles/spoils.
  */
-void PlayTurn(Game& game, Side& side, const std::function<void(const char*)>& pause = nullptr);
+void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr);
 
-/** @brief Reports a completed computer stack walk to `hooks.on_walk`. */
-void Walked(Game& game, const std::vector<Army*>& stack, const move::WalkResult& walk);
+/**
+ * @brief Reports a completed computer stack walk to `game.ActiveAiEvents()`, if any.
+ * @return False when the observer requested cooperative cancellation (`IsAborted()`).
+ */
+bool Walked(Game& game, const std::vector<Army*>& stack, const move::WalkResult& walk);
 
 /** @brief Selects the owned city where a newly hired computer hero appears. */
 City* HeroCity(Game& game, Side& side, City* fallback);

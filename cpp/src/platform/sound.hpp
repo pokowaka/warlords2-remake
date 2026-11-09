@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/types/span.h"
 
 #include "warlords/uidata.hpp"
 
@@ -58,6 +59,9 @@ using CompletionCallback = std::function<void()>;
 
 /// Faction pointer list used to inspect whether a human side remains active.
 using SidePtrList = std::vector<w2::Side*>;
+
+/// Read-only span of faction pointers used to inspect whether a human side remains active.
+using SidePtrSpan = absl::Span<w2::Side* const>;
 
 /** @brief Formats `synth` as its lowercase prefs/menu token (`"fm"`, `"mt32"`, or `"sc55"`). */
 std::string_view SynthName(SynthKind synth);
@@ -126,6 +130,13 @@ class AudioEngine {
      * @param has_active_human True while at least one living human faction remains in play.
      */
     void Music(int cue, bool has_active_human = true);
+
+    /**
+     * @brief Starts playing the song for `cue`, deriving human presence from `sides`.
+     * @param cue Music cue constant.
+     * @param sides Participating scenario sides.
+     */
+    void Music(int cue, SidePtrSpan sides);
 
     /** @brief Stops any playing background music and clears active streams. */
     void StopMusic();
@@ -208,56 +219,6 @@ class AudioEngine {
     bool rec_loop_ = false;                     ///< True when active Vorbis song loops.
     std::mt19937 rng_{std::random_device{}()};  ///< Non-gameplay PRNG for clip/song variety.
 };
-
-/** @brief Returns the process-default `AudioEngine` instance. */
-AudioEngine& DefaultAudio();
-void Music(int cue, const SidePtrList& sides);
-inline void Init(const std::filesystem::path& data_dir, const w2::uidata::Strings& files,
-                 OptionalSynthKind preferred_synth = std::nullopt) {
-    DefaultAudio().Init(data_dir, files, preferred_synth);
-}
-inline void Shutdown() {
-    DefaultAudio().Shutdown();
-}
-inline Options& MutableOptions() {
-    return DefaultAudio().MutableOptions();
-}
-inline void SaveOptions() {
-    DefaultAudio().SaveOptions();
-}
-inline void Toggle(AudioChannel channel) {
-    DefaultAudio().Toggle(channel);
-}
-inline void Music(int cue, bool has_active_human = true) {
-    DefaultAudio().Music(cue, has_active_human);
-}
-inline void StopMusic() {
-    DefaultAudio().StopMusic();
-}
-inline SynthKind Synth() {
-    return DefaultAudio().Synth();
-}
-inline bool SynthAvailable(SynthKind synth) {
-    return DefaultAudio().SynthAvailable(synth);
-}
-inline void SetSynth(SynthKind synth) {
-    DefaultAudio().SetSynth(synth);
-}
-inline double Effect(const std::string& name) {
-    return DefaultAudio().Effect(name);
-}
-inline bool Speak(int group, CompletionCallback after) {
-    return DefaultAudio().Speak(group, std::move(after));
-}
-inline bool SpeechOn() {
-    return DefaultAudio().SpeechOn();
-}
-inline bool Busy() {
-    return DefaultAudio().Busy();
-}
-inline void Update() {
-    DefaultAudio().Update();
-}
 
 }  // namespace sound
 

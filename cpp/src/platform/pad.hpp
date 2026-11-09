@@ -136,15 +136,6 @@ class GamepadInput {
     WarpQueue pending_warps_;         ///< Outstanding synthetic OS mouse warps.
 };
 
-/** @brief Returns the process-default `GamepadInput` instance. */
-GamepadInput& DefaultGamepad();
-void Hints();
-bool TranslateEvent(const SDL_Event& event, int& button, bool& down);
-bool Trigger(int& button, bool& down);
-Sticks ReadSticks();
-void Script(const Sticks& sticks);
-int FromName(const std::string& name);
-
 }  // namespace pad
 
 namespace w2 {

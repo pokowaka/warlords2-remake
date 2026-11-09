@@ -90,7 +90,7 @@ std::vector<size_t> BuildCoalitionSizes(const Game& game, Army* seed,
 
 /** @brief Forms army coalitions, scores mission options with MissionNet, and executes moves. */
 void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
-                                    const ml::ContextVec& ctx, const PauseCallback& pause,
+                                    const ml::ContextVec& ctx, IAiTurnEvents* events,
                                     ml::RolloutSampler* sampler, MovedArmySet& moved_armies,
                                     std::vector<MissionSnapshot>* snapshots = nullptr);
 

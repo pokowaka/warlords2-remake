@@ -52,15 +52,6 @@ class KeyboardState {
     HeldKeySet held_keys_;  ///< Set of LÖVE key names currently held down.
 };
 
-/** @brief Returns the process-default `KeyboardState` instance. */
-KeyboardState& DefaultKeyboard();
-void Press(const std::string& name);
-void Release(const std::string& name);
-void Clear();
-bool IsDown(KeyNameList names);
-bool IsDown(const std::string& name);
-std::string LoveName(int sdl_keycode);
-
 }  // namespace keys
 
 namespace w2 {

@@ -70,9 +70,11 @@ RaiderPlayer::RaiderPlayer(SharedClassicPlayer base)
 
 RaiderPlayer::RaiderPlayer(Game& game, Side& side) : base_(ExtractOrMakeClassic(game, side)) {}
 
-void RaiderPlayer::PlayTurn(Game& game, Side& side, const PauseCallback& pause) {
+void RaiderPlayer::PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
+    ScopedAiTurnEvents turn_scope(game, events);
     opponents::RaidEmptyCities(game, side);
-    base_->PlayTurn(game, side, pause);
+    if (events && events->IsAborted()) return;
+    base_->PlayTurn(game, side, events);
 }
 
 void RaiderPlayer::OnTurnStarted(Side& side) {
@@ -118,9 +120,9 @@ FrozenPlayer::FrozenPlayer(const ai::ml::PolicyNetwork* frozen_policy)
         : frozen_policy_(frozen_policy)
         , inner_(std::make_unique<ModernMlPlayer>(frozen_policy, nullptr)) {}
 
-void FrozenPlayer::PlayTurn(Game& game, Side& side, const PauseCallback& pause) {
+void FrozenPlayer::PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
     inner_->SetCustomPolicy(frozen_policy_);
-    inner_->PlayTurn(game, side, pause);
+    inner_->PlayTurn(game, side, events);
 }
 
 AttitudeBreakdown FrozenPlayer::EvaluateProposal(const Game& game, SideId ai_side,

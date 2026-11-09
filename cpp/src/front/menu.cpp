@@ -127,7 +127,7 @@ static bool Tickable(const std::string& act) {
 Layout MakeLayout(const Font& font, int screen_width, const std::vector<Menu>& menus) {
     Layout out;
     int x = kBarX;
-    int line_height = font.line_height;
+    int line_height = font.LineHeight();
     for (const Menu& source : menus) {
         int title_width = (font.Width(source.title) + 7) / 8 * 8;
         int drop_width = 0, key_col = 0, key_width = 0;

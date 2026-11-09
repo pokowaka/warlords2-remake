@@ -6,8 +6,9 @@
 
 namespace pckimage {
 
-gfx::ImageP FromPixels(const w2::pck::Pixels& pixels, const w2::pal::Palette& palette,
-                       const std::map<int, int>& map, const std::set<int>& keys) {
+gfx::ImageP FromPixels(gfx::Renderer& renderer, const w2::pck::Pixels& pixels,
+                       const w2::pal::Palette& palette, const ColourRemap& map,
+                       const TransparentSet& keys) {
     std::vector<uint8_t> out(static_cast<size_t>(pixels.w) * pixels.h * 4, 0);
     uint8_t rgb_by_index[16][3];
     for (int i = 0; i < 16; i++) {
@@ -28,27 +29,27 @@ gfx::ImageP FromPixels(const w2::pck::Pixels& pixels, const w2::pal::Palette& pa
         out[i * 4 + 2] = rgb_by_index[colour_index][2];
         out[i * 4 + 3] = 255;
     }
-    return gfx::NewImageRgba(pixels.w, pixels.h, out.data());
+    return renderer.NewImageRgba(pixels.w, pixels.h, out.data());
 }
 
-absl::StatusOr<gfx::ImageP> Load(const std::filesystem::path& path, const w2::pal::Palette& palette,
-                                 int key) {
+absl::StatusOr<gfx::ImageP> Load(gfx::Renderer& renderer, const std::filesystem::path& path,
+                                 const w2::pal::Palette& palette, int key) {
     auto pixels = w2::pck::Decode(path);
     if (!pixels.ok()) return pixels.status();
-    std::set<int> keys;
+    TransparentSet keys;
     if (key == kCorner && !(*pixels)->px.empty()) {
         keys.insert((*pixels)->px[0]);
     } else if (key >= 0) {
         keys.insert(key);
     }
-    return FromPixels(**pixels, palette, {}, keys);
+    return FromPixels(renderer, **pixels, palette, {}, keys);
 }
 
-absl::StatusOr<gfx::ImageP> Load(const std::filesystem::path& path, const w2::pal::Palette& palette,
-                                 const std::set<int>& keys) {
+absl::StatusOr<gfx::ImageP> Load(gfx::Renderer& renderer, const std::filesystem::path& path,
+                                 const w2::pal::Palette& palette, const TransparentSet& keys) {
     auto pixels = w2::pck::Decode(path);
     if (!pixels.ok()) return pixels.status();
-    return FromPixels(**pixels, palette, {}, keys);
+    return FromPixels(renderer, **pixels, palette, {}, keys);
 }
 
 }  // namespace pckimage

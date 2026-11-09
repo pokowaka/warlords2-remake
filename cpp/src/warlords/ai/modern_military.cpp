@@ -36,7 +36,7 @@ namespace w2::ai::modern {
  * executes the chosen moves.
  */
 void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
-                                    const ml::ContextVec& ctx, const PauseCallback& pause,
+                                    const ml::ContextVec& ctx, IAiTurnEvents* events,
                                     ml::RolloutSampler* sampler, MovedArmySet& moved_armies,
                                     std::vector<MissionSnapshot>* snapshots) {
     int our_side = side.Index();
@@ -241,6 +241,10 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
     float best_enemy_city_score = -1e9F;
 
     for (auto& [loc_key, loc_group] : groups_by_loc) {
+        if (IAiTurnEvents* active_events = game.ActiveAiEvents();
+            active_events && active_events->IsAborted()) {
+            return;
+        }
         std::vector<Army*> pool = loc_group.units;
         std::sort(pool.begin(), pool.end(), [&](Army* lhs, Army* rhs) {
             if (lhs->Hero() != rhs->Hero()) return lhs->Hero() > rhs->Hero();
@@ -363,6 +367,10 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         std::set<size_t> blocked_targets;
 
         while (!pool.empty()) {
+            if (IAiTurnEvents* active_events = game.ActiveAiEvents();
+                active_events && active_events->IsAborted()) {
+                return;
+            }
             Army* seed = pool.front();
             pool.erase(pool.begin());
             if (!game.Alive(seed) || seed->Moves() <= 0 || moved_armies.contains(seed->Id()))
@@ -761,7 +769,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
 
     if (snapshots) return;
     diplomacy::SetAlliedTargetCity(game, our_side, best_enemy_city_target);
-    if (pause) pause("missions");
+    if (events && !events->IsAborted()) (void)events->OnPhase("missions");
 }
 
 }  // namespace w2::ai::modern

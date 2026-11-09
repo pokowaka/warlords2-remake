@@ -21,7 +21,9 @@
 #include "platform/sound.hpp"
 #include "test/test_helpers.hpp"
 #include "util/util.hpp"
+#include "warlords/ai.hpp"
 #include "warlords/cues.hpp"
+#include "warlords/game.hpp"
 #include "warlords/uidata.hpp"
 
 namespace {
@@ -371,6 +373,58 @@ TEST_F(DummySdlTest, KeyboardAndGamepadInputRaiiState) {
     gamepad.RecordWarp(120, 240);
     EXPECT_TRUE(gamepad.ConsumeWarp(120, 240));
     EXPECT_FALSE(gamepad.ConsumeWarp(120, 240));
+}
+
+TEST(AiTurnRunnerTest, PlayTurnObserverBridgeEmitsEventsAndAbortsEarlyOnRealGame) {
+    class WorkerBridge final : public w2::IAiTurnEvents {
+      public:
+        explicit WorkerBridge(w2::SideId side_id, w2::ITurnObserver& out)
+                : side_id_(side_id), out_(out) {}
+
+        bool OnPhase(std::string_view phase) override {
+            return out_.OnTurnEvent(w2::PhaseProgressEvent{side_id_, 50, std::string(phase)}) ==
+                   w2::TurnControl::kContinue;
+        }
+
+        bool OnWalk(w2::Game&, const ArmyStack& stack, const TileCoords& walked,
+                    bool sea_before) override {
+            w2::WalkEvent walk;
+            for (const w2::Army* army : stack) walk.armies.push_back(army->Id());
+            for (const auto& [tile_x, tile_y] : walked) walk.tiles.emplace_back(tile_x, tile_y);
+            walk.sea_before = sea_before;
+            return out_.OnTurnEvent(walk) == w2::TurnControl::kContinue;
+        }
+
+        bool IsAborted() const override { return out_.IsAborted(); }
+
+      private:
+        w2::SideId side_id_;
+        w2::ITurnObserver& out_;
+    };
+
+    w2::game::NewGameOptions opts;
+    opts.seed = 42.0;
+    auto created = w2::game::NewGame("original", "ERYTHEA", opts);
+    ASSERT_TRUE(created.ok()) << created.status();
+    std::unique_ptr<w2::Game> game = std::move(*created);
+    for (w2::Side* side : game->Sides()) side->SetComputerControlled(true);
+    w2::Side* first_side = w2::game::Begin(*game);
+    ASSERT_NE(first_side, nullptr);
+
+    bool returned_without_throwing = false;
+    w2::AiTurnRunner runner(
+            [&game, first_side, &returned_without_throwing](w2::ITurnObserver& worker_observer) {
+                WorkerBridge bridge(first_side->Id(), worker_observer);
+                w2::ai::PlayTurn(*game, *first_side, &bridge);
+                returned_without_throwing = true;
+            });
+
+    RecordingTurnObserver abort_after_two(/*abort_at_index=*/2);
+    runner.RunToCompletion(abort_after_two);
+    EXPECT_TRUE(runner.Done());
+    EXPECT_TRUE(returned_without_throwing);
+    EXPECT_EQ(abort_after_two.Events().size(), 3UZ);
+    EXPECT_EQ(game->ActiveAiEvents(), nullptr);
 }
 
 }  // namespace

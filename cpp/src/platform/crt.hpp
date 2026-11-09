@@ -104,11 +104,6 @@ class CrtShader {
     std::unique_ptr<GlProgramState> gl_state_;  ///< Lazily initialized OpenGL shader state.
 };
 
-/** @brief Renders `canvas` through the default `CrtShader` using `display::DefaultWindow()`. */
-void Present(SDL_Renderer* sdl_renderer, SDL_Texture* canvas);
-/** @brief Unwarps `(x, y)` against `display::DefaultWindow()`'s frame geometry. */
-CanvasPoint Unwarp(double x, double y);
-
 }  // namespace crt
 
 namespace w2 {

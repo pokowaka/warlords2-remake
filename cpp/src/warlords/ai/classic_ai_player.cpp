@@ -139,55 +139,59 @@ ClassicAiPlayer::ClassicAiPlayer(AIData initial_data, SharedNeighbours neighbour
                                  const ArmyRegistry* registry)
         : data_(std::move(initial_data)), neighbours_(std::move(neighbours)), registry_(registry) {}
 
-void ClassicAiPlayer::PlayTurn(Game& game, Side& side, const PauseCallback& pause) {
+void ClassicAiPlayer::PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
+    ScopedAiTurnEvents turn_scope(game, events);
     registry_ = &game.Armies();
     if (!neighbours_) {
         neighbours_ = FindExistingNeighbours(game);
         if (!neighbours_) neighbours_ = ai::core::BuildNeighbours(game);
     }
-    auto pause_after = [&](const char* name) {
-        if (pause) pause(name);
+    auto phase_done = [&](std::string_view name) -> bool {
+        if (!events) return true;
+        if (events->IsAborted()) return false;
+        return events->OnPhase(name) && !events->IsAborted();
     };
     bool hidden = game.GetMap().GameOptions().hidden_map != 0;
 
     ResetMovedFlags();
     TurnSetup(game, side, data_);
     ai::diplo::Phase(game, side);
-    pause_after("diplomacy");
+    if (!phase_done("diplomacy")) return;
     ai::heroes::Phase(game, side);
-    pause_after("move hero");
+    if (!phase_done("move hero")) return;
     if (hidden) ai::moves::Search(game, side);
-    pause_after("move search");
+    if (!phase_done("move search")) return;
     ai::moves::HeroParties(game, side);
-    pause_after("move explore");
+    if (!phase_done("move explore")) return;
     ai::groups::Assault(game, side);
-    pause_after("assault");
+    if (!phase_done("assault")) return;
     ai::moves::MoveAll(game, side);
-    pause_after("move #1");
+    if (!phase_done("move #1")) return;
     ai::moves::Rescue(game, side);
-    pause_after("rescue");
+    if (!phase_done("rescue")) return;
     ai::cities::Evaluate(game, side, side.Index());
-    pause_after("evaluate");
+    if (!phase_done("evaluate")) return;
     ai::cities::Clean(game, side);
-    pause_after("clean city");
+    if (!phase_done("clean city")) return;
     ai::cities::Neutral(game, side);
-    pause_after("neutral");
+    if (!phase_done("neutral")) return;
     ai::moves::MoveAll(game, side);
-    pause_after("move #2");
+    if (!phase_done("move #2")) return;
     ai::cities::QuickAttack(game, side);
+    if (events && events->IsAborted()) return;
     if (hidden) ai::cities::UpdateHide(game, side);
     ai::groups::AssaultXx(game, side);
-    pause_after("assault XX");
+    if (!phase_done("assault XX")) return;
     ai::moves::Specials(game, side);
-    pause_after("specials");
+    if (!phase_done("specials")) return;
     ai::cities::Rebuild(game, side);
-    pause_after("rebuilding");
+    if (!phase_done("rebuilding")) return;
     ai::moves::LastRescue(game, side);
-    pause_after("last rescue");
+    if (!phase_done("last rescue")) return;
     ai::cities::Production(game, side);
-    pause_after("production");
+    if (!phase_done("production")) return;
     ai::cities::Vectoring(game, side);
-    pause_after("vectoring");
+    (void)phase_done("vectoring");
 }
 
 void ClassicAiPlayer::OnTurnStarted(Side& side) {

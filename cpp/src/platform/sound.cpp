@@ -7,8 +7,6 @@
 
 #include <SDL.h>
 
-#include "absl/base/no_destructor.h"
-
 #include "util/util.hpp"
 #include "warlords/ailfm.hpp"
 #include "warlords/cues.hpp"
@@ -536,16 +534,11 @@ void AudioEngine::Update() {
     StepRecording();
 }
 
-AudioEngine& DefaultAudio() {
-    static absl::NoDestructor<AudioEngine> instance;
-    return *instance;
-}
-
-void Music(int cue, const SidePtrList& sides) {
+void AudioEngine::Music(int cue, SidePtrSpan sides) {
     bool has_human = std::any_of(sides.begin(), sides.end(), [](const w2::Side* side) {
         return side != nullptr && side->IsAlive() && !side->IsComputerControlled();
     });
-    DefaultAudio().Music(cue, has_human);
+    Music(cue, has_human);
 }
 
 }  // namespace sound

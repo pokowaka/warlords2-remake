@@ -54,7 +54,7 @@ class ModernMlPlayer final : public IModernBackedPlayer {
     ModernMlPlayer& ModernImpl() override { return *this; }
     const ModernMlPlayer& ModernImpl() const override { return *this; }
 
-    void PlayTurn(Game& game, Side& side, const PauseCallback& pause = nullptr) override;
+    void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) override;
     AttitudeBreakdown EvaluateProposal(const Game& game, SideId ai_side,
                                        SideId proposer_side) const override;
     City* ChooseHeroCity(Game& game, Side& side, City* fallback) override;

@@ -81,8 +81,9 @@ struct Screen {
     } map_colour;                                    ///< The strategic map's colours.
     std::map<int, int> state;                        ///< The live state of each control.
 
-    /** @brief The bitmap with id `bitmap_id`, loaded on first use; null when missing. */
-    const Art* ArtFor(int bitmap_id);
+    /** @brief The bitmap with id `bitmap_id`, loaded on first use onto `renderer`; null when
+     * missing. */
+    const Art* ArtFor(gfx::Renderer& renderer, int bitmap_id);
     /** @brief The state of control `control_id`: kNormal unless set. */
     int StateOf(int control_id) const {
         auto found = state.find(control_id);
@@ -90,10 +91,15 @@ struct Screen {
     }
 };
 
-/** @brief Loads the layout and the background the given dialog needs. */
-absl::StatusOr<std::unique_ptr<Screen>> Load(const std::filesystem::path& data_dir,
-                                             const w2::pal::Palette& palette, int dialog_id = 0,
-                                             int terrain = 0);
+/// Owned handle to a loaded `Screen`.
+using ScreenHandle = std::unique_ptr<Screen>;
+/// Set of hidden control IDs skipped during dialog rendering.
+using HiddenIdSet = std::set<int>;
+
+/** @brief Loads the layout and the background the given dialog needs onto `renderer`. */
+absl::StatusOr<ScreenHandle> Load(gfx::Renderer& renderer, const std::filesystem::path& data_dir,
+                                  const w2::pal::Palette& palette, int dialog_id = 0,
+                                  int terrain = 0);
 /** @brief Places the main screen's controls and regions for `screen_layout`. */
 void Relayout(Screen& main_screen, const layout::Layout& screen_layout);
 /**
@@ -102,20 +108,21 @@ void Relayout(Screen& main_screen, const layout::Layout& screen_layout);
  * At 640x480 that is the original's background; on a bigger screen it is
  * papered with stone and the original's frames are cut out of the background.
  */
-void DrawBackground(Screen& main_screen, const layout::Layout& screen_layout);
+void DrawBackground(gfx::Renderer& renderer, Screen& main_screen,
+                    const layout::Layout& screen_layout);
 /** @brief Draws the main screen's controls, each in its live state. */
-void DrawControls(Screen& main_screen);
+void DrawControls(gfx::Renderer& renderer, Screen& main_screen);
 /** @brief Another dialog's layout, every control in its normal state. */
 View MakeView(Screen& main_screen, int dialog_id);
 /** The default buttons: the controls Enter presses. */
-extern const std::set<int> kDefaultIds;
+extern const HiddenIdSet kDefaultIds;
 /**
  * @brief Draws the controls of a loaded dialog, each default button with its ring.
  *
  * Controls in `hidden` are left out.
  */
-void DrawDialogControls(Screen& main_screen, const View& view,
-                        const std::set<int>* hidden = nullptr);
+void DrawDialogControls(gfx::Renderer& renderer, Screen& main_screen, const View& view,
+                        const HiddenIdSet* hidden = nullptr);
 /** @brief The control of `view` with id `control_id`, or null. */
 const w2::uidata::Control* DialogControl(const View& view, int control_id);
 /** @brief The control of `view` under a point, disabled ones included; or null. */
@@ -126,7 +133,8 @@ const w2::uidata::Control* DialogControlAt(const View& view, int x, int y);
  * Painted from MAPCOLOR.DAT as the original paints it. Tiles `side` has not
  * seen are black.
  */
-gfx::ImageP StrategicImage(Screen& main_screen, const w2::Game& game, int side);
+gfx::ImageP StrategicImage(gfx::Renderer& renderer, Screen& main_screen, const w2::Game& game,
+                           int side);
 /** @brief The region under a point, topmost first, as the original hit-tests. */
 const w2::uidata::Region* RegionAt(const Screen& main_screen, int x, int y);
 /** @brief The main screen's region with id `region_id`, or null. */

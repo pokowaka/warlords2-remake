@@ -55,7 +55,7 @@ class ClassicAiPlayer final : public IClassicBackedPlayer {
     ClassicAiPlayer& ClassicImpl() override { return *this; }
     const ClassicAiPlayer& ClassicImpl() const override { return *this; }
 
-    void PlayTurn(Game& game, Side& side, const PauseCallback& pause = nullptr) override;
+    void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) override;
     void OnTurnStarted(Side& side) override;
     AttitudeBreakdown EvaluateProposal(const Game& game, SideId ai_side,
                                        SideId proposer_side) const override;

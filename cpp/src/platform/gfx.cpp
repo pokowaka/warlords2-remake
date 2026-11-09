@@ -6,8 +6,6 @@
 
 #include <SDL.h>
 
-#include "absl/base/no_destructor.h"
-
 namespace gfx {
 
 namespace {
@@ -310,87 +308,6 @@ void Renderer::SaveShot(const std::filesystem::path& file_path) {
         SDL_SaveBMP(surf, path_str.c_str());
         SDL_FreeSurface(surf);
     }
-}
-
-Renderer& DefaultRenderer() {
-    static absl::NoDestructor<Renderer> instance;
-    return *instance;
-}
-
-void Init(SDL_Renderer* sdl_renderer) {
-    DefaultRenderer().Init(sdl_renderer, false);
-}
-void Shutdown() {
-    DefaultRenderer().Shutdown();
-}
-SDL_Renderer* ActiveSdlRenderer() {
-    return DefaultRenderer().SdlRenderer();
-}
-ImageP NewImageRgba(int width, int height, const uint8_t* rgba) {
-    return DefaultRenderer().NewImageRgba(width, height, rgba);
-}
-void Begin() {
-    DefaultRenderer().Begin();
-}
-void Clear(float red, float green, float blue) {
-    DefaultRenderer().Clear(red, green, blue);
-}
-void Push() {
-    DefaultRenderer().Push();
-}
-void Pop() {
-    DefaultRenderer().Pop();
-}
-void Origin() {
-    DefaultRenderer().Origin();
-}
-void Translate(double x, double y) {
-    DefaultRenderer().Translate(x, y);
-}
-void Scale(double factor) {
-    DefaultRenderer().Scale(factor);
-}
-void Scale(double scale_x, double scale_y) {
-    DefaultRenderer().Scale(scale_x, scale_y);
-}
-void TransformPoint(double x, double y, double& out_x, double& out_y) {
-    DefaultRenderer().TransformPoint(x, y, out_x, out_y);
-}
-void InverseTransformPoint(double x, double y, double& out_x, double& out_y) {
-    DefaultRenderer().InverseTransformPoint(x, y, out_x, out_y);
-}
-void SetColor(float red, float green, float blue, float alpha) {
-    DefaultRenderer().SetColor(red, green, blue, alpha);
-}
-void SetColor(const Color& col) {
-    DefaultRenderer().SetColor(col);
-}
-Color GetColor() {
-    return DefaultRenderer().GetColor();
-}
-void SetScissor(double x, double y, double width, double height) {
-    DefaultRenderer().SetScissor(x, y, width, height);
-}
-void SetScissor() {
-    DefaultRenderer().SetScissor();
-}
-void Rectangle(Mode mode, double x, double y, double width, double height) {
-    DefaultRenderer().Rectangle(mode, x, y, width, height);
-}
-void Line(double from_x, double from_y, double to_x, double to_y) {
-    DefaultRenderer().Line(from_x, from_y, to_x, to_y);
-}
-void Draw(const Image* img, double x, double y) {
-    DefaultRenderer().Draw(img, x, y);
-}
-void Draw(const Image* img, const Quad& quad, double x, double y) {
-    DefaultRenderer().Draw(img, quad, x, y);
-}
-ByteBuffer ReadPixels(int& width, int& height) {
-    return DefaultRenderer().ReadPixels(width, height);
-}
-void SaveShot(const std::filesystem::path& file_path) {
-    DefaultRenderer().SaveShot(file_path);
 }
 
 }  // namespace gfx

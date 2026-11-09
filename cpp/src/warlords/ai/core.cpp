@@ -533,13 +533,14 @@ struct StepResult {
  *         walked, 5 an enemy city is next; with the tile ahead.
  */
 StepResult Step(Game& game, Sel& sel, int target_x, int target_y) {
+    if (IAiTurnEvents* events = game.ActiveAiEvents(); events && events->IsAborted()) return {2};
     Army* lead = sel.leader;
     lead->SetTarget(TilePos(target_x, target_y));
     auto path = move::FindPath(game, sel.armies, lead->X(), lead->Y(), target_x, target_y);
     if (!path) return {1};
     if (path->empty()) return {4};
     move::WalkResult walk = move::Walk(game, sel.armies, *path);
-    if (walk.steps > 0) Walked(game, sel.armies, walk);
+    if (walk.steps > 0 && !Walked(game, sel.armies, walk)) return {2};
     Refresh(game, sel);
     PickUp(game, sel);
     if (walk.stopped == move::WalkStop::kAttack) {
@@ -573,7 +574,11 @@ Battle Fight(Game& game, Sel& sel, int x, int y) {
         diplomacy::AttackAnyway(game, side_index, city->OwnerIndex());
     }
     game::ChargeAttack(game, sel.armies, x, y);
-    if (hooks.on_fight) hooks.on_fight(game, sel.armies, x, y, result);
+    if (IAiTurnEvents* events = game.ActiveAiEvents()) {
+        if (!events->OnFight(game, sel.armies, x, y, result) || events->IsAborted()) {
+            return result;
+        }
+    }
     game::ApplyAttack(game, result);
     std::vector<Army*> keep;
     for (Army* army : sel.armies)
@@ -595,6 +600,7 @@ int MoveTo(Game& game, Sel& sel, int target_x, int target_y, bool keep) {
     int code = 0;
     bool again = true;
     while (again) {
+        if (IAiTurnEvents* events = game.ActiveAiEvents(); events && events->IsAborted()) return 2;
         again = false;
         if (sel.armies.empty()) break;
         StepResult step = Step(game, sel, target_x, target_y);

@@ -75,13 +75,17 @@ int SackValue(const Game& game, const City& city) {
 
 void Pillage(Game& game, Side& side, City& city) {
     game::Pillage(game, side, city, {});
-    if (hooks.on_spoils) hooks.on_spoils(game, side, city, "pillaged");
+    if (IAiTurnEvents* events = game.ActiveAiEvents()) {
+        (void)events->OnSpoils(game, side, city, "pillaged");
+    }
 }
 
 void Sack(Game& game, Side& side, City& city) {
     if (SackValue(game, city) == 0) return Pillage(game, side, city);
     game::Sack(game, side, city, {});
-    if (hooks.on_spoils) hooks.on_spoils(game, side, city, "sacked");
+    if (IAiTurnEvents* events = game.ActiveAiEvents()) {
+        (void)events->OnSpoils(game, side, city, "sacked");
+    }
 }
 
 City* Raze(Game& game, Side& side, City& city, bool force, Sel* sel) {
@@ -99,7 +103,9 @@ City* Raze(Game& game, Side& side, City& city, bool force, Sel* sel) {
         return nullptr;
     }
     game::Raze(game, side, city, sel ? sel->armies : std::vector<Army*>{});
-    if (hooks.on_spoils) hooks.on_spoils(game, side, city, "razed");
+    if (IAiTurnEvents* events = game.ActiveAiEvents()) {
+        (void)events->OnSpoils(game, side, city, "razed");
+    }
     if (!sel || sel->armies.empty()) return nullptr;
     Flood flood = FloodFrom(game, side.Index(), sel->leader->X(), sel->leader->Y(), 15, sel);
     return BestCity(game, *sel, flood, true);

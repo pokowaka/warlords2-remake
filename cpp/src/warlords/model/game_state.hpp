@@ -349,7 +349,12 @@ class Game {
     /** @brief Stores and returns `names` in the hero-name cache for `side_index`. */
     const HeroNameList& CacheHeroNames(int side_index, HeroNameList names);
 
+    /** @brief Returns the active `IAiTurnEvents` observer during a computer turn, or `nullptr`. */
+    IAiTurnEvents* ActiveAiEvents() const { return active_ai_events_; }
+
   private:
+    friend class ScopedAiTurnEvents;
+
     Rng rng_;                         ///< Deterministic per-game dice sequence.
     Bugs bugs_;                       ///< Per-game 1993 bug-compatibility flags.
     std::filesystem::path data_dir_;  ///< Root directory of original Warlords II assets.
@@ -378,6 +383,24 @@ class Game {
     TurnReportTable turn_news_{};     ///< Transient turn-opening news reports (`0..7`).
     PathfinderHandle pathfinder_;     ///< Owned movement cost-grid and route-cache service.
     TurnSchedule turn_schedule_;      ///< Round turn-order permutation and cursor.
+    IAiTurnEvents* active_ai_events_ = nullptr;  ///< Non-owning AI turn observer while active.
+};
+
+/**
+ * @brief RAII scope guard binding an `IAiTurnEvents*` observer onto a `Game` for the duration of a
+ * computer turn and restoring the previous pointer on exit.
+ */
+class ScopedAiTurnEvents {
+  public:
+    ScopedAiTurnEvents(Game& game, IAiTurnEvents* events);
+    ~ScopedAiTurnEvents();
+
+    ScopedAiTurnEvents(const ScopedAiTurnEvents&) = delete;
+    ScopedAiTurnEvents& operator=(const ScopedAiTurnEvents&) = delete;
+
+  private:
+    Game& game_;                         ///< Game aggregate whose observer slot is bound.
+    IAiTurnEvents* previous_ = nullptr;  ///< Previous observer restored on scope exit.
 };
 
 }  // namespace w2

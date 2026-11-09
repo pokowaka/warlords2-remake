@@ -1,13 +1,19 @@
 /**
  * @file
- * @brief Hero > Levels (auto_ui_hero_levels).
+ * @brief Hero > Levels (`auto_ui_hero_levels`).
  *
- * Popup 0, (80, 60) 480x320, and dialog 28: Done (469). "Hero Levels" in
- * font 1, the column heads in the side's colours at y = 105, and a row per
- * hero, 30 apart from y = 128, highest level first: the hero on a ring --
+ * Popup 0, `(80, 60)` `480x320`, and dialog 28: Done (`469`). `"Hero Levels"` in
+ * font 1, the column heads in the side's colours at `y = 105`, and a row per
+ * hero, 30 apart from `y = 128`, highest level first: the hero on a ring --
  * its side's colour at the top level, grey below -- its name, its title, its
  * experience, what the next level needs, its strength and its moves.
  */
+#include <array>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "absl/strings/str_format.h"
 
 #include "ui/dialogs.hpp"
@@ -17,44 +23,57 @@
 namespace levels {
 
 namespace {
-const kit::Rect kPopupRect{80, 60, 480, 320};  ///< Popup 0.
-const int kDialog = 28,                        ///< The dialog with the button.
-        kDone = 469;                           ///< The Done button.
-const int kTextGroup = 0x68,   ///< STRING.DAT group: the title and the column heads.
-        kTitlesMale = 0x63,    ///< Group: a hero's title at each level.
-        kTitlesFemale = 0x64;  ///< Group: a heroine's title at each level.
 
-/** @brief The experience the next level needs, or kNone at the top level. */
+using HeroList = std::vector<w2::Army*>;
+
+constexpr kit::Rect kPopupRect{80, 60, 480, 320};  ///< Popup 0.
+constexpr int kDialog = 28;                        ///< The dialog with the button.
+constexpr int kDone = 469;                         ///< The Done button.
+constexpr int kTextGroup = 0x68;                   ///< STRING.DAT group: title and column heads.
+constexpr int kTitlesMale = 0x63;                  ///< Group: a hero's title at each level.
+constexpr int kTitlesFemale = 0x64;                ///< Group: a heroine's title at each level.
+constexpr std::array<int, 4> kColumnX = {392, 440, 488, 536};
+
+/** @brief The experience the next level needs, or `kNone` at the top level. */
 int Needs(int level) {
     return level == 1 ? 15 : level == 2 ? 30 : level == 3 ? 60 : w2::kNone;
 }
 
-/** @brief The Hero Levels dialog: a row per hero of the player's. */
-struct Levels : kit::Modal {
-    screen::View dialog_view;     ///< Dialog 28's button.
-    std::vector<w2::Army*> rows;  ///< The heroes, highest level first.
+/**
+ * @brief Modal displaying the player's heroes ordered highest level first.
+ */
+class Levels final : public kit::Modal {
+  public:
+    Levels(w2::UiContext& ctx, HeroList rows)
+            : kit::Modal(ctx), view_(kit::View(ctx, kDialog)), rows_(std::move(rows)) {
+        view_.state[kDone] = w2::uidata::kNormal;
+        SetDialogView(&view_);
+    }
+
     void Draw() override {
-        w2::Side* side = g_app.player;
-        const Font& font = kit::GetFont(2);
-        kit::Popup(kPopupRect);
-        gfx::SetColor(1, 1, 1);
-        kit::Centred(kit::GetFont(1), kit::Text(kTextGroup, 0), 320, 63);
+        w2::UiContext& ctx = Ctx();
+        gfx::Renderer& ren = ctx.Renderer();
+        w2::Side* side = ctx.Player();
+        const Font& font = kit::GetFont(ctx, 2);
+        kit::Popup(ctx, kPopupRect);
+        ren.SetColor(1, 1, 1);
+        kit::Centred(kit::GetFont(ctx, 1), kit::Text(ctx, kTextGroup, 0), 320, 63);
         const Font& head = font.Colours(side->Colour(), side->Edge());
-        head.Draw(kit::Text(kTextGroup, 1), 128, 105);
-        head.Draw(kit::Text(kTextGroup, 2), 272, 105);
-        const int column_x[4] = {392, 440, 488, 536};
-        for (int column = 0; column < 4; column++)
-            kit::Centred(head, kit::Text(kTextGroup, column + 3), column_x[column], 105);
-        for (size_t i = 0; i < rows.size(); i++) {
-            w2::Army* hero = rows[i];
+        head.Draw(kit::Text(ctx, kTextGroup, 1), 128, 105);
+        head.Draw(kit::Text(ctx, kTextGroup, 2), 272, 105);
+        for (int column = 0; column < 4; column++) {
+            kit::Centred(head, kit::Text(ctx, kTextGroup, column + 3), kColumnX[column], 105);
+        }
+        for (size_t i = 0; i < rows_.size(); i++) {
+            w2::Army* hero = rows_[i];
             int y = 128 + 30 * static_cast<int>(i);
             int level = hero->Level() ? hero->Level() : 1;
-            kit::Army(w2::armytype::kHero, side->Index(), 88, y,
+            kit::Army(ctx, w2::armytype::kHero, side->Index(), 88, y,
                       level == 4 ? side->Index() + 2 : 1);
-            gfx::SetColor(1, 1, 1);
+            ren.SetColor(1, 1, 1);
             font.Draw(hero->Name(), 128, y + 6);
-            font.Draw(kit::Text(hero->IsFemale() ? kTitlesFemale : kTitlesMale, level - 1), 272,
-                      y + 6);
+            font.Draw(kit::Text(ctx, hero->IsFemale() ? kTitlesFemale : kTitlesMale, level - 1),
+                      272, y + 6);
             kit::Centred(font, absl::StrFormat("%d", hero->Experience()), 392, y + 6);
             kit::Centred(font,
                          Needs(level) != w2::kNone ? absl::StrFormat("%d", Needs(level)) : "-", 440,
@@ -62,38 +81,42 @@ struct Levels : kit::Modal {
             kit::Centred(font, absl::StrFormat("%d", hero->Strength()), 488, y + 6);
             kit::Centred(font, absl::StrFormat("%d", hero->MaxMoves()), 536, y + 6);
         }
-        for (int i = static_cast<int>(rows.size()); i < 6; i++)
-            kit::Army(w2::kNone, side->Index(), 88, 128 + 30 * i, 1);
-        kit::DrawControls(dialog_view);
+        for (int i = static_cast<int>(rows_.size()); i < 6; i++) {
+            kit::Army(ctx, w2::kNone, side->Index(), 88, 128 + 30 * i, 1);
+        }
+        kit::DrawControls(ctx, view_);
     }
+
     void Mousepressed(int x, int y, int) override {
-        auto control = kit::ControlAt(dialog_view, x, y);
-        if (control && control->id == kDone) kit::Pop(this);
+        const auto* control = kit::ControlAt(view_, x, y);
+        if (control && control->id == kDone) PopSelf();
     }
+
     void Keypressed(const std::string& key) override {
-        if (key == "escape" || key == "return" || key == "kpenter") kit::Pop(this);
+        if (key == "escape" || key == "return" || key == "kpenter") PopSelf();
     }
+
+  private:
+    screen::View view_;  ///< Dialog 28's button.
+    HeroList rows_;      ///< The heroes, highest level first.
 };
+
 }  // namespace
 
-/**
- * @brief Opens Hero > Levels: the player's heroes, highest level first and,
- * within a level, the newest first.
- */
-void Open() {
-    auto dialog = std::make_shared<Levels>();
-    dialog->dialog_view = kit::View(kDialog);
-    dialog->view = &dialog->dialog_view;
-    dialog->dialog_view.state[kDone] = w2::uidata::kNormal;
+void Open(w2::UiContext& ctx) {
+    w2::Game& game = ctx.ActiveGame();
+    int player_index = ctx.Player()->Index();
+    HeroList rows;
     for (int level = 4; level >= 1; level--) {
-        for (int i = static_cast<int>(g_app.g->Armies().size()) - 1; i >= 0; i--) {
-            w2::Army* army = g_app.g->Armies()[i];
-            if (army->Hero() && army->OwnerIndex() == g_app.player->Index() &&
-                (army->Level() ? army->Level() : 1) == level)
-                dialog->rows.push_back(army);
+        for (int i = static_cast<int>(game.Armies().size()) - 1; i >= 0; i--) {
+            w2::Army* army = game.Armies()[i];
+            if (army->Hero() && army->OwnerIndex() == player_index &&
+                (army->Level() ? army->Level() : 1) == level) {
+                rows.push_back(army);
+            }
         }
     }
-    kit::Push(dialog);
+    kit::Push(ctx, std::make_shared<Levels>(ctx, std::move(rows)));
 }
 
 }  // namespace levels

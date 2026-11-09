@@ -224,4 +224,13 @@ const Game::HeroNameList& Game::CacheHeroNames(int side_index, HeroNameList name
     return hero_names_[side_index] = std::move(names);
 }
 
+ScopedAiTurnEvents::ScopedAiTurnEvents(Game& game, IAiTurnEvents* events)
+        : game_(game), previous_(game.active_ai_events_) {
+    game_.active_ai_events_ = events;
+}
+
+ScopedAiTurnEvents::~ScopedAiTurnEvents() {
+    game_.active_ai_events_ = previous_;
+}
+
 }  // namespace w2

@@ -28,8 +28,9 @@
 
 namespace w2::ai::modern {
 
-void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
-              const ml::PolicyNetwork* custom_policy, ml::RolloutSampler* sampler) {
+void PlayTurn(Game& game, Side& side, IAiTurnEvents* events, const ml::PolicyNetwork* custom_policy,
+              ml::RolloutSampler* sampler) {
+    ScopedAiTurnEvents turn_scope(game, events);
     const ml::PolicyNetwork& policy = custom_policy ? *custom_policy : ml::ActivePolicy();
     // Outside training the policy is still sampled, as in training, but at the
     // deployment temperature and from a generator seeded by the game state (never
@@ -64,9 +65,11 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
             }
         }
         RunDiplomacyPhase(game, side, policy, wave_ctx, sampler, diplo_decided);
-        if (wave == 0 && pause) pause("diplomacy");
-        RunMilitaryAndExplorationPhase(game, side, policy, wave_ctx, wave == 0 ? pause : nullptr,
+        if (events && events->IsAborted()) return;
+        if (wave == 0 && events && (!events->OnPhase("diplomacy") || events->IsAborted())) return;
+        RunMilitaryAndExplorationPhase(game, side, policy, wave_ctx, wave == 0 ? events : nullptr,
                                        sampler, moved_armies);
+        if (events && events->IsAborted()) return;
         bool any_left = false;
         for (Army* army : game.Armies()) {
             if (army->OwnerIndex() == side.Index() && army->X() != kNone && !army->InTransit() &&
@@ -104,7 +107,7 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
     modern_player.SetLastBoardValue(policy.EvaluateValue(ctx, ml::BuildCriticFeatures(game, side)));
 
     RunEconomyPhase(game, side, policy, ctx, sampler);
-    if (pause) pause("economy");
+    if (events && !events->IsAborted()) (void)events->OnPhase("economy");
 }
 
 std::vector<MissionSnapshot> SnapshotMissions(Game& game, Side& side,
