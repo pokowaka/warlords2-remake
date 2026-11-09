@@ -70,23 +70,44 @@ struct Title {
     std::string text;  ///< Short flavour description line.
 };
 
-/** @brief Generates a deterministic scenario title and description from `shape` and `seed`. */
+/**
+ * @brief Generates a deterministic scenario title and description from `shape` and `seed`.
+ * @param shape Landmass layout style selecting the noun pool.
+ * @param seed World seed used to initialize an isolated RNG sequence.
+ * @return Generated scenario `Title` guaranteed to fit the selection list box.
+ */
 Title MakeTitle(Shape shape, long seed);
 
-/** @brief Parses "continents", "pangaea" or "islands"; false if it is none. */
+/**
+ * @brief Parses `"continents"`, `"pangaea"`, or `"islands"` into `out`.
+ * @param text Lowercase shape identifier string.
+ * @param out Destination `Shape` populated on success.
+ * @return `true` when `text` names a valid shape; `false` otherwise.
+ */
 bool ParseShape(const std::string& text, Shape& out);
 
-/** @brief Returns the lowercase name ("continents", "pangaea" or "islands") of `shape`. */
+/**
+ * @brief Returns the lowercase identifier (`"continents"`, `"pangaea"`, or `"islands"`) of `shape`.
+ * @param shape Landmass layout style.
+ * @return Null-terminated static string naming `shape`.
+ */
 const char* ShapeName(Shape shape);
 
 /** @brief The terrain grid and placed city and site locations from steps 1-6. */
 struct World {
-    std::vector<uint8_t> terrain;  ///< width x height terrain type ids (move::kWater ...).
+    std::vector<uint8_t> terrain;             ///< width x height terrain type ids (move::kWater..).
     std::vector<std::pair<int, int>> cities;  ///< Top-left of each 2x2 footprint.
     std::vector<std::pair<int, int>> sites;   ///< Coordinates of each ruin or temple.
 };
 
-/** @brief Steps 1-6: the ground, the cities and the sites, on a width x height grid. */
+/**
+ * @brief Generates the terrain grid, city footprints, and wild sites on a `width` x `height` map.
+ * @param settings Landmass shape, terrain shares, and feature counts.
+ * @param rng Dice sequence to draw noise permutations and sampling candidates from.
+ * @param width Map width in tiles (`> 0`).
+ * @param height Map height in tiles (`> 0`).
+ * @return Generated `World` terrain and feature coordinates.
+ */
 World MakeWorld(const Settings& settings, Rng& rng, int width, int height);
 
 /**
@@ -105,7 +126,16 @@ struct Roads {
     std::vector<int> bridges;   ///< Indices into the spans given, the ones used.
 };
 
-/** @brief Step 7: the roads between the cities over the finished terrain. */
+/**
+ * @brief Plans the inter-city road network and bridge spans over finished terrain.
+ * @param terrain Row-major `width` x `height` terrain type grid (`move::kWater` ..).
+ * @param width Map width in tiles.
+ * @param height Map height in tiles.
+ * @param cities Top-left `(x, y)` coordinates of each 2x2 city footprint.
+ * @param spans Candidate two-tile river spans eligible for bridges.
+ * @param rng Dice sequence used when sampling optional shortcut links.
+ * @return Planned `Roads` mask and selected bridge span indices.
+ */
 Roads PlanRoads(const std::vector<uint8_t>& terrain, int width, int height,
                 const std::vector<std::pair<int, int>>& cities, const std::vector<Span>& spans,
                 Rng& rng);

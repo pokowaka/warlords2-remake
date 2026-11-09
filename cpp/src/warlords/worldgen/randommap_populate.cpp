@@ -3,6 +3,13 @@
  * @brief Random map capital selection, fair capitals, city naming/production, signposts, and file
  * output.
  */
+#include <algorithm>
+#include <array>
+#include <cstdlib>
+#include <utility>
+
+#include "util/util.hpp"
+#include "warlords/travel.hpp"
 #include "warlords/worldgen/randommap_impl.hpp"
 
 namespace w2::randommap {
@@ -18,8 +25,8 @@ void Generator::CityList() {
             int offset = Crec(count);
             Ws16(offset, x);
             Ws16(offset + 2, y);
-            scn[offset + 21] = 15;
-            scn[offset + 20] = static_cast<uint8_t>(Dice(1, 3, 2));
+            scn_[offset + 21] = 15;
+            scn_[offset + 20] = static_cast<uint8_t>(Dice(1, 3, 2));
             count++;
         }
     }
@@ -93,7 +100,7 @@ void Generator::Crown() {
         int x = S16(SideRec(side_idx) + 6), y = S16(SideRec(side_idx) + 8);
         for (int city_idx = 0; city_idx < CityCount(); city_idx++) {
             if (Cx(city_idx) == x && Cy(city_idx) == y) {
-                scn[Crec(city_idx) + 21] = static_cast<uint8_t>(side_idx);
+                scn_[Crec(city_idx) + 21] = static_cast<uint8_t>(side_idx);
                 break;
             }
         }
@@ -130,7 +137,7 @@ void Generator::FairCapitals() {
             int cell = y * kMapW + x, terrain = TerrainOf(Tile(x, y));
             ground.terrain[cell] = terrain;
             ground.road[cell] = Road(x, y) != 0;
-            ground.crossing[cell] = (tiles[cell] & 0x8000) != 0 || terrain == kBridge;
+            ground.crossing[cell] = (tiles_[cell] & 0x8000) != 0 || terrain == kBridge;
         }
     auto footprint = [&](int city_idx) {
         std::vector<int> cells;
@@ -241,7 +248,7 @@ void Generator::Sides() {
     for (int side_idx = 0; side_idx < 8; side_idx++) {
         int name_idx = Dice(1, 5, -1);
         std::string name = Str(kSideNames + 100 * side_idx + 20 * name_idx, 20);
-        for (int i = 0; i < 20; i++) scn[20 * side_idx + i] = 0;
+        for (int i = 0; i < 20; i++) scn_[20 * side_idx + i] = 0;
         Wstr(20 * side_idx, name);
     }
     for (int side_idx = 0; side_idx < 8; side_idx++) Ws16(SideRec(side_idx) + 2, Dice(3, 50, 20));
@@ -263,7 +270,7 @@ Surroundings Generator::SurroundingsOf(int city_idx) const {
  *        1d4-1 +4 by shore, +2 by road, -1 by forest, -2 by marsh.
  */
 int Generator::Value(int city_idx, const Surroundings& surr) {
-    if (scn[Crec(city_idx) + 21] != 15) return 9;
+    if (scn_[Crec(city_idx) + 21] != 15) return 9;
     int val = Dice(1, 4, -1);
     if (surr.shore) val += 4;
     if (surr.road) val += 2;
@@ -305,15 +312,15 @@ std::string Generator::CityName(int city_idx, const Surroundings& surr) {
     }
     name = name.substr(0, 15);
     int offset = Crec(city_idx) + 4;
-    for (int i = 0; i < 16; i++) scn[offset + i] = 0;
+    for (int i = 0; i < 16; i++) scn_[offset + i] = 0;
     Wstr(offset, name);
     return name;
 }
 
 /** @brief True if any city before `city_idx` already has `name`. */
-bool Generator::NameTaken(int city_idx, const std::string& name) const {
+bool Generator::NameTaken(int city_idx, std::string_view name) const {
     for (int j = 0; j < city_idx; j++)
-        if (CstrOf(scn, Crec(j) + 4, 16) == name) return true;
+        if (CstrOf(scn_, Crec(j) + 4, 16) == name) return true;
     return false;
 }
 
@@ -323,8 +330,8 @@ bool Generator::NameTaken(int city_idx, const std::string& name) const {
  */
 void Generator::CityText(int city_idx, int val, const Surroundings& surr) {
     std::string name = CityName(city_idx, surr);
-    // the scenario generator's names never repeat (the original's may)
-    for (int tries = 0; modern && tries < 200 && NameTaken(city_idx, name); tries++)
+    // The scenario generator's names never repeat (the original's may).
+    for (int tries = 0; modern_ && tries < 200 && NameTaken(city_idx, name); tries++)
         name = CityName(city_idx, surr);
     Ws16(Crec(city_idx) + 42, val * 2 + Dice(1, 8, 0) + 14);
     auto grade = [&]() { return std::min(9, std::max(0, Dice(1, 3, val - 2))); };
@@ -358,30 +365,30 @@ void Generator::CityText(int city_idx, int val, const Surroundings& surr) {
     std::string kind = word_at(0x1248, grade2);
     int adj_idx = Dice(1, 3, -1);
     std::string adj = Str(0x1068 + 0x30 * grade1 + 16 * adj_idx, 16);
-    cty += Format("#%03d|%s is a %s|%s, %s|%s %s|\n", city_idx, name, adj, kind, part_a, part_b,
-                  part_c);
+    cty_ += Format("#%03d|%s is a %s|%s, %s|%s %s|\n", city_idx, name, adj, kind, part_a, part_b,
+                   part_c);
 }
 
 /** @brief True if army type `type_id` has the flying flag (ARMYTYPE +54). */
 bool Generator::Flies(int type_id) const {
-    const ArmyType* army_type = types.ById(type_id);
+    const ArmyType* army_type = types_.ById(type_id);
     return army_type && army_type->flies;
 }
 /** @brief True if army type `type_id` is magical / an ally (ARMYTYPE +48). */
 bool Generator::Magical(int type_id) const {
-    const ArmyType* army_type = types.ById(type_id);
+    const ArmyType* army_type = types_.ById(type_id);
     return army_type && army_type->IsMagical();
 }
 
 /** @brief Populates production slot `slot_idx` of city `city_idx` with army type `type_id`. */
 void Generator::SetSlot(int city_idx, int slot_idx, int type_id) {
     int offset = Crec(city_idx);
-    const ArmyType* army_type = types.ById(type_id);
-    scn[offset + 22 + slot_idx] = static_cast<uint8_t>(type_id);
-    scn[offset + 26 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->time : 0);
-    scn[offset + 30 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->strength : 0);
-    scn[offset + 34 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->move : 0);
-    scn[offset + 38 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->cost : 0);
+    const ArmyType* army_type = types_.ById(type_id);
+    scn_[offset + 22 + slot_idx] = static_cast<uint8_t>(type_id);
+    scn_[offset + 26 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->time : 0);
+    scn_[offset + 30 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->strength : 0);
+    scn_[offset + 34 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->move : 0);
+    scn_[offset + 38 + slot_idx] = static_cast<uint8_t>(army_type ? army_type->cost : 0);
 }
 
 /** @brief Chooses the up to four army production slots for city `city_idx`. */
@@ -403,7 +410,7 @@ void Generator::Production(int city_idx, int val, const Surroundings& surr) {
     int slot_idx = 0;
     for (int entry = 0; entry < 29 && slot_idx < slots; entry++) {
         int type_id = R16(rec(entry));
-        if (!allies && Magical(type_id)) continue;
+        if (!allies_ && Magical(type_id)) continue;
         if (Dice(1, 10, -1) >= R16(rec(entry) + 2)) continue;
         bool valid = suits(entry) || (R16(rec(entry) + 6) == 3 && surr.shore);
         if (type_id == 5 && !surr.shore) valid = false;
@@ -413,7 +420,7 @@ void Generator::Production(int city_idx, int val, const Surroundings& surr) {
     if (val > 6 && Dice(1, 10, -1) < 5 && slot_idx < 4) {
         bool flier = false;
         for (int j = 0; j < slot_idx; j++)
-            if (Flies(scn[Crec(city_idx) + 22 + j])) flier = true;
+            if (Flies(scn_[Crec(city_idx) + 22 + j])) flier = true;
         if (!flier && slot_idx < slots) {
             for (int entry = 0; entry < 29; entry++) {
                 int type_id = R16(rec(entry));
@@ -424,7 +431,7 @@ void Generator::Production(int city_idx, int val, const Surroundings& surr) {
             }
         }
     }
-    for (; slot_idx < 4; slot_idx++) scn[Crec(city_idx) + 22 + slot_idx] = 255;
+    for (; slot_idx < 4; slot_idx++) scn_[Crec(city_idx) + 22 + slot_idx] = 255;
 }
 
 /** @brief Picks a random magical (ally) army type id. */
@@ -449,7 +456,7 @@ void Generator::AllyProduction() {
         int city_idx = Dice(1, CityCount(), -1), offset = Crec(city_idx);
         int slot_idx = 0;
         for (int j = 0; j < 4; j++)
-            if (scn[offset + 22 + j] < 128) slot_idx++;
+            if (scn_[offset + 22 + j] < 128) slot_idx++;
         if (slot_idx < 4) {
             SetSlot(city_idx, slot_idx, MagicalType());
             count--;
@@ -469,9 +476,9 @@ void Generator::CapitalArmies() {
             if (Cx(i) == x && Cy(i) == y) city_idx = i;
         if (city_idx < 0) continue;
         int offset = Crec(city_idx);
-        // the highest empty slot, else the last
+        // The highest empty slot, else the last.
         int slot_idx = 3;
-        while (slot_idx >= 0 && scn[offset + 22 + slot_idx] < 128) slot_idx--;
+        while (slot_idx >= 0 && scn_[offset + 22 + slot_idx] < 128) slot_idx--;
         if (slot_idx < 0) slot_idx = 3;
         int draws = 0, pick = -1;
         while (draws <= 39) {
@@ -480,15 +487,15 @@ void Generator::CapitalArmies() {
             draws++;
             bool has = false;
             for (int j = 0; j < 4; j++)
-                if (scn[offset + 22 + j] == type_id) has = true;
-            const ArmyType* army_type = types.ById(type_id);
+                if (scn_[offset + 22 + j] == type_id) has = true;
+            const ArmyType* army_type = types_.ById(type_id);
             if (!has && army_type && army_type->strength >= 5) {
                 pick = type_id;
                 break;
             }
         }
-        // one found on the fortieth draw is dropped, as the original has it
-        if (pick >= 0 && draws < 40) scn[offset + 22 + slot_idx] = static_cast<uint8_t>(pick);
+        // Matches the reference: a match on the fortieth draw is discarded.
+        if (pick >= 0 && draws < 40) scn_[offset + 22 + slot_idx] = static_cast<uint8_t>(pick);
     }
 }
 
@@ -500,7 +507,7 @@ void Generator::CityDetails() {
         CityText(city_idx, val, surr);
         Production(city_idx, val, surr);
     }
-    if (allies) AllyProduction();
+    if (allies_) AllyProduction();
     CapitalArmies();
 }
 
@@ -512,7 +519,7 @@ std::vector<uint8_t> Generator::Signs() {
     int count = Dice(1, 30, 40);
     std::vector<uint8_t> out(2 + 104 * count, 0);
     SetI16(out, 0, count);
-    auto put_str = [&](int offset, const std::string& text) {
+    auto put_str = [&](int offset, std::string_view text) {
         for (size_t i = 0; i < text.size() && i < 49; i++)
             out[offset + i] = static_cast<uint8_t>(text[i]);
     };
@@ -545,7 +552,7 @@ std::vector<uint8_t> Generator::Signs() {
             }
             if (city_idx < 0) continue;
             int city_x = Cx(city_idx), city_y = Cy(city_idx);
-            put_str(offset + 4, Format(Str(kSignCity, 20), CstrOf(scn, Crec(city_idx) + 4, 16)));
+            put_str(offset + 4, Format(Str(kSignCity, 20), CstrOf(scn_, Crec(city_idx) + 4, 16)));
             put_str(offset + 54, Format(Str(kSignLeagues, 20), Distance(x, y, city_x, city_y) * 2,
                                         std::string(kCompass[Compass(x, y, city_x, city_y)])));
         }
@@ -559,17 +566,17 @@ std::vector<uint8_t> Generator::Signs() {
 void Generator::WriteFiles(Files& files) {
     std::vector<uint8_t> map(2UZ * kMapW * kMapH, 0);
     for (int i = 0; i < kMapW * kMapH; i++) {
-        map[2UZ * i] = static_cast<uint8_t>(tiles[i] & 0xff);
-        map[2UZ * i + 1] = static_cast<uint8_t>(tiles[i] >> 8);
+        map[2UZ * i] = static_cast<uint8_t>(tiles_[i] & 0xff);
+        map[2UZ * i + 1] = static_cast<uint8_t>(tiles_[i] >> 8);
     }
     std::vector<uint8_t> road(static_cast<size_t>(kMapW) * kMapH, 0);
-    for (int i = 0; i < kMapW * kMapH; i++) road[i] = static_cast<uint8_t>(roads[i] & 0x1f);
-    files["SCN"] = scn;
+    for (int i = 0; i < kMapW * kMapH; i++) road[i] = static_cast<uint8_t>(roads_[i] & 0x1f);
+    files["SCN"] = scn_;
     files["MAP"] = std::move(map);
     files["RD"] = std::move(road);
-    files["SGN"] = sgn;
-    files["CTY"] = std::vector<uint8_t>(cty.begin(), cty.end());
-    files["SPC"] = std::vector<uint8_t>(spc.begin(), spc.end());
+    files["SGN"] = sgn_;
+    files["CTY"] = std::vector<uint8_t>(cty_.begin(), cty_.end());
+    files["SPC"] = std::vector<uint8_t>(spc_.begin(), spc_.end());
 }
 
 }  // namespace w2::randommap

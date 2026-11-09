@@ -1,11 +1,19 @@
 /**
  * @file
- * @brief Random map and modern scenario generator entry points, stage state machine, and file
- * installation.
+ * @brief Random map and modern scenario generator entry points, stage state machine, and modern
+ *        road/signpost bridge passes.
  */
+#include "warlords/randommap.hpp"
+
+#include <algorithm>
+#include <bit>
+
 #include "absl/status/status.h"
 #include "absl/strings/str_format.h"
 
+#include "util/util.hpp"
+#include "warlords/armytype.hpp"
+#include "warlords/bytes.hpp"
 #include "warlords/worldgen/randommap_impl.hpp"
 
 namespace w2::randommap {
@@ -22,7 +30,7 @@ const char* const kSliderFormats[4] = {"(%d%%)", "(%d%%)", "(%d)", "(%d%%)"};
 /** @brief Returns a copy of the 112x156 terrain grid. */
 std::vector<uint8_t> Generator::Grid() const {
     std::vector<uint8_t> grid(static_cast<size_t>(kMapW) * kMapH);
-    for (int i = 0; i < kMapW * kMapH; i++) grid[i] = memory[kGrid + i];
+    for (int i = 0; i < kMapW * kMapH; i++) grid[i] = memory_[kGrid + i];
     return grid;
 }
 
@@ -44,11 +52,11 @@ std::vector<scengen::Span> Generator::Spans() const {
 
 /** @brief Lays the modern scenario generator's planned roads, bridges, and crossings. */
 void Generator::LayPlannedRoads() {
-    std::vector<std::pair<int, int>> where;
+    std::vector<CityPair> where;
     for (int city_idx = 0; city_idx < CityCount(); city_idx++)
         where.push_back({Cx(city_idx), Cy(city_idx)});
     auto spans = Spans();
-    auto road_plan = scengen::PlanRoads(Grid(), kMapW, kMapH, where, spans, *rng);
+    auto road_plan = scengen::PlanRoads(Grid(), kMapW, kMapH, where, spans, *rng_);
     SpotList list;
     for (int i = 0; i < 50; i++) {
         list.x[i] = list.y[i] = list.east_west[i] = list.city_dist[i] = list.chosen_dist[i] = -1;
@@ -77,7 +85,7 @@ void Generator::LayPlannedRoads() {
     }
     for (int i = 0; i < kMapW * kMapH; i++)
         if (road_plan.road[i]) SetRoad(i % kMapW, i / kMapW, 1);
-    // the crossings keep their distance from the bridges
+    // The crossings keep their distance from the bridges.
     Crossings(list);
     Landings();
 }
@@ -117,7 +125,7 @@ void Generator::Landings() {
         int part_id = part[Cy(city_idx) * kMapW + Cx(city_idx)];
         if (part_id < 0) continue;
         needs[part_id] = 1;
-        for (auto& ring : kRoundCity)
+        for (const auto& ring : kRoundCity)
             if (sea(Cx(city_idx) + ring[0], Cy(city_idx) + ring[1])) has_landing[part_id] = 1;
     }
     for (int i = 0; i < kNSites; i++) {
@@ -126,7 +134,7 @@ void Generator::Landings() {
             needs[part[y * kMapW + x]] = 1;
     }
     for (int i = 0; i < kMapW * kMapH; i++)
-        if (tiles[i] & 0x8000) {
+        if (tiles_[i] & 0x8000) {
             int x = i % kMapW, y = i / kMapW;
             for (int dir = 0; dir < 8; dir++) {
                 int adj_x = x + Nx(dir), adj_y = y + Ny(dir);
@@ -137,16 +145,16 @@ void Generator::Landings() {
         }
     for (int i = 0; i < kMapW * kMapH; i++) {
         int x = i % kMapW, y = i / kMapW;
-        if (!sea(x, y) || (tiles[i] & 0x8000)) continue;
+        if (!sea(x, y) || (tiles_[i] & 0x8000)) continue;
         int touched = -1;
-        for (int dir = 0; dir < 8; dir += 2) {  // the four sides
+        for (int dir = 0; dir < 8; dir += 2) {  // The four cardinal sides.
             int adj_x = x + Nx(dir), adj_y = y + Ny(dir);
             if (adj_x >= 0 && adj_y >= 0 && adj_x < kMapW && adj_y < kMapH &&
                 part[adj_y * kMapW + adj_x] >= 0)
                 touched = part[adj_y * kMapW + adj_x];
         }
         if (touched >= 0 && needs[touched] && !has_landing[touched]) {
-            tiles[i] |= 0x8000;
+            tiles_[i] |= 0x8000;
             has_landing[touched] = 1;
         }
     }
@@ -157,8 +165,8 @@ void Generator::Landings() {
  *        cardinal neighbours and extends road ends into adjacent cities.
  */
 void Generator::ModernRoadShapes() {
-    // the piece for each N 1, E 2, S 4, W 8 combination
-    static const int kPiece[16] = {0, 15, 14, 10, 13, 2, 11, 7, 12, 9, 1, 6, 8, 5, 4, 3};
+    // The piece for each N 1, E 2, S 4, W 8 combination.
+    constexpr int kPiece[16] = {0, 15, 14, 10, 13, 2, 11, 7, 12, 9, 1, 6, 8, 5, 4, 3};
     const int dx[4] = {0, 1, 0, -1}, dy[4] = {-1, 0, 1, 0};
     std::vector<int> shape(static_cast<size_t>(kMapW) * kMapH, 0);
     for (int y = 0; y < kMapH; y++)
@@ -173,7 +181,7 @@ void Generator::ModernRoadShapes() {
                 else if (At(adj_x, adj_y) == kCity && city < 0)
                     city = dir;
             }
-            // a road's end runs into the city beside it
+            // A road's end runs into the city beside it.
             if (city >= 0 && std::popcount(static_cast<unsigned>(mask)) <= 1) mask |= 1 << city;
             if (mask == 0) {
                 SetRoad(x, y, 0);
@@ -183,9 +191,9 @@ void Generator::ModernRoadShapes() {
         }
     for (int i = 0; i < kMapW * kMapH; i++)
         if (shape[i]) SetRoad(i % kMapW, i / kMapW, shape[i]);
-    // a few straight pieces take their standing-stone look
+    // A few straight pieces take their standing-stone look.
     const int swaps[2][2] = {{2, 17}, {1, 16}};
-    for (auto& swap_pair : swaps) {
+    for (const auto& swap_pair : swaps) {
         int count = Dice(1, 6, 3);
         for (int idx = 0; idx < count; idx++)
             for (int tries = 0; tries < 2000; tries++) {
@@ -213,14 +221,14 @@ std::vector<uint8_t> Generator::ModernSigns() {
                 int terrain = At(x + dxx, y + dyy);
                 if (terrain == kCity || terrain == kSite) clear = false;
             }
-        for (auto& spot : spots)
+        for (const auto& spot : spots)
             if (Reach(spot.x, spot.y, x, y) < 7) clear = false;
         if (by_road && clear) spots.push_back(Point{x, y});
     }
     int count = static_cast<int>(spots.size());
     std::vector<uint8_t> out(2 + 104 * count, 0);
     SetI16(out, 0, count);
-    auto put_str = [&](int offset, const std::string& text) {
+    auto put_str = [&](int offset, std::string_view text) {
         for (size_t i = 0; i < text.size() && i < 49; i++)
             out[offset + i] = static_cast<uint8_t>(text[i]);
     };
@@ -245,7 +253,7 @@ std::vector<uint8_t> Generator::ModernSigns() {
             }
         }
         if (city_idx < 0) continue;
-        put_str(offset + 4, Format(Str(kSignCity, 20), CstrOf(scn, Crec(city_idx) + 4, 16)));
+        put_str(offset + 4, Format(Str(kSignCity, 20), CstrOf(scn_, Crec(city_idx) + 4, 16)));
         put_str(offset + 54,
                 Format(Str(kSignLeagues, 20), Distance(x, y, Cx(city_idx), Cy(city_idx)) * 2,
                        std::string(kCompass[Compass(x, y, Cx(city_idx), Cy(city_idx))])));
@@ -255,29 +263,29 @@ std::vector<uint8_t> Generator::ModernSigns() {
 
 /** @brief Runs one stage of the modern scenario generator, returning progress %. */
 std::optional<int> Generator::NextModern(Files& files) {
-    switch (stage++) {
+    switch (stage_++) {
     case 0:
         return 0;
     case 1: {
-        plan = scengen::MakeWorld(world, *rng, kMapW, kMapH);
+        plan_ = scengen::MakeWorld(world_, *rng_, kMapW, kMapH);
         for (int i = 0; i < kMapW * kMapH; i++) {
-            memory[kGrid + i] = plan.terrain[i];
-            roads[i] &= 0xe0;
+            memory_[kGrid + i] = plan_.terrain[i];
+            roads_[i] &= 0xe0;
         }
         Shores();
         return 40;
     }
     case 2: {
         SetCityCount(0);
-        for (auto& [x, y] : plan.cities) {
+        for (const auto& [x, y] : plan_.cities) {
             int city_idx = CityCount();
             Ws16(Crec(city_idx), x);
             Ws16(Crec(city_idx) + 2, y);
             SetCityCount(city_idx + 1);
         }
         SitesBegin();
-        for (int i = 0; i < kNSites && i < static_cast<int>(plan.sites.size()); i++)
-            SiteAt(i, Point{plan.sites[i].first, plan.sites[i].second});
+        for (int i = 0; i < kNSites && i < static_cast<int>(plan_.sites.size()); i++)
+            SiteAt(i, Point{plan_.sites[i].first, plan_.sites[i].second});
         return 60;
     }
     case 3:
@@ -298,11 +306,11 @@ std::optional<int> Generator::NextModern(Files& files) {
         CityDetails();
         return 96;
     case 8:
-        sgn = ModernSigns();
+        sgn_ = ModernSigns();
         return 98;
     case 9:
-        scn[kSRandom] = 0;
-        scn[kSRandom + 1] = 0;  // an ordinary scenario
+        scn_[kSRandom] = 0;
+        scn_[kSRandom + 1] = 0;  // Ordinary scenario header flag.
         WriteFiles(files);
         return 100;
     default:
@@ -310,18 +318,16 @@ std::optional<int> Generator::NextModern(Files& files) {
     }
 }
 
-/** @brief Runs one stage of map generation, returning progress % or `std::nullopt` when done.
- */
 std::optional<int> Generator::Next(Files& files) {
-    if (modern) return NextModern(files);
-    switch (stage++) {
+    if (modern_) return NextModern(files);
+    switch (stage_++) {
     case 0:
         return 0;
     case 1:
-        // the map starts as sea
+        // The map starts as sea.
         for (int i = 0; i < kMapW * kMapH; i++) {
-            memory[kGrid + i] = kWater;
-            roads[i] &= 0xe0;
+            memory_[kGrid + i] = kWater;
+            roads_[i] &= 0xe0;
         }
         Coast();
         return 10;
@@ -347,15 +353,15 @@ std::optional<int> Generator::Next(Files& files) {
         SitesBegin();
         [[fallthrough]];
     case 9:
-        // the sites, the bar moving on a tenth of the way through them each
-        while (site_i < kNSites) {
-            int now = site_i * 10 / kNSites;
-            if (now != tenth) {
-                tenth = now;
-                stage = 9;
+        // Advance the progress bar by one point for each tenth of the sites placed.
+        while (site_i_ < kNSites) {
+            int now = site_i_ * 10 / kNSites;
+            if (now != tenth_) {
+                tenth_ = now;
+                stage_ = 9;
                 return 70 + now;
             }
-            Site(site_i++);
+            Site(site_i_++);
         }
         return 80;
     case 10:
@@ -368,7 +374,7 @@ std::optional<int> Generator::Next(Files& files) {
         return 83;
     case 13:
         if (auto pct = RoadsUntilShown()) {
-            stage = 13;
+            stage_ = 13;
             return *pct;
         }
         return 90;
@@ -377,7 +383,7 @@ std::optional<int> Generator::Next(Files& files) {
         return 92;
     case 15:
         CityList();
-        if (fair)
+        if (fair_)
             FairCapitals();
         else
             Capitals();
@@ -387,11 +393,11 @@ std::optional<int> Generator::Next(Files& files) {
         CityDetails();
         return 96;
     case 17:
-        sgn = Signs();
+        sgn_ = Signs();
         return 98;
     case 18:
-        scn[kSRandom] = 1;
-        scn[kSRandom + 1] = 0;
+        scn_[kSRandom] = 1;
+        scn_[kSRandom + 1] = 0;
         WriteFiles(files);
         return 100;
     default:
@@ -437,32 +443,24 @@ absl::StatusOr<std::unique_ptr<Run>> Run::Create(const Options& opts) {
                 "Rng instance.");
     }
     auto sliders = Settle(opts.sliders, *opts.rng);
-    auto gen = std::make_unique<Generator>();
     auto params = Params(opts.data_dir, sliders);
     if (!params.ok()) return params.status();
-    gen->memory = std::move(*params);
-    // the scenario of the chosen terrain set (Erythea) is the template
+    // Erythea's .SCN supplies the template header, army slots, and terrain type table.
     auto tmpl = ReadBytes(opts.data_dir / "ERYTHEA/ERYTHEA.SCN");
     if (!tmpl.ok()) return tmpl.status();
-    gen->scn = std::move(*tmpl);
-    if (gen->scn.size() <= static_cast<size_t>(kSTerrainSet)) {
+    if (tmpl->size() <= static_cast<size_t>(kSTerrainSet)) {
         return absl::InvalidArgumentError(absl::StrFormat(
                 "Failed to load random map template '%s': file is %zu bytes, shorter than header "
                 "offset %d. Verify original/ERYTHEA/ERYTHEA.SCN.",
-                (opts.data_dir / "ERYTHEA/ERYTHEA.SCN").string(), gen->scn.size(), kSTerrainSet));
+                (opts.data_dir / "ERYTHEA/ERYTHEA.SCN").string(), tmpl->size(), kSTerrainSet));
     }
-    if (absl::Status status = armytype::Load(opts.data_dir / "TERRAIN0/ARMYTYPE.DAT", gen->types);
+    Types types;
+    if (absl::Status status = armytype::Load(opts.data_dir / "TERRAIN0/ARMYTYPE.DAT", types);
         !status.ok()) {
         return status;
     }
-    gen->rng = opts.rng;
-    gen->allies = opts.allies;
-    gen->fair = opts.fair_capitals;
-    gen->modern = opts.scenario;
-    gen->world = opts.world;
-    gen->tiles.assign(static_cast<size_t>(kMapW) * kMapH, 0);
-    gen->roads.assign(static_cast<size_t>(kMapW) * kMapH, 0);
-    gen->scn[kSTerrainSet] = static_cast<uint8_t>(opts.terrain_set);
+    auto gen = std::make_unique<Generator>(std::move(*params), std::move(*tmpl), std::move(types),
+                                           opts);
     return std::unique_ptr<Run>(new Run(std::move(gen)));
 }
 

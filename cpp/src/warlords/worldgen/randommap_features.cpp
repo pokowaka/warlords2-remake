@@ -3,6 +3,10 @@
  * @brief Classic random map feature placement: cities, sites, terrain transitions, bridges,
  * crossings, roads.
  */
+#include <algorithm>
+
+#include "util/util.hpp"
+#include "warlords/move.hpp"
 #include "warlords/worldgen/randommap_impl.hpp"
 
 namespace w2::randommap {
@@ -53,8 +57,8 @@ void Generator::Cities() {
  * @brief Finds a spot for a site, cycling through the map's 16 cells in turn.
  */
 Point Generator::SiteSpot() {
-    if (site_cell == -1) site_cell = Dice(1, 16, -1);
-    int cell_x = site_cell % 4, cell_y = site_cell / 4;
+    if (site_cell_ == -1) site_cell_ = Dice(1, 16, -1);
+    int cell_x = site_cell_ % 4, cell_y = site_cell_ / 4;
     int x = 0, y = 0;
     bool found = false;
     for (int i = 0; i < 50 && !found; i++) {
@@ -78,7 +82,7 @@ Point Generator::SiteSpot() {
             found = At(x, y) != kCity && At(x, y) != kSite;
         }
     }
-    site_cell = (site_cell + 1) % 16;
+    site_cell_ = (site_cell_ + 1) % 16;
     return Point{x, y};
 }
 
@@ -98,7 +102,7 @@ void Generator::SiteAt(int site_idx, Point spot) {
     Ws16(offset + 2, spot.y);
     Put(spot.x, spot.y, kSite);
     std::string name, text;
-    if (scn[offset + 24] == 1) {
+    if (scn_[offset + 24] == 1) {
         int word_idx = Dice(1, 10, -1);
         name = Str(0x1000 + 10 * word_idx, 10) + " Temple";
         text = "#%03d|The %s can bless your|armies or give you|quests|\n";
@@ -112,7 +116,7 @@ void Generator::SiteAt(int site_idx, Point spot) {
         text = "#%03d|%s is|inhabited by monsters and|full of treasure!|\n";
     }
     Wstr(offset + 4, name);
-    spc += Format(text, site_idx, name);
+    spc_ += Format(text, site_idx, name);
 }
 
 // --- terrain to tiles ----------------------------------------------------
@@ -149,7 +153,7 @@ void Generator::ToTiles() {
  * @brief Builds an 8-bit neighbour mask (bit i for neighbour i), counting
  *        the map's outer edge as matching.
  */
-int Generator::Mask(int x, int y, const std::function<bool(int)>& test) const {
+int Generator::Mask(int x, int y, const TerrainPredicate& test) const {
     int mask = 0;
     for (int i = 0; i < 8; i++) {
         int adj_x = x + Nx(i), adj_y = y + Ny(i);
@@ -158,8 +162,6 @@ int Generator::Mask(int x, int y, const std::function<bool(int)>& test) const {
     }
     return mask;
 }
-
-/** @brief Calls `func(x, y)` for every tile whose terrain equals `terrain`. */
 
 /**
  * @brief Selects transition tile variants that join each terrain type to
@@ -177,7 +179,7 @@ void Generator::Shapes() {
                 Put(x, y, kMarsh);
                 SetTile(x, y, TileFor(kMarsh, 0, x, y));
                 MarshAround(x, y);
-                tiles[y * kMapW + x] &= 0x7fff;
+                tiles_[y * kMapW + x] &= 0x7fff;
             } else {
                 Put(x, y, kWater);
                 SetTile(x, y, TileFor(kWater, variant, x, y));
@@ -369,24 +371,24 @@ void Generator::Crossings(SpotList& list) {
     list.city_dist[0] = -1;
     for (int count = 0, i; count < 10 && (i = PickSpot(list, 50, false)) != -1; count++) {
         list.chosen[i] = 1;
-        tiles[list.y[i] * kMapW + list.x[i]] |= 0x8000;
+        tiles_[list.y[i] * kMapW + list.x[i]] |= 0x8000;
     }
 }
 
 /** @brief True if city `city_idx` has already been connected by road. */
 bool Generator::IsServed(int city_idx) const {
-    return city_idx >= 0 && city_idx < static_cast<int>(served.size()) ? served[city_idx] != 0
-                                                                       : false;
+    return city_idx >= 0 && city_idx < static_cast<int>(served_.size()) ? served_[city_idx] != 0
+                                                                        : false;
 }
 /** @brief Marks city `city_idx` as connected by road. */
 void Generator::Serve(int city_idx) {
-    if (city_idx >= 0 && city_idx < static_cast<int>(served.size())) served[city_idx] = 1;
+    if (city_idx >= 0 && city_idx < static_cast<int>(served_.size())) served_[city_idx] = 1;
 }
 
 /**
  * @brief Picks a pair of unserved cities 30..70 tiles apart to connect by road.
  */
-std::optional<std::pair<int, int>> Generator::RoadPair() {
+std::optional<Generator::CityPair> Generator::RoadPair() {
     for (;;) {
         int first = -1;
         for (int tries = 80; tries > 0; tries--) {
@@ -435,7 +437,7 @@ void Generator::LayRoad(Point from, Point to_pt) {
     ground.terrain = [this](int x, int y) { return TerrainOf(Tile(x, y)); };
     ground.road = [this](int x, int y) { return Road(x, y) != 0; };
     ground.crossing = [this](int x, int y) {
-        return x >= 0 && y >= 0 && x < kMapW && y < kMapH && (tiles[y * kMapW + x] & 0x8000) != 0;
+        return x >= 0 && y >= 0 && x < kMapW && y < kMapH && (tiles_[y * kMapW + x] & 0x8000) != 0;
     };
     auto route = move::RoadRoute(ground, kRoadCost, kMapW, kMapH, from.x, from.y, to_pt.x, to_pt.y);
     if (!route) return;
@@ -463,8 +465,8 @@ void Generator::RoadTiles() {
     Shapes();
     Shapes();
     for (int i = 0; i < kMapW * kMapH; i++) {
-        tiles[i] &= 0x7fff;
-        roads[i] &= 0xe0;
+        tiles_[i] &= 0x7fff;
+        roads_[i] &= 0xe0;
     }
 }
 
@@ -482,8 +484,8 @@ void Generator::RoadCrossings() {
                     -1;
     }
     Crossings(list);
-    served.assign(100, 0);
-    shown = 4;
+    served_.assign(100, 0);
+    shown_ = 4;
 }
 
 /**
@@ -492,17 +494,17 @@ void Generator::RoadCrossings() {
  */
 std::optional<int> Generator::RoadsUntilShown() {
     for (;;) {
-        std::pair<int, int> pair;
-        if (pending) {
-            pair = *pending;
-            pending.reset();
+        CityPair pair;
+        if (pending_) {
+            pair = *pending_;
+            pending_.reset();
         } else {
             auto next_pair = RoadPair();
             if (!next_pair) break;
             pair = *next_pair;
-            if (shown < 10 && Dice(1, 3, -1) == 0) {
-                pending = pair;
-                return 80 + shown++;
+            if (shown_ < 10 && Dice(1, 3, -1) == 0) {
+                pending_ = pair;
+                return 80 + shown_++;
             }
         }
         auto start_pt = RoadEnd(pair.first);
@@ -512,7 +514,7 @@ std::optional<int> Generator::RoadsUntilShown() {
             LayRoad(*start_pt, *end_pt);
     }
     for (int i = 0; i < kMapW * kMapH; i++)
-        if (memory[kGrid + i] == kSite) roads[i] &= 0xe0;
+        if (memory_[kGrid + i] == kSite) roads_[i] &= 0xe0;
     return std::nullopt;
 }
 
@@ -531,7 +533,7 @@ void Generator::RoadShapes() {
                     (Road(adj_x, adj_y) != 0 || TerrainOf(Tile(adj_x, adj_y)) == kBridge))
                     mask |= 1 << i;
             }
-            int variant = I8(memory[kRoadShape + mask]);
+            int variant = I8(memory_[kRoadShape + mask]);
             if (variant >= 0)
                 SetRoad(x, y, variant + 1);
             else if (Dice(1, 10, 0) < 6) {
