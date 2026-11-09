@@ -324,7 +324,7 @@ void MoveAllStep() {
     while (g_app.move_all) {
         if (g_app.walk) return;
         Army* lead = nullptr;
-        for (Army* army : g_app.g->armies) {
+        for (Army* army : g_app.g->Armies()) {
             if (army->OwnerIndex() == g_app.player->Index() && army->HasTarget() &&
                 !army->InTransit() && !g_app.move_all->seen.count(army)) {
                 lead = army;
@@ -505,7 +505,7 @@ void RefreshControls() {
                            (g_app.walk ? static_cast<int>(g_app.walk->i) + 1 : 0);
     set(173, walk_on);
     bool more = false;
-    for (Army* army : g_app.g->armies)
+    for (Army* army : g_app.g->Armies())
         if (army->OwnerIndex() == g_app.player->Index() && !army->InTransit() &&
             !army->IsFortified() && !army->IsDone()) {
             more = true;
@@ -588,7 +588,7 @@ static void ViewCity(int mode) {
     int viewer = game::ViewerSide(*g_app.g, g_app.player);
     City* best = nullptr;
     int best_d = kNone;
-    for (auto& city : g_app.g->map->cities) {
+    for (auto& city : g_app.g->GetMap().Cities()) {
         bool allowed = game::Seen(*g_app.g, viewer, city.X(), city.Y()) &&
                        (mode == city::kInfo || city.OwnerIndex() == g_app.player->Index());
         if (allowed) {
@@ -770,8 +770,8 @@ bool MenuEnabled(const std::string& menu_key) {
     // settings, and quit
     if (g_app.ai_run && !HumansLeft()) {
         if (menu_key == "h" || menu_key == "e" || menu_key == "j" || menu_key == "y")
-            return g_app.g->turn != 1;
-        if (menu_key == "d") return g_app.g->map->options.diplomacy != 0;
+            return g_app.g->Turn() != 1;
+        if (menu_key == "d") return g_app.g->GetMap().GameOptions().diplomacy != 0;
         return menu_key == "^Q" || menu_key == "alt X" || menu_key == "?" || menu_key == "c" ||
                menu_key == "." || menu_key == "a" || menu_key == "k" || menu_key == "g" ||
                menu_key == "n" || menu_key == "w" || menu_key == "l" ||
@@ -779,24 +779,22 @@ bool MenuEnabled(const std::string& menu_key) {
                menu_key.starts_with("screen ") || music || ai_opt;
     }
     w2::Game& game_state = *g_app.g;
+    w2::Map& map = game_state.GetMap();
     auto side_has_hero = [&]() {
-        for (Army* army : game_state.armies)
+        for (Army* army : game_state.Armies())
             if (army->OwnerIndex() == g_app.player->Index() && army->Hero()) return true;
         return false;
     };
     auto selected = []() { return g_app.selection && !g_app.selection->stack.empty(); };
     auto side_has_cities = [&]() {
-        for (auto& city : game_state.map->cities)
+        for (const auto& city : map.Cities())
             if (city.OwnerIndex() == g_app.player->Index() && !city.IsRazed()) return true;
         return false;
     };
     auto can_search = [&]() {
         if (!selected()) return false;
         Army* lead = g_app.selection->stack[0];
-        w2::Site* site =
-                game_state.map->site_at.empty()
-                        ? nullptr
-                        : game_state.map->site_at[lead->Y() * game_state.map->width + lead->X()];
+        const w2::Site* site = map.SiteAt(lead->X(), lead->Y());
         if (!site || site->searched) return false;
         return lead->Hero() || site->type == w2::site::kTemple;
     };
@@ -804,31 +802,32 @@ bool MenuEnabled(const std::string& menu_key) {
         if (!selected()) return false;
         Army* lead = g_app.selection->stack[0];
         if (!lead->Hero()) return false;
-        if (g_app.player->Index() >= static_cast<int>(game_state.map->items.size())) return false;
-        w2::Item* std = &game_state.map->items[g_app.player->Index()];
-        if (!lead->HasItem(std)) return false;
-        int terrain = w2::scn::TerrainAt(*game_state.map, lead->X(), lead->Y());
+        auto map_items = map.Items();
+        if (g_app.player->Index() >= static_cast<int>(map_items.size())) return false;
+        w2::Item* std_item = &map_items[g_app.player->Index()];
+        if (!lead->HasItem(std_item)) return false;
+        int terrain = w2::scn::TerrainAt(map, lead->X(), lead->Y());
         if (terrain == move::kWater || terrain == move::kShore || terrain == move::kCity ||
             terrain == move::kSite)
             return false;
-        for (auto& item : game_state.map->items)
+        for (const auto& item : map_items)
             if (item.planted && item.x == lead->X() && item.y == lead->Y()) return false;
         return true;
     };
     if (menu_key == "alt L") return savegame::Used() > 0;
     if (menu_key == "q" || menu_key == "s") return selected();
     if (menu_key == "x")
-        return selected() && w2::scn::TerrainAt(*game_state.map, g_app.selection->stack[0]->X(),
+        return selected() && w2::scn::TerrainAt(map, g_app.selection->stack[0]->X(),
                                                 g_app.selection->stack[0]->Y()) == move::kTower;
     if (menu_key == "r" || menu_key == "b" || menu_key == "p" || menu_key == "v")
         return side_has_cities();
-    if (menu_key == "d") return game_state.map->options.diplomacy != 0;
+    if (menu_key == "d") return map.GameOptions().diplomacy != 0;
     if (menu_key == "," || menu_key == "u") return side_has_hero();
     if (menu_key == "f") return can_plant_flag();
     if (menu_key == "z") return can_search();
     if (menu_key == "h" || menu_key == "e" || menu_key == "j" || menu_key == "y")
-        return game_state.turn != 1;
-    if (menu_key == "alt E") return !game_state.won;
+        return game_state.Turn() != 1;
+    if (menu_key == "alt E") return !game_state.IsWon();
     return true;
 }
 

@@ -66,7 +66,7 @@ struct Stack : kit::Modal {
         if (auto head = g_app.screen->ArtFor(46))
             gfx::Draw(head->image, gfx::NewQuad(0, 0, 400, 23), 80, 62);
         const Font& font = kit::GetFont(2);
-        font.Draw(absl::StrFormat("(max +%d)", g_app.g->map->combat_cap), 480, 66);
+        font.Draw(absl::StrFormat("(max +%d)", g_app.g->GetMap().CombatCap()), 480, 66);
         // draws a cell of ABITS at (x, y)
         auto abits = [](int cell_x, int cell_y, int width, int height, int x, int y) {
             gfx::SetColor(1, 1, 1);
@@ -83,7 +83,7 @@ struct Stack : kit::Modal {
             int x = 112, y = 90 + 30 * i;
             if (i < stack_slots.n && stack_slots.army[i]) {
                 w2::Army* army = stack_slots.army[i];
-                const w2::ArmyType* type = g_app.g->types.ById(army->Type());
+                const w2::ArmyType* type = g_app.g->ArmyTypes().ById(army->Type());
                 if (stack_slots.mark[i] != w2::slots::kNomark)
                     abits(448, stack_slots.mark[i] == w2::slots::kTick ? 16 : 0, 32, 16, x - 32,
                           y + 5);

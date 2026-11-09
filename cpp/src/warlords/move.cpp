@@ -28,7 +28,7 @@ Mode StackMode(const Game& game, const Stack& stack) {
     bool all_fly = true, any_fly = false, all_non_hero_fly = true, hero_flight = false;
     bool woods = false, hills = false;
     for (Army* army : stack) {
-        const ArmyType* army_type = game.types.ById(army->Type());
+        const ArmyType* army_type = game.ArmyTypes().ById(army->Type());
         if (army->IsAtSea()) at_sea = true;
         if (army_type->boat) any_boat = true;
         if (army_type->flies && !army->IsAtSea()) any_fly = true;
@@ -81,7 +81,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
             result.stopped = WalkStop::kOutOfMoves;
             break;
         }
-        City* city = game.map->city_tile[step.y * game.map->width + step.x];
+        City* city = game.GetMap().CityAtFootprint(step.x, step.y);
         auto here = game::ArmiesAt(game, step.x, step.y);
         if (city && !city->IsRazed() && !city->OwnedBy(side)) {
             if (!diplomacy::MayAttack(game, side, city->OwnerIndex())) {
@@ -128,7 +128,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
         result.attack.reset();
     }
 
-    if (game.map->options.hidden_map != 0 && side != kNone) {
+    if (game.GetMap().GameOptions().hidden_map != 0 && side != kNone) {
         bool flying = ModeOf(game, stack) == kFlying;
         int found = 0;
         for (int i = 0; i < static_cast<int>(path.size()); i++) {
@@ -151,12 +151,13 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
 }  // namespace
 
 bool IsPort(const Game& game, const City& city) {
+    const Map& map = game.GetMap();
     int x = city.X(), y = city.Y();
     for (int direction : kPortTour) {
         x += kDirs[direction][0];
         y += kDirs[direction][1];
-        if (x < 0 || y < 0 || x >= game.map->width || y >= game.map->height) return false;
-        int terrain = scn::TerrainAt(*game.map, x, y);
+        if (!map.InBounds(x, y)) return false;
+        int terrain = scn::TerrainAt(map, x, y);
         if (terrain == kBridge || terrain == kWater || terrain == kShore) return true;
     }
     return false;
@@ -229,12 +230,12 @@ int Distance(int from_x, int from_y, int to_x, int to_y) {
 
 std::string SettleSea(Game& game, const Stack& stack, int x, int y, int mode, bool was_at_sea) {
     if (mode != kLand) return "";
-    int terrain = scn::TerrainAt(*game.map, x, y);
+    int terrain = scn::TerrainAt(game.GetMap(), x, y);
     if (!was_at_sea) {
         if (terrain != kWater && terrain != kShore) return "";
         bool flier = false, walker = false;
         for (Army* army : stack) {
-            if (game.types.ById(army->Type())->flies)
+            if (game.ArmyTypes().ById(army->Type())->flies)
                 flier = true;
             else if (!army->Hero())
                 walker = true;
@@ -242,7 +243,7 @@ std::string SettleSea(Game& game, const Stack& stack, int x, int y, int mode, bo
         if (walker) flier = false;
         std::string change;
         for (Army* army : stack) {
-            if (!game.types.ById(army->Type())->flies && (!army->Hero() || !flier)) {
+            if (!game.ArmyTypes().ById(army->Type())->flies && (!army->Hero() || !flier)) {
                 army->BoardShip();
                 change = "to sea";
             }

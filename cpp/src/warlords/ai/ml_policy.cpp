@@ -205,19 +205,19 @@ void PolicyNetwork::InitRandomWeights(uint32_t seed) {
         mlp.b3.fill(0.0F);
     };
 
-    init_mlp(diplo_net);
-    init_mlp(mission_net);
-    init_mlp(econ_net);
-    init_mlp(value_net);
-    init_mlp(stack_value_net);
+    init_mlp(diplo_net_);
+    init_mlp(mission_net_);
+    init_mlp(econ_net_);
+    init_mlp(value_net_);
+    init_mlp(stack_value_net_);
 }
 
 void PolicyNetwork::Zero() {
-    diplo_net.Zero();
-    mission_net.Zero();
-    econ_net.Zero();
-    value_net.Zero();
-    stack_value_net.Zero();
+    diplo_net_.Zero();
+    mission_net_.Zero();
+    econ_net_.Zero();
+    value_net_.Zero();
+    stack_value_net_.Zero();
 }
 
 DiploInVec PackDiploInput(const ContextVec& context, const RivalVec& rival) {
@@ -260,7 +260,7 @@ StackValueInVec PackStackValueInput(const ContextVec& context, const StackVec& s
 }
 
 DiploOutput PolicyNetwork::ScoreDiplomacy(const ContextVec& context, const RivalVec& rival) const {
-    auto raw = diplo_net.Forward(PackDiploInput(context, rival));
+    auto raw = diplo_net_.Forward(PackDiploInput(context, rival));
     DiploOutput out;
     out.stance_logits = {raw[0], raw[1], raw[2], raw[3]};
     out.tribute_logit = raw[4];
@@ -270,42 +270,42 @@ DiploOutput PolicyNetwork::ScoreDiplomacy(const ContextVec& context, const Rival
 
 MissionOutput PolicyNetwork::ScoreMission(const ContextVec& context, const StackVec& stack,
                                           const TargetVec& target) const {
-    auto raw = mission_net.Forward(PackMissionInput(context, stack, target));
+    auto raw = mission_net_.Forward(PackMissionInput(context, stack, target));
     return MissionOutput{raw[0], raw[1]};
 }
 
 float PolicyNetwork::ScoreEconomy(const ContextVec& context, const EconVec& econ) const {
-    return econ_net.Forward(PackEconInput(context, econ))[0];
+    return econ_net_.Forward(PackEconInput(context, econ))[0];
 }
 
 float PolicyNetwork::EvaluateValue(const ContextVec& context, const CriticVec& critic) const {
     // Linear: the critic predicts discounted return in empire-score units, which
     // is not bounded to [-1, 1]
-    return value_net.Forward(PackValueInput(context, critic))[0];
+    return value_net_.Forward(PackValueInput(context, critic))[0];
 }
 
 float PolicyNetwork::EvaluateStackValue(const StackValueInVec& stack_state) const {
-    return stack_value_net.Forward(stack_state)[0];
+    return stack_value_net_.Forward(stack_state)[0];
 }
 
 std::vector<float> PolicyNetwork::Flatten() const {
     std::vector<float> out;
     out.reserve(kTotalParams);
-    diplo_net.ToFlat(out);
-    mission_net.ToFlat(out);
-    econ_net.ToFlat(out);
-    value_net.ToFlat(out);
-    stack_value_net.ToFlat(out);
+    diplo_net_.ToFlat(out);
+    mission_net_.ToFlat(out);
+    econ_net_.ToFlat(out);
+    value_net_.ToFlat(out);
+    stack_value_net_.ToFlat(out);
     return out;
 }
 
 void PolicyNetwork::Unflatten(const std::vector<float>& params) {
     size_t offset = 0;
-    offset = diplo_net.FromFlat(params, offset);
-    offset = mission_net.FromFlat(params, offset);
-    offset = econ_net.FromFlat(params, offset);
-    offset = value_net.FromFlat(params, offset);
-    stack_value_net.FromFlat(params, offset);
+    offset = diplo_net_.FromFlat(params, offset);
+    offset = mission_net_.FromFlat(params, offset);
+    offset = econ_net_.FromFlat(params, offset);
+    offset = value_net_.FromFlat(params, offset);
+    stack_value_net_.FromFlat(params, offset);
 }
 
 void PolicyNetwork::UnflattenLegacy(const std::vector<float>& params) {
@@ -317,19 +317,19 @@ void PolicyNetwork::UnflattenLegacy(const std::vector<float>& params) {
     const int insert_at = kLegacyGlobalDim, insert_count = kAddedGlobalDim;
     const int critic_drop = is_v5 ? kV5Dropped : kV4CriticDropped;
     size_t offset = 0;
-    offset = diplo_net.FromFlatWidenInput(params, offset, DiploNet::kInDim - kV5Dropped, insert_at,
+    offset = diplo_net_.FromFlatWidenInput(params, offset, DiploNet::kInDim - kV5Dropped, insert_at,
+                                           insert_count);
+    offset = mission_net_.FromFlatWidenInput(params, offset, MissionNet::kInDim - kV5Dropped,
+                                             insert_at, insert_count);
+    offset = econ_net_.FromFlatWidenInput(params, offset, EconNet::kInDim - kV5Dropped, insert_at,
                                           insert_count);
-    offset = mission_net.FromFlatWidenInput(params, offset, MissionNet::kInDim - kV5Dropped,
-                                            insert_at, insert_count);
-    offset = econ_net.FromFlatWidenInput(params, offset, EconNet::kInDim - kV5Dropped, insert_at,
-                                         insert_count);
-    offset = value_net.FromFlatWidenInput(params, offset, ValueNet::kInDim - critic_drop, insert_at,
-                                          insert_count);
-    if (is_v3) {
-        stack_value_net.Zero();
-    } else {
-        stack_value_net.FromFlatWidenInput(params, offset, StackValueNet::kInDim - critic_drop,
+    offset = value_net_.FromFlatWidenInput(params, offset, ValueNet::kInDim - critic_drop,
                                            insert_at, insert_count);
+    if (is_v3) {
+        stack_value_net_.Zero();
+    } else {
+        stack_value_net_.FromFlatWidenInput(params, offset, StackValueNet::kInDim - critic_drop,
+                                            insert_at, insert_count);
     }
 }
 
@@ -489,13 +489,14 @@ bool SelectBinary(float logit, RolloutSampler* sampler, float* out_log_prob) {
 }
 
 float ComputeEmpireScore(const Game& game, int side_index) {
-    if (side_index < 0 || side_index >= 8 || !game.map->sides[side_index].IsAlive()) {
+    const Map& map = game.GetMap();
+    if (side_index < 0 || side_index >= 8 || !map.Sides()[side_index].IsAlive()) {
         return 0.0F;
     }
     int total_standing = 0, total_income = 0;
     int my_cities = 0, my_income = 0;
     int revealed_cities = 0;
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : map.Cities()) {
         if (city.IsRazed()) continue;
         total_standing++;
         total_income += std::max(1, city.Income());
@@ -512,12 +513,12 @@ float ComputeEmpireScore(const Game& game, int side_index) {
 
     // Reconnaissance only counts under Hidden Map, and stays small next to cities
     float recon_term = 0.0F;
-    if (game.map->options.hidden_map != 0) {
+    if (map.GameOptions().hidden_map != 0) {
         int sampled = 0, seen_sampled = 0;
-        const int min_x = std::max(0, game.map->active_x0),
-                  max_x = std::min(game.map->width - 1, game.map->active_x1);
-        const int min_y = std::max(0, game.map->active_y0),
-                  max_y = std::min(game.map->height - 1, game.map->active_y1);
+        const int min_x = std::max(0, map.ActiveX0()),
+                  max_x = std::min(map.Width() - 1, map.ActiveX1());
+        const int min_y = std::max(0, map.ActiveY0()),
+                  max_y = std::min(map.Height() - 1, map.ActiveY1());
         for (int y = min_y; y <= max_y; y += 2) {
             for (int x = min_x; x <= max_x; x += 2) {
                 sampled++;
@@ -534,7 +535,7 @@ float ComputeEmpireScore(const Game& game, int side_index) {
     // Army combat power (Lanchester square law in sequential 1v1 duels, including
     // vectored units in transit) as a zero-sum share of all sides' forces.
     float my_army_str = 0.0F, all_army_str = 0.0F;
-    for (const Army* army : game.armies) {
+    for (const Army* army : game.Armies()) {
         if (army->IsDisbanded() || (army->X() == kNone && !army->InTransit()) ||
             army->OwnerIndex() < 0 || army->OwnerIndex() >= 8)
             continue;
@@ -561,6 +562,7 @@ PolicyNetwork& ActivePolicy() {
 }
 
 ContextVec BuildContext(const Game& game, const Side& side) {
+    const Map& map = game.GetMap();
     ContextVec context{};
     int our_side = side.Index();
     const SideBelief& belief = ai::belief::Ensure(const_cast<Side&>(side));
@@ -585,7 +587,7 @@ ContextVec BuildContext(const Game& game, const Side& side) {
     }
 
     int my_armies = 0, my_heroes = 0, my_strength = 0;
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         if (army->OwnerIndex() == our_side && !army->IsDisbanded() &&
             (army->X() != kNone || army->InTransit())) {
             my_armies++;
@@ -596,8 +598,8 @@ ContextVec BuildContext(const Game& game, const Side& side) {
 
     // Own cities without a single own army inside, and those of them a visible
     // hostile stack could reach within a turn (belief threat map: fair information)
-    std::vector<char> garrisoned(game.map->cities.size(), 0);
-    for (Army* army : game.armies) {
+    std::vector<char> garrisoned(map.Cities().size(), 0);
+    for (Army* army : game.Armies()) {
         if (army->OwnerIndex() != our_side || army->IsDisbanded() || army->InTransit() ||
             army->X() == kNone)
             continue;
@@ -607,7 +609,7 @@ ContextVec BuildContext(const Game& game, const Side& side) {
         }
     }
     int own_cities = 0, empty_cities = 0, exposed_cities = 0;
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : map.Cities()) {
         if (city.IsRazed() || city.OwnerIndex() != our_side) continue;
         own_cities++;
         if (city.Index() >= 0 && city.Index() < static_cast<int>(garrisoned.size()) &&
@@ -621,7 +623,7 @@ ContextVec BuildContext(const Game& game, const Side& side) {
 
     int wars = 0, allies = 0, alive_rivals = 0;
     for (int rival = 0; rival < 8; rival++) {
-        if (rival != our_side && game.map->sides[rival].IsAlive()) {
+        if (rival != our_side && map.Sides()[rival].IsAlive()) {
             alive_rivals++;
             if (diplomacy::State(game, our_side, rival) == diplomacy::kWar) wars++;
             if (diplomacy::IsAllied(game, our_side, rival)) allies++;
@@ -630,7 +632,7 @@ ContextVec BuildContext(const Game& game, const Side& side) {
     float rival_denom = static_cast<float>(std::max(1, alive_rivals));
 
     float cap_threat = 0.0F;
-    const City* capital = side.CapitalCity(*game.map);
+    const City* capital = side.CapitalCity(map);
     if (capital && capital->OwnerIndex() == our_side &&
         capital->Index() < static_cast<int>(belief.city_threat1_turn.size())) {
         cap_threat = std::tanh(belief.city_threat1_turn[capital->Index()] / 20.0F);
@@ -639,7 +641,7 @@ ContextVec BuildContext(const Game& game, const Side& side) {
     int income = game::Income(game, side);
     int upkeep = game::Upkeep(game, side);
 
-    context[0] = std::tanh(static_cast<float>(game.turn) / 30.0F) * 2.0F - 1.0F;
+    context[0] = std::tanh(static_cast<float>(game.Turn()) / 30.0F) * 2.0F - 1.0F;
     context[1] = static_cast<float>(my_cities) / static_cast<float>(std::max(1, total_vis_cities));
     context[2] = std::tanh(static_cast<float>(my_armies) / 24.0F);
     context[3] = std::tanh(static_cast<float>(side.Gold()) / 600.0F);
@@ -655,7 +657,7 @@ ContextVec BuildContext(const Game& game, const Side& side) {
     context[13] = std::min(1.0F, static_cast<float>(my_heroes) / 3.0F);
     // v6 additions: non-saturating scales and empty-city exposure
     context[14] = 0.5F * std::log1p(static_cast<float>(std::max(0, side.Gold())) / 1000.0F);
-    context[15] = std::min(2.0F, static_cast<float>(game.turn) / 50.0F);
+    context[15] = std::min(2.0F, static_cast<float>(game.Turn()) / 50.0F);
     context[16] = 0.5F * std::log1p(static_cast<float>(my_strength) / 50.0F);
     context[17] = own_cities > 0 ? static_cast<float>(empty_cities) / static_cast<float>(own_cities)
                                  : 0.0F;
@@ -675,12 +677,13 @@ ContextVec BuildContext(const Game& game, const Side& side) {
 }
 
 CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
+    const Map& map = game.GetMap();
     CriticVec features{};
     const int our_side = side.Index();
     std::array<int, 8> cities{}, income{};
     std::array<float, 8> power{};
     int standing = 0, neutral = 0, total_income = 0;
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : map.Cities()) {
         if (city.IsRazed()) continue;
         standing++;
         total_income += std::max(1, city.Income());
@@ -692,7 +695,7 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
         }
     }
     float all_power = 0.0F;
-    for (const Army* army : game.armies) {
+    for (const Army* army : game.Armies()) {
         if (army->IsDisbanded() || (army->X() == kNone && !army->InTransit()) ||
             army->OwnerIndex() < 0 || army->OwnerIndex() >= 8)
             continue;
@@ -704,7 +707,7 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
     int max_rival_cities = 0;
     float max_rival_power = 0.0F;
     for (int side_idx = 0; side_idx < 8; side_idx++) {
-        const Side& other = game.map->sides[side_idx];
+        const Side& other = map.Sides()[side_idx];
         if (other.InUse()) in_use++;
         if (!other.IsAlive()) continue;
         alive++;
@@ -719,11 +722,11 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
     // Cities where hostile strength within 6 tiles outweighs our own within 2
     constexpr int kThreatRadius = 6, kGuardRadius = 2;
     int my_cities = 0, threatened = 0;
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : map.Cities()) {
         if (city.IsRazed() || city.OwnerIndex() != our_side) continue;
         my_cities++;
         float hostile = 0.0F, guard = 0.0F;
-        for (const Army* army : game.armies) {
+        for (const Army* army : game.Armies()) {
             if (army->IsDisbanded() || army->X() == kNone || army->OwnerIndex() < 0 ||
                 army->OwnerIndex() >= 8)
                 continue;
@@ -739,7 +742,7 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
     }
 
     const float standing_denom = static_cast<float>(std::max(1, standing));
-    features[0] = std::min(2.0F, static_cast<float>(game.turn) / 50.0F);
+    features[0] = std::min(2.0F, static_cast<float>(game.Turn()) / 50.0F);
     features[1] = static_cast<float>(cities[our_side]) / standing_denom;
     features[2] =
             static_cast<float>(income[our_side]) / static_cast<float>(std::max(1, total_income));
@@ -749,8 +752,8 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
     features[6] = static_cast<float>(in_use) / 8.0F;
     features[7] = static_cast<float>(standing) / 80.0F;
     features[8] = static_cast<float>(max_rival_cities) / standing_denom;
-    features[9] = game.map->options.hidden_map != 0 ? 1.0F : 0.0F;
-    features[10] = game.map->options.diplomacy != 0 ? 1.0F : 0.0F;
+    features[9] = map.GameOptions().hidden_map != 0 ? 1.0F : 0.0F;
+    features[10] = map.GameOptions().diplomacy != 0 ? 1.0F : 0.0F;
     features[11] =
             rivals > 0 ? static_cast<float>(classic_rivals) / static_cast<float>(rivals) : 0.0F;
     features[12] =

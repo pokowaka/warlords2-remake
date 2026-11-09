@@ -70,7 +70,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             }
             if (city_armies <= 2) continue;
 
-            const ArmyType* army_type = game.types.ById(army->Type());
+            const ArmyType* army_type = game.ArmyTypes().ById(army->Type());
             float threat = (city->Index() < static_cast<int>(belief.city_threat2_turn.size()))
                                    ? belief.city_threat2_turn[city->Index()]
                                    : 0.0F;
@@ -101,8 +101,8 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             ml::EconInVec disband_in = ml::PackEconInput(cur_ctx, disband_vec);
 
             std::vector<ml::EconInVec> cands = {keep_in, disband_in};
-            std::vector<float> logits = {policy.econ_net.Forward(keep_in)[0],
-                                         policy.econ_net.Forward(disband_in)[0]};
+            std::vector<float> logits = {policy.EconHead().Forward(keep_in)[0],
+                                         policy.EconHead().Forward(disband_in)[0]};
             float log_prob = 0.0F;
             int pick = ml::SelectFromLogits(logits, sampler, &log_prob);
             if (sampler && sampler->current_turn) {
@@ -179,7 +179,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         std::vector<float> logits(buy_opts.size());
         std::vector<float> log_mult(buy_opts.size(), 0.0F);
         for (size_t i = 0; i < buy_opts.size(); i++) {
-            logits[i] = policy.econ_net.Forward(buy_opts[i].in_vec)[0];
+            logits[i] = policy.EconHead().Forward(buy_opts[i].in_vec)[0];
             if (i > 0 && buy_opts.size() > 2)
                 log_mult[i] = std::log(static_cast<float>(buy_opts.size() - 1));
         }
@@ -245,7 +245,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         std::vector<ml::EconInVec> cands = {ml::PackEconInput(prod_ctx, stop_vec)};
         for (size_t si = 0; si < city->Slots().size(); si++) {
             const Slot& slot = city->SlotAt(si);
-            const ArmyType* army_type = game.types.ById(slot.type);
+            const ArmyType* army_type = game.ArmyTypes().ById(slot.type);
             bool is_flier = army_type && army_type->flies;
             bool is_siege_or_spec = army_type && (army_type->siege || army_type->IsMagical() ||
                                                   army_type->Ability() != 0);
@@ -278,7 +278,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         std::vector<float> logits(cands.size());
         std::vector<float> log_mult(cands.size(), 0.0F);
         for (size_t i = 0; i < cands.size(); i++) {
-            logits[i] = policy.econ_net.Forward(cands[i])[0];
+            logits[i] = policy.EconHead().Forward(cands[i])[0];
             if (i > 0 && cands.size() > 2)
                 log_mult[i] = std::log(static_cast<float>(cands.size() - 1));
         }
@@ -358,7 +358,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             std::vector<float> logits(cands.size());
             std::vector<float> log_mult(cands.size(), 0.0F);
             for (size_t i = 0; i < cands.size(); i++) {
-                logits[i] = policy.econ_net.Forward(cands[i])[0];
+                logits[i] = policy.EconHead().Forward(cands[i])[0];
                 if (i > 0 && cands.size() > 2)
                     log_mult[i] = std::log(static_cast<float>(cands.size() - 1));
             }

@@ -136,9 +136,7 @@ void Select(int x, int y, Army* pick) {
         }
     }
     Army* lead = g_app.selection->stack.empty() ? nullptr : g_app.selection->stack[0];
-    if (lead && lead->Hero() && !g_app.g->map->site_at.empty() &&
-        g_app.g->map->site_at[y * g_app.g->map->width + x])
-        moments.push_back("search");
+    if (lead && lead->Hero() && g_app.g->GetMap().SiteAt(x, y)) moments.push_back("search");
     tutorial::Chain(moments);
 }
 /** @brief Selects what is on the tile, as a click with the select pointer does. */
@@ -158,8 +156,8 @@ void SelectAt(int x, int y) {
  */
 std::pair<int, int> CapOf(const Side* side) {
     if (side->CurrentCapitalPos()) return side->CurrentCapitalPos()->ToPair();
-    if (g_app.g && g_app.g->map) {
-        if (const City* cap = side->CapitalCity(*g_app.g->map)) return {cap->X(), cap->Y()};
+    if (g_app.g && g_app.g->HasMap()) {
+        if (const City* cap = side->CapitalCity(g_app.g->GetMap())) return {cap->X(), cap->Y()};
     }
     w2::TilePos orig = side->OriginCapitalPos();
     return {orig.x == kNone ? 0 : orig.x, orig.y == kNone ? 0 : orig.y};
@@ -190,7 +188,7 @@ static Army* NextArmy() {
     if (!g_app.cursor) CycleReset();
     Army* fresh = nullptr;
     Army* used = nullptr;
-    for (Army* army : g_app.g->armies) {
+    for (Army* army : g_app.g->Armies()) {
         if (army->OwnerIndex() == g_app.player->Index() && !army->InTransit() &&
             !army->IsFortified() && !army->IsDone()) {
             if (army->IsOffered()) {
@@ -202,7 +200,7 @@ static Army* NextArmy() {
     }
     if (!fresh) {
         if (!used) return nullptr;
-        for (Army* army : g_app.g->armies)
+        for (Army* army : g_app.g->Armies())
             if (army->OwnerIndex() == g_app.player->Index()) army->SetOffered(false);
         fresh = used;
     }

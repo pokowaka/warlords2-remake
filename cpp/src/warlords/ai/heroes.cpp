@@ -24,7 +24,7 @@ bool Blessed(const Army* hero, const Site& site) {
  */
 bool Worth(const Game& game, const Side& side, const Site& site, const Army* hero) {
     int distance = Dist(site.x, site.y, hero->X(), hero->Y());
-    int reach = game.turn * 2 + (site.rich ? 15 : 3);
+    int reach = game.Turn() * 2 + (site.rich ? 15 : 3);
     return distance < reach && Explored(game, side.Index(), site.x, site.y) && SiteOpen(site);
 }
 
@@ -83,12 +83,13 @@ void Sites(Game& game, Side& side, size_t hero_index, Info& info) {
     int quest_d = 100, site_d = 100;
     Site* quest_site = nullptr;
     Site* best = nullptr;
-    for (auto& candidate : game.map->sites) {
+    Map& map = game.GetMap();
+    for (auto& candidate : map.Sites()) {
         if (Worth(game, side, candidate, hero)) {
             int distance = Dist(candidate.x, candidate.y, hero->X(), hero->Y());
             bool worth = true;
             if (candidate.content == site::kTemple) {
-                bool quest_free = game.map->options.quests != 0 && !side.HasQuest() &&
+                bool quest_free = map.GameOptions().quests != 0 && !side.HasQuest() &&
                                   distance < range && distance < quest_d;
                 if (quest_free) {
                     quest_d = distance;
@@ -125,8 +126,9 @@ void Items(Game& game, Side& side, size_t hero_index, Info& info) {
     int range = OrderOf(game, hero).order == kOrderCity ? 5 : 15;
     Item* best = nullptr;
     int best_distance = 100;
-    for (int i = static_cast<int>(game.map->items.size()) - 1; i >= 0; i--) {
-        Item& item = game.map->items[i];
+    Map& map = game.GetMap();
+    for (int i = map.ItemCount() - 1; i >= 0; i--) {
+        Item& item = map.Items()[i];
         if (Lying(game, side, item)) {
             bool taken = false;
             for (size_t j = 0; j < info.heroes.size(); j++) {
@@ -167,8 +169,9 @@ void Enemy(Game& game, Side& side, size_t hero_index, Info& info) {
     Sel sel = Select(game, list);
     int need = list.size() < 3 ? 95 : 75;
     int best_odds = 0;
-    for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
-        City& city = game.map->cities[i];
+    Map& map = game.GetMap();
+    for (int i = map.CityCount() - 1; i >= 0; i--) {
+        City& city = map.Cities()[i];
         if (Standing(city) && !Cflag(data, city, kCfUnseen) && !city.IsNeutral() &&
             State(game, side.Index(), city.OwnerIndex()) == 2) {
             int distance = Dist(city.X(), city.Y(), hero->X(), hero->Y());
@@ -195,11 +198,12 @@ void Enemy(Game& game, Side& side, size_t hero_index, Info& info) {
  */
 int Choose(Game& game, Side& side, size_t hero_index, Info& info) {
     AIData& data = Data(game, side);
-    int roll = game.rng.Dice(1, 20, 0);
+    Rng& rng = game.GetRng();
+    int roll = rng.Dice(1, 20, 0);
     int pick = info.quest ? 1 : 0;
     int best = 0;
     if (info.quest) best = 100 - info.quest_d + roll;
-    roll = game.rng.Dice(1, 20, 0);
+    roll = rng.Dice(1, 20, 0);
     int score = 100 - info.site_d + roll;
     if (info.target && best < score) {
         pick = 3;
@@ -207,13 +211,13 @@ int Choose(Game& game, Side& side, size_t hero_index, Info& info) {
     }
     City* city = info.city[hero_index];
     if (!city || Get(data.garrison, city->Index()) > 4) {
-        roll = game.rng.Dice(1, 20, 0);
+        roll = rng.Dice(1, 20, 0);
         score = 100 - info.enemy_d + roll;
         if (info.enemy && best < score) {
             pick = 4;
             best = score;
         }
-        roll = game.rng.Dice(1, 20, 0);
+        roll = rng.Dice(1, 20, 0);
         if (info.item && best < 100 - info.item_d + roll) pick = 2;
     }
     return pick;
@@ -294,7 +298,7 @@ int Attack(Game& game, Side& side, size_t hero_index, Info& info) {
     City* city = info.city[hero_index];
     if (city && Get(data.garrison, city->Index()) == static_cast<int>(list.size())) {
         int enemy_distance = cities::NearestArmy(game, side, hero->X(), hero->Y());
-        if (enemy_distance < (game.turn < 6 ? 10 : 15)) return 0;
+        if (enemy_distance < (game.Turn() < 6 ? 10 : 15)) return 0;
     }
     auto sel = Order(game, list, kOrderCity, target->Index(), 0);
     if (sel) MoveTo(game, *sel, sel->leader->Target()->x, sel->leader->Target()->y);
@@ -316,7 +320,7 @@ bool QuestGo(Game& game, Side& side, size_t hero_index, Info& info) {
         return false;
     City* city = side_quest->ResolveCity(game);
     if (!city || Cflag(data, *city, kCfUnseen)) return false;
-    int need = (city->IsNeutral() || game.turn < 8) ? 1 : 2;
+    int need = (city->IsNeutral() || game.Turn() < 8) ? 1 : 2;
     auto list = Collect(game, side.Index(), hero->X(), hero->Y(), 8);
     if (static_cast<int>(list.size()) < need) return false;
     const ClassicArmyOrder& hero_ord = OrderOf(game, hero);
@@ -333,8 +337,9 @@ bool QuestGo(Game& game, Side& side, size_t hero_index, Info& info) {
 void Phase(Game& game, Side& side) {
     AIData& data = Data(game, side);
     data.quest_city = kNone;
+    Map& map = game.GetMap();
     auto side_quest = side.QuestPtr();
-    if (game.map->options.quests != 0 && side_quest &&
+    if (map.GameOptions().quests != 0 && side_quest &&
         (side_quest->Type() == quest::kOccupy || side_quest->Type() == quest::kRaze)) {
         City* quest_city = side_quest->ResolveCity(game);
         if (quest_city) data.quest_city = quest_city->Index();
@@ -344,7 +349,7 @@ void Phase(Game& game, Side& side) {
         Army* hero = info.heroes[hero_index];
         if (hero && Alive(game, hero) && hero->OwnerIndex() == side.Index() && IsHero(hero)) {
             if (info.city[hero_index]) cities::Garrison(game, side, *info.city[hero_index], true);
-            bool skip = game.map->options.quests != 0 && side.ActiveQuest() &&
+            bool skip = map.GameOptions().quests != 0 && side.ActiveQuest() &&
                         side.ActiveQuest()->HeroId() == hero->Id() &&
                         QuestGo(game, side, hero_index, info);
             if (!skip && Alive(game, hero)) {
@@ -352,10 +357,7 @@ void Phase(Game& game, Side& side) {
                 // it; otherwise its stack forgets the order.
                 if (OrderOf(game, hero).order == kOrderSite) {
                     int hero_dest = OrderOf(game, hero).dest;
-                    Site* site =
-                            hero_dest >= 0 && hero_dest < static_cast<int>(game.map->sites.size())
-                                    ? &game.map->sites[hero_dest]
-                                    : nullptr;
+                    Site* site = map.SiteById(SiteId(hero_dest));
                     if (!site || !Worth(game, side, *site, hero)) {
                         for (Army* army : OnTile(game, side.Index(), hero->X(), hero->Y())) {
                             if (OrderOf(game, army).order == OrderOf(game, hero).order) {
@@ -387,7 +389,7 @@ void Phase(Game& game, Side& side) {
                     } else {
                         // Nothing to go for: early on a hidden map, a lone
                         // hero that has moved explores.
-                        if (moved && game.map->options.hidden_map != 0 && game.turn < 10 &&
+                        if (moved && map.GameOptions().hidden_map != 0 && game.Turn() < 10 &&
                             Collect(game, side.Index(), hero->X(), hero->Y(), 8).size() == 1) {
                             moves::Explore(game, side, hero, nullptr);
                         }

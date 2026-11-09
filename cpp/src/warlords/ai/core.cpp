@@ -29,13 +29,13 @@ int Dist(int from_x, int from_y, int to_x, int to_y) {
 
 bool InPlay(const Game& game, int index) {
     if (index < 0 || index > 7) return false;
-    const Side& side = game.map->sides[index];
+    const Side& side = game.GetMap().Sides()[index];
     return side.InUse() && side.IsAlive();
 }
 
 bool IsComputer(const Game& game, int index) {
     if (index < 0 || index > 7) return false;
-    return game.map->sides[index].IsComputerControlled();
+    return game.GetMap().Sides()[index].IsComputerControlled();
 }
 
 int State(const Game& game, int side_index, int other_index) {
@@ -61,14 +61,11 @@ City* CityAt(const Game& game, int x, int y) {
 }
 
 Site* SiteAt(const Game& game, int x, int y) {
-    if (game.map->site_at.empty() || x < 0 || y < 0 || x >= game.map->width ||
-        y >= game.map->height)
-        return nullptr;
-    return game.map->site_at[y * game.map->width + x];
+    return game.HasMap() ? const_cast<Site*>(game.GetMap().SiteAt(x, y)) : nullptr;
 }
 
 int Terrain(const Game& game, int x, int y) {
-    return scn::TerrainAt(*game.map, x, y);
+    return scn::TerrainAt(game.GetMap(), x, y);
 }
 
 bool SiteOpen(const Site& site) {
@@ -76,11 +73,12 @@ bool SiteOpen(const Site& site) {
 }
 
 bool Explored(const Game& game, int side_index, int x, int y) {
-    if (game.map->options.hidden_map == 0) return true;
+    const Map& map = game.GetMap();
+    if (map.GameOptions().hidden_map == 0) return true;
     for (int tile_x = x - 1; tile_x <= x + 1; tile_x++) {
         for (int tile_y = y - 1; tile_y <= y + 1; tile_y++) {
-            if (tile_x >= 0 && tile_y >= 0 && tile_x < game.map->width &&
-                tile_y < game.map->height && game::Seen(game, side_index, tile_x, tile_y))
+            if (tile_x >= 0 && tile_y >= 0 && tile_x < map.Width() && tile_y < map.Height() &&
+                game::Seen(game, side_index, tile_x, tile_y))
                 return true;
         }
     }
@@ -88,25 +86,25 @@ bool Explored(const Game& game, int side_index, int x, int y) {
 }
 
 bool Flies(const Game& game, const Army* army) {
-    return game.types.ById(army->Type())->flies;
+    return game.ArmyTypes().ById(army->Type())->flies;
 }
 bool Magical(const Game& game, const Army* army) {
-    return game.types.ById(army->Type())->IsMagical();
+    return game.ArmyTypes().ById(army->Type())->IsMagical();
 }
 int Ability(const Game& game, const Army* army) {
-    return game.types.ById(army->Type())->Ability();
+    return game.ArmyTypes().ById(army->Type())->Ability();
 }
 bool Woods(const Game& game, const Army* army) {
-    return game.types.ById(army->Type())->woods_move;
+    return game.ArmyTypes().ById(army->Type())->woods_move;
 }
 bool Hills(const Game& game, const Army* army) {
-    return game.types.ById(army->Type())->hills_move;
+    return game.ArmyTypes().ById(army->Type())->hills_move;
 }
 
 std::vector<Army*> Armies(const Game& game, int side_index) {
     std::vector<Army*> out;
-    for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
-        Army* army = game.armies[i];
+    for (int i = static_cast<int>(game.Armies().size()) - 1; i >= 0; i--) {
+        Army* army = game.Armies()[i];
         if (army->OwnerIndex() == side_index) out.push_back(army);
     }
     return out;
@@ -114,8 +112,8 @@ std::vector<Army*> Armies(const Game& game, int side_index) {
 
 std::vector<Army*> OnTile(const Game& game, int side_index, int x, int y) {
     std::vector<Army*> out;
-    for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
-        Army* army = game.armies[i];
+    for (int i = static_cast<int>(game.Armies().size()) - 1; i >= 0; i--) {
+        Army* army = game.Armies()[i];
         if (army->OwnerIndex() == side_index && !army->InTransit() && army->X() == x &&
             army->Y() == y)
             out.push_back(army);
@@ -135,37 +133,40 @@ AIData& Data(Game& game, Side& side) {
 }
 
 AIData& Data(Game& game, int side_index) {
-    return Data(game, *game.map->Side(side_index));
+    return Data(game, *game.GetMap().SideAt(side_index));
 }
 
 const ClassicArmyOrder& OrderOf(const Game& game, const Army* army) {
     static const absl::NoDestructor<ClassicArmyOrder> kDefault;
-    if (!army || !game.map || army->OwnerIndex() < 0 || army->OwnerIndex() > 7) return *kDefault;
-    const ClassicAiPlayer* player = ClassicAiPlayer::FindOn(game.map->sides[army->OwnerIndex()]);
+    if (!army || !game.HasMap() || army->OwnerIndex() < 0 || army->OwnerIndex() > 7)
+        return *kDefault;
+    const ClassicAiPlayer* player =
+            ClassicAiPlayer::FindOn(game.GetMap().Sides()[army->OwnerIndex()]);
     return player ? player->OrderFor(army->Id()) : *kDefault;
 }
 
 ClassicArmyOrder& MutableOrderOf(Game& game, Army* army) {
     static ClassicArmyOrder fallback_scratch;
-    if (!army || !game.map || army->OwnerIndex() < 0 || army->OwnerIndex() > 7) {
+    if (!army || !game.HasMap() || army->OwnerIndex() < 0 || army->OwnerIndex() > 7) {
         fallback_scratch = ClassicArmyOrder{};
         return fallback_scratch;
     }
-    return ClassicAiPlayer::EnsureOn(game, game.map->sides[army->OwnerIndex()])
+    return ClassicAiPlayer::EnsureOn(game, game.GetMap().Sides()[army->OwnerIndex()])
             .MutableOrderFor(army->Id());
 }
 
 void ClearOrder(Game& game, Army* army) {
-    if (!army || !game.map || army->OwnerIndex() < 0 || army->OwnerIndex() > 7) return;
+    if (!army || !game.HasMap() || army->OwnerIndex() < 0 || army->OwnerIndex() > 7) return;
     if (ClassicAiPlayer* player =
-                ClassicAiPlayer::FindMutableOn(game.map->sides[army->OwnerIndex()])) {
+                ClassicAiPlayer::FindMutableOn(game.GetMap().Sides()[army->OwnerIndex()])) {
         player->ClearOrder(army->Id());
     }
 }
 
 std::pair<std::vector<City*>, std::vector<int>> FindNeighbours(Game& game, const City& city) {
+    Map& map = game.GetMap();
     std::shared_ptr<Neighbours> table;
-    for (const auto& side : game.map->sides) {
+    for (const auto& side : map.Sides()) {
         if (const ClassicAiPlayer* player = ClassicAiPlayer::FindOn(side)) {
             if (player->NeighbourTable()) {
                 table = player->NeighbourTable();
@@ -175,7 +176,7 @@ std::pair<std::vector<City*>, std::vector<int>> FindNeighbours(Game& game, const
     }
     if (!table) {
         table = BuildNeighbours(game);
-        for (auto& side : game.map->sides) {
+        for (auto& side : map.Sides()) {
             if (ClassicAiPlayer* player = ClassicAiPlayer::FindMutableOn(side)) {
                 player->SetNeighbourTable(table);
             }
@@ -184,7 +185,7 @@ std::pair<std::vector<City*>, std::vector<int>> FindNeighbours(Game& game, const
     std::pair<std::vector<City*>, std::vector<int>> out;
     if (city.Index() >= 0 && city.Index() < static_cast<int>(table->by_city.size())) {
         const auto& entry = table->by_city[city.Index()];
-        for (int city_index : entry.cities) out.first.push_back(&game.map->cities[city_index]);
+        for (int city_index : entry.cities) out.first.push_back(&map.Cities()[city_index]);
         out.second = entry.dist;
     }
     return out;
@@ -204,15 +205,16 @@ namespace {
  */
 int PickNeighbours(Game& game, const City& city, const Flood& flood, std::vector<int>& picked,
                    std::vector<int>& dists) {
+    const Map& map = game.GetMap();
     int slot_city[50], slot_dist[50];
     for (int slot = 0; slot < 50; slot++) {
         slot_city[slot] = -1;
         slot_dist[slot] = 0;
     }
     int found = 0;
-    for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
+    for (int i = map.CityCount() - 1; i >= 0; i--) {
         if (i == city.Index()) continue;
-        auto [distance, near_x, near_y] = CityDistance(game, flood, game.map->cities[i]);
+        auto [distance, near_x, near_y] = CityDistance(game, flood, map.Cities()[i]);
         (void)near_y;
         if (near_x == kNone) continue;
         found++;
@@ -237,7 +239,7 @@ int PickNeighbours(Game& game, const City& city, const Flood& flood, std::vector
         int best = -1, best_score = 10000;
         for (int slot = 49; slot >= 0; slot--) {
             if (slot_city[slot] != -1) {
-                const City& other = game.map->cities[slot_city[slot]];
+                const City& other = map.Cities()[slot_city[slot]];
                 int score = slot_dist[slot];
                 if ((other.X() < city.X() && left > 2) || (city.X() < other.X() && right > 2) ||
                     (other.Y() < city.Y() && above > 2) || (city.Y() < other.Y() && down > 2)) {
@@ -250,7 +252,7 @@ int PickNeighbours(Game& game, const City& city, const Flood& flood, std::vector
             }
         }
         if (best == -1) break;
-        const City& other = game.map->cities[slot_city[best]];
+        const City& other = map.Cities()[slot_city[best]];
         picked.push_back(other.Index());
         dists.push_back(slot_dist[best]);
         if (other.X() < city.X()) left++;
@@ -265,8 +267,9 @@ int PickNeighbours(Game& game, const City& city, const Flood& flood, std::vector
 
 std::shared_ptr<Neighbours> BuildNeighbours(Game& game) {
     auto out = std::make_shared<Neighbours>();
-    out->by_city.resize(game.map->cities.size());
-    for (auto& city : game.map->cities) {
+    Map& map = game.GetMap();
+    out->by_city.resize(map.Cities().size());
+    for (auto& city : map.Cities()) {
         std::vector<int> picked, dists;
         int found = PickNeighbours(game, city,
                                    FloodFrom(game, 0, city.X(), city.Y(), 45, move::kLand, kNone),
@@ -306,13 +309,14 @@ Sel Select(Game& game, const std::vector<Army*>& list) {
  *        the highest-ranked army leads a stack.
  */
 static int FightRank(const Game& game, const Army* army) {
-    const auto& row = game.map->fight_order[army->OwnerIndex() == kNone ? 8 : army->OwnerIndex()];
+    const auto& row =
+            game.GetMap().FightOrder()[army->OwnerIndex() == kNone ? 8 : army->OwnerIndex()];
     return army->TypeIndex() < static_cast<int>(row.size()) ? row[army->TypeIndex()] : 0;
 }
 
 int NewGroup(const Game& game, int side_index) {
     std::set<int> used;
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         if (army->OwnerIndex() == side_index && !army->InTransit() && army->Group())
             used.insert(army->Group());
     }
@@ -351,8 +355,9 @@ std::optional<Sel> Order(Game& game, const std::vector<Army*>& list, int order, 
 void SetTarget(Game& game, Army* army, int order, int dest) {
     if (order == kOrderRoam) return;
     int x = kNone, y = kNone;
+    Map& map = game.GetMap();
     if (order == kOrderCity && dest != kNone) {
-        City* city = game.map->City(dest);
+        City* city = map.CityAt(dest);
         if (city) {
             // An own city's bottom-right tile; an enemy's nearest corner.
             x = city->X();
@@ -366,18 +371,17 @@ void SetTarget(Game& game, Army* army, int order, int dest) {
             }
         }
     } else if (order == kOrderItem && dest != kNone) {
-        if (dest >= 0 && dest < static_cast<int>(game.map->items.size())) {
-            const Item& item = game.map->items[dest];
+        if (dest >= 0 && dest < map.ItemCount()) {
+            const Item& item = map.Items()[dest];
             if (item.x != kNone) {
                 x = item.x;
                 y = item.y;
             }
         }
     } else if (order == kOrderSite && dest != kNone) {
-        if (dest >= 0 && dest < static_cast<int>(game.map->sites.size())) {
-            const Site& site = game.map->sites[dest];
-            x = site.x;
-            y = site.y;
+        if (const Site* site = map.SiteById(SiteId(dest))) {
+            x = site->x;
+            y = site->y;
         }
     }
     army->SetTarget(TilePos(x != kNone ? x : army->X(), y != kNone ? y : army->Y()));
@@ -429,8 +433,8 @@ Flood FloodFrom(Game& game, int side_index, int x, int y, int range, const Sel* 
         hills = stack_mode.hills;
     }
     Flood flood;
-    flood.w = game.map->width;
-    flood.h = game.map->height;
+    flood.w = game.GetMap().Width();
+    flood.h = game.GetMap().Height();
     flood.dist = move::Flood(game, side_index, x, y, range, mode, woods, hills,
                              fog_side == kSameSide ? side_index : fog_side);
     return flood;
@@ -438,8 +442,8 @@ Flood FloodFrom(Game& game, int side_index, int x, int y, int range, const Sel* 
 
 Flood FloodFrom(Game& game, int side_index, int x, int y, int range, int mode, int fog_side) {
     Flood flood;
-    flood.w = game.map->width;
-    flood.h = game.map->height;
+    flood.w = game.GetMap().Width();
+    flood.h = game.GetMap().Height();
     flood.dist = move::Flood(game, side_index, x, y, range, mode, false, false,
                              fog_side == kSameSide ? side_index : fog_side);
     return flood;
@@ -498,7 +502,7 @@ void PickUp(Game& game, const Sel& sel) {
     if (!sel.hero || !Alive(game, sel.hero)) return;
     Army* hero = sel.hero;
     City* city = CityAt(game, hero->X(), hero->Y());
-    for (auto& item : game.map->items) {
+    for (auto& item : game.GetMap().Items()) {
         if (item.status == 1 && item.x != kNone && !item.planted) {
             // In a city, anything inside its footprint counts.
             bool here;
@@ -564,7 +568,7 @@ Battle Fight(Game& game, Sel& sel, int x, int y) {
     int side_index = sel.armies.empty() ? kNone : sel.armies[0]->OwnerIndex();
     City* city = result.lines.city;
     if (city && city->OwnerIndex() != kNone && side_index != kNone &&
-        game.map->options.diplomacy != 0 &&
+        game.GetMap().GameOptions().diplomacy != 0 &&
         diplomacy::State(game, side_index, city->OwnerIndex()) != diplomacy::kWar) {
         diplomacy::AttackAnyway(game, side_index, city->OwnerIndex());
     }
@@ -585,8 +589,8 @@ void Done(const Sel& sel) {
 }
 
 int MoveTo(Game& game, Sel& sel, int target_x, int target_y, bool keep) {
-    if (sel.armies.empty() || target_x < 0 || target_y < 0 || target_x >= game.map->width ||
-        target_y >= game.map->height)
+    if (sel.armies.empty() || target_x < 0 || target_y < 0 || target_x >= game.GetMap().Width() ||
+        target_y >= game.GetMap().Height())
         return 0;
     int code = 0;
     bool again = true;
@@ -608,7 +612,7 @@ int MoveTo(Game& game, Sel& sel, int target_x, int target_y, bool keep) {
             City* city = CityAt(game, target_x, target_y);
             if (city && Standing(*city)) {
                 int lead_dest = lead ? OrderOf(game, lead).dest : kNone;
-                City* dest = lead_dest != kNone ? game.map->City(lead_dest) : nullptr;
+                City* dest = lead_dest != kNone ? game.GetMap().CityAt(lead_dest) : nullptr;
                 if (!dest) dest = city;
                 auto [walk_on, next_x, next_y] = AttackCity(game, sel, dest, attack_x, attack_y);
                 again = walk_on;
@@ -673,7 +677,8 @@ City* Retarget(Game& game, Sel& sel, City* city, int x, int y) {
     int owner = Owner(*city);
     // Fair game: a neutral, a side at war, and now and then a human.
     bool fair = owner == kNeutral || State(game, owner, side_index) == 2;
-    if (owner != kNeutral && !IsComputer(game, owner) && game.rng.Dice(1, 4, -1) == 0) fair = true;
+    if (owner != kNeutral && !IsComputer(game, owner) && game.GetRng().Dice(1, 4, -1) == 0)
+        fair = true;
     if (!fair || odds < 51) {
         Flood flood = FloodFrom(game, side_index, sel.leader->X(), sel.leader->Y(), 15, &sel);
         City* best = BestCity(game, sel, flood, fair);
@@ -687,9 +692,9 @@ City* BestCity(Game& game, const Sel& sel, const Flood& flood, bool skip_own) {
     AIData& data = Data(game, side_index);
     City* best = nullptr;
     int best_score = -1;
-    auto& cities = game.map->cities;
-    for (int i = static_cast<int>(cities.size()) - 1; i >= 0; i--) {
-        City& city = cities[i];
+    Map& map = game.GetMap();
+    for (int i = map.CityCount() - 1; i >= 0; i--) {
+        City& city = map.Cities()[i];
         int owner = Owner(city);
         if (!(skip_own && owner == side_index) && Standing(city) &&
             data.quest_city != city.Index() && !Cflag(data, city, kCfUnseen) &&

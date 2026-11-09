@@ -22,7 +22,7 @@ namespace w2 {
 struct AIThought;
 class Army;
 class City;
-struct Game;
+class Game;
 class Side;
 struct SideBelief;
 

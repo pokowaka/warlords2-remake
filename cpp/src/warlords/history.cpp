@@ -9,24 +9,12 @@ namespace w2::history {
 void RecordDeed(Game& game, const Side* side, DeedType type, int subject, int object,
                 const std::string& name) {
     if (!side) return;
-    auto& kept = game.deeds[side->Index()];
-    Deed deed{side->Index(), type, subject, object, name.substr(0, 15)};
-    if (kept.size() < 2) {
-        kept.push_back(deed);
-        return;
-    }
-    // a lower type counts for more: replace the less important of the two
-    int worse = kept[1].type >= kept[0].type ? 1 : 0;
-    if (kept[worse].type > type) kept[worse] = deed;
+    game.RecordDeed(side->Id(), type, subject, object, name);
 }
 
 /** @brief Adds `n` to one kind of loss in `side`'s Triumphs row for `opponent`. */
 static void Bump(Game& game, int side, int opponent, Loss kind, int n = 1) {
-    if (side < 0 || opponent < 0 || side > 7 || opponent > 7) return;
-    auto& row = game.triumphs[side]
-                        .try_emplace(opponent, std::array<int, 5>{0, 0, 0, 0, 0})
-                        .first->second;
-    row[static_cast<int>(kind)] += n;
+    game.RecordTriumphLoss(side, opponent, static_cast<int>(kind), n);
 }
 
 void Tally(Game& game, const Army* army, int killer, bool boat) {
@@ -34,7 +22,7 @@ void Tally(Game& game, const Army* army, int killer, bool boat) {
     Loss kind;
     if (army->Hero())
         kind = Loss::kHeroes;
-    else if (game.types.ById(army->Type())->IsMagical())
+    else if (game.ArmyTypes().ById(army->Type())->IsMagical())
         kind = Loss::kCreatures;
     else
         kind = Loss::kArmies;
@@ -51,48 +39,43 @@ void Tally(Game& game, const Army* army, int killer, bool boat) {
 }
 
 int Triumph(const Game& game, int side, int opponent, Loss kind) {
-    auto side_rows = game.triumphs.find(side);
-    if (side_rows == game.triumphs.end()) return 0;
-    auto row = side_rows->second.find(opponent);
-    if (row == side_rows->second.end()) return 0;
-    return row->second[static_cast<int>(kind)];
+    return game.TriumphCount(side, opponent, static_cast<int>(kind));
 }
 
 void Record(Game& game) {
-    if (game.turn > kLastRecordedTurn) return;
+    if (game.Turn() > kLastRecordedTurn) return;
+    const Map& map = game.GetMap();
     HistoryRecord record;
-    auto win = report::ComputeFigures(game, *game.sides[0], report::kWinning);
+    auto win = report::ComputeFigures(game, *game.Sides()[0], report::kWinning);
     for (int i = 0; i < 8; i++) {
-        Side* side = game.map->Side(i);
+        const Side* side = map.SideAt(i);
         record.gold[i] = (side && side->InUse()) ? side->Gold() : 0;
         record.score[i] = win.value[i];
         record.cities[i] = side ? static_cast<int>(game::SideCities(game, *side).size()) : 0;
     }
-    for (const auto& city : game.map->cities)
+    for (const auto& city : map.Cities())
         record.owners.push_back(city.IsRazed() ? 0xff : (city.IsNeutral() ? 8 : city.OwnerIndex()));
     // every side's first deed, then second ones while there is room
     int kept = 0;
     int take[8] = {0};
     for (int i = 0; i < 8; i++) {
-        auto side_deeds = game.deeds.find(i);
-        if (side_deeds != game.deeds.end() && side_deeds->second.size() >= 1) {
+        if (game.DeedsForSide(i).size() >= 1) {
             take[i] = 1;
             kept++;
         }
     }
     for (int i = 0; i < 8; i++) {
-        auto side_deeds = game.deeds.find(i);
-        if (side_deeds != game.deeds.end() && side_deeds->second.size() >= 2 &&
-            kept < kMaxDeedsPerRound) {
+        if (game.DeedsForSide(i).size() >= 2 && kept < kMaxDeedsPerRound) {
             take[i] = 2;
             kept++;
         }
     }
     for (int i = 0; i < 8; i++) {
-        for (int j = 0; j < take[i]; j++) record.events.push_back(game.deeds[i][j]);
+        const auto& side_deeds = game.DeedsForSide(i);
+        for (int j = 0; j < take[i]; j++) record.events.push_back(side_deeds[j]);
     }
-    game.deeds.clear();
-    game.history.push_back(record);
+    game.ClearDeeds();
+    game.AppendHistoryRecord(std::move(record));
 }
 
 }  // namespace w2::history

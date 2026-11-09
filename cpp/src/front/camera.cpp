@@ -71,7 +71,7 @@ std::pair<int, int> ViewCentre() {
 /** @brief The tiles the view touches, clipped to the map: x0, y0, x1, y1. */
 std::array<int, 4> ViewTiles() {
     auto [view_w, view_h] = ViewSize();
-    int map_w = g_app.g->map->width, map_h = g_app.g->map->height;
+    int map_w = g_app.g->GetMap().Width(), map_h = g_app.g->GetMap().Height();
     return {std::max(0, static_cast<int>(std::floor(g_app.cx))),
             std::max(0, static_cast<int>(std::floor(g_app.cy))),
             std::min(map_w - 1, static_cast<int>(std::ceil(g_app.cx + view_w)) - 1),
@@ -94,7 +94,7 @@ bool InView(int x, int y) {
 void ClampCamera() {
     if (!g_app.g) return;
     auto [view_w, view_h] = ViewSize();
-    int map_w = g_app.g->map->width, map_h = g_app.g->map->height;
+    int map_w = g_app.g->GetMap().Width(), map_h = g_app.g->GetMap().Height();
     g_app.cx = view_w >= map_w ? (map_w - view_w) / 2
                                : std::max(0.0, std::min(g_app.cx, map_w - view_w));
     g_app.cy = view_h >= map_h ? (map_h - view_h) / 2
@@ -247,11 +247,11 @@ void ToggleCrt() {
  *        side's setting in the game under way, else the default.
  */
 static bool ActiveClassicAi() {
-    if (g_app.g && g_app.g->map && !g_app.starting) {
-        for (const auto& side : g_app.g->map->sides) {
+    if (g_app.g && g_app.g->HasMap() && !g_app.starting) {
+        for (const auto& side : g_app.g->GetMap().Sides()) {
             if (side.InUse() && side.IsComputerControlled()) return side.IsClassicAi();
         }
-        for (const auto& side : g_app.g->map->sides) {
+        for (const auto& side : g_app.g->GetMap().Sides()) {
             if (side.InUse()) return side.IsClassicAi();
         }
     }
@@ -265,8 +265,8 @@ static bool ActiveClassicAi() {
 void SetAiMode(bool classic) {
     w2::ai::SetDefaultClassicAi(classic);
     prefs::Set("ai", classic ? "classic" : "modern");
-    if (g_app.g && g_app.g->map) {
-        for (auto& side : g_app.g->map->sides) {
+    if (g_app.g && g_app.g->HasMap()) {
+        for (auto& side : g_app.g->GetMap().Sides()) {
             w2::ai::SetSideClassicAi(*g_app.g, side, classic);
         }
     }

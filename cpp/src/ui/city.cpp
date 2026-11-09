@@ -62,8 +62,8 @@ bool vector_see_all = false;
 
 /** @brief The index of the side whose capital the city is, or kNone. */
 int CapitalOf(const w2::City* city) {
-    for (const auto& side : g_app.g->map->sides)
-        if (side.CapitalCity(*g_app.g->map) == city) return side.Index();
+    for (const auto& side : g_app.g->GetMap().Sides())
+        if (side.CapitalCity(g_app.g->GetMap()) == city) return side.Index();
     return kNone;
 }
 
@@ -96,7 +96,8 @@ void Stats(const w2::City* city) {
     else if (city->IsNeutral())
         owner = kit::Text(kTextStats, 3);
     else
-        owner = Format(kit::Text(kTextStats, 4), g_app.g->map->sides[city->OwnerIndex()].Name());
+        owner = Format(kit::Text(kTextStats, 4),
+                       g_app.g->GetMap().Sides()[city->OwnerIndex()].Name());
     font.Draw(owner, kStatAt[2][0], kStatAt[2][1]);
 }
 
@@ -109,7 +110,7 @@ void Shields(const w2::City* city) {
 
 /** @brief Draws the 40x40 map tile at map position (map_x, map_y) at screen (x, y). */
 void Tile(int map_x, int map_y, int x, int y) {
-    int tile = w2::scn::TileAt(*g_app.g->map, map_x, map_y);
+    int tile = w2::scn::TileAt(g_app.g->GetMap(), map_x, map_y);
     int sheet = tile / 96, cell = tile % 96;
     gfx::SetColor(1, 1, 1);
     gfx::Draw(g_app.sheets[std::min(sheet, 1)],
@@ -286,7 +287,7 @@ struct CityDialog : kit::Modal {
         Shields(city);
         Stats(city);
         int owner = city->IsNeutral() ? 8 : city->OwnerIndex();
-        if (!city->IsRazed() && (g_app.g->map->options.view_production == 0 ||
+        if (!city->IsRazed() && (g_app.g->GetMap().GameOptions().view_production == 0 ||
                                  city->OwnerIndex() == g_app.player->Index())) {
             for (int i = 0; i < 4; i++) {
                 bool have = i < city->SlotCount();
@@ -306,13 +307,13 @@ struct CityDialog : kit::Modal {
         }
         int capital_side = CapitalOf(city);
         if (capital_side != kNone) SmallShield(capital_side, 408, 170);
-        auto text = g_app.g->map->city_text.find(city->Index());
+        const auto* desc_lines = g_app.g->GetMap().CityDescription(city->Index());
         const Font& font = kit::GetFont(2);
         gfx::SetColor(1, 1, 1);
-        if (text != g_app.g->map->city_text.end())
+        if (desc_lines)
             for (int i = 0; i < 3; i++)
-                if (!text->second[i].empty())
-                    font.Draw(text->second[i], kTextAt[i][0], kTextAt[i][1]);
+                if (!(*desc_lines)[i].empty())
+                    font.Draw((*desc_lines)[i], kTextAt[i][0], kTextAt[i][1]);
     }
 
     /** @brief Draws City mode: the stats and two lines on each of Rename, Raze and Build. */
@@ -353,7 +354,7 @@ struct CityDialog : kit::Modal {
                         kTextCurrent,
                         w2::game::StandardAt(*g_app.g, *g_app.player).first != kNone ? 2 : 3);
             } else {
-                w2::City* dest = g_app.g->map->City(city->VectoredCityId());
+                w2::City* dest = g_app.g->GetMap().CityById(city->VectoredCityId());
                 where = dest ? dest->Name() : kit::Text(kTextCurrent, 3);
             }
             font.Draw(turns_left + kit::Text(kTextCurrent, 1), 456, 102);
@@ -399,7 +400,7 @@ struct CityDialog : kit::Modal {
         w2::Army* out = nullptr;
         w2::Army* on_road = nullptr;
         std::vector<w2::Army*> next, after;
-        for (w2::Army* army : g_app.g->armies) {
+        for (w2::Army* army : g_app.g->Armies()) {
             if (army->InTransit() && army->OwnerIndex() == g_app.player->Index()) {
                 if (city->IsVectored() && army->HomeCity() == city->Id() &&
                     army->TransitState()->dest == city->VectorDestination()) {
@@ -614,7 +615,7 @@ struct CityDialog : kit::Modal {
             return;
         }
         if (mode == kInfo && x >= 308 && x < 532 && y >= 180 && y < 230) {
-            if (city->IsRazed() || (g_app.g->map->options.view_production != 0 &&
+            if (city->IsRazed() || (g_app.g->GetMap().GameOptions().view_production != 0 &&
                                     city->OwnerIndex() != g_app.player->Index())) {
                 infobox::ShowLines(screen_x, screen_y, city->Name(), "A picture of the city!");
                 return;

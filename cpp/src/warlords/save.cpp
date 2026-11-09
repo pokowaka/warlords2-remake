@@ -225,15 +225,16 @@ VectorTarget DecodeVectorTarget(const Json& json_val) {
 }  // namespace
 
 std::string Encode(const Game& game) {
+    const Map& map = game.GetMap();
     std::map<const Army*, int> ids;
-    for (size_t i = 0; i < game.armies.size(); i++) ids[game.armies[i]] = static_cast<int>(i);
+    for (size_t i = 0; i < game.Armies().size(); i++) ids[game.Armies()[i]] = static_cast<int>(i);
     auto id_of = [&](const Army* army) -> Json {
         auto found_it = ids.find(army);
         return found_it == ids.end() ? Json(nullptr) : Json(found_it->second);
     };
 
     Json armies = Json::array();
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         Json obj = Json::object();
         obj["slot"] = army->Slot();
         obj["x"] = OptInt(army->X());
@@ -278,7 +279,7 @@ std::string Encode(const Game& game) {
     }
 
     Json sides = Json::array();
-    for (Side* side : game.sides) {
+    for (Side* side : game.Sides()) {
         Json obj = Json::object();
         obj["index"] = side->Index();
         obj["name"] = Latin1ToUtf8(side->Name());
@@ -344,7 +345,7 @@ std::string Encode(const Game& game) {
     }
 
     Json cities = Json::array();
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : map.Cities()) {
         Json obj = Json::object();
         obj["index"] = city.Index();
         obj["name"] = Latin1ToUtf8(city.Name());
@@ -365,7 +366,7 @@ std::string Encode(const Game& game) {
     }
 
     Json sites = Json::array();
-    for (const auto& site : game.map->sites) {
+    for (const auto& site : map.Sites()) {
         Json obj = Json::object();
         obj["index"] = site.index;
         obj["content"] = site.content;
@@ -381,7 +382,7 @@ std::string Encode(const Game& game) {
     }
 
     Json items = Json::array();
-    for (const auto& item : game.map->items) {
+    for (const auto& item : map.Items()) {
         Json obj = Json::object();
         obj["index"] = item.index;
         obj["name"] = Latin1ToUtf8(item.name);
@@ -396,47 +397,48 @@ std::string Encode(const Game& game) {
     }
 
     Json signs = Json::array();
-    for (const auto& sign : game.map->signs) {
+    for (const auto& sign : map.Signs()) {
         signs.push_back(Json::array({Latin1ToUtf8(sign.lines[0]), Latin1ToUtf8(sign.lines[1])}));
     }
     Json towers = Json::array();
-    for (int tile_key : game.towers) towers.push_back(tile_key);
+    for (int tile_key : game.TowerKeys()) towers.push_back(tile_key);
     Json explored = Json::object();
-    for (SideId side_id : game.explored.SidesWithMasks()) {
-        explored[std::to_string(side_id.Value())] = PackMask(game.explored.MaskFor(side_id));
+    for (SideId side_id : game.Explored().SidesWithMasks()) {
+        explored[std::to_string(side_id.Value())] = PackMask(game.Explored().MaskFor(side_id));
     }
 
     Json opts = Json::object();
+    Options opts_copy = map.GameOptions();
     for (const auto& opt_name : Options::Names()) {
-        opts[opt_name] = *const_cast<Options&>(game.map->options).Field(opt_name);
+        opts[opt_name] = *opts_copy.Field(opt_name);
     }
 
     Json dip = Json::object();
-    dip["state"] = IntArray(game.diplomacy.StateTable());
-    dip["proposal"] = IntArray(game.diplomacy.ProposalTable());
+    dip["state"] = IntArray(game.Diplomacy().StateTable());
+    dip["proposal"] = IntArray(game.Diplomacy().ProposalTable());
     auto has_non_default = [](const auto& arr, int dflt) {
         for (int val : arr) {
             if (val != dflt) return true;
         }
         return false;
     };
-    if (has_non_default(game.diplomacy.AlliedTable(), 0))
-        dip["allied"] = IntArray(game.diplomacy.AlliedTable());
-    if (has_non_default(game.diplomacy.ProposeAlliedTable(), 0))
-        dip["proposeAllied"] = IntArray(game.diplomacy.ProposeAlliedTable());
-    if (has_non_default(game.diplomacy.TruceTurnsTable(), 0))
-        dip["truceTurns"] = IntArray(game.diplomacy.TruceTurnsTable());
-    if (has_non_default(game.diplomacy.GoldOfferTable(), 0))
-        dip["goldOffer"] = IntArray(game.diplomacy.GoldOfferTable());
-    if (has_non_default(game.diplomacy.WarTargetTable(), kNone))
-        dip["warTarget"] = IntArray(game.diplomacy.WarTargetTable());
-    if (has_non_default(game.diplomacy.TrustTable(), 0))
-        dip["trust"] = IntArray(game.diplomacy.TrustTable());
-    if (has_non_default(game.diplomacy.AlliedTargetCityTable(), kNone))
-        dip["alliedTargetCity"] = IntArray(game.diplomacy.AlliedTargetCityTable());
+    if (has_non_default(game.Diplomacy().AlliedTable(), 0))
+        dip["allied"] = IntArray(game.Diplomacy().AlliedTable());
+    if (has_non_default(game.Diplomacy().ProposeAlliedTable(), 0))
+        dip["proposeAllied"] = IntArray(game.Diplomacy().ProposeAlliedTable());
+    if (has_non_default(game.Diplomacy().TruceTurnsTable(), 0))
+        dip["truceTurns"] = IntArray(game.Diplomacy().TruceTurnsTable());
+    if (has_non_default(game.Diplomacy().GoldOfferTable(), 0))
+        dip["goldOffer"] = IntArray(game.Diplomacy().GoldOfferTable());
+    if (has_non_default(game.Diplomacy().WarTargetTable(), kNone))
+        dip["warTarget"] = IntArray(game.Diplomacy().WarTargetTable());
+    if (has_non_default(game.Diplomacy().TrustTable(), 0))
+        dip["trust"] = IntArray(game.Diplomacy().TrustTable());
+    if (has_non_default(game.Diplomacy().AlliedTargetCityTable(), kNone))
+        dip["alliedTargetCity"] = IntArray(game.Diplomacy().AlliedTargetCityTable());
 
     Json fight = Json::array();
-    for (const auto& row : game.map->fight_order) {
+    for (const auto& row : map.FightOrder()) {
         Json row_json = Json::array();
         for (int val : row) row_json.push_back(val);
         fight.push_back(std::move(row_json));
@@ -452,7 +454,7 @@ std::string Encode(const Game& game) {
         obj["name"] = Latin1ToUtf8(deed.name);
         return obj;
     };
-    for (const auto& rec : game.history) {
+    for (const auto& rec : game.History()) {
         Json obj = Json::object();
         obj["gold"] = IntArray(rec.gold);
         obj["score"] = IntArray(rec.score);
@@ -466,40 +468,40 @@ std::string Encode(const Game& game) {
         history.push_back(std::move(obj));
     }
     Json deeds = Json::object();
-    for (const auto& [side_idx, list] : game.deeds) {
+    for (const auto& [side_idx, list] : game.Deeds()) {
         Json list_json = Json::array();
         for (const auto& deed : list) list_json.push_back(deed_json(deed));
         deeds[std::to_string(side_idx)] = std::move(list_json);
     }
     Json triumphs = Json::object();
-    for (const auto& [my_side, row] : game.triumphs) {
+    for (const auto& [my_side, row] : game.Triumphs()) {
         Json row_json = Json::object();
         for (const auto& [opp, counts] : row) row_json[std::to_string(opp)] = IntArray(counts);
         triumphs[std::to_string(my_side)] = std::move(row_json);
     }
     Json seen = Json::array();
-    for (const auto& moment : game.tutorial_seen) seen.push_back(Latin1ToUtf8(moment));
+    for (const auto& moment : game.TutorialSeen()) seen.push_back(Latin1ToUtf8(moment));
     Json log = Json::array();
-    for (const auto& line : game.log) log.push_back(Latin1ToUtf8(line));
+    for (const auto& line : game.Log()) log.push_back(Latin1ToUtf8(line));
 
     Json out = Json::object();
     out["version"] = kVersion;
-    out["scenario"] = Latin1ToUtf8(game.map->name);
-    out["turn"] = game.turn;
-    out["current"] = game.current;
-    out["seed"] = static_cast<double>(game.rng.State());
+    out["scenario"] = Latin1ToUtf8(map.Name());
+    out["turn"] = game.Turn();
+    out["current"] = game.CurrentSideIndex();
+    out["seed"] = static_cast<double>(game.GetRng().State());
     {
         Json order = Json::array();
-        for (int val : game.turn_schedule.Order()) order.push_back(val);
+        for (int val : game.Schedule().Order()) order.push_back(val);
         out["turnOrder"] = std::move(order);
-        out["orderAt"] = game.turn_schedule.Cursor();
+        out["orderAt"] = game.Schedule().Cursor();
     }
-    out["won"] = game.won;
-    out["over"] = game.over;
-    out["noHumansSaid"] = game.no_humans_said;
-    out["greatest"] = game.greatest;
-    out["surrenderOffered"] = game.surrender_offered;
-    out["surrenderShown"] = game.surrender_shown;
+    out["won"] = game.IsWon();
+    out["over"] = game.IsOver();
+    out["noHumansSaid"] = game.NoHumansSaid();
+    out["greatest"] = game.IsGreatestCampaign();
+    out["surrenderOffered"] = game.SurrenderOffered();
+    out["surrenderShown"] = game.SurrenderShown();
     out["options"] = std::move(opts);
     out["diplomacy"] = std::move(dip);
     out["sides"] = std::move(sides);
@@ -516,23 +518,23 @@ std::string Encode(const Game& game) {
     out["triumphs"] = std::move(triumphs);
     out["tutorialSeen"] = std::move(seen);
     out["log"] = std::move(log);
-    if (!game.map->source_files.empty()) {
+    if (!map.SourceFiles().empty()) {
         std::vector<std::string> sorted_exts;
-        sorted_exts.reserve(game.map->source_files.size());
-        for (const auto& [ext, bytes] : game.map->source_files) {
+        sorted_exts.reserve(map.SourceFiles().size());
+        for (const auto& [ext, bytes] : map.SourceFiles()) {
             (void)bytes;
             sorted_exts.push_back(ext);
         }
         std::sort(sorted_exts.begin(), sorted_exts.end());
         Json world = Json::object();
         for (const std::string& ext : sorted_exts) {
-            world[ext] = BytesToHex(game.map->source_files.at(ext));
+            world[ext] = BytesToHex(map.SourceFiles().at(ext));
         }
         out["randomWorld"] = std::move(world);
-    } else if (game.map->name == randommap::kDir) {
+    } else if (map.Name() == randommap::kDir) {
         Json world = Json::object();
         for (const char* ext : randommap::kFiles) {
-            if (auto bytes = ReadBytes(game.data_dir / randommap::kDir /
+            if (auto bytes = ReadBytes(game.DataDir() / randommap::kDir /
                                        (std::string(randommap::kDir) + "." + ext));
                 bytes.ok()) {
                 world[ext] = BytesToHex(*bytes);
@@ -602,77 +604,78 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     auto game_ptr = game::NewGame(data_dir, scenario, opts);
     if (!game_ptr.ok()) return game_ptr.status();
     Game& game = **game_ptr;
-    game.armies.ClearActive();
-    game.turn = IntField(state, "turn", 1);
-    game.current = IntField(state, "current", 0);
+    Map& map = game.GetMap();
+    game.Armies().ClearActive();
+    game.SetTurn(IntField(state, "turn", 1));
+    game.SetCurrentSideIndex(IntField(state, "current", 0));
     const Json& turn_order = Field(state, "turnOrder");
     if (turn_order.is_array()) {
-        std::array<int, 8> loaded_order = game.turn_schedule.Order();
+        std::array<int, 8> loaded_order = game.Schedule().Order();
         for (size_t i = 0; i < 8 && i < turn_order.size(); i++) {
             loaded_order[i] = IntOf(turn_order[i]);
         }
-        game.turn_schedule.SetOrder(loaded_order);
+        game.Schedule().SetOrder(loaded_order);
     }
     const Json& seed_val = Field(state, "seed");
     if (seed_val.is_number()) {
-        game.rng.SetState(static_cast<uint32_t>(seed_val.get<double>()));
+        game.GetRng().SetState(static_cast<uint32_t>(seed_val.get<double>()));
     }
-    game.won = BoolField(state, "won");
-    game.over = BoolField(state, "over");
-    game.surrender_offered = BoolField(state, "surrenderOffered");
-    game.surrender_shown = BoolField(state, "surrenderShown");
-    game.no_humans_said = BoolField(state, "noHumansSaid");
-    game.greatest = BoolField(state, "greatest");
+    game.SetWon(BoolField(state, "won"));
+    game.SetOver(BoolField(state, "over"));
+    game.SetSurrenderOffered(BoolField(state, "surrenderOffered"));
+    game.SetSurrenderShown(BoolField(state, "surrenderShown"));
+    game.SetNoHumansSaid(BoolField(state, "noHumansSaid"));
+    game.SetGreatestCampaign(BoolField(state, "greatest"));
     const Json& dip = Field(state, "diplomacy");
     {
-        auto state_table = game.diplomacy.StateTable();
+        auto state_table = game.Diplomacy().StateTable();
         ReadIntArray(Field(dip, "state"), state_table);
-        game.diplomacy.SetStateTable(state_table);
+        game.Diplomacy().SetStateTable(state_table);
 
-        auto proposal_table = game.diplomacy.ProposalTable();
+        auto proposal_table = game.Diplomacy().ProposalTable();
         ReadIntArray(Field(dip, "proposal"), proposal_table);
-        game.diplomacy.SetProposalTable(proposal_table);
+        game.Diplomacy().SetProposalTable(proposal_table);
 
         if (HasField(dip, "allied")) {
-            auto allied_table = game.diplomacy.AlliedTable();
+            auto allied_table = game.Diplomacy().AlliedTable();
             ReadIntArray(Field(dip, "allied"), allied_table);
-            game.diplomacy.SetAlliedTable(allied_table);
+            game.Diplomacy().SetAlliedTable(allied_table);
         }
         if (HasField(dip, "proposeAllied")) {
-            auto propose_allied_table = game.diplomacy.ProposeAlliedTable();
+            auto propose_allied_table = game.Diplomacy().ProposeAlliedTable();
             ReadIntArray(Field(dip, "proposeAllied"), propose_allied_table);
-            game.diplomacy.SetProposeAlliedTable(propose_allied_table);
+            game.Diplomacy().SetProposeAlliedTable(propose_allied_table);
         }
         if (HasField(dip, "truceTurns")) {
-            auto truce_table = game.diplomacy.TruceTurnsTable();
+            auto truce_table = game.Diplomacy().TruceTurnsTable();
             ReadIntArray(Field(dip, "truceTurns"), truce_table);
-            game.diplomacy.SetTruceTurnsTable(truce_table);
+            game.Diplomacy().SetTruceTurnsTable(truce_table);
         }
         if (HasField(dip, "goldOffer")) {
-            auto gold_table = game.diplomacy.GoldOfferTable();
+            auto gold_table = game.Diplomacy().GoldOfferTable();
             ReadIntArray(Field(dip, "goldOffer"), gold_table);
-            game.diplomacy.SetGoldOfferTable(gold_table);
+            game.Diplomacy().SetGoldOfferTable(gold_table);
         }
         if (HasField(dip, "warTarget")) {
-            auto war_table = game.diplomacy.WarTargetTable();
+            auto war_table = game.Diplomacy().WarTargetTable();
             ReadIntArray(Field(dip, "warTarget"), war_table);
-            game.diplomacy.SetWarTargetTable(war_table);
+            game.Diplomacy().SetWarTargetTable(war_table);
         }
         if (HasField(dip, "trust")) {
-            auto trust_table = game.diplomacy.TrustTable();
+            auto trust_table = game.Diplomacy().TrustTable();
             ReadIntArray(Field(dip, "trust"), trust_table);
-            game.diplomacy.SetTrustTable(trust_table);
+            game.Diplomacy().SetTrustTable(trust_table);
         }
         if (HasField(dip, "alliedTargetCity")) {
-            auto target_city_table = game.diplomacy.AlliedTargetCityTable();
+            auto target_city_table = game.Diplomacy().AlliedTargetCityTable();
             ReadIntArray(Field(dip, "alliedTargetCity"), target_city_table);
-            game.diplomacy.SetAlliedTargetCityTable(target_city_table);
+            game.Diplomacy().SetAlliedTargetCityTable(target_city_table);
         }
     }
-    game.log.clear();
+    game.ClearLog();
     const Json& log_json = Field(state, "log");
     if (log_json.is_array()) {
-        for (const auto& line : log_json) game.log.push_back(StrOf(line));
+        for (const auto& line : log_json) game.AppendLog(StrOf(line));
     }
 
     std::map<int, Item*> item_by_index;
@@ -680,7 +683,7 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     if (items_json.is_array()) {
         for (const auto& saved : items_json) {
             int saved_index = IntField(saved, "index", -1);
-            for (auto& item : game.map->items) {
+            for (auto& item : map.Items()) {
                 if (item.index == saved_index) {
                     item.name = StrField(saved, "name");
                     item.type = IntField(saved, "type");
@@ -699,7 +702,7 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     const Json& cities_json = Field(state, "cities");
     if (cities_json.is_array()) {
         for (const auto& saved : cities_json) {
-            City* city = game.map->City(IntField(saved, "index", -1));
+            City* city = map.CityAt(IntField(saved, "index", -1));
             if (!city) continue;
             city->SetRazed(BoolField(saved, "razed"));
             city->SetOwner(SideId(OptField(saved, "ownerIndex")));
@@ -727,37 +730,37 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             if (!saved_name.empty()) city->Rename(std::move(saved_name));
         }
     }
-    scn::RefreshCityTiles(*game.map);
+    scn::RefreshCityTiles(map);
 
     const Json& sites_json = Field(state, "sites");
     if (sites_json.is_array()) {
         for (const auto& saved : sites_json) {
-            int idx = IntField(saved, "index", -1);
-            if (idx < 0 || idx >= static_cast<int>(game.map->sites.size())) continue;
-            Site& site = game.map->sites[static_cast<size_t>(idx)];
-            site.content = IntField(saved, "content");
-            site.item = OptField(saved, "item");
-            site.guardian = OptField(saved, "guardian");
-            site.ally_type = OptField(saved, "allyType");
-            site.rich = BoolField(saved, "rich");
-            site.revealed = IntField(saved, "revealed");
-            site.searched = BoolField(saved, "searched");
-            site.band = StrField(saved, "band");
-            site.temple_index = OptField(saved, "templeIndex");
+            Site* site = map.SiteById(SiteId(IntField(saved, "index", -1)));
+            if (!site) continue;
+            site->content = IntField(saved, "content");
+            site->item = OptField(saved, "item");
+            site->guardian = OptField(saved, "guardian");
+            site->ally_type = OptField(saved, "allyType");
+            site->rich = BoolField(saved, "rich");
+            site->revealed = IntField(saved, "revealed");
+            site->searched = BoolField(saved, "searched");
+            site->band = StrField(saved, "band");
+            site->temple_index = OptField(saved, "templeIndex");
         }
     }
     const Json& fight_order = Field(state, "fightOrder");
     if (fight_order.is_array()) {
-        game.map->fight_order.clear();
+        Map::FightOrderTable loaded_fight;
         for (const auto& row : fight_order) {
-            std::vector<int> row_vals;
+            Map::FightOrderRow row_vals;
             if (row.is_array()) {
                 for (const auto& val : row) row_vals.push_back(IntOf(val));
             }
-            game.map->fight_order.push_back(std::move(row_vals));
+            loaded_fight.push_back(std::move(row_vals));
         }
+        map.SetFightOrder(std::move(loaded_fight));
     }
-    game.history.clear();
+    game.ClearHistory();
     auto read_deed = [](const Json& obj) {
         return Deed{IntField(obj, "side"), static_cast<DeedType>(IntField(obj, "type")),
                     IntField(obj, "v1"), IntField(obj, "v2"), StrField(obj, "name")};
@@ -777,21 +780,21 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             if (events_json.is_array()) {
                 for (const auto& deed : events_json) rec.events.push_back(read_deed(deed));
             }
-            game.history.push_back(std::move(rec));
+            game.AppendHistoryRecord(std::move(rec));
         }
     }
-    game.deeds.clear();
+    game.ClearDeeds();
     const Json& deeds_json = Field(state, "deeds");
     if (deeds_json.is_object()) {
         for (const auto& [side_key, list] : deeds_json.items()) {
             auto side_idx = ToInt(side_key);
             if (!side_idx || !list.is_array()) continue;
-            for (const auto& deed : list) {
-                game.deeds[static_cast<int>(*side_idx)].push_back(read_deed(deed));
-            }
+            Game::DeedList side_deeds;
+            for (const auto& deed : list) side_deeds.push_back(read_deed(deed));
+            game.SetSideDeeds(static_cast<int>(*side_idx), std::move(side_deeds));
         }
     }
-    game.triumphs.clear();
+    game.ClearTriumphs();
     const Json& triumphs_json = Field(state, "triumphs");
     if (triumphs_json.is_object()) {
         for (const auto& [my_side, row] : triumphs_json.items()) {
@@ -800,37 +803,39 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             for (const auto& [opp, counts] : row.items()) {
                 auto opp_idx = ToInt(opp);
                 if (!opp_idx) continue;
-                ReadIntArray(counts,
-                             game.triumphs[static_cast<int>(*my_idx)][static_cast<int>(*opp_idx)]);
+                Game::TriumphCounts row_counts{0, 0, 0, 0, 0};
+                ReadIntArray(counts, row_counts);
+                game.SetTriumphRow(static_cast<int>(*my_idx), static_cast<int>(*opp_idx),
+                                   row_counts);
             }
         }
     }
-    game.tutorial_seen.clear();
+    game.ClearTutorialSeen();
     const Json& seen_json = Field(state, "tutorialSeen");
     if (seen_json.is_array()) {
-        for (const auto& moment : seen_json) game.tutorial_seen.insert(StrOf(moment));
+        for (const auto& moment : seen_json) game.MarkTutorialSeen(StrOf(moment));
     }
-    game.towers.clear();
+    game.ClearTowers();
     const Json& towers_json = Field(state, "towers");
     if (towers_json.is_array()) {
-        for (const auto& tile_key : towers_json) game.towers.insert(IntOf(tile_key));
+        for (const auto& tile_key : towers_json) game.PlaceTowerKey(IntOf(tile_key));
     }
     const Json& signs = Field(state, "signs");
     if (signs.is_array()) {
-        for (size_t i = 0; i < game.map->signs.size() && i < signs.size(); i++) {
+        for (size_t i = 0; i < map.Signs().size() && i < signs.size(); i++) {
             if (signs[i].is_array() && signs[i].size() >= 2) {
-                game.map->signs[i].lines = {StrOf(signs[i][0]), StrOf(signs[i][1])};
+                map.Signs()[i].lines = {StrOf(signs[i][0]), StrOf(signs[i][1])};
             }
         }
     }
-    game.explored.Clear();
+    game.Explored().Clear();
     const Json& explored_json = Field(state, "explored");
     if (explored_json.is_object()) {
         for (const auto& [side_key, runs] : explored_json.items()) {
             if (auto side_idx = ToInt(side_key)) {
-                game.explored.SetMask(
+                game.Explored().SetMask(
                         SideId(static_cast<int>(*side_idx)),
-                        UnpackMask(runs, static_cast<size_t>(game.map->width) * game.map->height));
+                        UnpackMask(runs, static_cast<size_t>(map.Width()) * map.Height()));
             }
         }
     }
@@ -889,11 +894,11 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             armies.push_back(game.Make(army));
         }
     }
-    game.armies.RestoreActive(armies);
+    game.Armies().RestoreActive(armies);
 
     if (saved_sides.is_array()) {
         for (const auto& saved : saved_sides) {
-            Side* side = game.map->Side(IntField(saved, "index", -1));
+            Side* side = map.SideAt(IntField(saved, "index", -1));
             if (!side) continue;
             side->SetGold(IntField(saved, "gold"));
             side->SetAlive(BoolField(saved, "alive"));
@@ -941,13 +946,13 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
                 std::string target_kind = StrField(quest_json, "targetKind");
                 int ref = IntField(quest_json, "target", -1);
                 Quest::Target target = std::monostate{};
-                if (target_kind == "city" && game.map->City(ref)) {
+                if (target_kind == "city" && map.CityAt(ref)) {
                     target = CityId(ref);
-                } else if (target_kind == "side" && game.map->Side(ref)) {
+                } else if (target_kind == "side" && map.SideAt(ref)) {
                     target = SideId(ref);
                 } else if (target_kind == "item" && item_by_index.count(ref)) {
                     target = ItemId(ref);
-                } else if (target_kind == "armytype" && game.types.ById(ref)) {
+                } else if (target_kind == "armytype" && game.ArmyTypes().ById(ref)) {
                     target = ArmyTypeId(ref);
                 } else if (target_kind == "army" && ref >= 0 &&
                            ref < static_cast<int>(armies.size())) {
@@ -964,35 +969,33 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
     // clear any stale at_sea flag in older saves, matching the Lua reference.
     std::set<int> fliers;
     std::set<int> walkers;
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         if (army->X() != kNone) {
-            int tile_key = army->Y() * game.map->width + army->X();
-            if (game.types.ById(army->Type())->flies)
+            int tile_key = army->Y() * map.Width() + army->X();
+            if (game.ArmyTypes().ById(army->Type())->flies)
                 fliers.insert(tile_key);
             else if (!army->Hero())
                 walkers.insert(tile_key);
         }
     }
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         if (army->IsAtSea() && army->X() != kNone) {
-            int tile_key = army->Y() * game.map->width + army->X();
-            if (game.types.ById(army->Type())->flies ||
+            int tile_key = army->Y() * map.Width() + army->X();
+            if (game.ArmyTypes().ById(army->Type())->flies ||
                 (army->Hero() && fliers.count(tile_key) && !walkers.count(tile_key))) {
                 army->ComeAshore();
             }
         }
     }
 
-    game.side =
-            game.current < static_cast<int>(game.sides.size()) ? game.sides[game.current] : nullptr;
     // Restore the current side's position in the turn order, or derive it for
     // older saves that did not record `orderAt`.
     const Json& order_at = Field(state, "orderAt");
     if (order_at.is_number()) {
-        game.turn_schedule.SetCursor(order_at.get<int>());
+        game.Schedule().SetCursor(order_at.get<int>());
     } else {
-        int cur_side = game.side ? game.side->Index() : 0;
-        game.turn_schedule.SyncCursorToSide(SideId(cur_side));
+        int cur_side = game.CurrentSide() ? game.CurrentSide()->Index() : 0;
+        game.Schedule().SyncCursorToSide(SideId(cur_side));
     }
     move::Invalidate(game);
     return game_ptr;

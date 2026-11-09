@@ -51,8 +51,7 @@ Army* HeroIn(const std::vector<Army*>& stack) {
 }
 
 const Monster* MonsterOf(const Game& game, int index) {
-    if (index < 0 || index > 9 || !game.map->monsters[index]) return nullptr;
-    return &*game.map->monsters[index];
+    return game.GetMap().MonsterAt(index);
 }
 
 int SageDistance(const Site& target_site, int hero_x, int hero_y) {
@@ -129,11 +128,12 @@ std::array<int, 4> SageMap(Game& game, const Side& side, int target_x, int targe
 }  // namespace site
 
 void SiteExplorer::FillItemPool(int reserved) {
-    if (!game_.map->item_pool) return;
-    const auto& pool = *game_.map->item_pool;
+    Map& map = game_.GetMap();
+    if (!map.ItemPool()) return;
+    const auto& pool = *map.ItemPool();
     std::map<int, Item*> by_index;
     std::map<int, bool> used;
-    for (auto& item : game_.map->items) by_index[item.index] = &item;
+    for (auto& item : map.Items()) by_index[item.index] = &item;
     for (int idx = 8; idx <= 21; idx++) {
         auto entry = by_index.find(idx);
         if (entry == by_index.end()) continue;
@@ -144,7 +144,7 @@ void SiteExplorer::FillItemPool(int reserved) {
             if (!used[static_cast<int>(i)] && site::ItemReserved(pool[i]) == want)
                 choices.push_back(static_cast<int>(i));
         }
-        int choice = game_.rng.PickIndex(choices.size());
+        int choice = game_.GetRng().PickIndex(choices.size());
         if (choice >= 0) {
             int pick = choices[choice];
             used[pick] = true;
@@ -156,27 +156,29 @@ void SiteExplorer::FillItemPool(int reserved) {
 }
 
 void SiteExplorer::MarkRich() {
+    Map& map = game_.GetMap();
     std::vector<Site*> ruins;
-    for (auto& map_site : game_.map->sites) {
+    for (auto& map_site : map.Sites()) {
         map_site.rich = false;
         map_site.revealed = 0xff;
         if (map_site.type != site::kTemple) ruins.push_back(&map_site);
     }
-    int want = static_cast<int>(game_.map->sites.size()) * site::kRichShare / 10;
-    game_.rng.Shuffle(ruins);
+    int want = map.SiteCount() * site::kRichShare / 10;
+    game_.GetRng().Shuffle(ruins);
     for (int i = 0; i < std::min(want, static_cast<int>(ruins.size())); i++) {
         ruins[i]->rich = true;
-        if (game_.map->options.quests != 0) ruins[i]->revealed = 0;
+        if (map.GameOptions().quests != 0) ruins[i]->revealed = 0;
     }
 }
 
 void SiteExplorer::Setup() {
+    Map& map = game_.GetMap();
     std::vector<std::pair<int, int>> capitals;
-    for (Side* side : game_.sides) capitals.push_back(side->OriginCapitalPos().ToPair());
+    for (Side* side : game_.Sides()) capitals.push_back(side->OriginCapitalPos().ToPair());
 
     MarkRich();
     int temples = 0;
-    for (auto& map_site : game_.map->sites) {
+    for (auto& map_site : map.Sites()) {
         map_site.content = map_site.type == site::kTemple ? site::kTemple : site::kEmpty;
         if (map_site.content == site::kTemple) {
             map_site.temple_index = temples;
@@ -189,22 +191,22 @@ void SiteExplorer::Setup() {
         map_site.band = Band(map_site, capitals);
     }
 
-    int n_sites = static_cast<int>(game_.map->sites.size());
+    int n_sites = map.SiteCount();
     int reserved = n_sites * 2 / 10;
     FillItemPool(reserved);
 
     int band_hi = reserved;
-    int band_lo = std::min(game_.rng.Dice(2, 3, 1), band_hi);
-    int last = std::min(22, n_sites / 3 + game_.rng.Dice(1, 5, -3) + 8);
+    int band_lo = std::min(game_.GetRng().Dice(2, 3, 1), band_hi);
+    int last = std::min(22, n_sites / 3 + game_.GetRng().Dice(1, 5, -3) + 8);
 
     std::vector<Site*> free_sites;
-    for (auto& map_site : game_.map->sites) {
+    for (auto& map_site : map.Sites()) {
         if (map_site.content == site::kEmpty) free_sites.push_back(&map_site);
     }
-    game_.rng.Shuffle(free_sites);
+    game_.GetRng().Shuffle(free_sites);
 
     std::map<int, Item*> by_index;
-    for (auto& item : game_.map->items) {
+    for (auto& item : map.Items()) {
         by_index[item.index] = &item;
         item.status = 0;
     }
@@ -227,33 +229,29 @@ void SiteExplorer::Setup() {
         }
     }
 
-    for (auto& map_site : game_.map->sites) {
+    for (auto& map_site : map.Sites()) {
         if (map_site.content == site::kEmpty)
-            map_site.content = game_.rng.Pick(Content(map_site.band), 0);
+            map_site.content = game_.GetRng().Pick(Content(map_site.band), 0);
         if (map_site.content == site::kTemple) {
             map_site.guardian = kNone;
         } else if (map_site.content == site::kAllies) {
-            map_site.ally_type = game_.rng.Pick(AllyTypes(map_site.band), 0);
+            map_site.ally_type = game_.GetRng().Pick(AllyTypes(map_site.band), 0);
             map_site.guardian = kNone;
         } else {
-            map_site.guardian = game_.rng.Dice(1, 9, 0);
+            map_site.guardian = game_.GetRng().Dice(1, 9, 0);
         }
     }
-    game_.map->site_at.assign(static_cast<size_t>(game_.map->width) * game_.map->height, nullptr);
-    for (auto& map_site : game_.map->sites) {
-        game_.map->site_at[map_site.y * game_.map->width + map_site.x] = &map_site;
-    }
+    map.RebuildSpatialIndices();
 }
 
 bool SiteExplorer::SurvivesGuardian(const Army& hero, int monster_strength) {
     int margin = 90 + 5 * (hero.Strength() + combat::BattleItems(hero) - monster_strength) +
                  3 * static_cast<int>(game::ArmiesAt(game_, hero.X(), hero.Y()).size());
-    return game_.rng.Dice(1, 100, 0) <= margin;
+    return game_.GetRng().Dice(1, 100, 0) <= margin;
 }
 
 int SiteExplorer::GuardianStrength(const Site& target_site) const {
-    if (target_site.guardian < 0 || target_site.guardian > 9) return 0;
-    const auto& monster = game_.map->monsters[target_site.guardian];
+    const Monster* monster = game_.GetMap().MonsterAt(target_site.guardian);
     return monster ? monster->strength : 0;
 }
 
@@ -276,8 +274,8 @@ int SiteExplorer::Bless(const Site& target_site, const ArmyStack& stack) {
 
 std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x, int y,
                                                    bool human) {
-    if (game_.map->site_at.empty() || x < 0 || y < 0) return nullptr;
-    Site* target_site = game_.map->site_at[y * game_.map->width + x];
+    Map& map = game_.GetMap();
+    Site* target_site = map.SiteAt(x, y);
     if (!target_site || target_site->searched) return nullptr;
     if (stack.empty() || stack[0]->Moves() < 1) return nullptr;
     Army* hero = HeroIn(stack);
@@ -296,7 +294,7 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
         out->kind = "no hero";
         return out;
     }
-    Side* side = game_.map->Side(hero->Owner());
+    Side* side = map.SideById(hero->Owner());
     out->hero = hero;
 
     if (target_site->content == site::kSage) {
@@ -330,7 +328,7 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
 
     if (target_site->content == site::kItem) {
         Item* found = nullptr;
-        for (auto& item : game_.map->items) {
+        for (auto& item : map.Items()) {
             if (item.index == target_site->item) found = &item;
         }
         if (found && human) {
@@ -350,7 +348,8 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
         return out;
     }
     if (target_site->content == site::kGold) {
-        int gold = target_site->rich ? game_.rng.Dice(3, 1000, 1000) : game_.rng.Dice(3, 500, 500);
+        int gold = target_site->rich ? game_.GetRng().Dice(3, 1000, 1000)
+                                     : game_.GetRng().Dice(3, 500, 500);
         if (side) side->AddGold(gold);
         target_site->searched = true;
         history::RecordDeed(game_, side, DeedType::kFound, history::kFoundGold, 0, hero->Name());
@@ -360,9 +359,9 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
     }
     if (target_site->content == site::kAllies) {
         target_site->searched = true;
-        const ArmyType* type = game_.types.ById(target_site->ally_type);
-        if (!type) type = game_.types.ById(armytype::kScouts);
-        int count = game_.rng.Dice(1, 2, 0);
+        const ArmyType* type = game_.ArmyTypes().ById(target_site->ally_type);
+        if (!type) type = game_.ArmyTypes().ById(armytype::kScouts);
+        int count = game_.GetRng().Dice(1, 2, 0);
         if (target_site->rich) count += 2;
         for (int i = 0; i < count; i++) {
             Army* ally = hero::PlaceAlly(game_, type, x, y, *side);
@@ -380,9 +379,10 @@ std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x
 
 std::vector<site::SageEntry> SiteExplorer::SageList(const Side& side, int hero_x,
                                                     int hero_y) const {
+    Map& map = game_.GetMap();
     std::vector<site::SageEntry> list;
     bool gold = false, allies = false;
-    for (auto& map_site : game_.map->sites) {
+    for (auto& map_site : map.Sites()) {
         if (Unshown(side, map_site, hero_x, hero_y)) {
             if (map_site.content == site::kGold && !gold) {
                 gold = true;
@@ -391,7 +391,7 @@ std::vector<site::SageEntry> SiteExplorer::SageList(const Side& side, int hero_x
                 allies = true;
                 list.push_back(site::SageEntry{"allies", "Allies", nullptr});
             } else if (map_site.content == site::kItem) {
-                for (auto& item : game_.map->items) {
+                for (auto& item : map.Items()) {
                     if (item.index == map_site.item)
                         list.push_back(site::SageEntry{"item", item.name, &item});
                 }
@@ -405,7 +405,7 @@ Site* SiteExplorer::SageShow(const Side& side, const site::SageEntry& entry, int
                              int hero_y) {
     Site* found = nullptr;
     int best = kNone;
-    for (auto& map_site : game_.map->sites) {
+    for (auto& map_site : game_.GetMap().Sites()) {
         if (entry.kind == "item") {
             if (map_site.content == site::kItem && entry.item &&
                 map_site.item == entry.item->index) {
@@ -428,17 +428,18 @@ Site* SiteExplorer::SageShow(const Side& side, const site::SageEntry& entry, int
 }
 
 int SiteExplorer::SageGem(Side& side) {
-    int gold = game_.rng.Dice(3, 500, 500);
+    int gold = game_.GetRng().Dice(3, 500, 500);
     side.AddGold(gold);
     return gold;
 }
 
 SiteExplorer::MapPatch SiteExplorer::SageMap(const Side& side, int target_x, int target_y) {
-    int left = std::max(0, target_x - game_.rng.Dice(1, 5, 8));
-    int top = std::max(0, target_y - game_.rng.Dice(1, 5, 8));
-    int width = game_.rng.Dice(1, 10, 15), height = game_.rng.Dice(1, 10, 15);
-    if (left + width >= game_.map->width) width = game_.map->width - left - 1;
-    if (top + height >= game_.map->height) height = game_.map->height - top - 1;
+    const Map& map = game_.GetMap();
+    int left = std::max(0, target_x - game_.GetRng().Dice(1, 5, 8));
+    int top = std::max(0, target_y - game_.GetRng().Dice(1, 5, 8));
+    int width = game_.GetRng().Dice(1, 10, 15), height = game_.GetRng().Dice(1, 10, 15);
+    if (left + width >= map.Width()) width = map.Width() - left - 1;
+    if (top + height >= map.Height()) height = map.Height() - top - 1;
     for (int x = left; x < left + width; x++) {
         for (int y = top; y < top + height; y++) game::Reveal(game_, side.Index(), x, y, false);
     }

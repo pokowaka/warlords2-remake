@@ -46,11 +46,11 @@ int Direction(int from_x, int from_y, int to_x, int to_y) {
 /** @brief Where an item is: its carrier, the ruin it lies in, or the ground. */
 std::pair<int, int> ItemPlace(const w2::Game& game, const w2::Item* item) {
     if (item->status == 3) {
-        for (w2::Army* army : game.armies)
+        for (w2::Army* army : game.Armies())
             for (w2::Item* carried : army->Items())
                 if (carried == item && army->X() != w2::kNone) return {army->X(), army->Y()};
     } else if (item->status == 2) {
-        for (auto& site : game.map->sites)
+        for (const auto& site : game.GetMap().Sites())
             if (site.item == item->index) return {site.x, site.y};
     }
     return {item->x, item->y};
@@ -74,7 +74,7 @@ QuestText DescribeQuest(const w2::Game& game, const w2::Side& side, const w2::Qu
     // (x, y+1)
     auto fabled = [&](const w2::City* city) {
         auto seen = [&](int x, int y) { return w2::game::Seen(game, side.Index(), x, y); };
-        return game.map->options.hidden_map != 0 && !seen(city->X(), city->Y()) &&
+        return game.GetMap().GameOptions().hidden_map != 0 && !seen(city->X(), city->Y()) &&
                !seen(city->X() + 1, city->Y() + 1) && !seen(city->X(), city->Y() + 1);
     };
     using namespace w2::quest;
@@ -87,7 +87,7 @@ QuestText DescribeQuest(const w2::Game& game, const w2::Side& side, const w2::Qu
     if (type == kSlayHero && foe && hero) {
         add(175, text_line(0x15, 0));
         add(195, text_line(0x15, 1));
-        const w2::Side* foe_side = game.map->Side(foe->Owner());
+        const w2::Side* foe_side = game.GetMap().SideById(foe->Owner());
         add(215, Format(text_line(0x15, 2), foe_side ? foe_side->Name() : ""));
         add(235, foe->Name());
         add(265, text_line(0x15, 3));
@@ -155,7 +155,7 @@ struct QuestDialog : kit::Modal {
             int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
             int target_type_id = quest->TargetArmyTypeId().Value();
             int target_side_id = quest->TargetSideId().Value();
-            for (w2::Army* army : g_app.g->armies) {
+            for (w2::Army* army : g_app.g->Armies()) {
                 bool match = (type == kSlayType && target_type_id != w2::kNone &&
                               army->TypeIndex() == target_type_id) ||
                              (type == kSlaughter && target_side_id != w2::kNone &&
@@ -223,7 +223,7 @@ void Open() {
         w2::Army* hero = quest->ResolveHero(*g_app.g);
         if (hero && g_app.g->Alive(hero) && hero->X() != w2::kNone) dialog->quest = quest;
     }
-    dialog->no_quest = kit::Text(0x14, g_app.g->rng.Dice(1, 4, -1));
+    dialog->no_quest = kit::Text(0x14, g_app.g->GetRng().Dice(1, 4, -1));
     kit::Push(dialog);
 }
 

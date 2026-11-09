@@ -153,7 +153,7 @@ absl::StatusOr<Canvas> Draw(const Map& map, const std::filesystem::path& data_di
     auto roads = pck::Decode(terrain / "ROAD.PCK");
     if (!roads.ok()) return roads.status();
 
-    int map_width = map.width, map_height = map.height;
+    int map_width = map.Width(), map_height = map.Height();
     Canvas canvas(map_width * scale, map_height * scale);
     uint8_t key = (*roads)->At(0, 0);  // ROAD.PCK is colour-keyed on its corner
     for (int tile_y = 0; tile_y < map_height; tile_y++) {
@@ -199,13 +199,13 @@ absl::StatusOr<Canvas> Draw(const Map& map, const std::filesystem::path& data_di
             if (shape & 2) canvas.Rect(centre_x, centre_y - thick / 2, size - mid, thick, kRoad);
         }
     }
-    for (const Site& site : map.sites) {
+    for (const Site& site : map.Sites()) {
         canvas.Rect(site.x * size, site.y * size, size, size, kYellow);
         canvas.Outline(site.x * size, site.y * size, size, size, kBlack);
     }
-    for (const City& city : map.cities) {
+    for (const City& city : map.Cities()) {
         const Side* owner = nullptr;
-        for (const Side& side : map.sides) {
+        for (const Side& side : map.Sides()) {
             if (side.CapitalCity(map) == &city) owner = &side;
         }
         if (!owner) {

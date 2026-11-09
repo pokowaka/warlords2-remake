@@ -48,7 +48,7 @@ struct Settings : kit::Modal {
         for (int i = 0; i < 3; i++) states[kSound + i] = w2::uidata::kNormal;
         hidden.clear();
         for (int i = 0; i < 8; i++) {
-            if (g_app.g->map->sides[i].InUse()) {
+            if (g_app.g->GetMap().Sides()[i].InUse()) {
                 states[kHuman + i] = states[kEnhanced + i] = states[kObserve + i] =
                         w2::uidata::kNormal;
             } else {
@@ -75,7 +75,7 @@ struct Settings : kit::Modal {
         kit::Centred(head, "Enhanced", 396, 60);
         kit::Centred(head, "Observe", 468, 60);
         for (int i = 0; i < 8; i++) {
-            const w2::Side& side = g_app.g->map->sides[i];
+            const w2::Side& side = g_app.g->GetMap().Sides()[i];
             int y = 90 + 30 * i;
             gfx::SetColor(1, 1, 1);
             kit::Right(font.Colours(side.Colour(), side.Edge()), side.Name(), 248, y);
@@ -116,13 +116,13 @@ struct Settings : kit::Modal {
         int control_id = control->id;
         if (control_id == kOk) return Finish();
         if (control_id >= kHuman && control_id < kHuman + 8) {
-            w2::Side& side = g_app.g->map->sides[control_id - kHuman];
+            w2::Side& side = g_app.g->GetMap().Sides()[control_id - kHuman];
             side.SetComputerControlled(!side.IsComputerControlled());
         } else if (control_id >= kEnhanced && control_id < kEnhanced + 8) {
-            w2::Side& side = g_app.g->map->sides[control_id - kEnhanced];
+            w2::Side& side = g_app.g->GetMap().Sides()[control_id - kEnhanced];
             side.SetEnhanced(!side.IsEnhanced());
         } else if (control_id >= kObserve && control_id < kObserve + 8) {
-            w2::Side& side = g_app.g->map->sides[control_id - kObserve];
+            w2::Side& side = g_app.g->GetMap().Sides()[control_id - kObserve];
             if (side.IsComputerControlled()) side.SetObserved(!side.IsObserved());
         } else if (control_id >= kSound && control_id < kSound + 3) {
             sound::Toggle(kSounds[control_id - kSound].channel);

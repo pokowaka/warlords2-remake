@@ -98,21 +98,22 @@ void ReadIntArray(const Json& json_arr, std::array<T, N>& arr) {
 
 void TurnSetup(Game& game, Side& side, AIData& data) {
     SideId self_id = side.Id();
-    game.diplomacy.SetState(self_id, self_id, 0);
-    game.diplomacy.SetProposal(self_id, self_id, 0);
+    game.Diplomacy().SetState(self_id, self_id, 0);
+    game.Diplomacy().SetProposal(self_id, self_id, 0);
     side.SetAiSolidarity(data.solidarity);
-    bool quick = game.map->options.quick_start != 0 && game.map->options.hidden_map != 0;
-    for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
-        City& city = game.map->cities[i];
+    Map& map = game.GetMap();
+    bool quick = map.GameOptions().quick_start != 0 && map.GameOptions().hidden_map != 0;
+    for (int i = map.CityCount() - 1; i >= 0; i--) {
+        City& city = map.Cities()[i];
         if (city.OwnerIndex() == side.Index()) {
             int role = ai::core::Role(data, city);
             if (role == ai::core::kExplorer || role == ai::core::kExploreR2) {
-                ai::core::SetRole(data, city, game.turn < 5 ? ai::core::kWeak : ai::core::kStop);
+                ai::core::SetRole(data, city, game.Turn() < 5 ? ai::core::kWeak : ai::core::kStop);
             }
             if (quick) {
-                if (game.turn == 1)
+                if (game.Turn() == 1)
                     ai::core::SetRole(data, city, ai::core::kExplorer);
-                else if (game.turn < 3)
+                else if (game.Turn() < 3)
                     ai::core::SetRole(data, city, ai::core::kExploreR2);
             }
             ai::core::ClearCflag(data, city, ai::core::kCfCleaned);
@@ -121,8 +122,8 @@ void TurnSetup(Game& game, Side& side, AIData& data) {
 }
 
 std::shared_ptr<Neighbours> FindExistingNeighbours(const Game& game) {
-    if (!game.map) return nullptr;
-    for (const auto& side : game.map->sides) {
+    if (!game.HasMap()) return nullptr;
+    for (const auto& side : game.GetMap().Sides()) {
         if (const ClassicAiPlayer* classic = ClassicAiPlayer::FindOn(side)) {
             if (classic->NeighbourTable()) return classic->NeighbourTable();
         }
@@ -139,7 +140,7 @@ ClassicAiPlayer::ClassicAiPlayer(AIData initial_data, SharedNeighbours neighbour
         : data_(std::move(initial_data)), neighbours_(std::move(neighbours)), registry_(registry) {}
 
 void ClassicAiPlayer::PlayTurn(Game& game, Side& side, const PauseCallback& pause) {
-    registry_ = &game.armies;
+    registry_ = &game.Armies();
     if (!neighbours_) {
         neighbours_ = FindExistingNeighbours(game);
         if (!neighbours_) neighbours_ = ai::core::BuildNeighbours(game);
@@ -147,7 +148,7 @@ void ClassicAiPlayer::PlayTurn(Game& game, Side& side, const PauseCallback& paus
     auto pause_after = [&](const char* name) {
         if (pause) pause(name);
     };
-    bool hidden = game.map->options.hidden_map != 0;
+    bool hidden = game.GetMap().GameOptions().hidden_map != 0;
 
     ResetMovedFlags();
     TurnSetup(game, side, data_);
@@ -203,17 +204,18 @@ AttitudeBreakdown ClassicAiPlayer::EvaluateProposal(const Game& game, SideId ai_
 City* ClassicAiPlayer::ChooseHeroCity(Game& game, Side& side, City* fallback) {
     City* best = fallback;
     int best_score = 0;
-    for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
-        City& city = game.map->cities[i];
+    Map& map = game.GetMap();
+    for (int i = map.CityCount() - 1; i >= 0; i--) {
+        City& city = map.Cities()[i];
         if (city.OwnerIndex() == side.Index()) {
             int role = ai::core::Role(data_, city);
             int score = 0;
             if (role == ai::core::kRally)
-                score = game.rng.Dice(1, 100, 100);
+                score = game.GetRng().Dice(1, 100, 100);
             else if (role == ai::core::kTakingNeutral)
-                score = game.rng.Dice(1, 100, 50);
+                score = game.GetRng().Dice(1, 100, 50);
             else if (role == ai::core::kNearNeutral)
-                score = game.rng.Dice(1, 100, 0);
+                score = game.GetRng().Dice(1, 100, 0);
             if (best_score < score) {
                 best = &city;
                 best_score = score;
@@ -225,7 +227,8 @@ City* ClassicAiPlayer::ChooseHeroCity(Game& game, Side& side, City* fallback) {
 
 bool ClassicAiPlayer::OnQuestCapture(Game& game, Side& side, City& city, const ArmyStack& stack) {
     auto side_quest = side.QuestPtr();
-    if (game.map->options.quests == 0 || !side_quest || side_quest->TargetCityId() != city.Id()) {
+    if (game.GetMap().GameOptions().quests == 0 || !side_quest ||
+        side_quest->TargetCityId() != city.Id()) {
         return false;
     }
     if (side_quest->Type() != quest::kOccupy && side_quest->Type() != quest::kRaze) return false;
@@ -418,12 +421,12 @@ nlohmann::ordered_json ClassicAiPlayer::SaveState() const {
 }
 
 absl::Status ClassicAiPlayer::LoadState(const nlohmann::ordered_json& obj, const Game& game) {
-    registry_ = &game.armies;
+    registry_ = &game.Armies();
     if (!obj.is_object()) return absl::OkStatus();
 
     absl::flat_hash_map<int, Army*> army_by_slot;
-    army_by_slot.reserve(game.armies.size());
-    for (Army* army : game.armies) army_by_slot[army->Slot()] = army;
+    army_by_slot.reserve(game.Armies().size());
+    for (Army* army : game.Armies()) army_by_slot[army->Slot()] = army;
 
     auto read_int = [&](std::string_view key, int& target) {
         if (HasField(obj, key)) target = IntField(obj, key, target);
@@ -537,9 +540,9 @@ absl::Status ClassicAiPlayer::LoadState(const nlohmann::ordered_json& obj, const
     }
 
     const Json& ai_nbrs = Field(obj, "neighbours");
-    if (ai_nbrs.is_object() && game.map) {
+    if (ai_nbrs.is_object() && game.HasMap()) {
         auto nbrs = std::make_shared<Neighbours>();
-        nbrs->by_city.resize(game.map->cities.size());
+        nbrs->by_city.resize(game.GetMap().Cities().size());
         for (const auto& [key, entry] : ai_nbrs.items()) {
             auto parsed_idx = ToInt(key);
             if (!parsed_idx || *parsed_idx < 0) continue;
@@ -574,7 +577,7 @@ ClassicAiPlayer* ClassicAiPlayer::FindMutableOn(Side& side) {
 
 ClassicAiPlayer& ClassicAiPlayer::EnsureOn(Game& game, Side& side) {
     if (ClassicAiPlayer* existing = FindMutableOn(side)) {
-        existing->BindRegistry(&game.armies);
+        existing->BindRegistry(&game.Armies());
         if (!existing->NeighbourTable()) {
             auto shared = FindExistingNeighbours(game);
             existing->SetNeighbourTable(shared ? shared : ai::core::BuildNeighbours(game));
@@ -582,8 +585,8 @@ ClassicAiPlayer& ClassicAiPlayer::EnsureOn(Game& game, Side& side) {
         return *existing;
     }
     auto shared = FindExistingNeighbours(game);
-    if (!shared && game.map) shared = ai::core::BuildNeighbours(game);
-    auto created = std::make_shared<ClassicAiPlayer>(ai::core::NewData(), shared, &game.armies);
+    if (!shared && game.HasMap()) shared = ai::core::BuildNeighbours(game);
+    auto created = std::make_shared<ClassicAiPlayer>(ai::core::NewData(), shared, &game.Armies());
     ClassicAiPlayer& ref = *created;
     side.SetComputerPlayer(std::move(created));
     return ref;

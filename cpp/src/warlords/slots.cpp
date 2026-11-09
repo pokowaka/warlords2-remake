@@ -11,7 +11,7 @@ namespace w2::slots {
 namespace {
 /** @brief The fight order row for a side (neutrals use row 8), indexed by army type. */
 const std::vector<int>& Row(const Game& game, int side) {
-    return game.map->fight_order[side == kNone ? 8 : side];
+    return game.GetMap().FightOrder()[side == kNone ? 8 : side];
 }
 
 /** @brief Where the army in `slot` stands in its side's fight order. */
@@ -239,7 +239,7 @@ void Commit(Slots& slots, Game& game) {
             return group_id;
         }
         std::set<int> used;
-        for (Army* army : game.armies) used.insert(army->Group());
+        for (Army* army : game.Armies()) used.insert(army->Group());
         int fresh = 2;
         while (used.count(fresh)) fresh++;
         return fresh;

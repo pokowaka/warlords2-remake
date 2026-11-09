@@ -205,8 +205,9 @@ move::Path Trace(Query& query) {
 
 bool SingleStep(const Game& game, int mode, int start_x, int start_y, int dest_x, int dest_y) {
     auto wet = [](int terrain) { return terrain == move::kWater || terrain == move::kShore; };
-    int from_terrain = scn::TerrainAt(*game.map, start_x, start_y);
-    int to_terrain = scn::TerrainAt(*game.map, dest_x, dest_y);
+    const Map& map = game.GetMap();
+    int from_terrain = scn::TerrainAt(map, start_x, start_y);
+    int to_terrain = scn::TerrainAt(map, dest_x, dest_y);
     if (mode != move::kFlying) {
         if (wet(from_terrain) != wet(to_terrain)) return false;
         if (move::kCost[to_terrain] == 0) return false;
@@ -216,11 +217,12 @@ bool SingleStep(const Game& game, int mode, int start_x, int start_y, int dest_x
 
 std::vector<std::pair<int, int>> OpenCityAt(Game& game, std::vector<int>& grid, int dest_x,
                                             int dest_y) {
-    int width = game.map->width, height = game.map->height;
+    Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
     std::vector<std::pair<int, int>> restore;
     int goal = dest_y * width + dest_x;
     int goal_byte = grid[goal];
-    City* city = game.map->city_tile[goal];
+    City* city = map.CityAtFootprint(dest_x, dest_y);
     if (city && goal_byte % 8 == 0 && move::Has(goal_byte, move::kCityF)) {
         bool port = move::IsPort(game, *city);
         for (int ox = 0; ox <= 1; ox++) {
@@ -266,11 +268,12 @@ std::optional<std::vector<int>> CacheHit(const Game& game,
     if (!entry || entry->dx != dest_x || entry->dy != dest_y || entry->mode != mode ||
         entry->flags != flags)
         return std::nullopt;
+    const Map& map = game.GetMap();
     int x = entry->sx, y = entry->sy;
     for (size_t i = 0; i < entry->dirs.size(); i++) {
         if (x == start_x && y == start_y)
             return std::vector<int>(entry->dirs.begin() + i, entry->dirs.end());
-        if (!StepDir(x, y, entry->dirs[i], game.map->width, game.map->height)) return std::nullopt;
+        if (!StepDir(x, y, entry->dirs[i], map.Width(), map.Height())) return std::nullopt;
     }
     return std::nullopt;
 }
@@ -293,8 +296,8 @@ std::vector<int>& Pathfinder::GridFor(Game& game, int side_index) {
     auto cached = grids_.find(side_index);
     if (cached != grids_.end()) return cached->second;
 
-    const Map& map = *game.map;
-    int width = map.width, height = map.height;
+    const Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
     std::vector<int> grid(static_cast<size_t>(width) * height);
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
@@ -309,11 +312,11 @@ std::vector<int>& Pathfinder::GridFor(Game& game, int side_index) {
                 byte |= move::kForestF;
             else if (terrain == move::kHills)
                 byte |= move::kHillsF;
-            if (map.crossing[tile]) byte |= move::kCrossF;
+            if (map.IsCrossing(x, y)) byte |= move::kCrossF;
             grid[tile] = byte;
         }
     }
-    for (const City& city : map.cities) {
+    for (const City& city : map.Cities()) {
         bool mine = side_index != kNone && city.OwnedBy(side_index) && !city.IsRazed();
         bool port = (mine || city.IsRazed()) && move::IsPort(game, city);
         for (int dx = 0; dx <= 1; dx++) {
@@ -385,8 +388,9 @@ void Pathfinder::StoreCachedRoute(int distance, int start_x, int start_y, int de
 std::optional<move::Path> Pathfinder::FindPath(Game& game, const move::Stack& stack, int start_x,
                                                int start_y, int dest_x, int dest_y) {
     if (start_x == dest_x && start_y == dest_y) return move::Path{};
-    int width = game.map->width, height = game.map->height;
-    if (dest_x < 0 || dest_y < 0 || dest_x >= width || dest_y >= height) return std::nullopt;
+    const Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
+    if (!map.InBounds(dest_x, dest_y)) return std::nullopt;
 
     int side = stack.empty() ? kNone : stack[0]->OwnerIndex();
     move::Mode movement = move::StackMode(game, stack);
@@ -411,7 +415,7 @@ std::optional<move::Path> Pathfinder::FindPath(Game& game, const move::Stack& st
         auto restore = OpenCityAt(game, grid, dest_x, dest_y);
         int penalty = 0;
         if (movement.mode == move::kLand) {
-            int dest_terrain = scn::TerrainAt(*game.map, dest_x, dest_y);
+            int dest_terrain = scn::TerrainAt(map, dest_x, dest_y);
             penalty = (dest_terrain == move::kWater || dest_terrain == move::kShore)
                               ? move::kWaterPenaltyTo
                               : move::kWaterPenalty;
@@ -471,13 +475,14 @@ std::optional<move::Path> Pathfinder::FindPath(Game& game, const move::Stack& st
 
 std::vector<int> Pathfinder::Flood(Game& game, int grid_side, int x, int y, int range, int mode,
                                    bool woods, bool hills, int fog_side) {
-    int width = game.map->width, height = game.map->height;
+    const Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
     std::vector<int>& grid = GridFor(game, grid_side);
     int goal = y * width + x;
     auto restore = OpenCityAt(game, grid, x, y);
     int penalty = 0;
     if (mode == move::kLand) {
-        int terrain = scn::TerrainAt(*game.map, x, y);
+        int terrain = scn::TerrainAt(map, x, y);
         penalty = (terrain == move::kWater || terrain == move::kShore) ? move::kWaterPenaltyTo
                                                                        : move::kWaterPenalty;
     }
@@ -497,13 +502,12 @@ namespace move {
 
 std::vector<int> Prepare(Game& game, const std::vector<int>& grid, int side_index, int mode,
                          int dest_x, int dest_y) {
-    int width = game.map->width, height = game.map->height;
-    Side* side = game.map->Side(side_index);
-    bool fog = game.map->options.hidden_map != 0 && side &&
+    const Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
+    const Side* side = map.SideAt(side_index);
+    bool fog = map.GameOptions().hidden_map != 0 && side &&
                (!side->IsComputerControlled() || !side->IsClassicAi());
-    City* dest_city = (dest_x >= 0 && dest_y >= 0 && dest_x < width && dest_y < height)
-                              ? game.map->city_tile[dest_y * width + dest_x]
-                              : nullptr;
+    const City* dest_city = map.CityAtFootprint(dest_x, dest_y);
     bool dest_city_seen = false;
     if (dest_city && fog && side && side->IsComputerControlled() && !side->IsClassicAi()) {
         for (int oy = 0; oy <= 1; oy++) {
@@ -518,7 +522,7 @@ std::vector<int> Prepare(Game& game, const std::vector<int>& grid, int side_inde
         for (int x = 0; x < width; x++) {
             int tile = y * width + x;
             int byte = grid[tile];
-            bool is_dest_city_tile = dest_city_seen && game.map->city_tile[tile] == dest_city;
+            bool is_dest_city_tile = dest_city_seen && map.CityAtFootprint(x, y) == dest_city;
             bool hidden = fog && !is_dest_city_tile && !game::Seen(game, side_index, x, y);
             bool shut;
             if (mode == kLand)

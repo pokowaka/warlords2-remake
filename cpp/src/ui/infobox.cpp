@@ -87,7 +87,7 @@ void ArmyBoard(int x, int y, const std::string& name, int type_id, int side, int
     kit::Centred(font, name, x + 112, y + 8);
     kit::Army(type_id, side, x + 96, y + 31, 1);
     (void)medals;  // the remake keeps no medals yet
-    const w2::ArmyType* army_type = g_app.g->types.ById(type_id);
+    const w2::ArmyType* army_type = g_app.g->ArmyTypes().ById(type_id);
     const int* move_icon = nullptr;
     if (army_type && army_type->flies)
         move_icon = kMoveFly;
@@ -196,7 +196,7 @@ void ShowLines(int screen_x, int screen_y, const std::string& title, const std::
  * colours.
  */
 void Army(int screen_x, int screen_y, const w2::Army* army) {
-    const w2::ArmyType* army_type = g_app.g->types.ById(army->Type());
+    const w2::ArmyType* army_type = g_app.g->ArmyTypes().ById(army->Type());
     bool hero = army->Hero();
     std::string name = hero ? army->Name() : (army_type ? army_type->name : "");
     w2::Army army_copy = *army;
@@ -216,7 +216,7 @@ void Army(int screen_x, int screen_y, const w2::Army* army) {
  * @param side The side whose colours to show it in; kNone for the player's.
  */
 void ArmyType(int screen_x, int screen_y, int type_id, const w2::Slot& slot, int side) {
-    const w2::ArmyType* army_type = g_app.g->types.ById(type_id);
+    const w2::ArmyType* army_type = g_app.g->ArmyTypes().ById(type_id);
     std::string name = army_type ? army_type->name : "";
     int shown_side = side == w2::kNone ? g_app.player->Index() : side;
     w2::Slot slot_copy = slot;

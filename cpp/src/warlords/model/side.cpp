@@ -32,11 +32,11 @@ bool Side::SpendGold(int amount) {
 }
 
 City* Side::CapitalCity(Map& map) const {
-    return map.City(capital_city_);
+    return map.CityById(capital_city_);
 }
 
 const City* Side::CapitalCity(const Map& map) const {
-    return map.City(capital_city_);
+    return map.CityById(capital_city_);
 }
 
 void Side::SetCurrentCapitalPos(TilePos pos) {

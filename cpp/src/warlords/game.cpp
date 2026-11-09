@@ -19,57 +19,24 @@
 
 namespace w2 {
 
-Game::Game() : pathfinder(std::make_unique<Pathfinder>()) {}
+Game::Game() : pathfinder_(std::make_unique<Pathfinder>()) {}
 Game::~Game() = default;
-
-TurnReport& Game::TurnNews(SideId side_id) {
-    ABSL_DCHECK(side_id.IsValid() && side_id.Value() < 8);
-    int idx = std::clamp(side_id.Value(), 0, 7);
-    return turn_news[static_cast<size_t>(idx)];
-}
-
-const TurnReport& Game::TurnNews(SideId side_id) const {
-    ABSL_DCHECK(side_id.IsValid() && side_id.Value() < 8);
-    int idx = std::clamp(side_id.Value(), 0, 7);
-    return turn_news[static_cast<size_t>(idx)];
-}
+Game::Game(Game&&) noexcept = default;
+Game& Game::operator=(Game&&) noexcept = default;
 
 Pathfinder& Game::GetPathfinder() {
-    if (!pathfinder) pathfinder = std::make_unique<Pathfinder>();
-    return *pathfinder;
+    if (!pathfinder_) pathfinder_ = std::make_unique<Pathfinder>();
+    return *pathfinder_;
 }
 
 const Pathfinder& Game::GetPathfinder() const {
-    ABSL_DCHECK(pathfinder != nullptr);
-    return *pathfinder;
+    ABSL_DCHECK(pathfinder_ != nullptr);
+    return *pathfinder_;
 }
 
-Army* Game::Make(const Army& army) {
-    return armies.Make(army);
-}
-
-Army* Game::Add(const Army& army) {
-    return armies.Add(army);
-}
-
-bool Game::Alive(const Army* army) const {
-    return armies.Alive(army);
-}
-
-void Game::Remove(const Army* army) {
-    armies.Remove(army);
-}
-
-std::vector<Army*> Game::ArmiesOnTile(int x, int y) const {
-    return armies.ArmiesOnTile(x, y);
-}
-
-int Game::LivingSideCount() const {
-    int count = 0;
-    for (const Side* side_ptr : sides) {
-        if (side_ptr && side_ptr->IsAlive()) count++;
-    }
-    return count;
+void Game::SetCityOwner(City& city, SideId owner) {
+    city.SetOwner(owner);
+    GetPathfinder().Invalidate();
 }
 
 namespace game {
@@ -79,25 +46,24 @@ std::vector<Army*> ArmiesAt(const Game& game, int x, int y) {
 }
 
 City* CityAt(const Game& game, int x, int y) {
-    return game.map ? game.map->CityAtFootprint(x, y) : nullptr;
+    return game.HasMap() ? const_cast<City*>(game.GetMap().CityAtFootprint(x, y)) : nullptr;
 }
 
 void SetCityOwner(Game& game, City& city, int side_index) {
-    city.SetOwner(SideId(side_index));
-    game.GetPathfinder().Invalidate();
+    game.SetCityOwner(city, SideId(side_index));
 }
 
 std::vector<City*> SideCities(const Game& game, const Side& side) {
     std::vector<City*> out;
-    for (auto& city : game.map->cities) {
-        if (city.OwnedBy(side.Id())) out.push_back(&city);
+    for (const auto& city : game.GetMap().Cities()) {
+        if (city.OwnedBy(side.Id())) out.push_back(const_cast<City*>(&city));
     }
     return out;
 }
 
 std::vector<Army*> SideArmies(const Game& game, const Side& side) {
     std::vector<Army*> out;
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         if (army->OwnedBy(side.Id())) out.push_back(army);
     }
     return out;
@@ -105,7 +71,7 @@ std::vector<Army*> SideArmies(const Game& game, const Side& side) {
 
 int ItemBonus(const Game& game, const Side& side, int item_type) {
     int total = 0;
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         if (army->OwnedBy(side.Id())) {
             for (Item* item : army->Items()) {
                 if (item->type == item_type) total += std::max(1, item->value);
@@ -118,9 +84,11 @@ int ItemBonus(const Game& game, const Side& side, int item_type) {
 std::pair<int, int> FreeTileIn(Game& game, const City& city, bool spill,
                                std::pair<int, int>* last) {
     static const int kOffsets[4][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 1}};
+    const int map_width = game.GetMap().Width();
+    const int map_height = game.GetMap().Height();
     for (const auto& offset : kOffsets) {
         int x = city.X() + offset[0], y = city.Y() + offset[1];
-        if (x < game.map->width && y < game.map->height &&
+        if (x < map_width && y < map_height &&
             static_cast<int>(ArmiesAt(game, x, y).size()) < rules::kMaxStack) {
             return {x, y};
         }
@@ -128,9 +96,9 @@ std::pair<int, int> FreeTileIn(Game& game, const City& city, bool spill,
     if (!spill) return {kNone, kNone};
     int last_x = kNone, last_y = kNone;
     for (int i = 0; i < 20; i++) {
-        int x = city.X() + game.rng.Dice(1, 3, -2);
-        int y = city.Y() + game.rng.Dice(1, 3, -2);
-        if (x >= 0 && y >= 0 && x < game.map->width && y < game.map->height) {
+        int x = city.X() + game.GetRng().Dice(1, 3, -2);
+        int y = city.Y() + game.GetRng().Dice(1, 3, -2);
+        if (x >= 0 && y >= 0 && x < map_width && y < map_height) {
             last_x = x;
             last_y = y;
             if (ArmiesAt(game, x, y).empty()) return {x, y};
@@ -141,25 +109,15 @@ std::pair<int, int> FreeTileIn(Game& game, const City& city, bool spill,
 }
 
 bool TowerAt(const Game& game, int x, int y) {
-    return game.towers.count(y * game.map->width + x) > 0;
+    return game.HasTower(x, y);
 }
 
 void TidyTowers(Game& game) {
-    if (game.towers.empty()) return;
-    std::set<int> held;
-    for (Army* army : game.armies) {
-        if (army->OnMap()) held.insert(army->Y() * game.map->width + army->X());
-    }
-    for (auto it = game.towers.begin(); it != game.towers.end();) {
-        if (!held.count(*it))
-            it = game.towers.erase(it);
-        else
-            ++it;
-    }
+    game.ClearAbandonedTowers();
 }
 
 bool HeroWithDoubleMoveAt(const Game& game, const Side& side, int x, int y) {
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         if (army->OwnedBy(side.Id()) && army->OnMap() && army->X() == x && army->Y() == y &&
             army->Hero()) {
             for (Item* item : army->Items()) {
@@ -171,10 +129,7 @@ bool HeroWithDoubleMoveAt(const Game& game, const Side& side, int x, int y) {
 }
 
 Sign* SignAt(Game& game, int x, int y) {
-    for (auto& sign : game.map->signs) {
-        if (sign.x == x && sign.y == y) return &sign;
-    }
-    return nullptr;
+    return game.GetMap().SignAt(x, y);
 }
 
 void AddDiploScore(Game& game, Side& side, int points) {
@@ -183,7 +138,7 @@ void AddDiploScore(Game& game, Side& side, int points) {
 }
 
 bool HasActiveHuman(const Game& game) {
-    for (const Side* side : game.sides) {
+    for (const Side* side : game.Sides()) {
         if (side && side->IsAlive() && !side->IsComputerControlled() &&
             !SideCities(game, *side).empty())
             return true;
@@ -197,17 +152,18 @@ int ViewerSide(const Game& game, const Side* player) {
 }
 
 bool Seen(const Game& game, int side, int x, int y) {
-    if (game.map->options.hidden_map == 0) return true;
-    if (x < 0 || y < 0 || x >= game.map->width || y >= game.map->height) return false;
+    const Map& map = game.GetMap();
+    if (map.GameOptions().hidden_map == 0) return true;
+    if (!map.InBounds(x, y)) return false;
     if (side == kNone) return true;
-    int map_width = game.map->width, map_height = game.map->height;
+    int map_width = map.Width(), map_height = map.Height();
     SideId side_id(side);
-    if (game.explored.IsExplored(side_id, map_width, map_height, x, y)) return true;
+    if (game.Explored().IsExplored(side_id, map_width, map_height, x, y)) return true;
     if (side >= 0 && side < 8) {
         for (int ally = 0; ally < 8; ally++) {
             SideId ally_id(ally);
-            if (ally != side && game.diplomacy.AlliedFlag(side_id, ally_id) &&
-                game.explored.IsExplored(ally_id, map_width, map_height, x, y)) {
+            if (ally != side && game.Diplomacy().AlliedFlag(side_id, ally_id) &&
+                game.Explored().IsExplored(ally_id, map_width, map_height, x, y)) {
                 return true;
             }
         }
@@ -216,17 +172,18 @@ bool Seen(const Game& game, int side, int x, int y) {
 }
 
 int Reveal(Game& game, int side, int x, int y, bool flying) {
-    if (game.map->options.hidden_map == 0) return 0;
-    int map_width = game.map->width, map_height = game.map->height;
+    const Map& map = game.GetMap();
+    if (map.GameOptions().hidden_map == 0) return 0;
+    int map_width = map.Width(), map_height = map.Height();
     SideId side_id(side);
-    game.explored.EnsureSide(side_id, map_width, map_height);
-    bool on_city = x >= 0 && y >= 0 && x < map_width && y < map_height &&
-                   game.map->city_tile[y * map_width + x];
+    game.Explored().EnsureSide(side_id, map_width, map_height);
+    bool on_city = map.CityAtFootprint(x, y) != nullptr;
     int radius = (flying || on_city) ? 2 : 1;
     int found = 0;
     for (int tile_y = y - radius; tile_y <= y + radius; tile_y++) {
         for (int tile_x = x - radius; tile_x <= x + radius; tile_x++) {
-            if (game.explored.MarkExplored(side_id, map_width, map_height, tile_x, tile_y)) found++;
+            if (game.Explored().MarkExplored(side_id, map_width, map_height, tile_x, tile_y))
+                found++;
         }
     }
     return found;
@@ -253,34 +210,35 @@ const int kFogCell[256] = {
 
 int FogCell(const Game& game, int side, int x, int y) {
     if (Seen(game, side, x, y)) return kNone;
+    const Map& map = game.GetMap();
     int bits = 0;
     for (int i = 0; i < 8; i++) {
         int nbr_x = x + kFogDx[i], nbr_y = y + kFogDy[i];
-        if (nbr_x < 0 || nbr_y < 0 || nbr_x >= game.map->width || nbr_y >= game.map->height ||
-            !Seen(game, side, nbr_x, nbr_y))
-            bits += 1 << i;
+        if (!map.InBounds(nbr_x, nbr_y) || !Seen(game, side, nbr_x, nbr_y)) bits += 1 << i;
     }
     int cell = kFogCell[bits];
     return cell == kFogNone ? kNone : cell;
 }
 
 void TidyExplored(Game& game, int side) {
-    if (game.map->options.hidden_map == 0) return;
-    int map_width = game.map->width, map_height = game.map->height;
+    const Map& map = game.GetMap();
+    if (map.GameOptions().hidden_map == 0) return;
+    int map_width = map.Width(), map_height = map.Height();
     SideId side_id(side);
-    game.explored.EnsureSide(side_id, map_width, map_height);
+    game.Explored().EnsureSide(side_id, map_width, map_height);
     for (int pass = 0; pass < 2; pass++) {
         for (int x = 0; x < map_width; x++) {
             for (int y = 0; y < map_height; y++) {
-                if (!game.explored.IsExplored(side_id, map_width, map_height, x, y)) {
+                if (!game.Explored().IsExplored(side_id, map_width, map_height, x, y)) {
                     int bits = 0;
                     for (int i = 0; i < 8; i++) {
                         int nbr_x = x + kFogDx[i], nbr_y = y + kFogDy[i];
-                        if (!game.explored.IsExplored(side_id, map_width, map_height, nbr_x, nbr_y))
+                        if (!game.Explored().IsExplored(side_id, map_width, map_height, nbr_x,
+                                                        nbr_y))
                             bits += 1 << i;
                     }
                     if (kFogCell[bits] == kFogNone)
-                        game.explored.MarkExplored(side_id, map_width, map_height, x, y);
+                        game.Explored().MarkExplored(side_id, map_width, map_height, x, y);
                 }
             }
         }
@@ -288,7 +246,7 @@ void TidyExplored(Game& game, int side) {
 }
 
 void RevealStart(Game& game, const Side& side) {
-    if (game.map->options.hidden_map == 0) return;
+    if (game.GetMap().GameOptions().hidden_map == 0) return;
     for (City* city : SideCities(game, side))
         Reveal(game, side.Index(), city->X(), city->Y(), false);
     for (Army* army : SideArmies(game, side)) {

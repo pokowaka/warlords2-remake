@@ -30,7 +30,7 @@ int CityEconomy::Income(const Side& side) const {
 
 int CityEconomy::Upkeep(const Side& side) const {
     int total = 0;
-    for (Army* army : game_.armies) {
+    for (Army* army : game_.Armies()) {
         if (army->OwnedBy(side.Id()) && !army->InTransit()) {
             int cost = army->Upkeep();
             if (army->IsAtSea()) cost = std::max(rules::kSeaMinUpkeep, cost);
@@ -50,7 +50,7 @@ bool CityEconomy::Deliver(Army* army, City& city) {
     auto [x, y] = game::FreeTileIn(game_, city, false);
     if (x == kNone || city.Owner() != army->Owner()) {
         if (army->IsReturning() || army->HomeCity() == city.Id()) return false;
-        City* home = game_.map->City(army->HomeCity());
+        City* home = game_.GetMap().CityById(army->HomeCity());
         VectorTarget home_dest = home ? VectorTarget{home->Id()} : VectorTarget{};
         army->SendIntoTransit(Transit{kTransitTurns, home_dest}, /*returning=*/true);
         return true;
@@ -61,8 +61,8 @@ bool CityEconomy::Deliver(Army* army, City& city) {
 
 std::vector<Produced> CityEconomy::RunProduction(Side& side) {
     std::vector<Produced> arrived, built;
-    for (int i = static_cast<int>(game_.armies.size()) - 1; i >= 0; i--) {
-        Army* army = game_.armies[i];
+    for (int i = static_cast<int>(game_.Armies().size()) - 1; i >= 0; i--) {
+        Army* army = game_.Armies()[i];
         if (army->InTransit() && army->OwnedBy(side.Id())) {
             if (army->TickTransit()) {
                 VectorTarget dest_target = army->TransitState()->dest;
@@ -84,7 +84,7 @@ std::vector<Produced> CityEconomy::RunProduction(Side& side) {
                     }
                 } else {
                     const auto* dest_city_id = std::get_if<CityId>(&dest_target);
-                    City* dest = dest_city_id ? game_.map->City(*dest_city_id) : nullptr;
+                    City* dest = dest_city_id ? game_.GetMap().CityById(*dest_city_id) : nullptr;
                     army->ClearTransit();
                     if (!dest || !Deliver(army, *dest))
                         army->SetDisbanded(true);
@@ -122,7 +122,7 @@ std::vector<Produced> CityEconomy::RunProduction(Side& side) {
         }
     }
 
-    game_.armies.RemoveDisbanded();
+    game_.Armies().RemoveDisbanded();
     TurnReport& news = game_.TurnNews(side.Id());
     news.produced = std::move(arrived);
     for (const auto& entry : built) news.produced.push_back(entry);
@@ -140,7 +140,7 @@ void CityEconomy::SetProduction(City& city, int slot_index) {
 bool CityEconomy::SetCityProduction(const Side* who, City& city, int slot) {
     if (slot < 0 || slot >= city.SlotCount()) return false;
     if ((who ? who->Gold() : 0) < city.SlotAt(static_cast<size_t>(slot)).cost + 30 &&
-        game_.turn > 5)
+        game_.Turn() > 5)
         return false;
     SetProduction(city, slot);
     return true;
@@ -160,9 +160,10 @@ void CityEconomy::ProduceNeutralGarrison(City& city, const Side* who) {
 }
 
 void CityEconomy::NeutralProduction(const Side* who) {
-    if (!(game_.map->options.neutral_cities > 1)) return;
-    for (int i = static_cast<int>(game_.map->cities.size()) - 1; i >= 0; i--) {
-        City& city = game_.map->cities[i];
+    Map& map = game_.GetMap();
+    if (!(map.GameOptions().neutral_cities > 1)) return;
+    for (int i = map.CityCount() - 1; i >= 0; i--) {
+        City& city = map.Cities()[i];
         if (city.IsNeutral() && !city.IsRazed() && city.HasBeenAttacked()) {
             if (city.Countdown() != 0) {
                 if (city.TickCountdown()) ProduceNeutralGarrison(city, who);
@@ -172,7 +173,8 @@ void CityEconomy::NeutralProduction(const Side* who) {
             if (!building &&
                 std::min(static_cast<int>(game::ArmiesAt(game_, city.X(), city.Y()).size()),
                          rules::kMaxStack) < 4) {
-                int best = rules::BestSlot(city.Slots(), 2, game_.types, who && who->IsEnhanced());
+                int best = rules::BestSlot(city.Slots(), 2, game_.ArmyTypes(),
+                                           who && who->IsEnhanced());
                 if (best != kNone) SetCityProduction(who, city, best);
             }
         }
@@ -181,7 +183,7 @@ void CityEconomy::NeutralProduction(const Side* who) {
 
 std::vector<City*> CityEconomy::VectoredTo(const City* dest, const Side* side) const {
     std::vector<City*> out;
-    for (auto& city : game_.map->cities) {
+    for (auto& city : game_.GetMap().Cities()) {
         if (!dest) {
             if (city.IsVectoredToStandard() && side && city.OwnedBy(side->Id()))
                 out.push_back(&city);
@@ -193,23 +195,25 @@ std::vector<City*> CityEconomy::VectoredTo(const City* dest, const Side* side) c
 }
 
 CityEconomy::CoordPair CityEconomy::StandardAt(const Side& side) const {
-    if (side.Index() < static_cast<int>(game_.map->items.size())) {
-        const Item& item = game_.map->items[side.Index()];
+    const auto items = game_.GetMap().Items();
+    if (side.Index() < static_cast<int>(items.size())) {
+        const Item& item = items[side.Index()];
         if (item.status == 1 && item.planted && item.x != kNone) return {item.x, item.y};
     }
     return {kNone, kNone};
 }
 
 bool CityEconomy::PlantFlag(Side& side, Army* hero) {
-    int terrain = scn::TerrainAt(*game_.map, hero->X(), hero->Y());
+    Map& map = game_.GetMap();
+    int terrain = scn::TerrainAt(map, hero->X(), hero->Y());
     if (terrain == move::kWater || terrain == move::kShore || terrain == move::kCity ||
         terrain == move::kSite)
         return false;
-    for (const auto& item : game_.map->items) {
+    for (const auto& item : map.Items()) {
         if (item.planted && item.x == hero->X() && item.y == hero->Y()) return false;
     }
-    if (side.Index() >= static_cast<int>(game_.map->items.size())) return false;
-    Item* standard = &game_.map->items[side.Index()];
+    if (side.Index() >= map.ItemCount()) return false;
+    Item* standard = &map.Items()[side.Index()];
     if (hero->RemoveItem(standard)) {
         standard->status = 1;
         standard->x = hero->X();
@@ -246,7 +250,7 @@ bool CityEconomy::Vector(City& city, City* dest_city) {
 City* CityEconomy::NearestCity(int x, int y, const Side* side, const Side* seer) const {
     City* best = nullptr;
     int best_d = kNone;
-    for (auto& city : game_.map->cities) {
+    for (auto& city : game_.GetMap().Cities()) {
         bool allowed = !side || city.OwnedBy(side->Id());
         if (allowed && seer) {
             int seer_idx = seer->Index();
@@ -268,7 +272,7 @@ City* CityEconomy::NearestCity(int x, int y, const Side* side, const Side* seer)
 
 CityEconomy::BuyableTypeList CityEconomy::BuyableTypes() const {
     BuyableTypeList out;
-    for (const auto* army_type : game_.types.List()) {
+    for (const auto* army_type : game_.ArmyTypes().List()) {
         if (army_type->price >= 0) out.push_back(army_type);
     }
     return out;
@@ -289,7 +293,7 @@ int CityEconomy::BuySlot(const City& city) const {
 }
 
 void CityEconomy::BuyProduction(Side& side, City& city, int slot_index, int type_id) {
-    const ArmyType* army_type = game_.types.ById(type_id);
+    const ArmyType* army_type = game_.ArmyTypes().ById(type_id);
     bool building = city.ProducingSlot() != kNone;
     int was = city.ProducingSlot();
     Slot slot{army_type->id,   army_type->name, army_type->strength,       army_type->time,
@@ -311,7 +315,7 @@ void CityEconomy::RenameCity(City& city, const std::string& name) {
 }
 
 int CityEconomy::SlotPillageValue(const Slot& slot) const {
-    return std::abs(game_.types.ById(slot.type)->price) / 2;
+    return std::abs(game_.ArmyTypes().ById(slot.type)->price) / 2;
 }
 
 void CityEconomy::RecomputeCityAfterSpoils(City& city) {
@@ -333,7 +337,7 @@ game::Spoils CityEconomy::Pillage(Side& side, City& city, const ArmyStack& stack
     out.gold = gold;
     out.lost.emplace_back(slot.type, gold);
     side.AddGold(gold);
-    game::AddDiploScore(game_, side, game_.rng.Dice(1, 5, 0));
+    game::AddDiploScore(game_, side, game_.GetRng().Dice(1, 5, 0));
     RecomputeCityAfterSpoils(city);
     quest::Event event;
     event.city = &city;
@@ -355,7 +359,7 @@ game::Spoils CityEconomy::Sack(Side& side, City& city, const ArmyStack& stack) {
     city.TruncateSlots(1);
     out.gold = gold;
     side.AddGold(gold);
-    game::AddDiploScore(game_, side, game_.rng.Dice(1, 10, 5));
+    game::AddDiploScore(game_, side, game_.GetRng().Dice(1, 10, 5));
     RecomputeCityAfterSpoils(city);
     quest::Event event;
     event.city = &city;
@@ -367,22 +371,23 @@ game::Spoils CityEconomy::Sack(Side& side, City& city, const ArmyStack& stack) {
 
 void CityEconomy::MakeRuins(City& city) {
     city.Raze(city.Owner());
-    for (auto& other_city : game_.map->cities) {
+    Map& map = game_.GetMap();
+    for (auto& other_city : map.Cities()) {
         if (other_city.VectoredCityId() == city.Id()) {
             other_city.StopProduction();
         }
     }
-    scn::SetCityTiles(*game_.map, city);
+    scn::SetCityTiles(map, city);
     game_.GetPathfinder().Invalidate();
 }
 
 void CityEconomy::Raze(Side& side, City& city, const ArmyStack& stack, bool own_city) {
     MakeRuins(city);
     if (own_city) {
-        game::AddDiploScore(game_, side, game_.rng.Dice(1, 25, 25));
+        game::AddDiploScore(game_, side, game_.GetRng().Dice(1, 25, 25));
         return;
     }
-    game::AddDiploScore(game_, side, game_.rng.Dice(1, 15, 10));
+    game::AddDiploScore(game_, side, game_.GetRng().Dice(1, 15, 10));
     quest::Event event;
     event.city = &city;
     event.stack = stack;

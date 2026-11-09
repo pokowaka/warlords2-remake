@@ -44,9 +44,10 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
                                ? belief.city_nearest_enemy_dist[city.Index()]
                                : 60.0F;
     int sack_gold = ai::groups::SackValue(game, city);
-    int pillage_gold = city.Slots().size() >= 2
-                               ? std::abs(game.types.ById(city.Slots().back().type)->price) / 2
-                               : 0;
+    int pillage_gold =
+            city.Slots().size() >= 2
+                    ? std::abs(game.ArmyTypes().ById(city.Slots().back().type)->price) / 2
+                    : 0;
 
     auto make_spoil_in = [&](float ongoing_income, float instant_gold, float diplo_pen) {
         ml::EconVec econ_vec{};
@@ -59,9 +60,10 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
         return ml::PackEconInput(ctx, econ_vec);
     };
 
+    const Map& map = game.GetMap();
     bool is_any_capital = false;
     for (int side_idx = 0; side_idx < 8; side_idx++) {
-        if (game.map->sides[side_idx].CapitalCity(*game.map) == &city) is_any_capital = true;
+        if (map.Sides()[side_idx].CapitalCity(map) == &city) is_any_capital = true;
     }
 
     std::vector<int> modes = {0};
@@ -84,7 +86,7 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
 
     std::vector<float> scores(cand_inputs.size());
     for (size_t i = 0; i < cand_inputs.size(); i++) {
-        scores[i] = policy.econ_net.Forward(cand_inputs[i])[0];
+        scores[i] = policy.EconHead().Forward(cand_inputs[i])[0];
     }
     float log_prob = 0.0F;
     int pick = ml::SelectFromLogits(scores, sampler, &log_prob);
@@ -181,6 +183,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         }
     }
 
+    const Map& map = game.GetMap();
     if (stage_near && (tgt.kind == TargetKind::kEnemyCity || tgt.kind == TargetKind::kNeutralCity ||
                        tgt.kind == TargetKind::kEnemyStack)) {
         int best_sx = dest_x, best_sy = dest_y;
@@ -191,14 +194,11 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                 int rad = std::max(std::abs(dx), std::abs(dy));
                 if (rad < 1 || rad > 2) continue;
                 int next_x = tgt.x + dx, next_y = tgt.y + dy;
-                if (next_x < 0 || next_y < 0 || next_x >= game.map->width ||
-                    next_y >= game.map->height)
+                if (next_x < 0 || next_y < 0 || next_x >= map.Width() || next_y >= map.Height())
                     continue;
                 if (tgt.city && game::CityAt(game, next_x, next_y) == tgt.city) continue;
                 if (!belief::IsTileVisible(game, our_side, next_x, next_y)) continue;
-                int terr =
-                        game.map->terrain_type[game.map->tiles[next_y * game.map->width + next_x] &
-                                               0xff];
+                int terr = map.TerrainTypeOf(map.TileWord(next_x, next_y));
                 if (terr == move::kWater || terr == move::kShore || terr == move::kMountains)
                     continue;
                 auto occ = game::ArmiesAt(game, next_x, next_y);
@@ -242,12 +242,12 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         }
 
         int seen_box_before = 0;
-        if (is_fog_mission && game.map->options.hidden_map != 0) {
+        if (is_fog_mission && map.GameOptions().hidden_map != 0) {
             for (int oy = -7; oy <= 7; oy++) {
                 for (int ox = -7; ox <= 7; ox++) {
                     int tile_x = leader_x + ox, tile_y = leader_y + oy;
-                    if (tile_x >= 0 && tile_y >= 0 && tile_x < game.map->width &&
-                        tile_y < game.map->height &&
+                    if (tile_x >= 0 && tile_y >= 0 && tile_x < map.Width() &&
+                        tile_y < map.Height() &&
                         belief::IsTileVisible(game, our_side, tile_x, tile_y)) {
                         seen_box_before++;
                     }
@@ -323,13 +323,13 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             continue;
         }
 
-        if (is_fog_mission && walk_result.steps > 0 && game.map->options.hidden_map != 0) {
+        if (is_fog_mission && walk_result.steps > 0 && map.GameOptions().hidden_map != 0) {
             int seen_box_after = 0;
             for (int oy = -7; oy <= 7; oy++) {
                 for (int ox = -7; ox <= 7; ox++) {
                     int tile_x = leader_x + ox, tile_y = leader_y + oy;
-                    if (tile_x >= 0 && tile_y >= 0 && tile_x < game.map->width &&
-                        tile_y < game.map->height &&
+                    if (tile_x >= 0 && tile_y >= 0 && tile_x < map.Width() &&
+                        tile_y < map.Height() &&
                         belief::IsTileVisible(game, our_side, tile_x, tile_y)) {
                         seen_box_after++;
                     }
@@ -364,7 +364,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                 site::Search(game, sel.armies, final_x, final_y, false);
                 made_progress = true;
                 completed_objective = true;
-                if (game.map->options.quests != 0 && sel.hero &&
+                if (map.GameOptions().quests != 0 && sel.hero &&
                     (!side.ActiveQuest() || !side.ActiveQuest()->HasTarget())) {
                     quest::Assign(game, side, sel.hero, true, core::Flies(game, sel.hero));
                 }

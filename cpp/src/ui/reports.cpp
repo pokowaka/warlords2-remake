@@ -59,7 +59,7 @@ void DrawArmyBanners() {
     gfx::SetScissor(kMapX, kMapY, 224, 312);
     gfx::SetColor(1, 1, 1);
     int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
-    for (w2::Army* army : g_app.g->armies) {
+    for (w2::Army* army : g_app.g->Armies()) {
         if (!army->InTransit() && army->X() != w2::kNone) {
             int tile_key = army->Y() * 1000 + army->X();
             if (!marked_tiles.count(tile_key) &&
@@ -157,7 +157,7 @@ struct Reports : kit::Modal {
             gfx::SetColor(1, 1, 1);
             font.Draw(absl::StrFormat("%d", top_row + i + 1), 312, y);
             kit::Army(entry.type, g_app.player->Index(), 328, 170 + 30 * i, 1);
-            w2::City* city = g_app.g->map->City(entry.city);
+            w2::City* city = g_app.g->GetMap().CityById(entry.city);
             std::string name = entry.standard ? "Standard" : (city ? city->Name() : "");
             std::string text;
             switch (entry.kind) {

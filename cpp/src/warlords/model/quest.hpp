@@ -14,7 +14,7 @@ namespace w2 {
 class Army;
 struct ArmyType;
 class City;
-struct Game;
+class Game;
 struct Item;
 class Side;
 

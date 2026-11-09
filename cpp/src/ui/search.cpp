@@ -158,7 +158,7 @@ struct Ruin : kit::Modal {
         auto control = kit::ControlAt(dialog_view, x, y, hidden);
         if (!control) return;
         if (control->id == kTake && hero) {
-            for (auto& item : g_app.g->map->items) {
+            for (auto& item : g_app.g->GetMap().Items()) {
                 if (item.status == 1 && item.x == hero->X() && item.y == hero->Y())
                     w2::hero::TakeItem(*g_app.g, hero, &item);
             }
@@ -266,7 +266,8 @@ void OpenTemple(std::shared_ptr<w2::SearchResult> result, const std::vector<w2::
     dialog->dialog_view = kit::View(kTempleDialog);
     dialog->view = &dialog->dialog_view;
     dialog->dialog_view.state[kBless] = w2::uidata::kNormal;
-    bool can_quest = g_app.g->map->options.quests != 0 && !g_app.player->HasQuest() && result->hero;
+    bool can_quest = g_app.g->GetMap().GameOptions().quests != 0 && !g_app.player->HasQuest() &&
+                     result->hero;
     dialog->dialog_view.state[kQuest] = can_quest ? w2::uidata::kNormal : w2::uidata::kDisabled;
     kit::Push(dialog);
 }
@@ -413,7 +414,7 @@ void OpenSage(std::shared_ptr<w2::SearchResult> result) {
     dialog->view = &dialog->dialog_view;
     dialog->entries =
             w2::site::SageList(*g_app.g, *g_app.player, dialog->hero->X(), dialog->hero->Y());
-    dialog->hidden_map = g_app.g->map->options.hidden_map != 0;
+    dialog->hidden_map = g_app.g->GetMap().GameOptions().hidden_map != 0;
     dialog->Offers(true);
     kit::Push(dialog);
 }

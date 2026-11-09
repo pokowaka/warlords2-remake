@@ -89,7 +89,7 @@ static std::vector<std::pair<int, int>> LineSlots(int n, const std::vector<int>&
 static std::string VictorName(const std::vector<Army*>& line) {
     for (Army* army : line)
         if (army->Hero() && !army->Name().empty()) return army->Name();
-    const w2::ArmyType* rec = line.empty() ? nullptr : g_app.g->types.ById(line[0]->Type());
+    const w2::ArmyType* rec = line.empty() ? nullptr : g_app.g->ArmyTypes().ById(line[0]->Type());
     return rec ? rec->name : "Your armies";
 }
 
@@ -108,7 +108,7 @@ static std::vector<std::string> OutcomeLines(const w2::Battle& result, const Cit
             break;
         }
     if (city) {
-        if (fled) out.push_back(kit::Text(kAsFled, g_app.g->rng.Dice(1, 4, -1)));
+        if (fled) out.push_back(kit::Text(kAsFled, g_app.g->GetRng().Dice(1, 4, -1)));
         if (!hero_name.empty())
             out.push_back(Format(kit::Text(kAsWonCityHero, 0), hero_name));
         else
@@ -140,8 +140,9 @@ void StartAssault(int x, int y, const w2::Battle& result) {
     assault.phase = AssaultPhase::kCloud;
     assault.at = w2::Now();
     // On a human's turn, hold the cloud while WAR.8SN plays.
-    assault.cloud_time =
-            (g_app.g->side && !g_app.g->side->IsComputerControlled()) ? sound::Effect("war") : 0;
+    assault.cloud_time = (g_app.g->CurrentSide() && !g_app.g->CurrentSide()->IsComputerControlled())
+                                 ? sound::Effect("war")
+                                 : 0;
     assault.victor = VictorName(lines.attackers);
     assault.message = OutcomeLines(result, lines.city, fled);
     assault.def_fell.resize(assault.def.size());
@@ -330,8 +331,8 @@ void PresentVictory(City* city, const std::string& victor) {
     if (!g_app.victory_view) g_app.victory_view = screen::MakeView(*g_app.screen, kAsVDialog);
     Victory vic;
     vic.city = city;
-    vic.who = Format(kit::Text(kAsVWho, g_app.g->rng.Dice(1, 4, -1)), victor);
-    vic.where = Format(kit::Text(kAsVWhere, g_app.g->rng.Dice(1, 3, -1)), city->Name());
+    vic.who = Format(kit::Text(kAsVWho, g_app.g->GetRng().Dice(1, 4, -1)), victor);
+    vic.where = Format(kit::Text(kAsVWhere, g_app.g->GetRng().Dice(1, 3, -1)), city->Name());
     g_app.victory = vic;
     auto& states = g_app.victory_view->state;
     states[kAsOccupy] = kNormal;
@@ -340,7 +341,7 @@ void PresentVictory(City* city, const std::string& victor) {
     int pillage_gold =
             city->Slots().empty()
                     ? 0
-                    : std::abs(g_app.g->types.ById(city->Slots().back().type)->price) / 2;
+                    : std::abs(g_app.g->ArmyTypes().ById(city->Slots().back().type)->price) / 2;
     int sack_gold = w2::ai::groups::SackValue(*g_app.g, *city);
     states[kAsPillage] = pillage_gold != 0 ? kNormal : kDisabled;
     states[kAsSack] = sack_gold != 0 ? kNormal : kDisabled;
@@ -356,7 +357,8 @@ void PresentVictory(City* city, const std::string& victor) {
                 break;
             }
     }
-    if (g_app.g->map->options.quests != 0 && quest && hero && hero->Id() == quest->HeroId()) {
+    if (g_app.g->GetMap().GameOptions().quests != 0 && quest && hero &&
+        hero->Id() == quest->HeroId()) {
         if (quest->Type() == w2::quest::kRaze && quest->TargetCityId() == city->Id())
             g_app.victory->enter = kAsRaze;
         else if (quest->Type() == w2::quest::kPillageGold) {

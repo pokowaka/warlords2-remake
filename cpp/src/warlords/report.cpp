@@ -15,9 +15,10 @@ int Score(const Game& game, const Side& side) {
 }
 
 Figures ComputeFigures(const Game& game, const Side& side, int report_index) {
+    const Map& map = game.GetMap();
     Figures figures;
     for (int i = 0; i < 8; i++) {
-        const Side& other = game.map->sides[i];
+        const Side& other = map.Sides()[i];
         figures.out[i] = !other.IsAlive();
         figures.value[i] = 0;
     }
@@ -26,19 +27,19 @@ Figures ComputeFigures(const Game& game, const Side& side, int report_index) {
         return figures;
     }
     if (report_index == kArmy) {
-        for (Army* army : game.armies) {
+        for (Army* army : game.Armies()) {
             if (army->OwnerIndex() >= 0 && army->OwnerIndex() < 8)
                 figures.value[army->OwnerIndex()]++;
         }
     } else if (report_index == kCity) {
         for (int i = 0; i < 8; i++)
-            figures.value[i] = static_cast<int>(game::SideCities(game, game.map->sides[i]).size());
+            figures.value[i] = static_cast<int>(game::SideCities(game, map.Sides()[i]).size());
     } else if (report_index == kGold) {
-        for (int i = 0; i < 8; i++) figures.value[i] = game.map->sides[i].Gold();
+        for (int i = 0; i < 8; i++) figures.value[i] = map.Sides()[i].Gold();
     } else if (report_index == kWinning) {
         int scores[8];
         for (int i = 0; i < 8; i++) {
-            const Side& other = game.map->sides[i];
+            const Side& other = map.Sides()[i];
             scores[i] = other.InUse() ? Score(game, other) : 1;
         }
         int rank = 0;

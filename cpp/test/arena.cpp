@@ -326,16 +326,14 @@ const ml::PolicyNetwork* g_frozen = nullptr;
  */
 void MarkDepartures(const Game& game, int side, ml::TurnStepRecord& turn) {
     int standing = 0, total_income = 0;
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : game.GetMap().Cities()) {
         if (city.IsRazed()) continue;
         standing++;
         total_income += std::max(1, city.Income());
     }
     for (auto& step : turn.mission_steps) {
-        if (step.vacated_city == kNone ||
-            step.vacated_city >= static_cast<int>(game.map->cities.size()))
-            continue;
-        const City& vacated = game.map->cities[step.vacated_city];
+        if (step.vacated_city == kNone || step.vacated_city >= game.GetMap().CityCount()) continue;
+        const City& vacated = game.GetMap().Cities()[step.vacated_city];
         if (!vacated.IsRazed() && vacated.OwnedBy(side)) continue;
         step.vacated_loss = 2.0F / static_cast<float>(std::max(1, standing)) +
                             0.5F * static_cast<float>(std::max(1, vacated.Income())) /
@@ -365,7 +363,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     std::array<ml::RolloutSampler, 8> samplers{};
     int active_count = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (game.map->sides[side_index].InUse()) active_count++;
+        if (game.GetMap().Sides()[side_index].InUse()) active_count++;
     }
     int solo_seat =
             active_count > 0 ? static_cast<int>(seed % static_cast<uint32_t>(active_count)) : 0;
@@ -377,7 +375,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     const bool mixed_vs_classic = cfg.solo_learner && !solo;
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        Side& side = game.map->sides[side_index];
+        Side& side = game.GetMap().Sides()[side_index];
         if (!side.InUse()) continue;
         bool learner_side = solo ? (seat == solo_seat)
                             : mixed_vs_classic
@@ -416,7 +414,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
 
     Side* current = game::Begin(game);
     int safety = 0;
-    while (current && !game.over && !game.won && game.turn <= cfg.max_turns &&
+    while (current && !game.IsOver() && !game.IsWon() && game.Turn() <= cfg.max_turns &&
            safety < cfg.max_turns * 12) {
         safety++;
         int side_index = current->Index();
@@ -433,7 +431,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
             } else {
                 ml::RolloutSampler opponent_sampler;
                 opponent_sampler.rng_state = samplers[side_index].rng_state ^
-                                             static_cast<uint32_t>(game.turn * 374761393U);
+                                             static_cast<uint32_t>(game.Turn() * 374761393U);
                 opponent_sampler.temperature = temperature;
                 ai::modern::PlayTurn(game, *current, nullptr, &snapshot, &opponent_sampler);
             }
@@ -443,7 +441,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
 
     RolloutSummary summary;
     std::array<int, 8> cities{};
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : game.GetMap().Cities()) {
         if (city.IsRazed()) continue;
         int owner_index = city.OwnerIndex();
         if (owner_index == kNone)
@@ -453,7 +451,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     }
     for (int side_index = 0; side_index < 8; side_index++) {
         if (!recorded[side_index] || episodes[side_index].turns.empty()) continue;
-        Side& side = game.map->sides[side_index];
+        Side& side = game.GetMap().Sides()[side_index];
         SideEpisode& episode = episodes[side_index];
         MarkDepartures(game, side_index, episode.turns.back());
         episode.final_cities = cities[side_index];
@@ -461,9 +459,10 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
         if (!side.IsAlive()) {
             episode.terminal = true;
             episode.terminal_reward = cfg.elimination_reward;
-        } else if (game.over || game.won) {
+        } else if (game.IsOver() || game.IsWon()) {
             episode.terminal = true;
-            bool won_game = (game.ending.winner && game.ending.winner->Index() == side_index);
+            bool won_game =
+                    (game.EndingState().winner && game.EndingState().winner->Index() == side_index);
             episode.terminal_reward = won_game ? cfg.win_reward : 0.0F;
         } else {
             ai::belief::Update(game, side);
@@ -512,7 +511,7 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
     auto current_game = MakeArenaGame(cfg, scenario, preset, seed, false);
     int active_count = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (current_game->map->sides[side_index].InUse()) active_count++;
+        if (current_game->GetMap().Sides()[side_index].InUse()) active_count++;
     }
     const int solo_seat =
             active_count > 0 ? static_cast<int>(seed % static_cast<uint32_t>(active_count)) : 0;
@@ -520,7 +519,7 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
     std::array<opponents::Kind, 8> kind{};
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        Side& side = current_game->map->sides[side_index];
+        Side& side = current_game->GetMap().Sides()[side_index];
         if (!side.InUse()) continue;
         const bool is_learner = (seat++ == solo_seat);
         if (is_learner) learner_side = side_index;
@@ -555,10 +554,10 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
     };
     // Plays a copy on for --search-h rounds and returns the learner's empire score
     auto rollout_value = [&](Game& game) {
-        const int stop_turn = game.turn + cfg.search_h;
+        const int stop_turn = game.Turn() + cfg.search_h;
         Side* current = game::EndTurn(game);
         int safety = 0;
-        while (current && !game.over && !game.won && game.turn < stop_turn &&
+        while (current && !game.IsOver() && !game.IsWon() && game.Turn() < stop_turn &&
                safety++ < cfg.search_h * 12) {
             if (current->IsComputerControlled() && current->IsAlive()) play_side(game, *current);
             current = game::EndTurn(game);
@@ -572,8 +571,8 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
     search_episode.searched = true;
     Side* current = game::Begin(*current_game);
     int safety = 0;
-    while (current && !current_game->over && !current_game->won &&
-           current_game->turn <= cfg.max_turns && safety++ < cfg.max_turns * 12) {
+    while (current && !current_game->IsOver() && !current_game->IsWon() &&
+           current_game->Turn() <= cfg.max_turns && safety++ < cfg.max_turns * 12) {
         const int side_index = current->Index();
         if (current->IsComputerControlled() && current->IsAlive() && side_index == learner_side) {
             std::vector<std::unique_ptr<Game>> candidate_games;
@@ -584,16 +583,16 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                 ml::RolloutSampler sampler;
                 sampler.temperature = temperature;
                 sampler.rng_state = (seed * 2654435761U) ^
-                                    static_cast<uint32_t>((current_game->turn + 1) * 40503U) ^
+                                    static_cast<uint32_t>((current_game->Turn() + 1) * 40503U) ^
                                     static_cast<uint32_t>((candidate + 1) * 2246822519U);
                 sampler.current_turn = &candidate_turns[candidate];
-                ai::modern::PlayTurn(*candidate_game, *candidate_game->map->Side(side_index),
+                ai::modern::PlayTurn(*candidate_game, *candidate_game->GetMap().SideAt(side_index),
                                      nullptr, &learner, &sampler);
                 sampler.current_turn = nullptr;
                 for (int rollout = 0; rollout < cfg.search_r; rollout++) {
                     auto copy = CopyGame(cfg, *candidate_game);
-                    copy->rng.SetState(copy->rng.State() ^
-                                       static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U));
+                    copy->GetRng().SetState(copy->GetRng().State() ^
+                                            static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U));
                     values[candidate] += rollout_value(*copy);
                 }
                 values[candidate] /= cfg.search_r;
@@ -615,13 +614,13 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                 search_episode.turns.push_back(std::move(turn));
             }
             current_game = std::move(candidate_games[best]);
-            current = current_game->map->Side(side_index);
+            current = current_game->GetMap().SideAt(side_index);
         } else if (current->IsComputerControlled() && current->IsAlive()) {
             play_side(*current_game, *current);
         }
         current = game::EndTurn(*current_game);
     }
-    for (const auto& city : current_game->map->cities) {
+    for (const auto& city : current_game->GetMap().Cities()) {
         if (city.IsRazed()) continue;
         if (city.IsNeutral())
             summary.neutrals_left++;
@@ -871,11 +870,11 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
     const bool has_critic_target = !std::isnan(turn.return_target);
     if (has_critic_target) {
         const ml::ValueInVec value_in = ml::PackValueInput(turn.start_ctx, turn.start_critic);
-        float predicted_value = net.value_net.Forward(value_in)[0];
+        float predicted_value = net.ValueHead().Forward(value_in)[0];
         float value_error = predicted_value - turn.return_target;
         stats.value_loss += 0.5 * value_error * value_error;
         stats.turns++;
-        net.value_net.Backward(value_in, {value_error}, grad.value_net);
+        net.ValueHead().Backward(value_in, {value_error}, grad.ValueHead());
     }
 
     for (const auto& step : turn.mission_steps) {
@@ -884,8 +883,8 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
             float stack_value_error = predicted_stack_value - step.stack_return_target;
             stats.value_loss += 0.25 * stack_value_error * stack_value_error;
             stats.stack_values++;
-            net.stack_value_net.Backward(step.stack_value_in, {stack_value_error},
-                                         grad.stack_value_net);
+            net.StackValueHead().Backward(step.stack_value_in, {stack_value_error},
+                                          grad.StackValueHead());
         }
 
         float adv = normalizers.mission(step.advantage);
@@ -893,22 +892,22 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
         if (candidate_count > 1) {
             scores.resize(candidate_count);
             for (size_t candidate = 0; candidate < candidate_count; candidate++)
-                scores[candidate] = net.mission_net.Forward(step.candidates[candidate])[0];
+                scores[candidate] = net.MissionHead().Forward(step.candidates[candidate])[0];
             CategoricalPpo(scores, &step.log_mult, step.chosen_idx, step.old_log_prob, adv, inv_t,
                            cfg, d_scores, stats);
             for (size_t candidate = 0; candidate < candidate_count; candidate++) {
                 if (d_scores[candidate] != 0.0F)
-                    net.mission_net.Backward(step.candidates[candidate],
-                                             {d_scores[candidate], 0.0F}, grad.mission_net);
+                    net.MissionHead().Backward(step.candidates[candidate],
+                                               {d_scores[candidate], 0.0F}, grad.MissionHead());
             }
             stats.mission++;
         }
         if (step.has_stage_choice && step.chosen_idx < static_cast<int>(candidate_count)) {
-            float stage_logit = net.mission_net.Forward(step.candidates[step.chosen_idx])[1];
+            float stage_logit = net.MissionHead().Forward(step.candidates[step.chosen_idx])[1];
             float d_stage_logit = BinaryPpo(stage_logit, step.stage_chosen, step.old_stage_log_prob,
                                             adv, inv_t, cfg, stats);
-            net.mission_net.Backward(step.candidates[step.chosen_idx], {0.0F, d_stage_logit},
-                                     grad.mission_net);
+            net.MissionHead().Backward(step.candidates[step.chosen_idx], {0.0F, d_stage_logit},
+                                       grad.MissionHead());
             stats.mission++;
         }
     }
@@ -919,20 +918,20 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
         if (candidate_count <= 1) continue;
         scores.resize(candidate_count);
         for (size_t candidate = 0; candidate < candidate_count; candidate++)
-            scores[candidate] = net.econ_net.Forward(econ_step.candidates[candidate])[0];
+            scores[candidate] = net.EconHead().Forward(econ_step.candidates[candidate])[0];
         CategoricalPpo(scores, &econ_step.log_mult, econ_step.chosen_idx, econ_step.old_log_prob,
                        econ_adv, inv_t, cfg, d_scores, stats);
         for (size_t candidate = 0; candidate < candidate_count; candidate++) {
             if (d_scores[candidate] != 0.0F)
-                net.econ_net.Backward(econ_step.candidates[candidate], {d_scores[candidate]},
-                                      grad.econ_net);
+                net.EconHead().Backward(econ_step.candidates[candidate], {d_scores[candidate]},
+                                        grad.EconHead());
         }
         stats.econ++;
     }
 
     float diplo_adv = normalizers.diplo(turn.advantage);
     for (const auto& diplo_step : turn.diplo_steps) {
-        auto raw = net.diplo_net.Forward(diplo_step.input);
+        auto raw = net.DiploHead().Forward(diplo_step.input);
         std::array<float, ml::kDiploOutDim> d_out{};
         scores = {raw[0], raw[1], raw[2], raw[3]};
         CategoricalPpo(scores, nullptr, diplo_step.chosen_stance, diplo_step.old_stance_log_prob,
@@ -949,7 +948,7 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
                                  diplo_step.old_joint_war_log_prob, diplo_adv, inv_t, cfg, stats);
             stats.diplo++;
         }
-        net.diplo_net.Backward(diplo_step.input, d_out, grad.diplo_net);
+        net.DiploHead().Backward(diplo_step.input, d_out, grad.DiploHead());
     }
 }
 
@@ -1026,7 +1025,7 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     Game& game = *owned_game;
     int active_count = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (game.map->sides[side_index].InUse()) active_count++;
+        if (game.GetMap().Sides()[side_index].InUse()) active_count++;
     }
     // Solo: the Modern seat rotates with the seed; the swapped game takes the seat
     // half-way round the table so both games of a seed differ in position.
@@ -1040,14 +1039,14 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     std::array<bool, 8> modern{};
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        if (!game.map->sides[side_index].InUse()) continue;
+        if (!game.GetMap().Sides()[side_index].InUse()) continue;
         modern[side_index] = solo ? (seat == solo_seat) : ((seat + eval_case.swap) % 2 == 0);
         // Opponent seats are Classic AI sides unless the Frozen Modern checkpoint plays them
         if (modern[side_index]) {
-            ai::SetSideClassicAi(game, game.map->sides[side_index], false);
+            ai::SetSideClassicAi(game, game.GetMap().Sides()[side_index], false);
             eval_case.modern_sides++;
         } else {
-            opponents::InstallOpponent(game, game.map->sides[side_index], cfg.eval_opponent,
+            opponents::InstallOpponent(game, game.GetMap().Sides()[side_index], cfg.eval_opponent,
                                        g_frozen);
         }
         eval_case.sides++;
@@ -1055,7 +1054,8 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     }
     Side* current = game::Begin(game);
     int safety = 0;
-    while (current && !game.over && !game.won && game.turn <= turns && safety < turns * 12) {
+    while (current && !game.IsOver() && !game.IsWon() && game.Turn() <= turns &&
+           safety < turns * 12) {
         safety++;
         if (current->IsComputerControlled() && current->IsAlive()) {
             if (modern[current->Index()])
@@ -1067,7 +1067,7 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
     }
     std::array<int, 8> city_counts{};
     int modern_cities = 0, classic_cities = 0, largest_side = kNone, largest_count = -1;
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : game.GetMap().Cities()) {
         int owner_index = city.OwnerIndex();
         if (city.IsRazed() || owner_index < 0 || owner_index >= 8) continue;
         city_counts[owner_index]++;

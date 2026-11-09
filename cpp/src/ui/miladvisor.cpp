@@ -63,14 +63,14 @@ struct Advice : kit::Modal {
  */
 void Open(const std::vector<w2::Army*>* stack, int x, int y) {
     w2::Game& game = *g_app.g;
-    if (game.map->options.military_advisor == 0 || !stack || stack->empty()) return;
+    if (game.GetMap().GameOptions().military_advisor == 0 || !stack || stack->empty()) return;
     auto lines = w2::combat::BattleLines(game, *stack, x, y);
     int wins = w2::combat::Advise(game, lines.attackers, lines.defenders, x, y).second;
     auto dialog = std::make_shared<Advice>();
     dialog->dialog_view = kit::View(kDialog);
     dialog->view = &dialog->dialog_view;
-    dialog->hail = kit::Text(kHail, game.rng.Dice(1, 5, -1));
-    dialog->battle = kit::Text(kBattle, game.rng.Dice(1, 5, -1));
+    dialog->hail = kit::Text(kHail, game.GetRng().Dice(1, 5, -1));
+    dialog->battle = kit::Text(kBattle, game.GetRng().Dice(1, 5, -1));
     dialog->verdict = kit::Text(kVerdict, wins / 2);
     dialog->dialog_view.state[kOk] = w2::uidata::kNormal;
     kit::Push(dialog);

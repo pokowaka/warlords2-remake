@@ -104,7 +104,7 @@ int Dist(int from_x, int from_y, int to_x, int to_y) {
 int LabelSnapshot(Game& game, int my_side, const ai::modern::MissionSnapshot& snapshot) {
     const size_t candidate_count = snapshot.candidates.size();
     City* start_city =
-            snapshot.start_city != kNone ? &game.map->cities[snapshot.start_city] : nullptr;
+            snapshot.start_city != kNone ? game.GetMap().CityAt(snapshot.start_city) : nullptr;
     auto stayed = [&](Army* army) {
         if (army->X() == kNone) return false;
         if (start_city) return game::CityAt(game, army->X(), army->Y()) == start_city;
@@ -265,7 +265,7 @@ double BcAccumulate(const ml::PolicyNetwork& net, const Example& example, ml::Po
     float max_logit = -1e30F;
     int argmax = 0;
     for (size_t i = 0; i < candidate_count; i++) {
-        utilities[i] = net.mission_net.Forward(example.candidates[i])[0];
+        utilities[i] = net.MissionHead().Forward(example.candidates[i])[0];
         // No multiplicity prior here: greedy play (T = 0.02) ranks options by
         // utility alone, so the utilities themselves must put the label on top
         logits[i] = utilities[i] * inverse_temperature;
@@ -284,7 +284,8 @@ double BcAccumulate(const ml::PolicyNetwork& net, const Example& example, ml::Po
                 inverse_temperature *
                 (probabilities[i] - (i == static_cast<size_t>(example.label) ? 1.0F : 0.0F));
         if (logit_grad != 0.0F)
-            net.mission_net.Backward(example.candidates[i], {logit_grad, 0.0F}, grad.mission_net);
+            net.MissionHead().Backward(example.candidates[i], {logit_grad, 0.0F},
+                                       grad.MissionHead());
     }
     return -std::log(std::max(1e-12F, probabilities[example.label]));
 }
@@ -340,8 +341,8 @@ int main(int argc, char** argv) {
                 Game& game = *game_ptr;
                 std::vector<int> in_use;
                 for (int side = 0; side < 8; side++) {
-                    if (game.map->sides[side].InUse()) in_use.push_back(side);
-                    ai::SetSideClassicAi(game, game.map->sides[side], true);
+                    if (game.GetMap().Sides()[side].InUse()) in_use.push_back(side);
+                    ai::SetSideClassicAi(game, game.GetMap().Sides()[side], true);
                 }
                 if (in_use.empty()) continue;
                 const int recorded_a = in_use[static_cast<size_t>(game_index) % in_use.size()],
@@ -351,7 +352,7 @@ int main(int argc, char** argv) {
                 long local_snaps = 0;
                 Side* current = game::Begin(game);
                 int safety = 0;
-                while (current && !game.over && !game.won && game.turn <= turns &&
+                while (current && !game.IsOver() && !game.IsWon() && game.Turn() <= turns &&
                        safety++ < turns * 12) {
                     if (current->IsComputerControlled() && current->IsAlive()) {
                         const bool recorded =
@@ -431,7 +432,7 @@ int main(int argc, char** argv) {
             int greedy_choice = 0;
             float best = -1e30F;
             for (size_t candidate = 0; candidate < example.candidates.size(); candidate++) {
-                float utility = net.mission_net.Forward(example.candidates[candidate])[0];
+                float utility = net.MissionHead().Forward(example.candidates[candidate])[0];
                 if (utility > best) {
                     best = utility;
                     greedy_choice = static_cast<int>(candidate);

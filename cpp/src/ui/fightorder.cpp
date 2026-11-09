@@ -38,7 +38,7 @@ struct Order : kit::Modal {
     int chosen = -1;           ///< The chosen place, or -1 for none.
 
     /** @brief The player's fight-order row: army type id -> place. */
-    std::vector<int>& Row() { return g_app.g->map->fight_order[g_app.player->Index()]; }
+    std::vector<int>& Row() { return g_app.g->GetMap().MutableFightOrder()[g_app.player->Index()]; }
 
     /** @brief The army type id at place `rank`, or w2::kNone. */
     int TypeAt(int rank) {
@@ -108,7 +108,7 @@ struct Order : kit::Modal {
         if (control_id == kOk) return Close(true);
         if (control_id == kCancel) return Close(false);
         if (control_id == kDefault) {
-            Row() = g_app.g->map->fight_order[kNeutral];
+            Row() = g_app.g->GetMap().FightOrder()[kNeutral];
             chosen = -1;
         } else if (control_id == kEarlier && chosen > 0) {
             Swap(chosen, chosen - 1);
@@ -133,7 +133,8 @@ struct Order : kit::Modal {
     /** @brief The right button on a place (help sub-ids 45-71): its army-type box. */
     bool Info(int sub, int screen_x, int screen_y) override {
         int type_id = TypeAt(sub - 45);
-        const w2::ArmyType* type = type_id != w2::kNone ? g_app.g->types.ById(type_id) : nullptr;
+        const w2::ArmyType* type =
+                type_id != w2::kNone ? g_app.g->ArmyTypes().ById(type_id) : nullptr;
         if (!type) return false;
         infobox::ArmyType(screen_x, screen_y, type_id,
                           w2::Slot{type->id, type->name, type->strength, type->time, type->cost,
@@ -155,7 +156,7 @@ struct Order : kit::Modal {
 /** @brief Opens Fight Order, keeping a copy of the row for Cancel. */
 void Open() {
     auto dialog = std::make_shared<Order>();
-    dialog->backup = g_app.g->map->fight_order[g_app.player->Index()];
+    dialog->backup = g_app.g->GetMap().FightOrder()[g_app.player->Index()];
     dialog->dialog_view = kit::View(kDialog);
     dialog->view = &dialog->dialog_view;
     dialog->Refresh();

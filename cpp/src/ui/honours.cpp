@@ -121,10 +121,10 @@ void Medal(w2::Army* army, kit::Done after) {
     bool grew_move = army->Strength() >= 15;
     int now = grew_move ? army->MaxMoves() : army->Strength();
     auto pick = [](int group, int count) {
-        return kit::Text(group, g_app.g->rng.Dice(1, count, -1));
+        return kit::Text(group, g_app.g->GetRng().Dice(1, count, -1));
     };
     std::string line1 = pick(kMedalFor, 7), line3 = pick(kMedalGiven, 4);
-    const w2::ArmyType* army_type = g_app.g->types.ById(army->Type());
+    const w2::ArmyType* army_type = g_app.g->ArmyTypes().ById(army->Type());
     std::string type_name = army_type ? army_type->name : "";
     int type = army->TypeIndex(), owner = army->OwnerIndex();
     sound::Music(w2::cues::kMedal);

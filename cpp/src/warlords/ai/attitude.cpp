@@ -29,8 +29,9 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
         return breakdown;
     }
 
-    const Side& own_side = game.map->sides[ai_side];
-    const Side& their_side = game.map->sides[target_side];
+    const Map& map = game.GetMap();
+    const Side& own_side = map.Sides()[ai_side];
+    const Side& their_side = map.Sides()[target_side];
     const auto& profile = personality::ForSide(own_side);
     breakdown.personality_name = profile.name;
     breakdown.personality_archetype = profile.archetype;
@@ -42,7 +43,7 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
     int their_cities = 0, leader_cities = 0, leader_side = kNone;
     int cities_taken_from_me = 0;
     std::array<int, 8> side_cities{};
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : map.Cities()) {
         if (city.IsRazed() || !belief::IsCityVisible(game, ai_side, city)) continue;
         total_standing_cities++;
         int owner_idx = city.OwnerIndex();
@@ -84,7 +85,7 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
     int shared_wars = 0;
     for (int third_side = 0; third_side < 8; third_side++) {
         if (third_side != ai_side && third_side != target_side &&
-            game.map->sides[third_side].IsAlive()) {
+            map.Sides()[third_side].IsAlive()) {
             if (diplomacy::State(game, ai_side, third_side) == diplomacy::kWar &&
                 diplomacy::State(game, target_side, third_side) == diplomacy::kWar) {
                 shared_wars++;
@@ -124,7 +125,7 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
         push_factor(absl::StrFormat("You hold %d of our claimed cities", cities_taken_from_me),
                     -cities_taken_from_me * 8);
     }
-    const City* own_capital = own_side.CapitalCity(*game.map);
+    const City* own_capital = own_side.CapitalCity(map);
     if (own_capital && own_capital->OwnerIndex() == target_side) {
         push_factor("You occupy our ancestral Capital!", -60);
     }

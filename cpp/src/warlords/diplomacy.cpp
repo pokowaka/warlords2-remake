@@ -65,16 +65,18 @@ void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::s
 
     int war_target = WarTarget(game, side_index, other_index);
     if (war_target == kNone) war_target = WarTarget(game, other_index, side_index);
+    const auto& map_sides = game.GetMap().Sides();
     if (war_target >= 0 && war_target < 8 && war_target != side_index &&
-        war_target != other_index && game.map->sides[war_target].IsAlive()) {
+        war_target != other_index && map_sides[war_target].IsAlive()) {
         for (int participant : {side_index, other_index}) {
             if (State(game, participant, war_target) != kWar) {
-                game.diplomacy.SetSymmetricState(SideId(participant), SideId(war_target), kWar);
-                game.diplomacy.SetSymmetricProposal(SideId(participant), SideId(war_target), kWar);
+                game.Diplomacy().SetSymmetricState(SideId(participant), SideId(war_target), kWar);
+                game.Diplomacy().SetSymmetricProposal(SideId(participant), SideId(war_target),
+                                                      kWar);
                 SetAllied(game, participant, war_target, false);
                 messages.push_back(absl::StrFormat("%s joined the war against %s!",
-                                                   game.map->sides[participant].Name(),
-                                                   game.map->sides[war_target].Name()));
+                                                   map_sides[participant].Name(),
+                                                   map_sides[war_target].Name()));
             }
         }
     }
@@ -85,12 +87,12 @@ void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::s
 }  // namespace
 
 void Init(Game& game) {
-    int start_state = game.map->options.diplomacy != 0 ? kPeace : kWar;
-    game.diplomacy.Reset(start_state);
+    int start_state = game.GetMap().GameOptions().diplomacy != 0 ? kPeace : kWar;
+    game.Diplomacy().Reset(start_state);
 }
 
 int State(const Game& game, int from_side, int to_side) {
-    return game.diplomacy.State(SideId(from_side), SideId(to_side));
+    return game.Diplomacy().State(SideId(from_side), SideId(to_side));
 }
 
 bool MayAttack(const Game& game, int from_side, int to_side) {
@@ -99,67 +101,67 @@ bool MayAttack(const Game& game, int from_side, int to_side) {
 }
 
 void Propose(Game& game, int from_side, int to_side, int proposed_state) {
-    game.diplomacy.Propose(SideId(from_side), SideId(to_side), proposed_state);
+    game.Diplomacy().Propose(SideId(from_side), SideId(to_side), proposed_state);
 }
 
 int Proposal(const Game& game, int from_side, int to_side) {
-    return game.diplomacy.Proposal(SideId(from_side), SideId(to_side));
+    return game.Diplomacy().Proposal(SideId(from_side), SideId(to_side));
 }
 
 bool IsAllied(const Game& game, int from_side, int to_side) {
-    return game.diplomacy.IsAllied(SideId(from_side), SideId(to_side));
+    return game.Diplomacy().IsAllied(SideId(from_side), SideId(to_side));
 }
 
 void SetAllied(Game& game, int from_side, int to_side, bool allied) {
-    game.diplomacy.SetAllied(SideId(from_side), SideId(to_side), allied);
+    game.Diplomacy().SetAllied(SideId(from_side), SideId(to_side), allied);
 }
 
 bool ProposalAllied(const Game& game, int from_side, int to_side) {
-    return game.diplomacy.ProposalAllied(SideId(from_side), SideId(to_side));
+    return game.Diplomacy().ProposalAllied(SideId(from_side), SideId(to_side));
 }
 
 void ProposeAlliance(Game& game, int from_side, int to_side, bool propose) {
-    game.diplomacy.ProposeAlliance(SideId(from_side), SideId(to_side), propose);
+    game.Diplomacy().ProposeAlliance(SideId(from_side), SideId(to_side), propose);
 }
 
 int TruceTurns(const Game& game, int from_side, int to_side) {
-    return game.diplomacy.TruceTurns(SideId(from_side), SideId(to_side));
+    return game.Diplomacy().TruceTurns(SideId(from_side), SideId(to_side));
 }
 
 void SetTruce(Game& game, int from_side, int to_side, int turns) {
-    game.diplomacy.SetTruce(SideId(from_side), SideId(to_side), turns);
+    game.Diplomacy().SetTruce(SideId(from_side), SideId(to_side), turns);
 }
 
 int GoldOffer(const Game& game, int from_side, int to_side) {
-    return game.diplomacy.GoldOffer(SideId(from_side), SideId(to_side));
+    return game.Diplomacy().GoldOffer(SideId(from_side), SideId(to_side));
 }
 
 void SetGoldOffer(Game& game, int from_side, int to_side, int gold) {
-    game.diplomacy.SetGoldOffer(SideId(from_side), SideId(to_side), gold);
+    game.Diplomacy().SetGoldOffer(SideId(from_side), SideId(to_side), gold);
 }
 
 int WarTarget(const Game& game, int from_side, int to_side) {
-    return game.diplomacy.WarTarget(SideId(from_side), SideId(to_side)).Value();
+    return game.Diplomacy().WarTarget(SideId(from_side), SideId(to_side)).Value();
 }
 
 void SetWarTarget(Game& game, int from_side, int to_side, int target_side) {
-    game.diplomacy.SetWarTarget(SideId(from_side), SideId(to_side), SideId(target_side));
+    game.Diplomacy().SetWarTarget(SideId(from_side), SideId(to_side), SideId(target_side));
 }
 
 int Trust(const Game& game, int from_side, int to_side) {
-    return game.diplomacy.Trust(SideId(from_side), SideId(to_side));
+    return game.Diplomacy().Trust(SideId(from_side), SideId(to_side));
 }
 
 void AddTrust(Game& game, int from_side, int to_side, int delta) {
-    game.diplomacy.AddTrust(SideId(from_side), SideId(to_side), delta);
+    game.Diplomacy().AddTrust(SideId(from_side), SideId(to_side), delta);
 }
 
 int AlliedTargetCity(const Game& game, int side) {
-    return game.diplomacy.AlliedTargetCity(SideId(side)).Value();
+    return game.Diplomacy().AlliedTargetCity(SideId(side)).Value();
 }
 
 void SetAlliedTargetCity(Game& game, int side, int city_index) {
-    game.diplomacy.SetAlliedTargetCity(SideId(side), CityId(city_index));
+    game.Diplomacy().SetAlliedTargetCity(SideId(side), CityId(city_index));
 }
 
 std::vector<std::string> Apply(Game& game, Side& side) {
@@ -167,7 +169,7 @@ std::vector<std::string> Apply(Game& game, Side& side) {
     int side_index = side.Index();
     bool classic = side.IsClassicAi();
     for (int other_index = 0; other_index < 8; other_index++) {
-        Side* other = game.map->Side(other_index);
+        Side* other = game.GetMap().SideAt(other_index);
         if (other_index != side_index && other) {
             if (!classic && TruceTurns(game, side_index, other_index) > 0 &&
                 State(game, side_index, other_index) == kPeace) {
@@ -182,10 +184,11 @@ std::vector<std::string> Apply(Game& game, Side& side) {
                     int truce_left = TruceTurns(game, side_index, other_index);
                     SetAllied(game, side_index, other_index, false);
                     SetTruce(game, side_index, other_index, 0);
-                    game.diplomacy.SetSymmetricState(SideId(side_index), SideId(other_index),
-                                                     wanted);
+                    game.Diplomacy().SetSymmetricState(SideId(side_index), SideId(other_index),
+                                                       wanted);
                     if (Proposal(game, other_index, side_index) < wanted)
-                        game.diplomacy.SetProposal(SideId(other_index), SideId(side_index), wanted);
+                        game.Diplomacy().SetProposal(SideId(other_index), SideId(side_index),
+                                                     wanted);
                     if (!classic && (was_allied || (truce_left > 0 && wanted == kWar))) {
                         AddTrust(game, other_index, side_index, -50);
                         for (int bystander = 0; bystander < 8; bystander++) {
@@ -199,8 +202,8 @@ std::vector<std::string> Apply(Game& game, Side& side) {
                         messages.push_back("War declared with " + other->Name() + "!");
                     }
                 } else if (Proposal(game, other_index, side_index) <= wanted) {
-                    game.diplomacy.SetSymmetricState(SideId(side_index), SideId(other_index),
-                                                     wanted);
+                    game.Diplomacy().SetSymmetricState(SideId(side_index), SideId(other_index),
+                                                       wanted);
                     if (wanted == kPeace) {
                         history::RecordDeed(game, &side, DeedType::kAtPeace, side_index,
                                             other_index, "");
@@ -231,20 +234,21 @@ std::vector<std::string> Apply(Game& game, Side& side) {
 }
 
 bool MustDeclare(const Game& game, int from_side, int to_side, const City* city) {
-    if (game.map->options.diplomacy == 0 || from_side == kNone || to_side == kNone) return false;
+    if (game.GetMap().GameOptions().diplomacy == 0 || from_side == kNone || to_side == kNone)
+        return false;
     int current_state = State(game, from_side, to_side);
     return current_state == kPeace || (current_state == kIntermediate && city && city->Index() > 0);
 }
 
 void AttackAnyway(Game& game, int from_side, int to_side) {
     if (from_side == kNone || to_side == kNone) return;
-    Side* side = game.map->Side(from_side);
+    Side* side = game.GetMap().SideAt(from_side);
     if (!side) return;
     int current_state = State(game, from_side, to_side);
     if (current_state == kPeace)
-        game::AddDiploScore(game, *side, game.rng.Dice(1, 100, 100));
+        game::AddDiploScore(game, *side, game.GetRng().Dice(1, 100, 100));
     else if (current_state == kIntermediate)
-        game::AddDiploScore(game, *side, game.rng.Dice(1, 15, 10));
+        game::AddDiploScore(game, *side, game.GetRng().Dice(1, 15, 10));
     SetAllied(game, from_side, to_side, false);
     SetTruce(game, from_side, to_side, 0);
     AddTrust(game, to_side, from_side, -60);
@@ -252,8 +256,8 @@ void AttackAnyway(Game& game, int from_side, int to_side) {
         if (bystander != from_side && bystander != to_side)
             AddTrust(game, bystander, from_side, -25);
     }
-    game.diplomacy.SetSymmetricState(SideId(from_side), SideId(to_side), kWar);
-    game.diplomacy.SetSymmetricProposal(SideId(from_side), SideId(to_side), kWar);
+    game.Diplomacy().SetSymmetricState(SideId(from_side), SideId(to_side), kWar);
+    game.Diplomacy().SetSymmetricProposal(SideId(from_side), SideId(to_side), kWar);
     history::RecordDeed(game, side, DeedType::kTreachery, from_side, to_side, "");
 }
 
@@ -272,9 +276,9 @@ void ScoreUpdate(Game& game, Side& side) {
 int AddScore(Game& game, Side& side, int from_state, int to_state) {
     int gain = kNone;
     if (from_state == kWar && to_state == kPeace)
-        gain = game.rng.Dice(1, 10, 10);
+        gain = game.GetRng().Dice(1, 10, 10);
     else if (to_state < from_state)
-        gain = game.rng.Dice(1, 2, 1);
+        gain = game.GetRng().Dice(1, 2, 1);
     if (gain != kNone) game::AddDiploScore(game, side, gain);
     return gain;
 }
@@ -286,10 +290,10 @@ std::map<int, std::string> Ratings(const Game& game) {
         int seq;
     };
     std::vector<RankedSide> order;
-    for (size_t i = 0; i < game.sides.size(); i++) {
-        if (game.sides[i]->IsAlive()) {
-            order.push_back(
-                    RankedSide{game.sides[i], game.sides[i]->DiploScore(), static_cast<int>(i)});
+    for (size_t i = 0; i < game.Sides().size(); i++) {
+        if (game.Sides()[i]->IsAlive()) {
+            order.push_back(RankedSide{game.Sides()[i], game.Sides()[i]->DiploScore(),
+                                       static_cast<int>(i)});
         }
     }
     LuaSort(order, [](const RankedSide& lhs, const RankedSide& rhs) {
@@ -309,7 +313,7 @@ AttitudeBreakdown ComputeAttitude(const Game& game, int ai_side, int target_side
     breakdown.from_side = ai_side;
     breakdown.to_side = target_side;
     if (!ValidPair(ai_side, target_side)) return breakdown;
-    const Side& own_side = game.map->sides[ai_side];
+    const Side& own_side = game.GetMap().Sides()[ai_side];
     if (own_side.ComputerPlayer()) {
         return own_side.ComputerPlayer()->EvaluateProposal(game, SideId(ai_side),
                                                            SideId(target_side));

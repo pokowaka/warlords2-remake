@@ -152,7 +152,7 @@ static Army* TopArmy(const std::vector<Army*>& stack) {
     Army* best = nullptr;
     int best_rank = kNone;
     for (Army* army : stack) {
-        int rank = g_app.g->map->fight_order[OwnerOr8(army->OwnerIndex())][army->TypeIndex()];
+        int rank = g_app.g->GetMap().FightOrder()[OwnerOr8(army->OwnerIndex())][army->TypeIndex()];
         if (best_rank == kNone || rank > best_rank) {
             best = army;
             best_rank = rank;
@@ -180,7 +180,7 @@ static int StackFigure(const std::vector<Army*>& stack) {
  */
 static void DrawFog() {
     int viewer = game::ViewerSide(*g_app.g, g_app.player);
-    if (g_app.g->map->options.hidden_map == 0 || viewer == kNone) return;
+    if (g_app.g->GetMap().GameOptions().hidden_map == 0 || viewer == kNone) return;
     for (int tile_y = g_app.view[1]; tile_y <= g_app.view[3]; tile_y++) {
         for (int tile_x = g_app.view[0]; tile_x <= g_app.view[2]; tile_x++) {
             int cell = game::FogCell(*g_app.g, viewer, tile_x, tile_y);
@@ -241,8 +241,9 @@ static void DrawStack(int owner, int army_type, int count, int pixel_x, int pixe
 static void DrawMap() {
     g_app.view = ViewTiles();
     const auto& view = g_app.view;
+    w2::Map& map = g_app.g->GetMap();
     std::map<int, std::vector<Army*>> armies_on;
-    for (Army* army : g_app.g->armies) {
+    for (Army* army : g_app.g->Armies()) {
         if (!army->InTransit() && army->X() != kNone && army->X() >= view[0] &&
             army->X() <= view[2] && army->Y() >= view[1] && army->Y() <= view[3])
             armies_on[army->X() + army->Y() * 1000].push_back(army);
@@ -250,8 +251,9 @@ static void DrawMap() {
     // one item a tile: the last in item order (the original walks them from
     // the end)
     std::map<int, w2::Item*> items_on_tile;
-    for (int i = static_cast<int>(g_app.g->map->items.size()) - 1; i >= 0; i--) {
-        w2::Item& item = g_app.g->map->items[i];
+    auto map_items = map.Items();
+    for (int i = static_cast<int>(map_items.size()) - 1; i >= 0; i--) {
+        w2::Item& item = map_items[i];
         if (item.status == 1 && item.x != kNone && !items_on_tile.count(item.x + item.y * 1000))
             items_on_tile[item.x + item.y * 1000] = &item;
     }
@@ -265,15 +267,15 @@ static void DrawMap() {
     for (int tile_y = view[1]; tile_y <= view[3]; tile_y++) {
         for (int tile_x = view[0]; tile_x <= view[2]; tile_x++) {
             int pixel_x = tile_x * kTile, pixel_y = tile_y * kTile;
-            int tile = w2::scn::TileAt(*g_app.g->map, tile_x, tile_y);
+            int tile = w2::scn::TileAt(map, tile_x, tile_y);
             int sheet = std::min(1, tile / 96);
             gfx::SetColor(1, 1, 1);
             gfx::Draw(g_app.sheets[sheet], TileQuad(tile), pixel_x, pixel_y);
-            int road = w2::scn::RoadAt(*g_app.g->map, tile_x, tile_y);
+            int road = w2::scn::RoadAt(map, tile_x, tile_y);
             if (road != 0) gfx::Draw(g_app.road_img, RoadQuad(road - 1), pixel_x, pixel_y);
             // a port -- a crossing, map word bit 15 -- takes the anchor, at the
             // tile's corner after the roads
-            if (w2::scn::IsCrossing(*g_app.g->map, tile_x, tile_y))
+            if (w2::scn::IsCrossing(map, tile_x, tile_y))
                 gfx::Draw(g_app.atrans_shields, gfx::NewQuad(0, 0, 32, 29), pixel_x, pixel_y);
             // items on the ground: a planted standard as its side's flag, army
             // cell 29; anything else as the bag
@@ -375,7 +377,7 @@ void DrawStrategicMap(int x, int y, const City* mark, bool no_cities,
     gfx::SetColor(1, 1, 1);
     gfx::Draw(g_app.strat_image, x, y);
     if (!no_cities) {
-        auto& cities = g_app.g->map->cities;
+        auto cities = g_app.g->GetMap().Cities();
         for (size_t i = 0; i < cities.size(); i++) {
             const City& city = cities[i];
             int owner = owners && i < owners->size() ? (*owners)[i] : kNone;
@@ -401,7 +403,7 @@ void DrawStrategicMap(int x, int y, const City* mark, bool no_cities,
             if (ally != g_app.player->Index() &&
                 w2::diplomacy::IsAllied(*g_app.g, g_app.player->Index(), ally)) {
                 int target_index = w2::diplomacy::AlliedTargetCity(*g_app.g, ally);
-                if (const City* target = g_app.g->map->City(target_index)) {
+                if (const City* target = g_app.g->GetMap().CityAt(target_index)) {
                     if (!target->IsRazed() &&
                         game::Seen(*g_app.g, viewer, target->X(), target->Y())) {
                         int target_x = x + target->X() * 2 - 1, target_y = y + target->Y() * 2 - 1;
@@ -427,7 +429,7 @@ void DrawStrategicMap(int x, int y, const City* mark, bool no_cities,
 void DrawSiteMarkers(int x, int y, const w2::Site* highlight) {
     int viewer = game::ViewerSide(*g_app.g, g_app.player);
     gfx::SetScissor(x, y, 224, 312);
-    for (auto& site : g_app.g->map->sites) {
+    for (const auto& site : g_app.g->GetMap().Sites()) {
         if (!(viewer == kNone || (w2::site::ShownTo(site, *g_app.player) &&
                                   game::Seen(*g_app.g, viewer, site.x, site.y))))
             continue;
@@ -471,7 +473,7 @@ int strat_scroll = 0;
  */
 static void FollowView() {
     const auto& rect = g_app.strat_rect;
-    int full = g_app.g->map->height * 2;
+    int full = g_app.g->GetMap().Height() * 2;
     auto [view_w, view_h] = ViewSize();
     // a whole tile at a time
     int scroll = static_cast<int>(std::lround(g_app.cy + view_h / 2 - rect.h / 4.0)) * 2;
@@ -547,10 +549,10 @@ static void DrawTurnStrip() {
     PalColour(15);
     gfx::Rectangle(gfx::kFill, 437, 0, 202, 17);
     std::vector<Side*> alive;
-    for (Side* side : g_app.g->sides)
+    for (Side* side : g_app.g->Sides())
         if (side->IsAlive()) alive.push_back(side);
     int count = static_cast<int>(alive.size());
-    std::string turn = absl::StrFormat("Turn %d", g_app.g->turn);
+    std::string turn = absl::StrFormat("Turn %d", g_app.g->Turn());
     const Font& font = g_app.big_font->Colours(0, 15);
     font.Draw(turn, (8 - count) * 16 + 508 - font.Width(turn), 0);
     const Side* active_side = (g_app.ai_side && !HumansLeft()) ? g_app.ai_side : g_app.player;
@@ -704,7 +706,7 @@ static void DrawArmySlots() {
     if (!moving.empty()) {
         bool sea = true, woods = false, hills = false;
         for (Army* army : moving) {
-            const w2::ArmyType* army_type = g_app.g->types.ById(army->Type());
+            const w2::ArmyType* army_type = g_app.g->ArmyTypes().ById(army->Type());
             if (army_type->woods_move) woods = true;
             if (army_type->hills_move) hills = true;
             if (!army->IsAtSea()) sea = false;
@@ -900,7 +902,7 @@ void DrawVectorMap(int x, int y, City* city, int filter, bool see_all) {
             if (owned_city->IsVectored()) mark_idx = 2;
             if (!incoming.empty()) mark_idx = game::Producing(*owned_city) ? 1 : 5;
             marker(owned_city, mark_idx);
-            City* dest = g_app.g->map->City(owned_city->VectoredCityId());
+            City* dest = g_app.g->GetMap().CityById(owned_city->VectoredCityId());
             if (dest) {
                 done.insert(dest);
                 marker(dest, game::Producing(*dest) ? 1 : 5);
@@ -933,7 +935,7 @@ void DrawVectorMap(int x, int y, City* city, int filter, bool see_all) {
                 marker(owned_city, mark_idx);
             }
         }
-        City* dest = g_app.g->map->City(city->VectoredCityId());
+        City* dest = g_app.g->GetMap().CityById(city->VectoredCityId());
         if (dest) {
             marker(dest, game::Producing(*dest) ? 1 : 5);
             line(city, dest, 7);

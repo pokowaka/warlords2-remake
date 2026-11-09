@@ -45,10 +45,9 @@ int PointerKind(int x, int y) {
     if (!tile) return g_app.panel_rect.Contains(x, y) ? kHand : kArrow;
     auto [tile_x, tile_y] = *tile;
     w2::Game& game_state = *g_app.g;
+    const w2::Map& map = game_state.GetMap();
     int player_index = g_app.player->Index();
-    if (tile_x < 0 || tile_y < 0 || tile_x >= game_state.map->width ||
-        tile_y >= game_state.map->height)
-        return kHand;
+    if (!map.InBounds(tile_x, tile_y)) return kHand;
     auto here = game::ArmiesAt(game_state, tile_x, tile_y);
     City* city = game::CityAt(game_state, tile_x, tile_y);
     bool armies = !here.empty();
@@ -57,7 +56,7 @@ int PointerKind(int x, int y) {
     if (owner == kNone) owner = city ? city->OwnerIndex() : kNone;
     if (owner == kNone) owner = w2::rules::kNeutral;
     int terrain = city ? (city->IsRazed() ? move::kSite : move::kCity)
-                       : w2::scn::TerrainAt(*game_state.map, tile_x, tile_y);
+                       : w2::scn::TerrainAt(map, tile_x, tile_y);
     const std::vector<Army*>* sel =
             g_app.selection && !g_app.selection->stack.empty() ? &g_app.selection->stack : nullptr;
     int dist = 0, mode = kNone, under = move::kPlain;
@@ -72,11 +71,11 @@ int PointerKind(int x, int y) {
             dist = std::max(std::abs(tile_x - stack_x), std::abs(tile_y - stack_y));
         }
         mode = move::ModeOf(game_state, *sel);
-        under = w2::scn::TerrainAt(*game_state.map, stack_x, stack_y);
+        under = w2::scn::TerrainAt(map, stack_x, stack_y);
         at_sea = (*sel)[0]->IsAtSea();
     }
     // any tile with a road on it costs 1, a mountain pass too
-    bool road = w2::scn::RoadAt(*game_state.map, tile_x, tile_y) % 0x20 != 0;
+    bool road = w2::scn::RoadAt(map, tile_x, tile_y) % 0x20 != 0;
     int cost = (sel && mode != move::kFlying && !road) ? move::kCost[terrain] : 1;
     if (!game::Seen(game_state, player_index, tile_x, tile_y) || cost <= 0) return kHand;
     auto walk = [&]() {
@@ -94,7 +93,7 @@ int PointerKind(int x, int y) {
     bool enemy_near =
             sel && dist <= 1 && owner != player_index && (terrain == move::kCity || armies);
     if (Held({"lshift", "rshift"})) {
-        if (enemy_near && game_state.map->options.military_advisor != 0) return kAdvise;
+        if (enemy_near && map.GameOptions().military_advisor != 0) return kAdvise;
         return look();
     }
     if (armies && owner == player_index && !ctrl) {
@@ -105,7 +104,7 @@ int PointerKind(int x, int y) {
     if (enemy_near &&
         !(at_sea && mode == move::kLand && under == move::kShore && !kPtrOk.count(terrain)) &&
         !(!at_sea && mode == move::kLand && terrain == move::kShore && !kPtrOk.count(under))) {
-        if (game_state.map->options.diplomacy == 0 || owner == w2::rules::kNeutral) return kAttack;
+        if (map.GameOptions().diplomacy == 0 || owner == w2::rules::kNeutral) return kAttack;
         int relation = w2::diplomacy::State(game_state, player_index, owner);
         if (terrain == move::kCity) return relation == w2::diplomacy::kWar ? kAttack : kPeace;
         return relation != w2::diplomacy::kPeace ? kAttack : kPeace;

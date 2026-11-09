@@ -100,7 +100,7 @@ void ShowPicture(int popup, int dialog_id, std::vector<int> live_ids, int defaul
 void Victory(kit::Done after) {
     sound::Music(w2::cues::kTriumph);
     ShowPicture(22, 32, {483}, 483, 483, [after](int) {
-        g_app.g->map->options.hidden_map = 0;
+        g_app.g->GetMap().MutableOptions().hidden_map = 0;
         front::StratDirty();
         search::ShowMessage(GroupLine(0x10, 0), GroupLine(0x10, 1), after);
     });
@@ -172,7 +172,7 @@ void Show(w2::Ending& outcome, kit::Done after) {
     // The offer waits on the game, not on the round's finding: computer
     // turns may have come between.
     if (w2::game::SurrenderPending(*g_app.g)) {
-        g_app.g->surrender_shown = true;
+        g_app.g->SetSurrenderShown(true);
         sound::Music(w2::cues::kSurrender);
         ShowPicture(20, 30, {485, 486}, 485, 486, [after, done](int control_id) {
             if (control_id == 485) {
@@ -209,7 +209,7 @@ void Over(w2::Ending& outcome) {
         return;
     }
     bool humans = false;
-    for (w2::Side* side : g_app.g->sides)
+    for (w2::Side* side : g_app.g->Sides())
         if (side->IsAlive() && !side->IsComputerControlled() &&
             !w2::game::SideCities(*g_app.g, *side).empty())
             humans = true;

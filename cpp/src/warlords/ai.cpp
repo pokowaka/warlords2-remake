@@ -25,7 +25,7 @@ bool& DefaultClassicAiFlag() {
 }
 
 void LevelDefaults(Game& game, AIData& data, int level) {
-    Rng& rng = game.rng;
+    Rng& rng = game.GetRng();
     if (level == 0) {
         data.rebuild_limit = 30;
         data.cautious = 1;
@@ -95,7 +95,7 @@ void LevelDefaults(Game& game, AIData& data, int level) {
 }
 
 void FromCard(Game& game, Side& side, AIData& data, const aicard::Card& card) {
-    Rng& rng = game.rng;
+    Rng& rng = game.GetRng();
     data.die_human = rng.Dice(1, card.die_human, 0);
     data.die_lord = rng.Dice(1, card.die_lord, 0);
     data.die_knight = rng.Dice(1, card.die_knight, 0);
@@ -118,16 +118,17 @@ void FromCard(Game& game, Side& side, AIData& data, const aicard::Card& card) {
     data.poor = card.poor;
     data.early = card.early;
     data.human_share = card.human_share * 10 + rng.Dice(1, 10, 0);
-    game.map->fight_order[side.Index()] = card.fight_order;
+    game.GetMap().MutableFightOrder()[side.Index()] = card.fight_order;
 }
 
 AIData RollInitialData(Game& game, Side& side) {
     AIData data = core::NewData();
-    bool quick = game.map->options.quick_start != 0;
-    for (auto& city : game.map->cities) {
+    Map& map = game.GetMap();
+    bool quick = map.GameOptions().quick_start != 0;
+    for (auto& city : map.Cities()) {
         data.roles[city.Index()] = quick ? core::kWeak : 0;
         data.held[city.Index()] = 0;
-        data.flags[city.Index()] = game.map->options.hidden_map != 0 ? core::kCfUnseen : 0;
+        data.flags[city.Index()] = map.GameOptions().hidden_map != 0 ? core::kCfUnseen : 0;
     }
     int level = 2;
     if (side.IsComputerControlled() && (side.Level() == 0 || side.Level() == 1)) {
@@ -135,7 +136,7 @@ AIData RollInitialData(Game& game, Side& side) {
     }
     LevelDefaults(game, data, level);
     if (side.InUse() && side.IsComputerControlled()) {
-        auto card = aicard::Load(game.data_dir, level, side.Card());
+        auto card = aicard::Load(game.DataDir(), level, side.Card());
         if (card) FromCard(game, side, data, *card);
     }
     return data;
@@ -143,12 +144,13 @@ AIData RollInitialData(Game& game, Side& side) {
 
 AIData MakeDeterministicData(const Game& game, const Side& side) {
     AIData data = core::NewData();
-    if (!game.map) return data;
-    bool quick = game.map->options.quick_start != 0;
-    for (const auto& city : game.map->cities) {
+    if (!game.HasMap()) return data;
+    const Map& map = game.GetMap();
+    bool quick = map.GameOptions().quick_start != 0;
+    for (const auto& city : map.Cities()) {
         data.roles[city.Index()] = quick ? core::kWeak : 0;
         data.held[city.Index()] = 0;
-        data.flags[city.Index()] = game.map->options.hidden_map != 0 ? core::kCfUnseen : 0;
+        data.flags[city.Index()] = map.GameOptions().hidden_map != 0 ? core::kCfUnseen : 0;
     }
     int level = 2;
     if (side.IsComputerControlled() && (side.Level() == 0 || side.Level() == 1)) {
@@ -188,8 +190,8 @@ AIData MakeDeterministicData(const Game& game, const Side& side) {
         data.early = 1;
         data.human_share = 35;
     }
-    if (side.InUse() && side.IsComputerControlled() && !game.data_dir.empty()) {
-        if (auto card = aicard::Load(game.data_dir, level, side.Card())) {
+    if (side.InUse() && side.IsComputerControlled() && !game.DataDir().empty()) {
+        if (auto card = aicard::Load(game.DataDir(), level, side.Card())) {
             data.max_groups = std::max(0, std::min(core::kMaxGroups, card->groups));
             data.solidarity = card->solidarity;
             if (card->bold != 0) data.bold = true;
@@ -214,8 +216,8 @@ AIData MakeDeterministicData(const Game& game, const Side& side) {
 }
 
 std::shared_ptr<Neighbours> SharedNeighboursFor(Game& game) {
-    if (!game.map) return nullptr;
-    for (const auto& candidate : game.map->sides) {
+    if (!game.HasMap()) return nullptr;
+    for (const auto& candidate : game.GetMap().Sides()) {
         if (const ClassicAiPlayer* classic = ClassicAiPlayer::FindOn(candidate)) {
             if (classic->NeighbourTable()) return classic->NeighbourTable();
         }
@@ -224,7 +226,8 @@ std::shared_ptr<Neighbours> SharedNeighboursFor(Game& game) {
 }
 
 void ShareOutCities(Game& game) {
-    for (auto& city : game.map->cities) {
+    Map& map = game.GetMap();
+    for (auto& city : map.Cities()) {
         city.SetClaim(city.Owner());
     }
     bool shares[8] = {false};
@@ -232,7 +235,7 @@ void ShareOutCities(Game& game) {
     int computers = 0;
     std::pair<int, int> from[8];
     for (int i = 0; i < 8; i++) {
-        Side& side = game.map->sides[i];
+        Side& side = map.Sides()[i];
         if (side.InUse()) {
             if (side.IsComputerControlled()) {
                 shares[i] = true;
@@ -250,9 +253,9 @@ void ShareOutCities(Game& game) {
         int best = kNone;
         int best_roll = 0;
         for (int i = 7; i >= 0; i--) {
-            if (game.map->sides[i].InUse()) {
+            if (map.Sides()[i].InUse()) {
                 shares[i] = true;
-                int roll = game.rng.Dice(1, 100, 0);
+                int roll = game.GetRng().Dice(1, 100, 0);
                 if (best == kNone || best_roll < roll) {
                     best = i;
                     best_roll = roll;
@@ -273,8 +276,8 @@ void ShareOutCities(Game& game) {
         auto [from_x, from_y] = from[turn];
         City* pick = nullptr;
         int best_distance = kNone;
-        for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
-            City& city = game.map->cities[i];
+        for (int i = map.CityCount() - 1; i >= 0; i--) {
+            City& city = map.Cities()[i];
             if (core::Standing(city) && !city.Claim().IsValid()) {
                 int distance = core::Dist(from_x, from_y, city.X(), city.Y());
                 if (best_distance == kNone || distance < best_distance) {
@@ -285,8 +288,8 @@ void ShareOutCities(Game& game) {
         }
         if (!pick) break;
         pick->SetClaim(SideId(turn));
-        Side& side = game.map->sides[turn];
-        if (game.rng.Dice(1, 10, -1) < 5) {
+        Side& side = map.Sides()[turn];
+        if (game.GetRng().Dice(1, 10, -1) < 5) {
             TilePos cap_pos = side.OriginCapitalPos();
             from[turn] = {cap_pos.x, cap_pos.y};
         } else {
@@ -318,7 +321,7 @@ void SetDefaultClassicAi(bool classic) {
 std::shared_ptr<IComputerPlayer> MakeComputerPlayer(bool classic, Game& game, Side& side) {
     if (classic) {
         return std::make_shared<ClassicAiPlayer>(MakeDeterministicData(game, side),
-                                                 SharedNeighboursFor(game), &game.armies);
+                                                 SharedNeighboursFor(game), &game.Armies());
     }
     return std::make_shared<ModernMlPlayer>();
 }
@@ -336,20 +339,21 @@ AIData& InitSide(Game& game, Side& side) {
 }
 
 void StartGame(Game& game) {
+    Map& map = game.GetMap();
     auto neighbours = core::BuildNeighbours(game);
-    for (auto& side : game.map->sides) {
+    for (auto& side : map.Sides()) {
         AIData data = RollInitialData(game, side);
         if (DefaultClassicAiFlag()) {
             side.SetComputerPlayer(
-                    std::make_shared<ClassicAiPlayer>(std::move(data), neighbours, &game.armies));
+                    std::make_shared<ClassicAiPlayer>(std::move(data), neighbours, &game.Armies()));
         } else {
             side.SetComputerPlayer(std::make_shared<ModernMlPlayer>());
         }
     }
     ShareOutCities(game);
-    for (auto& side : game.map->sides) {
-        side.SetDiploScore(game.rng.Dice(1, 8, 0));
-        if (game.greatest && !side.IsComputerControlled()) side.AddDiploScore(400);
+    for (auto& side : map.Sides()) {
+        side.SetDiploScore(game.GetRng().Dice(1, 8, 0));
+        if (game.IsGreatestCampaign() && !side.IsComputerControlled()) side.AddDiploScore(400);
     }
 }
 
@@ -383,8 +387,8 @@ void RecordBattle(Game& game, int defender, int attacker, int x, int y, int hero
     if (defender == kNone || attacker == kNone || defender == core::kNeutral) return;
     if (defender < 0 || defender > 7 || attacker < 0 || attacker > 7) return;
     TilePos pos{x, y};
-    Side* def_side = game.map->Side(defender);
-    Side* atk_side = game.map->Side(attacker);
+    Side* def_side = game.GetMap().SideAt(defender);
+    Side* atk_side = game.GetMap().SideAt(attacker);
     if (def_side && def_side->ComputerPlayer()) {
         def_side->ComputerPlayer()->RecordBattle(game, SideId(defender), SideId(attacker), pos,
                                                  heroes_lost, armies_lost, all_lost, city_tile);

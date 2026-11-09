@@ -75,7 +75,7 @@ void Open() {
     dialog->view = &dialog->dialog_view;
     dialog->dialog_view.state[kDone] = w2::uidata::kNormal;
     dialog->dialog_view.state[kHelp] = w2::uidata::kNormal;
-    for (auto& item : g_app.g->map->items)
+    for (auto& item : g_app.g->GetMap().Items())
         if (item.index >= kFirst && item.index <= kLast) dialog->list.push_back(&item);
     // an insertion sort, by kind then value: equal ones keep their order
     auto& sorted = dialog->list;

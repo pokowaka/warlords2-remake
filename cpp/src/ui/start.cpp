@@ -186,11 +186,11 @@ std::shared_ptr<Setup> NewSetup(const Scenario& scenario) {
     setup->sc = scenario;
     if (!loaded_map.ok()) return setup;
     const auto& map = *loaded_map;
-    if (map->options.tutorial != 0)
+    if (map->GameOptions().tutorial != 0)
         for (int i = 0; i <= 9; i++) remembered_options[i] = kPresets[0][i];
     else
         RecallOptions();
-    for (const auto& side : map->sides) {
+    for (const auto& side : map->Sides()) {
         SideSetup& side_setup = setup->sides[side.Index()];
         side_setup.in_use = side.InUse();
         side_setup.name = side.Name();

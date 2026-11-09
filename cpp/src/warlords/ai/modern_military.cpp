@@ -40,6 +40,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                     ml::RolloutSampler* sampler, MovedArmySet& moved_armies,
                                     std::vector<MissionSnapshot>* snapshots) {
     int our_side = side.Index();
+    Map& map = game.GetMap();
     SideBelief& belief = belief::Ensure(side);
     float caution = 0.0F;
 
@@ -52,11 +53,11 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                ? belief.city_threat2_turn[city->Index()]
                                : 0.0F;
         bool is_quest_or_own =
-                (side.CapitalCity(*game.map) == city) ||
+                (side.CapitalCity(map) == city) ||
                 (side.ActiveQuest() && side.ActiveQuest()->TargetCityId() == city->Id());
         bool is_enemy_cap = false;
         for (int side_idx = 0; side_idx < 8; side_idx++) {
-            if (side_idx != our_side && game.map->sides[side_idx].CapitalCity(*game.map) == city)
+            if (side_idx != our_side && map.Sides()[side_idx].CapitalCity(map) == city)
                 is_enemy_cap = true;
         }
 
@@ -205,7 +206,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         if (target.kind == TargetKind::kNeutralCity || target.kind == TargetKind::kEnemyCity ||
             target.kind == TargetKind::kEnemyStack) {
             float near_str = 0.0F;
-            for (Army* army : game.armies) {
+            for (Army* army : game.Armies()) {
                 if (army->OwnerIndex() == our_side && army->X() != kNone && !army->InTransit() &&
                     army->Moves() > 0 &&
                     move::Distance(army->X(), army->Y(), target.x, target.y) <= 14) {
@@ -223,12 +224,12 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         std::vector<Army*> units;  ///< Unmoved armies standing at this location.
     };
     std::map<int, LocGroup> groups_by_loc;
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         if (army->OwnerIndex() != our_side || army->X() == kNone || army->InTransit() ||
             army->Moves() <= 0 || moved_armies.contains(army->Id()))
             continue;
         City* city = game::CityAt(game, army->X(), army->Y());
-        int key = city ? -(city->Index() + 1) : (army->Y() * game.map->width + army->X());
+        int key = city ? -(city->Index() + 1) : (army->Y() * map.Width() + army->X());
         auto& loc_group = groups_by_loc[key];
         loc_group.x = army->X();
         loc_group.y = army->Y();
@@ -266,7 +267,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         };
 
         // Ensure local reachable fog frontiers (land or coastal sea) are included near this stack
-        if (game.map->options.hidden_map != 0) {
+        if (map.GameOptions().hidden_map != 0) {
             int reachable_fog_count = 0;
             for (const auto& target : targets) {
                 if (target.kind == TargetKind::kFogFrontier &&
@@ -275,7 +276,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                 }
             }
             if (reachable_fog_count < 4) {
-                int width = game.map->width, height = game.map->height;
+                int width = map.Width(), height = map.Height();
                 for (int radius = 1; radius <= 28 && reachable_fog_count < 6; radius++) {
                     for (int dy = -radius; dy <= radius && reachable_fog_count < 6; dy++) {
                         for (int dx = -radius; dx <= radius && reachable_fog_count < 6; dx++) {
@@ -283,9 +284,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                             int fog_x = loc_group.x + dx, fog_y = loc_group.y + dy;
                             if (fog_x < 0 || fog_y < 0 || fog_x >= width || fog_y >= height)
                                 continue;
-                            int fterr =
-                                    game.map->terrain_type[game.map->tiles[fog_y * width + fog_x] &
-                                                           0xff];
+                            int fterr = map.TerrainTypeOf(map.TileWord(fog_x, fog_y));
                             if (fterr == move::kMountains) continue;
                             if (core::FloodAt(land_flood, fog_x, fog_y) >= core::kUnreached)
                                 continue;
@@ -318,8 +317,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                     fog_target.x = fog_x;
                                     fog_target.y = fog_y;
                                     fog_target.is_water = is_w;
-                                    bool road = !is_w &&
-                                                (scn::RoadAt(*game.map, fog_x, fog_y) % 0x20 != 0);
+                                    bool road =
+                                            !is_w && (scn::RoadAt(map, fog_x, fog_y) % 0x20 != 0);
                                     fog_target.value =
                                             static_cast<float>(adj_u) * 2.0F + (road ? 6.0F : 0.0F);
                                     fog_target.label =
@@ -338,7 +337,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         // Select up to 6 closest reachable land fog frontiers + 4 closest sea frontiers for this
         // stack
         std::set<size_t> local_fog_indices;
-        if (game.map->options.hidden_map != 0) {
+        if (map.GameOptions().hidden_map != 0) {
             std::vector<std::pair<int, size_t>> land_fogs, sea_fogs;
             for (size_t ti = 0; ti < targets.size(); ti++) {
                 if (targets[ti].kind != TargetKind::kFogFrontier) continue;
@@ -475,15 +474,15 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                         (tgt.item->status != 1 || tgt.item->x == kNone)) {
                         continue;
                     }
-                    if (tgt.kind == TargetKind::kFogFrontier && game.map->options.hidden_map != 0) {
+                    if (tgt.kind == TargetKind::kFogFrontier && map.GameOptions().hidden_map != 0) {
                         if (tgt.assigned_stacks >= 1) continue;
                         if (!local_fog_indices.empty() && !local_fog_indices.count(ti)) continue;
                         bool still_has_unseen = false;
                         for (int oy = -1; oy <= 1 && !still_has_unseen; oy++) {
                             for (int ox = -1; ox <= 1 && !still_has_unseen; ox++) {
                                 int unseen_x = tgt.x + ox, unseen_y = tgt.y + oy;
-                                if (unseen_x >= 0 && unseen_y >= 0 && unseen_x < game.map->width &&
-                                    unseen_y < game.map->height &&
+                                if (unseen_x >= 0 && unseen_y >= 0 && unseen_x < map.Width() &&
+                                    unseen_y < map.Height() &&
                                     !belief::IsTileVisible(game, our_side, unseen_x, unseen_y)) {
                                     still_has_unseen = true;
                                 }
@@ -528,7 +527,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                         ml::TargetVec target_vec = BuildTargetFeatures(
                                 game, side, prebuilt.units, tgt, near_str, caution, p_cost);
                         ml::MissionInVec m_in = ml::PackMissionInput(ctx, opt_sv, target_vec);
-                        auto raw = policy.mission_net.Forward(m_in);
+                        auto raw = policy.MissionHead().Forward(m_in);
                         options.push_back(JointOption{ti, si, m_in, target_vec,
                                                       ml::MissionOutput{raw[0], raw[1]}});
                     }
@@ -671,7 +670,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
 
                     // Add newly revealed neutral or enemy cities immediately so remaining stacks
                     // can act on them
-                    for (auto& city : game.map->cities) {
+                    for (auto& city : map.Cities()) {
                         if (city.IsRazed() || city.OwnerIndex() == our_side ||
                             !belief::IsCityVisible(game, our_side, city))
                             continue;
@@ -686,7 +685,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                             bool is_enemy_cap = false;
                             for (int side_idx = 0; side_idx < 8; side_idx++) {
                                 if (side_idx != our_side &&
-                                    game.map->sides[side_idx].CapitalCity(*game.map) == &city)
+                                    map.Sides()[side_idx].CapitalCity(map) == &city)
                                     is_enemy_cap = true;
                             }
                             if (city.IsNeutral()) {

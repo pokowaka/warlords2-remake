@@ -265,11 +265,37 @@ class PolicyNetwork {
     /** @brief Loads the network weights from a JSON file. */
     absl::Status LoadJson(const std::filesystem::path& path);
 
-    DiploNet diplo_net;             ///< Head 1: diplomacy.
-    MissionNet mission_net;         ///< Head 2: stack missions.
-    EconNet econ_net;               ///< Head 3: economy.
-    ValueNet value_net;             ///< Head 4: the turn critic.
-    StackValueNet stack_value_net;  ///< Head 5: the per-stack critic.
+    /** @brief Returns Head 1 (diplomacy MLP). */
+    DiploNet& DiploHead() { return diplo_net_; }
+    /** @brief Returns Head 1 (diplomacy MLP, const). */
+    const DiploNet& DiploHead() const { return diplo_net_; }
+
+    /** @brief Returns Head 2 (stack mission MLP). */
+    MissionNet& MissionHead() { return mission_net_; }
+    /** @brief Returns Head 2 (stack mission MLP, const). */
+    const MissionNet& MissionHead() const { return mission_net_; }
+
+    /** @brief Returns Head 3 (economy MLP). */
+    EconNet& EconHead() { return econ_net_; }
+    /** @brief Returns Head 3 (economy MLP, const). */
+    const EconNet& EconHead() const { return econ_net_; }
+
+    /** @brief Returns Head 4 (turn value critic MLP). */
+    ValueNet& ValueHead() { return value_net_; }
+    /** @brief Returns Head 4 (turn value critic MLP, const). */
+    const ValueNet& ValueHead() const { return value_net_; }
+
+    /** @brief Returns Head 5 (per-stack value critic MLP). */
+    StackValueNet& StackValueHead() { return stack_value_net_; }
+    /** @brief Returns Head 5 (per-stack value critic MLP, const). */
+    const StackValueNet& StackValueHead() const { return stack_value_net_; }
+
+  private:
+    DiploNet diplo_net_;             ///< Head 1: diplomacy.
+    MissionNet mission_net_;         ///< Head 2: stack missions.
+    EconNet econ_net_;               ///< Head 3: economy.
+    ValueNet value_net_;             ///< Head 4: the turn critic.
+    StackValueNet stack_value_net_;  ///< Head 5: the per-stack critic.
 };
 
 // --- Trajectory recording and stochastic exploration for PPO self-play ---

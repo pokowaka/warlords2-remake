@@ -30,7 +30,7 @@ const int kOffer[3] = {372, 380, 388};  // a row of 7 each: war, uneasy, peace
 
 /** @brief Whether side `side` is a valid index, in the scenario and still alive. */
 bool Playing(const w2::Game& game, int side) {
-    return side >= 0 && side < 8 && game.map->sides[side].IsActive();
+    return side >= 0 && side < 8 && game.GetMap().Sides()[side].IsActive();
 }
 
 /**
@@ -157,7 +157,7 @@ void OpenClassicReport() {
     report->v.state[kDone] = report->v.state[kAction] = w2::uidata::kNormal;
     if (!w2::game::HasActiveHuman(*g_app.g)) report->hidden.insert(kAction);
     report->titles = dip::Ratings(*g_app.g);
-    for (w2::Side* side : g_app.g->sides)
+    for (w2::Side* side : g_app.g->Sides())
         if (side->IsAlive()) report->order.push_back(side);
     w2::LuaSort(report->order, [](w2::Side* lhs, w2::Side* rhs) {
         if (lhs->DiploScore() != rhs->DiploScore()) return lhs->DiploScore() < rhs->DiploScore();
@@ -178,7 +178,7 @@ struct ClassicAction : kit::Modal {
     void Draw() override {
         w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
-        const w2::Side& my_side = game.map->sides[viewer];
+        const w2::Side& my_side = game.GetMap().Sides()[viewer];
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(0x6c, 0), 320, 64);
@@ -540,7 +540,7 @@ void OpenReport() {
     report->view = &report->v;
     report->v.state[kDone] = report->v.state[kAction] = w2::uidata::kNormal;
     report->titles = dip::Ratings(*g_app.g);
-    for (w2::Side* side : g_app.g->sides)
+    for (w2::Side* side : g_app.g->Sides())
         if (side->IsAlive()) report->order.push_back(side);
     w2::LuaSort(report->order, [](w2::Side* lhs, w2::Side* rhs) {
         if (lhs->DiploScore() != rhs->DiploScore()) return lhs->DiploScore() < rhs->DiploScore();
@@ -561,7 +561,7 @@ struct ActionDialog : kit::Modal {
     void Draw() override {
         w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
-        const w2::Side& my_side = game.map->sides[viewer];
+        const w2::Side& my_side = game.GetMap().Sides()[viewer];
         kit::Popup(kPopupRect);
         gfx::SetColor(1, 1, 1);
         kit::Centred(kit::GetFont(1), kit::Text(0x6c, 0), 320, 64);
@@ -741,8 +741,8 @@ struct ParleyModal : kit::Modal {
             auto fallback_rivals = RivalList(game, viewer);
             if (!fallback_rivals.empty()) other = fallback_rivals[0];
         }
-        const w2::Side& other_side = game.map->sides[other];
-        const w2::Side& my_side = game.map->sides[viewer];
+        const w2::Side& other_side = game.GetMap().Sides()[other];
+        const w2::Side& my_side = game.GetMap().Sides()[viewer];
         const auto& profile = w2::ai::personality::ForSide(other_side);
         auto attitude = dip::ComputeAttitude(game, other, viewer);
 
@@ -852,7 +852,7 @@ struct ParleyModal : kit::Modal {
         int war_target = dip::WarTarget(game, viewer, other);
         std::string war_target_name =
                 (war_target >= 0 && war_target < 8 && Playing(game, war_target))
-                        ? game.map->sides[war_target].Name()
+                        ? game.GetMap().Sides()[war_target].Name()
                         : "None";
 
         DrawButton(btn_ally.x, btn_ally.y, btn_ally.w, btn_ally.h,
@@ -892,7 +892,8 @@ struct ParleyModal : kit::Modal {
             forecast_y += 14;
         }
         if (allied && dip::AlliedTargetCity(game, other) != w2::kNone) {
-            if (const w2::City* target_city = game.map->City(dip::AlliedTargetCity(game, other))) {
+            if (const w2::City* target_city =
+                        game.GetMap().CityAt(dip::AlliedTargetCity(game, other))) {
                 std::string target_text =
                         FitText(small_font,
                                 absl::StrFormat("Allied War Target: %s (%d, %d)",
@@ -954,7 +955,7 @@ struct ParleyModal : kit::Modal {
             dip::SetGoldOffer(game, viewer, other, std::max(0, offer - 50));
         } else if (btn_gold_plus.Contains(x, y)) {
             int offer = dip::GoldOffer(game, viewer, other);
-            if (offer + 50 <= game.map->sides[viewer].Gold()) {
+            if (offer + 50 <= game.GetMap().Sides()[viewer].Gold()) {
                 dip::SetGoldOffer(game, viewer, other, offer + 50);
             }
         } else if (btn_joint_war.Contains(x, y)) {
@@ -1038,7 +1039,7 @@ struct MissiveModal : kit::Modal {
     /** @brief Draws the envoy's banner, the message and its context. */
     void Draw() override {
         w2::Game& game = *g_app.g;
-        const w2::Side& sender = game.map->sides[std::clamp(m.from_side, 0, 7)];
+        const w2::Side& sender = game.GetMap().Sides()[std::clamp(m.from_side, 0, 7)];
         kit::Popup(box);
 
         const Font& big_font = kit::GetFont(2);
@@ -1114,10 +1115,10 @@ struct MissiveModal : kit::Modal {
         w2::Game& game = *g_app.g;
         int viewer = ActiveViewerIndex(game);
         if (btn_accept.Contains(x, y)) {
-            if (m.gold_demand > 0 && game.map->sides[viewer].Gold() < m.gold_demand) return;
+            if (m.gold_demand > 0 && game.GetMap().Sides()[viewer].Gold() < m.gold_demand) return;
             if (m.gold_demand > 0) {
-                game.map->sides[viewer].SpendGold(m.gold_demand);
-                game.map->sides[m.from_side].AddGold(m.gold_demand);
+                game.GetMap().Sides()[viewer].SpendGold(m.gold_demand);
+                game.GetMap().Sides()[m.from_side].AddGold(m.gold_demand);
             }
             dip::Propose(game, viewer, m.from_side, m.proposed_state);
             dip::Propose(game, m.from_side, viewer, m.proposed_state);
@@ -1126,14 +1127,14 @@ struct MissiveModal : kit::Modal {
                 dip::SetTruce(game, viewer, m.from_side, 15);
                 dip::AddTrust(game, m.from_side, viewer, 18);
             } else if (m.proposed_state == dip::kPeace) {
-                game.diplomacy.SetSymmetricState(w2::SideId(viewer), w2::SideId(m.from_side),
-                                                 dip::kPeace);
+                game.Diplomacy().SetSymmetricState(w2::SideId(viewer), w2::SideId(m.from_side),
+                                                   dip::kPeace);
                 dip::SetTruce(game, viewer, m.from_side, 10);
                 dip::AddTrust(game, m.from_side, viewer, 10);
             }
             if (m.joint_war_target != w2::kNone && Playing(game, m.joint_war_target)) {
-                game.diplomacy.SetSymmetricState(w2::SideId(viewer), w2::SideId(m.joint_war_target),
-                                                 dip::kWar);
+                game.Diplomacy().SetSymmetricState(w2::SideId(viewer),
+                                                   w2::SideId(m.joint_war_target), dip::kWar);
                 dip::Propose(game, viewer, m.joint_war_target, dip::kWar);
             }
             front::StratDirty();
@@ -1178,14 +1179,15 @@ struct BrainInspectorModal : kit::Modal {
         w2::Game& game = *g_app.g;
         if (!Playing(game, side_idx)) {
             for (int candidate = 0; candidate < 8; candidate++) {
-                if (Playing(game, candidate) && game.map->sides[candidate].IsComputerControlled()) {
+                if (Playing(game, candidate) &&
+                    game.GetMap().Sides()[candidate].IsComputerControlled()) {
                     side_idx = candidate;
                     break;
                 }
             }
             if (!Playing(game, side_idx)) side_idx = ActiveViewerIndex(game);
         }
-        w2::Side& side = game.map->sides[side_idx];
+        w2::Side& side = game.GetMap().Sides()[side_idx];
         const auto& profile = w2::ai::personality::ForSide(side);
         const auto& belief = w2::ai::belief::Ensure(side);
 
@@ -1284,7 +1286,7 @@ struct BrainInspectorModal : kit::Modal {
             if (rival == side_idx || !Playing(game, rival)) continue;
             if (rival_y > 279) break;
             SmallShield(rival, 284, rival_y - 1);
-            std::string rival_name = FitText(small_font, game.map->sides[rival].Name(), 106);
+            std::string rival_name = FitText(small_font, game.GetMap().Sides()[rival].Name(), 106);
             small_font.Draw(rival_name, 304, rival_y);
             kit::Right(small_font.Colours(7, 0),
                        absl::StrFormat("%d", belief.visible_cities_by_side[rival]), 434, rival_y);
@@ -1368,7 +1370,7 @@ struct BrainInspectorModal : kit::Modal {
             }
         }
         if (btn_toggle_engine.Contains(x, y)) {
-            w2::Side& target_side = game.map->sides[side_idx];
+            w2::Side& target_side = game.GetMap().Sides()[side_idx];
             w2::ai::SetSideClassicAi(game, target_side, !target_side.IsClassicAi());
             return;
         }
@@ -1401,7 +1403,7 @@ struct BrainInspectorModal : kit::Modal {
 
 /** @brief Opens the Diplomatic Report, modern or classic; nothing when diplomacy is off. */
 void Open() {
-    if (g_app.g->map->options.diplomacy == 0) return;
+    if (g_app.g->GetMap().GameOptions().diplomacy == 0) return;
     if (g_app.modern_ui)
         OpenReport();
     else
@@ -1410,7 +1412,7 @@ void Open() {
 
 /** @brief Opens Diplomatic Action, modern or classic; nothing when diplomacy is off. */
 void Action() {
-    if (g_app.g->map->options.diplomacy == 0) return;
+    if (g_app.g->GetMap().GameOptions().diplomacy == 0) return;
     if (g_app.modern_ui)
         OpenAction();
     else
@@ -1466,7 +1468,7 @@ void OpenBrainInspector(int initial_side) {
         inspector->side_idx = initial_side;
     } else {
         for (int i = 0; i < 8; i++) {
-            if (Playing(*g_app.g, i) && g_app.g->map->sides[i].IsComputerControlled()) {
+            if (Playing(*g_app.g, i) && g_app.g->GetMap().Sides()[i].IsComputerControlled()) {
                 inspector->side_idx = i;
                 break;
             }
@@ -1481,7 +1483,7 @@ void OpenBrainInspector(int initial_side) {
  * proposes more hostile ones (hostile wins); kNone with diplomacy off.
  */
 int ButtonFor(w2::Game& game, int side) {
-    if (game.map->options.diplomacy == 0) return w2::kNone;
+    if (game.GetMap().GameOptions().diplomacy == 0) return w2::kNone;
     bool friendlier = false, hostile = false;
     for (int other = 0; other < 8; other++) {
         if (other != side) {

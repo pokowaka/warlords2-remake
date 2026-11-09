@@ -29,23 +29,24 @@ int StraightLineDistance(int from_x, int from_y, int to_x, int to_y) {
 
 std::optional<Quest::Target> PickTarget(Game& game, const Side& side, int type, const Army* hero,
                                         bool computer, bool flying) {
+    Map& map = game.GetMap();
     if (type == quest::kSlayHero) {
         std::vector<Army*> heroes;
-        for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
-            Army* army = game.armies[i];
+        for (int i = static_cast<int>(game.Armies().size()) - 1; i >= 0; i--) {
+            Army* army = game.Armies()[i];
             if (army->Hero() && !army->OwnedBy(side.Id())) heroes.push_back(army);
         }
         if (heroes.empty()) return std::nullopt;
-        Army* chosen = heroes[game.rng.Dice(1, static_cast<int>(heroes.size()), -1)];
+        Army* chosen = heroes[game.GetRng().Dice(1, static_cast<int>(heroes.size()), -1)];
         return Quest::Target{chosen->Id()};
     }
     if (type == quest::kRetrieveItem) {
         int range = computer ? quest::kAiItemRange : quest::kItemRange;
         std::vector<std::pair<Item*, Site*>> choices;
-        for (auto& item : game.map->items) {
+        for (auto& item : map.Items()) {
             if (item.index <= 21 && item.status == 2 && !site::ItemReserved(item)) {
                 Site* ruin = nullptr;
-                for (auto& candidate : game.map->sites) {
+                for (auto& candidate : map.Sites()) {
                     if (candidate.content == site::kItem && candidate.item == item.index) {
                         ruin = &candidate;
                         break;
@@ -57,7 +58,7 @@ std::optional<Quest::Target> PickTarget(Game& game, const Side& side, int type, 
             }
         }
         if (choices.empty()) return std::nullopt;
-        auto& pick = choices[game.rng.Dice(1, static_cast<int>(choices.size()), -1)];
+        auto& pick = choices[game.GetRng().Dice(1, static_cast<int>(choices.size()), -1)];
         pick.second->revealed |= 1 << side.Index();
         game::Reveal(game, side.Index(), pick.second->x, pick.second->y, flying);
         return Quest::Target{ItemId(pick.first->index)};
@@ -65,8 +66,8 @@ std::optional<Quest::Target> PickTarget(Game& game, const Side& side, int type, 
     if (type == quest::kSlayType) {
         for (int attempt = 0; attempt < 5; attempt++) {
             const ArmyType* want = hero::MagicalType(game);
-            for (int i = static_cast<int>(game.armies.size()) - 1; i >= 0; i--) {
-                Army* army = game.armies[i];
+            for (int i = static_cast<int>(game.Armies().size()) - 1; i >= 0; i--) {
+                Army* army = game.Armies()[i];
                 if (army->TypeIndex() == want->id && !army->OwnedBy(side.Id()) && army->OnMap()) {
                     return Quest::Target{ArmyTypeId(want->id)};
                 }
@@ -75,9 +76,9 @@ std::optional<Quest::Target> PickTarget(Game& game, const Side& side, int type, 
         return std::nullopt;
     }
     if (type == quest::kSlaughter) {
-        if (game.won) return std::nullopt;
+        if (game.IsWon()) return std::nullopt;
         for (int attempt = 0; attempt < 200; attempt++) {
-            Side* other = game.map->Side(game.rng.Dice(1, 8, -1));
+            Side* other = map.SideAt(game.GetRng().Dice(1, 8, -1));
             if (other && other->Id() != side.Id() && other->IsActive()) {
                 return Quest::Target{other->Id()};
             }
@@ -85,12 +86,11 @@ std::optional<Quest::Target> PickTarget(Game& game, const Side& side, int type, 
         return std::nullopt;
     }
     if (type == quest::kOccupy || type == quest::kRaze) {
-        if (game.won) return std::nullopt;
+        if (game.IsWon()) return std::nullopt;
         int range = type == quest::kRaze ? quest::kRazeRange
                                          : (computer ? quest::kAiCityRange : quest::kCityRange);
         for (int attempt = 0; attempt < 200; attempt++) {
-            City* city =
-                    game.map->City(game.rng.Dice(1, static_cast<int>(game.map->cities.size()), -1));
+            City* city = map.CityAt(game.GetRng().Dice(1, map.CityCount(), -1));
             if (city && !city->OwnedBy(side.Id()) && !city->IsRazed() &&
                 (StraightLineDistance(hero->X(), hero->Y(), city->X(), city->Y()) <= range ||
                  attempt > 99)) {
@@ -106,8 +106,8 @@ std::optional<Quest::Target> PickTarget(Game& game, const Side& side, int type, 
 }
 
 int QuestType(Game& game, int attempt, bool computer) {
-    if (!computer) return quest::kTypeTable[game.rng.Dice(1, 10, -1)];
-    if (attempt == 1) return game.rng.Dice(1, 5, -1) == 0 ? quest::kRaze : quest::kOccupy;
+    if (!computer) return quest::kTypeTable[game.GetRng().Dice(1, 10, -1)];
+    if (attempt == 1) return game.GetRng().Dice(1, 5, -1) == 0 ? quest::kRaze : quest::kOccupy;
     if (attempt == 2) return quest::kSlaughter;
     return quest::kPillageGold;
 }
@@ -175,16 +175,16 @@ std::shared_ptr<QuestResult> QuestSystem::Finish(Side& side, const std::string& 
 
 std::shared_ptr<Quest> QuestSystem::Assign(Side& side, Army* hero, bool computer, bool flying) {
     if (side.HasQuest()) return nullptr;
-    if (game_.map->options.quests == 0) return nullptr;
+    if (game_.GetMap().GameOptions().quests == 0) return nullptr;
     history::RecordDeed(game_, &side, DeedType::kQuestReceived, 0, 0, hero ? hero->Name() : "");
     for (int attempt = 1;; attempt++) {
         int type = QuestType(game_, attempt, computer);
         if (auto target = PickTarget(game_, side, type, hero, computer, flying)) {
             int required = kNone;
             if (type == quest::kSlaughter)
-                required = game_.rng.Dice(1, 12, 10);
+                required = game_.GetRng().Dice(1, 12, 10);
             else if (type == quest::kPillageGold)
-                required = game_.rng.Dice(3, 300, 500);
+                required = game_.GetRng().Dice(3, 300, 500);
             ArmyId hero_id = hero ? hero->Id() : ArmyId::None();
             auto assigned = std::make_shared<Quest>(type, hero_id, *target, required, 0);
             side.SetQuest(assigned);
@@ -215,7 +215,7 @@ std::shared_ptr<QuestResult> QuestSystem::Notify(Side& side, const std::string& 
     int type = current_quest.Type();
 
     if (event == "turn") {
-        Army* hero = game_.armies.FindAlive(current_quest.HeroId());
+        Army* hero = game_.Armies().FindAlive(current_quest.HeroId());
         bool alive = hero != nullptr && hero->OwnedBy(side.Id());
         if (!alive) return Finish(side, "the hero is lost", 0x20);
         if (type == quest::kOccupy || type == quest::kRaze) {
@@ -227,7 +227,7 @@ std::shared_ptr<QuestResult> QuestSystem::Notify(Side& side, const std::string& 
             if (!target_side || !target_side->IsAlive())
                 return Finish(side, "that side is gone", 0x27);
         } else if (type == quest::kSlayHero) {
-            if (!game_.armies.Alive(current_quest.TargetArmyId()))
+            if (!game_.Armies().Alive(current_quest.TargetArmyId()))
                 return Finish(side, "the quarry is gone", 0x29);
         } else if (type == quest::kRetrieveItem) {
             const Item* item = current_quest.ResolveItem(game_);
@@ -309,7 +309,7 @@ std::shared_ptr<Reward> QuestSystem::ChooseReward(Side& side, const Quest* activ
     Army* hero = active_quest ? active_quest->ResolveHero(game_) : nullptr;
 
     auto give_allies = [&](int count) {
-        const ArmyType* type = game_.types.ById(quest::kRewardAlly);
+        const ArmyType* type = game_.ArmyTypes().ById(quest::kRewardAlly);
         auto reward = std::make_shared<Reward>();
         reward->kind = "allies";
         reward->type = type;
@@ -322,7 +322,7 @@ std::shared_ptr<Reward> QuestSystem::ChooseReward(Side& side, const Quest* activ
     };
 
     auto give_gold = [&]() {
-        int amount = game_.rng.Dice(2, 1000, 1000);
+        int amount = game_.GetRng().Dice(2, 1000, 1000);
         side.AddGold(amount);
         auto reward = std::make_shared<Reward>();
         reward->kind = "gold";
@@ -330,23 +330,24 @@ std::shared_ptr<Reward> QuestSystem::ChooseReward(Side& side, const Quest* activ
         return reward;
     };
 
-    if (cities < 10 && game_.turn > 15) return give_allies(game_.rng.Dice(1, 3, 5));
+    if (cities < 10 && game_.Turn() > 15) return give_allies(game_.GetRng().Dice(1, 3, 5));
     if (side.Gold() < 100) return give_gold();
 
+    Map& map = game_.GetMap();
     std::vector<Item*> unused;
-    for (auto& item : game_.map->items) {
+    for (auto& item : map.Items()) {
         if (item.index <= 21 && item.status == 0 && site::ItemReserved(item) &&
             (item.index > 7 || item.index == side.Index())) {
             unused.push_back(&item);
         }
     }
     std::vector<Site*> unknown;
-    for (auto& candidate : game_.map->sites) {
+    for (auto& candidate : map.Sites()) {
         if (candidate.rich && !site::ShownTo(candidate, side) && candidate.content != site::kEmpty)
             unknown.push_back(&candidate);
     }
-    if (!unused.empty() && game_.rng.Dice(1, 3, 0) == 1) {
-        Item* item = unused[game_.rng.Dice(1, static_cast<int>(unused.size()), -1)];
+    if (!unused.empty() && game_.GetRng().Dice(1, 3, 0) == 1) {
+        Item* item = unused[game_.GetRng().Dice(1, static_cast<int>(unused.size()), -1)];
         if (hero) {
             hero->AddItem(item);
             item->status = 3;
@@ -356,7 +357,7 @@ std::shared_ptr<Reward> QuestSystem::ChooseReward(Side& side, const Quest* activ
         reward->item = item;
         return reward;
     }
-    if (unused.empty() && !unknown.empty() && game_.rng.Dice(1, 3, 0) < 3) {
+    if (unused.empty() && !unknown.empty() && game_.GetRng().Dice(1, 3, 0) < 3) {
         Site* best = nullptr;
         int best_distance = 10000;
         for (Site* candidate : unknown) {
@@ -376,7 +377,7 @@ std::shared_ptr<Reward> QuestSystem::ChooseReward(Side& side, const Quest* activ
         reward->site = best;
         return reward;
     }
-    if (game_.rng.Dice(1, 2, 0) == 1) return give_allies(game_.rng.Dice(1, 3, 2));
+    if (game_.GetRng().Dice(1, 2, 0) == 1) return give_allies(game_.GetRng().Dice(1, 3, 2));
     return give_gold();
 }
 

@@ -161,7 +161,7 @@ struct HeroInfo : kit::Modal {
         w2::City* near = nullptr;
         int near_distance = w2::kNone;
         int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
-        for (auto& city : g_app.g->map->cities) {
+        for (auto& city : g_app.g->GetMap().Cities()) {
             if (w2::game::Seen(*g_app.g, viewer, city.X(), city.Y())) {
                 int distance =
                         std::max(std::abs(city.X() - hero->X()), std::abs(city.Y() - hero->Y()));
@@ -258,8 +258,8 @@ struct HeroInfo : kit::Modal {
 /** @brief Opens hero info on the side's hero nearest the view's centre; nothing without one. */
 void Open() {
     auto dialog = std::make_shared<HeroInfo>();
-    for (int i = static_cast<int>(g_app.g->armies.size()) - 1; i >= 0; i--) {
-        w2::Army* army = g_app.g->armies[i];
+    for (int i = static_cast<int>(g_app.g->Armies().size()) - 1; i >= 0; i--) {
+        w2::Army* army = g_app.g->Armies()[i];
         if (army->Hero() && army->OwnerIndex() == g_app.player->Index() && !army->InTransit() &&
             army->X() != w2::kNone)
             dialog->heroes.push_back(army);

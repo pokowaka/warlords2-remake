@@ -61,19 +61,19 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromFiles(const std::filesystem::path& 
 
 /** @brief The tile drawn at (x, y), with the crossing flag. */
 inline int TileAt(const Map& map, int x, int y) {
-    return map.tiles[y * kMapW + x];
+    return map.TileWord(x, y);
 }
 /** @brief The road piece at (x, y), 0 for none. */
 inline int RoadAt(const Map& map, int x, int y) {
-    return map.roads[y * kMapW + x];
+    return map.RoadByte(x, y);
 }
 /** @brief Is (x, y) marked as a crossing between land and sea? */
 inline bool IsCrossing(const Map& map, int x, int y) {
-    return map.crossing[y * kMapW + x];
+    return map.IsCrossing(x, y);
 }
 /** @brief The terrain type id (0-11) of a map tile, via the scenario's own table. */
 inline int TerrainAt(const Map& map, int x, int y) {
-    return map.terrain_type[TileAt(map, x, y) % 256];
+    return map.TerrainTypeOf(TileAt(map, x, y) % 256);
 }
 
 /**

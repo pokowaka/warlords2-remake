@@ -39,8 +39,8 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
     ml::RolloutSampler deploy_sampler;
     if (!sampler) {
         deploy_sampler.temperature = ml::DeployTemperature();
-        deploy_sampler.rng_state = (game.rng.State() * 2654435761U) ^
-                                   static_cast<uint32_t>(game.turn * 40503U) ^
+        deploy_sampler.rng_state = (game.GetRng().State() * 2654435761U) ^
+                                   static_cast<uint32_t>(game.Turn() * 40503U) ^
                                    static_cast<uint32_t>((side.Index() + 1) * 2246822519U);
         sampler = &deploy_sampler;
     }
@@ -68,7 +68,7 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
         RunMilitaryAndExplorationPhase(game, side, policy, wave_ctx, wave == 0 ? pause : nullptr,
                                        sampler, moved_armies);
         bool any_left = false;
-        for (Army* army : game.armies) {
+        for (Army* army : game.Armies()) {
             if (army->OwnerIndex() == side.Index() && army->X() != kNone && !army->InTransit() &&
                 !moved_armies.contains(army->Id()) && army->Moves() >= 2) {
                 any_left = true;
@@ -80,11 +80,11 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
 
     // A city emptied by one move but re-garrisoned by a later one was not left open
     if (sampler && sampler->current_turn) {
+        const Map& map = game.GetMap();
         for (auto& mission_step : sampler->current_turn->mission_steps) {
-            if (mission_step.vacated_city == kNone ||
-                mission_step.vacated_city >= static_cast<int>(game.map->cities.size()))
+            if (mission_step.vacated_city == kNone || mission_step.vacated_city >= map.CityCount())
                 continue;
-            const City& vacated_city = game.map->cities[mission_step.vacated_city];
+            const City& vacated_city = map.Cities()[mission_step.vacated_city];
             for (int dy = 0; dy <= 1 && mission_step.vacated_city != kNone; dy++) {
                 for (int dx = 0; dx <= 1 && mission_step.vacated_city != kNone; dx++) {
                     for (Army* army :

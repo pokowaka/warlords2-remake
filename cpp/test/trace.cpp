@@ -31,7 +31,7 @@ using namespace w2;
  */
 static void Trace(const Game& game, const Side& side) {
     long long hash = 0;
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         hash = (hash * 31 + static_cast<int64_t>(army->X() == kNone ? 999 : army->X()) * 7 +
                 static_cast<int64_t>(army->Y() == kNone ? 999 : army->Y()) * 13 +
                 static_cast<int64_t>(army->TypeIndex()) * 17 +
@@ -40,13 +40,13 @@ static void Trace(const Game& game, const Side& side) {
                1000000007;
     }
     std::string owners;
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : game.GetMap().Cities()) {
         owners += city.IsRazed()      ? 'x'
                   : !city.IsNeutral() ? static_cast<char>('0' + city.OwnerIndex())
                                       : '.';
     }
-    printf("%d %d gold=%d armies=%d rng=%u h=%lld %s\n", game.turn, side.Index(), side.Gold(),
-           static_cast<int>(game.armies.size()), game.rng.State(), hash, owners.c_str());
+    printf("%d %d gold=%d armies=%d rng=%u h=%lld %s\n", game.Turn(), side.Index(), side.Gold(),
+           static_cast<int>(game.Armies().size()), game.GetRng().State(), hash, owners.c_str());
 }
 
 /**
@@ -97,15 +97,15 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::unique_ptr<Game> game = std::move(*created_game);
-    for (Side* player : game->sides) player->SetComputerControlled(true);
+    for (Side* player : game->Sides()) player->SetComputerControlled(true);
     Side* side = game::Begin(*game);
     bool dump_armies = absl::GetFlag(FLAGS_dump) || (std::getenv("DUMP") != nullptr);
-    while (side && game->turn <= turns) {
+    while (side && game->Turn() <= turns) {
         ai::PlayTurn(*game, *side);
         Trace(*game, *side);
         if (dump_armies) {
             int number = 1;
-            for (Army* army : game->armies) {
+            for (Army* army : game->Armies()) {
                 auto show = [](int value) {
                     return value == kNone ? std::string("nil") : std::to_string(value);
                 };
@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
             game = std::move(*reloaded);
-            side = game->side;
+            side = game->CurrentSide();
         }
     }
     return 0;

@@ -344,7 +344,8 @@ const Control* DialogControlAt(const View& view, int x, int y) {
 }
 
 gfx::ImageP StrategicImage(Screen& main_screen, const w2::Game& game, int side) {
-    int width = game.map->width, height = game.map->height;
+    const w2::Map& map = game.GetMap();
+    int width = map.Width(), height = map.Height();
     const auto& colours = main_screen.map_colour;
     long long seed = 12345;
     // Tile ids 0x50-0x5f get a random grey, 2-4, per pixel. Matches the
@@ -380,8 +381,8 @@ gfx::ImageP StrategicImage(Screen& main_screen, const w2::Game& game, int side) 
             if (!w2::game::Seen(game, side, x, y)) {
                 pixel_colour[0] = pixel_colour[1] = pixel_colour[2] = pixel_colour[3] = -1;
             } else {
-                int road = w2::scn::RoadAt(*game.map, x, y) % 32;
-                int tile_id = road != 0 ? road - 1 : (w2::scn::TileAt(*game.map, x, y) % 256);
+                int road = w2::scn::RoadAt(map, x, y) % 32;
+                int tile_id = road != 0 ? road - 1 : (w2::scn::TileAt(map, x, y) % 256);
                 if (road == 0 && tile_id >= 0x50 && tile_id <= 0x5f) {
                     for (int pixel = 0; pixel < 4; pixel++) pixel_colour[pixel] = grey();
                 } else {

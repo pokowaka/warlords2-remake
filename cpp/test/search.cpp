@@ -113,7 +113,7 @@ std::unique_ptr<Game> CopyGame(const Game& game, const std::string& data_dir) {
  */
 void RestrictToView(Game& game, int my_side) {
     std::array<std::vector<Army*>, 8> unseen;
-    for (Army* army : game.armies) {
+    for (Army* army : game.Armies()) {
         int owner_index = army->OwnerIndex();
         if (owner_index < 0 || owner_index >= 8 || owner_index == my_side || army->IsDisbanded())
             continue;
@@ -124,7 +124,7 @@ void RestrictToView(Game& game, int my_side) {
     }
     for (int side_index = 0; side_index < 8; side_index++) {
         if (!unseen[side_index].empty())
-            game::Disband(game, game.map->sides[side_index], unseen[side_index]);
+            game::Disband(game, game.GetMap().Sides()[side_index], unseen[side_index]);
     }
 }
 
@@ -136,7 +136,7 @@ void RestrictToView(Game& game, int my_side) {
  */
 void PlayCandidate(Game& game, int side_index, int candidate, uint32_t base_seed,
                    const Settings& settings) {
-    Side& side = *game.map->Side(side_index);
+    Side& side = *game.GetMap().SideAt(side_index);
     if (candidate == 0) {
         ai::modern::PlayTurn(game, side, nullptr, settings.policy, nullptr);
         return;
@@ -164,10 +164,11 @@ void PlayOwnTurn(Game& game, Side& side, const ml::PolicyNetwork& policy) {
  * @return The side's empire score at the end.
  */
 float Rollout(Game& game, int side_index, int rounds, const ml::PolicyNetwork& policy) {
-    const int stop_turn = game.turn + rounds;
+    const int stop_turn = game.Turn() + rounds;
     Side* current = game::EndTurn(game);
     int safety = 0;
-    while (current && !game.over && !game.won && game.turn < stop_turn && safety++ < rounds * 12) {
+    while (current && !game.IsOver() && !game.IsWon() && game.Turn() < stop_turn &&
+           safety++ < rounds * 12) {
         if (current->IsComputerControlled() && current->IsAlive())
             PlayOwnTurn(game, *current, policy);
         current = game::EndTurn(game);
@@ -189,8 +190,8 @@ std::vector<CandidateResult> ScoreCandidates(const Game& game, int side_index,
                                              const Settings& settings,
                                              const std::string& data_dir) {
     std::vector<CandidateResult> out;
-    const uint32_t base_seed = static_cast<uint32_t>(game.rng.State() * 2654435761U) ^
-                               static_cast<uint32_t>(game.turn * 40503U);
+    const uint32_t base_seed = static_cast<uint32_t>(game.GetRng().State() * 2654435761U) ^
+                               static_cast<uint32_t>(game.Turn() * 40503U);
     for (int candidate = 0; candidate <= settings.candidates; candidate++) {
         CandidateResult result;
         std::vector<double> scores;
@@ -199,15 +200,15 @@ std::vector<CandidateResult> ScoreCandidates(const Game& game, int side_index,
             PlayCandidate(*result.after, side_index, candidate, base_seed, settings);
             for (int rollout = 0; rollout < settings.rollouts; rollout++) {
                 auto copy = CopyGame(*result.after, data_dir);
-                copy->rng.SetState(copy->rng.State() ^
-                                   static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U));
+                copy->GetRng().SetState(copy->GetRng().State() ^
+                                        static_cast<uint32_t>((rollout + 1) * 0x9e3779b9U));
                 scores.push_back(Rollout(*copy, side_index, settings.horizon, *settings.policy));
             }
         } else {
             for (int rollout = 0; rollout < settings.rollouts; rollout++) {
                 auto copy = CopyGame(game, data_dir);
-                copy->rng.SetState(
-                        copy->rng.State() ^
+                copy->GetRng().SetState(
+                        copy->GetRng().State() ^
                         static_cast<uint32_t>((rollout + 1) *
                                               0x9e3779b9U));  // fresh dice, also for candidate
                 if (settings.judge == Judge::kFair) RestrictToView(*copy, side_index);
@@ -266,7 +267,7 @@ std::array<bool, 8> AssignSeats(Game& game, int swap) {
     std::array<bool, 8> modern{};
     int seat = 0;
     for (int side_index = 0; side_index < 8; side_index++) {
-        Side& side = game.map->sides[side_index];
+        Side& side = game.GetMap().Sides()[side_index];
         if (!side.InUse()) continue;
         modern[side_index] = ((seat + swap) % 2 == 0);
         ai::SetSideClassicAi(game, side, !modern[side_index]);
@@ -278,7 +279,7 @@ std::array<bool, 8> AssignSeats(Game& game, int swap) {
 /** @brief The share of the standing owned cities that Modern sides hold (0.5 if none). */
 double ModernShare(const Game& game, const std::array<bool, 8>& modern) {
     int modern_cities = 0, classic_cities = 0;
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : game.GetMap().Cities()) {
         int owner_index = city.OwnerIndex();
         if (city.IsRazed() || owner_index < 0 || owner_index >= 8) continue;
         (modern[owner_index] ? modern_cities : classic_cities)++;
@@ -363,14 +364,14 @@ int main(int argc, char** argv) {
                 auto modern = AssignSeats(*game, case_index % 2);
                 Side* current = game::Begin(*game);
                 int safety = 0;
-                while (current && !game->over && !game->won && game->turn <= turns &&
+                while (current && !game->IsOver() && !game->IsWon() && game->Turn() <= turns &&
                        safety++ < turns * 12) {
                     const int side_index = current->Index();
                     const bool search_here =
                             current->IsComputerControlled() && current->IsAlive() &&
                             modern[side_index] &&
-                            (play ||
-                             (!play && (game->turn == 10 || game->turn == 20 || game->turn == 30)));
+                            (play || (!play && (game->Turn() == 10 || game->Turn() == 20 ||
+                                                game->Turn() == 30)));
                     if (search_here) {
                         auto candidates = ScoreCandidates(*game, side_index, settings, data_dir);
                         size_t best = 0;
@@ -404,7 +405,7 @@ int main(int argc, char** argv) {
                                         policy);  // probe only: the game itself goes on unsearched
                         } else if (settings.judge == Judge::kPeek) {
                             game = std::move(candidates[best].after);
-                            current = game->map->Side(side_index);
+                            current = game->GetMap().SideAt(side_index);
                         } else {
                             PlayCandidate(*game, side_index, candidates[best].k,
                                           candidates[best].base_seed, settings);  // real dice

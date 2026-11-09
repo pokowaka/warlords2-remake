@@ -86,8 +86,8 @@ void Open() {
     dialog->view = &dialog->dialog_view;
     dialog->dialog_view.state[kDone] = w2::uidata::kNormal;
     for (int level = 4; level >= 1; level--) {
-        for (int i = static_cast<int>(g_app.g->armies.size()) - 1; i >= 0; i--) {
-            w2::Army* army = g_app.g->armies[i];
+        for (int i = static_cast<int>(g_app.g->Armies().size()) - 1; i >= 0; i--) {
+            w2::Army* army = g_app.g->Armies()[i];
             if (army->Hero() && army->OwnerIndex() == g_app.player->Index() &&
                 (army->Level() ? army->Level() : 1) == level)
                 dialog->rows.push_back(army);

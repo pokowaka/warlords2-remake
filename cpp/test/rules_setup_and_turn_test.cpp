@@ -77,31 +77,31 @@ TEST_P(GameScenarioTest, InitialStateGarrisonsAndSeedDeterminism) {
     const std::string& scenario = GetParam();
     auto game_ptr = SetupGame(scenario, Seed(3));
     Game& game = *game_ptr;
-    EXPECT_GE(game.sides.size(), 2U);
-    EXPECT_EQ(game.armies.size(), game.map->cities.size());
+    EXPECT_GE(game.Sides().size(), 2U);
+    EXPECT_EQ(game.Armies().size(), game.GetMap().Cities().size());
 
-    for (Side* side : game.sides) {
+    for (Side* side : game.Sides()) {
         auto owned = game::SideCities(game, *side);
         ASSERT_EQ(owned.size(), 1U) << side->Name();
         EXPECT_EQ(owned[0]->Id(), side->CapitalCityId()) << side->Name();
     }
-    for (const auto& city : game.map->cities) {
+    for (const auto& city : game.GetMap().Cities()) {
         for (const auto& slot : city.Slots()) EXPECT_NE(slot.type, armytype::kNavy) << city.Name();
         EXPECT_EQ(city.Defence(), rules::CityDefence(city.SlotCount()));
         EXPECT_LE(city.Slots().size(), 4U);
     }
     std::map<int, int> per_tile;
-    for (const Army* army : game.armies) {
-        EXPECT_NE(game.types.ById(army->TypeIndex()), nullptr);
+    for (const Army* army : game.Armies()) {
+        EXPECT_NE(game.ArmyTypes().ById(army->TypeIndex()), nullptr);
         EXPECT_EQ(army->Moves(), 0);
-        EXPECT_LE(++per_tile[army->Y() * game.map->width + army->X()], rules::kMaxStack);
+        EXPECT_LE(++per_tile[army->Y() * game.GetMap().Width() + army->X()], rules::kMaxStack);
     }
 
     auto rebuilt = SetupGame(scenario, Seed(3));
-    ASSERT_EQ(rebuilt->armies.size(), game.armies.size());
-    for (size_t i = 0; i < game.armies.size(); ++i) {
-        EXPECT_EQ(rebuilt->armies[i]->Type(), game.armies[i]->Type());
-        EXPECT_EQ(rebuilt->armies[i]->Strength(), game.armies[i]->Strength());
+    ASSERT_EQ(rebuilt->Armies().size(), game.Armies().size());
+    for (size_t i = 0; i < game.Armies().size(); ++i) {
+        EXPECT_EQ(rebuilt->Armies()[i]->Type(), game.Armies()[i]->Type());
+        EXPECT_EQ(rebuilt->Armies()[i]->Strength(), game.Armies()[i]->Strength());
     }
 }
 
@@ -118,7 +118,7 @@ TEST(TurnLoopTest, MoveRefreshCarryoverProductionAndCitylessElimination) {
         EXPECT_EQ(army->Moves(), army->MaxMoves());
     }
     int initial_gold = side->Gold();
-    EXPECT_EQ(side->Income(), side->CapitalCity(*game.map)->Income());
+    EXPECT_EQ(side->Income(), side->CapitalCity(game.GetMap())->Income());
     EXPECT_EQ(side->Gold(), std::max(0, initial_gold));
 
     Army* first_army = game::SideArmies(game, *side)[0];
@@ -139,7 +139,7 @@ TEST(TurnLoopTest, MoveRefreshCarryoverProductionAndCitylessElimination) {
     AdvanceRounds(game, 1);
     EXPECT_EQ(first_army->Moves(), base_moves + 1);
 
-    City* city = side->CapitalCity(*game.map);
+    City* city = side->CapitalCity(game.GetMap());
     game::SetProduction(game, *city, 0);
     size_t armies_before = game::SideArmies(game, *side).size();
     AdvanceRounds(game, static_cast<size_t>(city->SlotAt(0).time));
@@ -152,13 +152,13 @@ TEST(TurnLoopTest, MoveRefreshCarryoverProductionAndCitylessElimination) {
     EXPECT_EQ(built->Upkeep(), city->SlotAt(0).cost / 2);
     EXPECT_EQ(built->X(), city->X());
 
-    Side* victim = game.sides.back();
+    Side* victim = game.Sides().back();
     for (City* victim_city : game::SideCities(game, *victim)) victim_city->SetOwner(SideId::None());
     victim->SetGold(500);
-    game.diplomacy.SetState(victim->Id(), SideId(0), diplomacy::kWar);
+    game.Diplomacy().SetState(victim->Id(), SideId(0), diplomacy::kWar);
     EXPECT_FALSE(game::SideArmies(game, *victim).empty());
-    int round_of = game.turn;
-    while (game.turn == round_of) {
+    int round_of = game.Turn();
+    while (game.Turn() == round_of) {
         EXPECT_TRUE(victim->IsAlive());
         EndTurn(game);
     }
@@ -166,21 +166,21 @@ TEST(TurnLoopTest, MoveRefreshCarryoverProductionAndCitylessElimination) {
     EXPECT_TRUE(game::SideArmies(game, *victim).empty());
     EXPECT_EQ(victim->Gold(), 0);
     EXPECT_EQ(diplomacy::State(game, victim->Index(), 0), diplomacy::kIntermediate);
-    ASSERT_FALSE(game.ending.fallen.empty());
-    EXPECT_EQ(game.ending.fallen[0].side, victim);
+    ASSERT_FALSE(game.EndingState().fallen.empty());
+    EXPECT_EQ(game.EndingState().fallen[0].side, victim);
 
     auto second_game = SetupGame("ERYTHEA", Seed(6));
     game::Begin(*second_game);
-    EXPECT_EQ(second_game->turn, 1);
+    EXPECT_EQ(second_game->Turn(), 1);
     AdvanceRounds(*second_game, 1);
-    EXPECT_EQ(second_game->turn, 2);
+    EXPECT_EQ(second_game->Turn(), 2);
 }
 
 TEST(VectoringTest, TwoTurnTransitFourSenderCapAndSelfLift) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(9));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    City* from = side->CapitalCity(*game.map);
+    City* from = side->CapitalCity(game.GetMap());
     City* dest = FindNeutralCity(game, 1);
     ASSERT_NE(dest, nullptr);
     dest->SetOwner(side->Id());
@@ -199,7 +199,7 @@ TEST(VectoringTest, TwoTurnTransitFourSenderCapAndSelfLift) {
             if (entry.kind == ProducedKind::kSent) any_sent = true;
         }
         if (!any_sent) continue;
-        for (Army* army : game.armies) {
+        for (Army* army : game.Armies()) {
             if (army->InTransit() && army->OwnedBy(side->Id()) &&
                 army->TransitState()->dest == VectorTarget{dest->Id()} &&
                 army->TransitState()->turns == 2) {
@@ -217,7 +217,7 @@ TEST(VectoringTest, TwoTurnTransitFourSenderCapAndSelfLift) {
     EXPECT_FALSE(from->IsVectored());
 
     std::vector<City*> senders;
-    for (auto& city : game.map->cities) {
+    for (auto& city : game.GetMap().Cities()) {
         if (&city != dest && senders.size() < 5) {
             city.SetOwner(side->Id());
             senders.push_back(&city);
@@ -238,12 +238,12 @@ TEST(BuyProductionTest, PurchasingSortingOverwritingAndRenamingPersistence) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(17));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    City* city = side->CapitalCity(*game.map);
+    City* city = side->CapitalCity(game.GetMap());
     side->SetGold(5000);
     auto list = game::BuyableTypes(game);
     ASSERT_TRUE(!list.empty() && list.size() <= 20);
     for (const auto* army_type : list) EXPECT_GE(army_type->price, 0) << army_type->name;
-    EXPECT_EQ(game::CannotBuy(game, *side, *city, *game.types.ById(city->SlotAt(0).type)),
+    EXPECT_EQ(game::CannotBuy(game, *side, *city, *game.ArmyTypes().ById(city->SlotAt(0).type)),
               "has it");
     int slot_count = city->SlotCount();
     EXPECT_EQ(game::BuySlot(*city), slot_count < 4 ? slot_count : 0);
@@ -279,8 +279,9 @@ TEST(BuyProductionTest, PurchasingSortingOverwritingAndRenamingPersistence) {
     }
     EXPECT_EQ(city->SlotAt(city->ProducingSlot()), building);
 
-    game::Vector(game, *city,
-                 &game.map->cities[0] != city ? &game.map->cities[0] : &game.map->cities[1]);
+    game::Vector(
+            game, *city,
+            game.GetMap().CityAt(0) != city ? game.GetMap().CityAt(0) : game.GetMap().CityAt(1));
     const ArmyType* replacement = nullptr;
     for (const auto* army_type : list) {
         if (!replacement && game::CannotBuy(game, *side, *city, *army_type).empty()) {
@@ -294,8 +295,9 @@ TEST(BuyProductionTest, PurchasingSortingOverwritingAndRenamingPersistence) {
 
     game::RenameCity(game, *city, "Newtown");
     auto loaded = *save::Decode(save::Encode(game), kData);
-    EXPECT_EQ(loaded->map->cities[city->Index()].Name(), "Newtown");
-    EXPECT_EQ(loaded->map->cities[city->Index()].Slots().back().type, city->Slots().back().type);
+    EXPECT_EQ(loaded->GetMap().Cities()[city->Index()].Name(), "Newtown");
+    EXPECT_EQ(loaded->GetMap().Cities()[city->Index()].Slots().back().type,
+              city->Slots().back().type);
 }
 
 TEST(ReportsAndDisbandTest, ReportFiguresStackDisbandSignpostsAndResignation) {
@@ -309,10 +311,10 @@ TEST(ReportsAndDisbandTest, ReportFiguresStackDisbandSignpostsAndResignation) {
     for (int i = 0; i < 8; ++i) {
         if (city_figures.out[i]) ++unused;
     }
-    EXPECT_EQ(unused, 8 - static_cast<int>(report_game.sides.size()));
+    EXPECT_EQ(unused, 8 - static_cast<int>(report_game.Sides().size()));
 
     int owned_armies = 0;
-    for (const Army* army : report_game.armies) {
+    for (const Army* army : report_game.Armies()) {
         if (army->OwnedBy(side->Id())) ++owned_armies;
     }
     EXPECT_EQ(report::ComputeFigures(report_game, *side, report::kArmy).result, owned_armies);
@@ -325,12 +327,12 @@ TEST(ReportsAndDisbandTest, ReportFiguresStackDisbandSignpostsAndResignation) {
     EXPECT_EQ(report::ComputeFigures(report_game, *side, report::kWinning).result, 0);
     EXPECT_EQ(report::Score(report_game, *side), 500);
 
-    City* capital = side->CapitalCity(*report_game.map);
+    City* capital = side->CapitalCity(report_game.GetMap());
     game::SetProduction(report_game, *capital, 0);
     capital->SetCountdown(1);
     for (int turns = 0; turns <= 20; ++turns) {
         EndTurn(report_game);
-        if (report_game.side == side) break;
+        if (report_game.CurrentSide() == side) break;
     }
     const auto& produced = report_game.TurnNews(side->Id()).produced;
     ASSERT_FALSE(produced.empty());
@@ -350,11 +352,11 @@ TEST(ReportsAndDisbandTest, ReportFiguresStackDisbandSignpostsAndResignation) {
     auto fight_strengths = combat::StackStrengths(disband_game, {hero}, hero->X(), hero->Y());
     EXPECT_EQ(fight_strengths[hero], 5 + combat::kHeroTable[5] + 1);
 
-    size_t army_count = disband_game.armies.size();
+    size_t army_count = disband_game.Armies().size();
     d_side->SetQuest(MakeCityQuest(quest::kOccupy, hero, nullptr));
     Item* standard = hero->Items()[0];
     game::Disband(disband_game, *d_side, stack);
-    EXPECT_EQ(disband_game.armies.size(), army_count - stack.size());
+    EXPECT_EQ(disband_game.Armies().size(), army_count - stack.size());
     EXPECT_TRUE(game::ArmiesAt(disband_game, hero->X(), hero->Y()).empty());
     EXPECT_EQ(standard->status, 1);
     EXPECT_EQ(d_side->ActiveQuest(), nullptr);
@@ -367,15 +369,15 @@ TEST(ReportsAndDisbandTest, ReportFiguresStackDisbandSignpostsAndResignation) {
     auto reloaded = *save::Decode(save::Encode(disband_game), kData);
     EXPECT_EQ(game::SignAt(*reloaded, 18, 12)->lines[0], "Hello there");
 
-    disband_game.map->fight_order[d_side->Index()][3] = 26;
+    disband_game.GetMap().MutableFightOrder()[d_side->Index()][3] = 26;
     reloaded = *save::Decode(save::Encode(disband_game), kData);
-    EXPECT_EQ(reloaded->map->fight_order[d_side->Index()][3], 26);
+    EXPECT_EQ(reloaded->GetMap().FightOrder()[d_side->Index()][3], 26);
 
     int diplo_before = d_side->DiploScore();
     game::Resign(disband_game, *d_side);
     EXPECT_TRUE(game::SideCities(disband_game, *d_side).empty());
     EXPECT_TRUE(game::SideArmies(disband_game, *d_side).empty());
-    EXPECT_TRUE(d_side->CapitalCity(*disband_game.map)->IsRazed());
+    EXPECT_TRUE(d_side->CapitalCity(disband_game.GetMap())->IsRazed());
     EXPECT_EQ(d_side->DiploScore(), diplo_before);
 }
 
@@ -386,26 +388,26 @@ TEST(HistoryTest, DeedPrioritySlotsRoundRecordsAndHeroStandardTallies) {
     history::RecordDeed(game, side, DeedType::kFound, history::kFoundSage, 0, "Hero");
     history::RecordDeed(game, side, DeedType::kCityWon, side->Index(), 3, side->Name());
     history::RecordDeed(game, side, DeedType::kHeroEmerges, 1, 0, "Hero");
-    ASSERT_EQ(game.deeds[side->Index()].size(), 2U);
-    std::vector<history::DeedType> deed_types = {game.deeds[side->Index()][0].type,
-                                                 game.deeds[side->Index()][1].type};
+    const auto& side_deeds = game.DeedsForSide(side->Index());
+    ASSERT_EQ(side_deeds.size(), 2U);
+    std::vector<history::DeedType> deed_types = {side_deeds[0].type, side_deeds[1].type};
     std::sort(deed_types.begin(), deed_types.end());
     EXPECT_EQ(deed_types[0], DeedType::kHeroEmerges);
     EXPECT_EQ(deed_types[1], DeedType::kCityWon);
 
     history::RecordDeed(game, side, DeedType::kAtPeace, 0, 1, "");
-    EXPECT_EQ(game.deeds[side->Index()].size(), 2U);
+    EXPECT_EQ(game.DeedsForSide(side->Index()).size(), 2U);
 
-    for (int guard = 0; game.turn < 3 && guard < 50; ++guard) EndTurn(game);
-    ASSERT_FALSE(game.history.empty());
-    EXPECT_EQ(game.history[0].owners.size(), game.map->cities.size());
-    EXPECT_GE(game.history[0].events.size(), 2U);
-    EXPECT_TRUE(!game.deeds.count(side->Index()) || game.deeds[side->Index()].empty());
+    for (int guard = 0; game.Turn() < 3 && guard < 50; ++guard) EndTurn(game);
+    ASSERT_FALSE(game.History().empty());
+    EXPECT_EQ(game.History()[0].owners.size(), game.GetMap().Cities().size());
+    EXPECT_GE(game.History()[0].events.size(), 2U);
+    EXPECT_TRUE(game.DeedsForSide(side->Index()).empty());
 
     auto reloaded = *save::Decode(save::Encode(game), kData);
-    EXPECT_EQ(reloaded->history.size(), game.history.size());
+    EXPECT_EQ(reloaded->History().size(), game.History().size());
 
-    Side* foe = game.sides[1];
+    Side* foe = game.Sides()[1];
     Item standard;
     standard.index = foe->Index();
     Army dead_hero;
@@ -425,21 +427,22 @@ TEST(SetupTest, NewGameOptionsInactiveSidesQuickStartAndSaveFidelity) {
     setup.sides[2] = MakeSideSetup(false, kNone, true);
     auto game_ptr = SetupGame("ERYTHEA", setup);
     Game& game = *game_ptr;
-    EXPECT_EQ(game.map->options.quests, 0);
-    EXPECT_FALSE(game.map->sides[0].IsComputerControlled());
-    EXPECT_TRUE(game.map->sides[1].IsComputerControlled() && game.map->sides[1].Level() == 2);
-    EXPECT_FALSE(game.map->sides[2].InUse());
-    City* capital = game.map->sides[2].CapitalCity(*game.map);
+    EXPECT_EQ(game.GetMap().GameOptions().quests, 0);
+    EXPECT_FALSE(game.GetMap().Sides()[0].IsComputerControlled());
+    EXPECT_TRUE(game.GetMap().Sides()[1].IsComputerControlled() &&
+                game.GetMap().Sides()[1].Level() == 2);
+    EXPECT_FALSE(game.GetMap().Sides()[2].InUse());
+    City* capital = game.GetMap().Sides()[2].CapitalCity(game.GetMap());
     EXPECT_EQ(capital != nullptr ? capital->OwnerIndex() : kNone, kNone);
-    for (const Side* side : game.sides) EXPECT_NE(side->Index(), 2);
+    for (const Side* side : game.Sides()) EXPECT_NE(side->Index(), 2);
 
-    game.map->sides[0].SetName("Ozymandias");
+    game.GetMap().Sides()[0].SetName("Ozymandias");
     auto reloaded = *save::Decode(save::Encode(game), kData);
-    EXPECT_TRUE(!reloaded->map->sides[2].InUse() && !reloaded->map->sides[2].IsAlive());
-    EXPECT_EQ(reloaded->sides.size(), game.sides.size());
-    for (const Side* side : reloaded->sides) EXPECT_NE(side->Index(), 2);
-    EXPECT_EQ(reloaded->map->sides[0].Name(), "Ozymandias");
-    EXPECT_EQ(reloaded->map->sides[1].Level(), 2);
+    EXPECT_TRUE(!reloaded->GetMap().Sides()[2].InUse() && !reloaded->GetMap().Sides()[2].IsAlive());
+    EXPECT_EQ(reloaded->Sides().size(), game.Sides().size());
+    for (const Side* side : reloaded->Sides()) EXPECT_NE(side->Index(), 2);
+    EXPECT_EQ(reloaded->GetMap().Sides()[0].Name(), "Ozymandias");
+    EXPECT_EQ(reloaded->GetMap().Sides()[1].Level(), 2);
 
     const std::vector<std::pair<std::string, int>> options = {
         {"neutralCities", 2},   {"diplomacy", 0},      {"quests", 0},        {"hiddenMap", 1},
@@ -451,16 +454,16 @@ TEST(SetupTest, NewGameOptionsInactiveSidesQuickStartAndSaveFidelity) {
     full_setup.sides[1].card = 3;
     auto full = SetupGame("ERYTHEA", full_setup);
     game::Reveal(*full, 0, 50, 80, true);
-    full->surrender_offered = true;
+    full->SetSurrenderOffered(true);
     auto loaded_full = *save::Decode(save::Encode(*full), kData);
     EXPECT_TRUE(game::SurrenderPending(*loaded_full));
     for (const auto& [opt_name, opt_val] : options) {
-        EXPECT_EQ(*loaded_full->map->options.Field(opt_name), opt_val) << opt_name;
+        EXPECT_EQ(*loaded_full->GetMap().MutableOptions().Field(opt_name), opt_val) << opt_name;
     }
-    EXPECT_TRUE(loaded_full->greatest);
-    EXPECT_EQ(loaded_full->map->sides[1].Card(), 3);
-    EXPECT_EQ(loaded_full->map->sides[1].Level(), 1);
-    EXPECT_TRUE(loaded_full->map->sides[1].IsComputerControlled());
+    EXPECT_TRUE(loaded_full->IsGreatestCampaign());
+    EXPECT_EQ(loaded_full->GetMap().Sides()[1].Card(), 3);
+    EXPECT_EQ(loaded_full->GetMap().Sides()[1].Level(), 1);
+    EXPECT_TRUE(loaded_full->GetMap().Sides()[1].IsComputerControlled());
     EXPECT_TRUE(game::Seen(*loaded_full, 0, 50, 80));
     EXPECT_FALSE(game::Seen(*loaded_full, 0, 90, 20));
 
@@ -469,19 +472,19 @@ TEST(SetupTest, NewGameOptionsInactiveSidesQuickStartAndSaveFidelity) {
     auto quick = SetupGame("ERYTHEA", quick_setup);
     std::map<int, int> counts;
     int neutral = 0;
-    for (const auto& city : quick->map->cities) {
+    for (const auto& city : quick->GetMap().Cities()) {
         city.IsNeutral() ? ++neutral : ++counts[city.OwnerIndex()];
     }
     EXPECT_TRUE(neutral == 0 && counts.count(2) == 0U);
     int least = 1 << 30;
     int most = 0;
-    for (const Side* side : quick->sides) {
+    for (const Side* side : quick->Sides()) {
         least = std::min(least, counts[side->Index()]);
         most = std::max(most, counts[side->Index()]);
-        EXPECT_EQ(side->CapitalCity(*quick->map)->Owner(), side->Id());
+        EXPECT_EQ(side->CapitalCity(quick->GetMap())->Owner(), side->Id());
     }
     EXPECT_LE(most - least, 1);
-    for (const Army* army : quick->armies) {
+    for (const Army* army : quick->Armies()) {
         if (City* city = game::CityAt(*quick, army->X(), army->Y())) {
             EXPECT_EQ(army->Owner(), city->Owner());
         }
@@ -495,72 +498,72 @@ TEST(SetupTest, NewGameOptionsInactiveSidesQuickStartAndSaveFidelity) {
 TEST(EndGameTest, TriumphEliminationMajorityVictoryAndSurrenderOffer) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(81));
     Game& game = *game_ptr;
-    for (Side* side : game.sides) side->SetComputerControlled(true);
-    Side* winner = game.sides[0];
-    for (auto& city : game.map->cities) {
+    for (Side* side : game.Sides()) side->SetComputerControlled(true);
+    Side* winner = game.Sides()[0];
+    for (auto& city : game.GetMap().Cities()) {
         city.SetOwner(!city.IsNeutral() ? winner->Id() : SideId::None());
     }
-    for (size_t i = 1; i < game.sides.size(); ++i) game.sides[i]->SetAlive(false);
+    for (size_t i = 1; i < game.Sides().size(); ++i) game.Sides()[i]->SetAlive(false);
     auto triumph = game::CheckEnd(game);
     EXPECT_TRUE(triumph.triumph && !triumph.over && !triumph.no_humans && triumph.winner == winner);
-    EXPECT_TRUE(!winner->IsComputerControlled() && game.won);
+    EXPECT_TRUE(!winner->IsComputerControlled() && game.IsWon());
 
     auto cityless = SetupGame("ERYTHEA", Seed(82));
-    for (auto& city : cityless->map->cities) city.SetOwner(SideId::None());
+    for (auto& city : cityless->GetMap().Cities()) city.SetOwner(SideId::None());
     EXPECT_FALSE(game::CheckEnd(*cityless).over);
     auto round_end = game::EndRound(*cityless);
     EXPECT_TRUE(round_end.over && round_end.winner == nullptr);
     EXPECT_NE(round_end.message.find("No more players"), std::string::npos);
-    EXPECT_EQ(round_end.fallen.size(), cityless->sides.size());
+    EXPECT_EQ(round_end.fallen.size(), cityless->Sides().size());
 
     auto fall_game = SetupGame("ERYTHEA", SeedWith(86, {{"diplomacy", 1}}));
-    for (size_t i = 0; i < fall_game->sides.size(); ++i) {
-        fall_game->sides[i]->SetComputerControlled(i > 0);
+    for (size_t i = 0; i < fall_game->Sides().size(); ++i) {
+        fall_game->Sides()[i]->SetComputerControlled(i > 0);
     }
     game::Begin(*fall_game);
-    Side* doomed = fall_game->sides[1];
-    Side* other = fall_game->sides[2];
+    Side* doomed = fall_game->Sides()[1];
+    Side* other = fall_game->Sides()[2];
     for (City* city : game::SideCities(*fall_game, *doomed)) city->SetOwner(other->Id());
-    fall_game->diplomacy.SetSymmetricState(doomed->Id(), other->Id(), diplomacy::kWar);
+    fall_game->Diplomacy().SetSymmetricState(doomed->Id(), other->Id(), diplomacy::kWar);
     EXPECT_FALSE(game::SideArmies(*fall_game, *doomed).empty());
     EndTurn(*fall_game);
-    EXPECT_TRUE(fall_game->side == other && doomed->IsAlive());
-    while (fall_game->turn == 1) EndTurn(*fall_game);
+    EXPECT_TRUE(fall_game->CurrentSide() == other && doomed->IsAlive());
+    while (fall_game->Turn() == 1) EndTurn(*fall_game);
     EXPECT_TRUE(!doomed->IsAlive() && game::SideArmies(*fall_game, *doomed).empty() &&
                 doomed->Gold() == 0);
     EXPECT_EQ(diplomacy::State(*fall_game, other->Index(), doomed->Index()),
               diplomacy::kIntermediate);
     EXPECT_EQ(diplomacy::Proposal(*fall_game, doomed->Index(), other->Index()),
               diplomacy::kIntermediate);
-    ASSERT_FALSE(fall_game->ending.fallen.empty());
-    const Fallen& fallen = fall_game->ending.fallen[0];
+    ASSERT_FALSE(fall_game->EndingState().fallen.empty());
+    const Fallen& fallen = fall_game->EndingState().fallen[0];
     EXPECT_TRUE(fallen.side == doomed && fallen.line >= 0 && fallen.line < game::kFallenLines &&
                 fallen.boxed);
 
     auto human_fall = SetupGame("ERYTHEA", Seed(87));
-    for (size_t i = 0; i < human_fall->sides.size(); ++i) {
-        human_fall->sides[i]->SetComputerControlled(i + 1 < human_fall->sides.size());
+    for (size_t i = 0; i < human_fall->Sides().size(); ++i) {
+        human_fall->Sides()[i]->SetComputerControlled(i + 1 < human_fall->Sides().size());
     }
     game::Begin(*human_fall);
-    Side* last_human = human_fall->sides.back();
+    Side* last_human = human_fall->Sides().back();
     for (City* city : game::SideCities(*human_fall, *last_human)) {
-        city->SetOwner(human_fall->sides[0]->Id());
+        city->SetOwner(human_fall->Sides()[0]->Id());
     }
-    for (size_t i = 1; i < human_fall->sides.size(); ++i) EndTurn(*human_fall);
-    EXPECT_TRUE(human_fall->side == last_human && last_human->IsAlive());
+    for (size_t i = 1; i < human_fall->Sides().size(); ++i) EndTurn(*human_fall);
+    EXPECT_TRUE(human_fall->CurrentSide() == last_human && last_human->IsAlive());
     EndTurn(*human_fall);
     EXPECT_TRUE(!last_human->IsAlive() && last_human->IsComputerControlled());
-    EXPECT_TRUE(human_fall->ending.no_humans && human_fall->no_humans_said);
+    EXPECT_TRUE(human_fall->EndingState().no_humans && human_fall->NoHumansSaid());
     AdvanceRounds(*human_fall, 1);
-    EXPECT_FALSE(human_fall->ending.no_humans);
+    EXPECT_FALSE(human_fall->EndingState().no_humans);
 
     auto half_game = SetupGame("ERYTHEA", Seed(83));
-    for (Side* side : half_game->sides) side->SetComputerControlled(false);
-    Side* holder = half_game->sides[0];
-    for (size_t i = 1; i < half_game->sides.size(); ++i) half_game->sides[i]->SetAlive(false);
-    int standing = static_cast<int>(half_game->map->cities.size());
+    for (Side* side : half_game->Sides()) side->SetComputerControlled(false);
+    Side* holder = half_game->Sides()[0];
+    for (size_t i = 1; i < half_game->Sides().size(); ++i) half_game->Sides()[i]->SetAlive(false);
+    int standing = static_cast<int>(half_game->GetMap().Cities().size());
     int given = 0;
-    for (auto& city : half_game->map->cities) {
+    for (auto& city : half_game->GetMap().Cities()) {
         city.SetOwner(given++ < standing / 2 ? holder->Id() : SideId::None());
     }
     EXPECT_FALSE(game::CheckEnd(*half_game).over);
@@ -570,39 +573,40 @@ TEST(EndGameTest, TriumphEliminationMajorityVictoryAndSurrenderOffer) {
     EXPECT_FALSE(game::CheckEnd(*half_game).won);
 
     auto surrender_game = SetupGame("ERYTHEA", Seed(84));
-    Side* human = surrender_game->sides[0];
+    Side* human = surrender_game->Sides()[0];
     human->SetComputerControlled(false);
-    for (size_t i = 1; i < surrender_game->sides.size(); ++i) {
-        surrender_game->sides[i]->SetComputerControlled(true);
+    for (size_t i = 1; i < surrender_game->Sides().size(); ++i) {
+        surrender_game->Sides()[i]->SetComputerControlled(true);
     }
-    Side* rival = surrender_game->sides[1];
-    int city_count = static_cast<int>(surrender_game->map->cities.size());
+    Side* rival = surrender_game->Sides()[1];
+    int city_count = static_cast<int>(surrender_game->GetMap().Cities().size());
     for (int i = 0; i < city_count; ++i) {
-        surrender_game->map->cities[i].SetOwner(
+        surrender_game->GetMap().Cities()[i].SetOwner(
                 (i + 1 <= city_count * 3 / 4)
                         ? human->Id()
                         : (i + 1 == city_count ? rival->Id() : SideId::None()));
     }
     auto offer = game::CheckEnd(*surrender_game);
-    EXPECT_TRUE(offer.surrender && !offer.over && surrender_game->surrender_offered);
+    EXPECT_TRUE(offer.surrender && !offer.over && surrender_game->SurrenderOffered());
     EXPECT_FALSE(game::CheckEnd(*surrender_game).surrender);
-    surrender_game->ending = Ending{};
+    surrender_game->SetEndingState(Ending{});
     EXPECT_TRUE(game::SurrenderPending(*surrender_game));
-    surrender_game->surrender_shown = true;
+    surrender_game->SetSurrenderShown(true);
     EXPECT_FALSE(game::SurrenderPending(*surrender_game));
-    surrender_game->surrender_shown = false;
+    surrender_game->SetSurrenderShown(false);
 
     auto ruins_game = SetupGame("ERYTHEA", Seed(85));
-    for (size_t i = 1; i < ruins_game->sides.size(); ++i) ruins_game->sides[i]->SetAlive(false);
-    for (Side* side : ruins_game->sides) side->SetComputerControlled(false);
-    for (size_t i = 0; i < ruins_game->map->cities.size(); ++i) {
-        ruins_game->map->cities[i].SetRazed(i > 0);
-        ruins_game->map->cities[i].SetOwner(i == 0 ? ruins_game->sides[0]->Id() : SideId::None());
+    for (size_t i = 1; i < ruins_game->Sides().size(); ++i) ruins_game->Sides()[i]->SetAlive(false);
+    for (Side* side : ruins_game->Sides()) side->SetComputerControlled(false);
+    for (size_t i = 0; i < ruins_game->GetMap().Cities().size(); ++i) {
+        ruins_game->GetMap().Cities()[i].SetRazed(i > 0);
+        ruins_game->GetMap().Cities()[i].SetOwner(i == 0 ? ruins_game->Sides()[0]->Id()
+                                                         : SideId::None());
     }
     EXPECT_TRUE(game::CheckEnd(*ruins_game).won);
 
     game::AcceptSurrender(*surrender_game, *human);
-    EXPECT_TRUE(surrender_game->won && !rival->IsAlive());
+    EXPECT_TRUE(surrender_game->IsWon() && !rival->IsAlive());
 }
 
 }  // namespace

@@ -58,7 +58,8 @@ City* ModernMlPlayer::ChooseHeroCity(Game& game, Side& side, City* fallback) {
 
 bool ModernMlPlayer::OnQuestCapture(Game& game, Side& side, City& city, const ArmyStack& stack) {
     auto side_quest = side.QuestPtr();
-    if (game.map->options.quests == 0 || !side_quest || side_quest->TargetCityId() != city.Id()) {
+    if (game.GetMap().GameOptions().quests == 0 || !side_quest ||
+        side_quest->TargetCityId() != city.Id()) {
         return false;
     }
     if (side_quest->Type() != quest::kOccupy && side_quest->Type() != quest::kRaze) return false;

@@ -20,7 +20,7 @@
 namespace w2 {
 
 class City;
-struct Map;
+class Map;
 
 /** @brief City-count threshold markers governing voiced advisor remarks (`cues.cpp`). */
 struct Advisor {

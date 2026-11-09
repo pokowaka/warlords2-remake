@@ -34,7 +34,7 @@ bool Raidable(Game& game, int raider_index, const City& city) {
     if (city.IsRazed() || owner_index < 0 || owner_index >= 8 || owner_index == raider_index) {
         return false;
     }
-    if (!game.map->sides[owner_index].IsAlive()) return false;
+    if (!game.GetMap().Sides()[owner_index].IsAlive()) return false;
     if (diplomacy::IsAllied(game, raider_index, owner_index)) return false;
     if (diplomacy::MustDeclare(game, raider_index, owner_index, &city)) return false;
     return Defenders(game, city) == 0;
@@ -52,7 +52,7 @@ std::shared_ptr<ClassicAiPlayer> ExtractOrMakeClassic(Game& game, Side& side) {
     }
     if (ClassicAiPlayer* existing = ClassicAiPlayer::FindMutableOn(side)) {
         return std::make_shared<ClassicAiPlayer>(existing->Data(), existing->NeighbourTable(),
-                                                 &game.armies);
+                                                 &game.Armies());
     }
     auto created = ai::MakeComputerPlayer(true, game, side);
     if (auto casted = std::dynamic_pointer_cast<ClassicAiPlayer>(created)) {
@@ -166,11 +166,11 @@ int RaidEmptyCities(Game& game, Side& side) {
     constexpr int kMoveCostPerTile = 2;
 
     std::vector<City*> targets;
-    for (auto& city : game.map->cities) {
+    for (auto& city : game.GetMap().Cities()) {
         if (Raidable(game, raider_index, city)) targets.push_back(&city);
     }
     auto learner_owned = [&](const City* city) {
-        return !game.map->sides[city->OwnerIndex()].IsClassicAi();
+        return !game.GetMap().Sides()[city->OwnerIndex()].IsClassicAi();
     };
     std::sort(targets.begin(), targets.end(), [&](City* lhs, City* rhs) {
         if (learner_owned(lhs) != learner_owned(rhs)) return learner_owned(lhs);
@@ -181,7 +181,7 @@ int RaidEmptyCities(Game& game, Side& side) {
     for (City* target : targets) {
         if (!Raidable(game, raider_index, *target)) continue;
         std::vector<Army*> raiders;
-        for (Army* army : game.armies) {
+        for (Army* army : game.Armies()) {
             if (!army->OwnedBy(raider_index) || army->X() == kNone || army->InTransit() ||
                 army->Moves() <= 0 || army->Hero()) {
                 continue;

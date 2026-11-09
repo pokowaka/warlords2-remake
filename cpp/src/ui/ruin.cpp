@@ -63,9 +63,9 @@ struct Ruin : kit::Modal {
                       kLegendAt[i][0], kLegendAt[i][1]);
             font.Draw(kit::Text(0x73, i), kLegendAt[i][0] + 16, kLegendAt[i][1] - 3);
         }
-        auto description = g_app.g->map->site_text.find(site->index);
-        if (description != g_app.g->map->site_text.end())
-            for (int i = 0; i < 3; i++) font.Draw(description->second[i], 310, 259 + 20 * i);
+        const auto* description = g_app.g->GetMap().SiteDescription(site->index);
+        if (description)
+            for (int i = 0; i < 3; i++) font.Draw((*description)[i], 310, 259 + 20 * i);
         kit::DrawControls(dialog_view, hidden);
     }
     /** @brief Done closes; a click on the map moves to the site nearest it. */
@@ -105,7 +105,7 @@ w2::Site* Nearest(int x, int y) {
     w2::Site* best = nullptr;
     int best_distance = w2::kNone;
     int viewer = w2::game::ViewerSide(*g_app.g, g_app.player);
-    for (auto& site : g_app.g->map->sites) {
+    for (auto& site : g_app.g->GetMap().Sites()) {
         if (viewer == w2::kNone || (w2::site::ShownTo(site, *g_app.player) &&
                                     w2::game::Seen(*g_app.g, viewer, site.x, site.y))) {
             double dx = site.x - x, dy = site.y - y;

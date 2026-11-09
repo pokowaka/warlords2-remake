@@ -112,14 +112,13 @@ void InstallHooks() {
             defender = result.lines.city->OwnerIndex();
         else if (!result.lines.defenders.empty())
             defender = result.lines.defenders[0]->OwnerIndex();
-        Side* def_side =
-                defender != kNone && defender < 8 ? &game_state.map->sides[defender] : nullptr;
+        Side* def_side = game_state.GetMap().SideAt(defender);
         bool human = def_side && !def_side->IsComputerControlled();
         if (!(ShownSide(g_app.ai_side) || human)) return;
         std::vector<Side*> humans;
-        for (Side* side : game_state.sides)
+        for (Side* side : game_state.Sides())
             if (side->IsAlive() && !side->IsComputerControlled()) humans.push_back(side);
-        if (game_state.map->options.hidden_map != 0 && humans.size() == 1 &&
+        if (game_state.GetMap().GameOptions().hidden_map != 0 && humans.size() == 1 &&
             !game::Seen(game_state, humans[0]->Index(), x, y))
             return;
         auto text_of = [](int grp) { return kit::Text(grp, 0); };
@@ -137,7 +136,7 @@ void InstallHooks() {
             outcome = Format(text_of(0x8e), attacking_hero->Name());
         else
             outcome = Format(text_of(0x96), attacker_name);
-        bool hidden_many = game_state.map->options.hidden_map != 0 && humans.size() > 1;
+        bool hidden_many = game_state.GetMap().GameOptions().hidden_map != 0 && humans.size() > 1;
         bool window = !hidden_many && ((ShownSide(g_app.ai_side) && def_side) || human);
         bool cloud = !hidden_many;
         // the original slides the view box to the battle and centres the map
@@ -182,7 +181,7 @@ static void ComputerTurns(Coroutine& coroutine, Side* side) {
     // playing -- in the status bar for 100 ticks, then the last human's fall
     // in two boxes. The rest waits for the turn that follows (ui/ending.cpp).
     auto announce = [&coroutine, &yield_what]() {
-        w2::Ending& round_end = g_app.g->ending;
+        w2::Ending& round_end = g_app.g->MutableEndingState();
         if (round_end.told) return;
         round_end.told = true;
         auto fallen = round_end.fallen;
@@ -204,7 +203,12 @@ static void ComputerTurns(Coroutine& coroutine, Side* side) {
     while (side && side->IsComputerControlled()) {
         g_app.ai_side = side;
         // each computer turn opens with a song that plays once
-        sound::Music(w2::cues::kComputer, g_app.g->sides);
+        bool has_human = std::any_of(g_app.g->Sides().begin(), g_app.g->Sides().end(),
+                                     [](const Side* active_side) {
+                                         return active_side != nullptr && active_side->IsAlive() &&
+                                                !active_side->IsComputerControlled();
+                                     });
+        sound::Music(w2::cues::kComputer, has_human);
         g_app.ai_status = AiStatus{side, side->Name(), 5};
         yield_what("progress");
         auto& side_news = g_app.g->TurnNews(side->Id());
@@ -304,14 +308,14 @@ void PlayComputers(Side* side) {
 }
 /** @brief Plays the computer sides from the side whose turn it is. */
 void PlayComputer() {
-    PlayComputers(g_app.g->side);
+    PlayComputers(g_app.g->CurrentSide());
 }
 
 /** @brief End Turn: hands over to the next side, computer or human. */
 void EndTurn() {
     // End Turn does nothing once the game is won: the winner stays on the
     // turn, to look the kingdom over
-    if (g_app.g->won) return;
+    if (g_app.g->IsWon()) return;
     // It puts the stack down, and its route with it: the next player sees no
     // other side's plans
     g_app.selection.reset();
@@ -329,7 +333,7 @@ static void FinishRound(Side* side) {
     if (!side) {
         g_app.ai_status.reset();
         g_app.over = true;
-        ending::Over(g_app.g->ending);
+        ending::Over(g_app.g->MutableEndingState());
         return;
     }
     g_app.player = side;
@@ -341,7 +345,7 @@ static void FinishRound(Side* side) {
     // and until then neither map is shown
     g_app.map_after_banner = HotseatHidden();
     if (!g_app.map_after_banner) CentreOn(CapOf(side).first, CapOf(side).second);
-    ending::Show(g_app.g->ending, [side]() { ShowBanner(side); });
+    ending::Show(g_app.g->MutableEndingState(), [side]() { ShowBanner(side); });
 }
 
 /** @brief Opens the city's dialog. */
@@ -360,9 +364,9 @@ void OpenQuest() {
 void TakeLoaded(std::unique_ptr<w2::Game> loaded) {
     g_app.g = std::move(loaded);
     if (opt_military_advisor >= 0) {
-        g_app.g->map->options.military_advisor = opt_military_advisor;
-    } else if (g_app.g->map->options.military_advisor == 0) {
-        g_app.g->map->options.military_advisor = 1;
+        g_app.g->GetMap().MutableOptions().military_advisor = opt_military_advisor;
+    } else if (g_app.g->GetMap().GameOptions().military_advisor == 0) {
+        g_app.g->GetMap().MutableOptions().military_advisor = 1;
     }
     g_app.selection.reset();
     g_app.route.reset();
@@ -371,7 +375,7 @@ void TakeLoaded(std::unique_ptr<w2::Game> loaded) {
     g_app.starting = false;
     g_app.map_after_banner = false;
     StratDirty();
-    g_app.player = g_app.g->sides[g_app.g->current];
+    g_app.player = g_app.g->CurrentSide();
     CentreOn(CapOf(g_app.player).first, CapOf(g_app.player).second);
     sound::Music(w2::cues::kPlay);
 }

@@ -149,7 +149,7 @@ static const int kBannerNameY = 85, kBannerTurnY = 130;
 
 /** @brief Raises the start-of-turn banner for the side, with its fanfare. */
 void ShowBanner(Side* side) {
-    g_app.banner = Banner{side->Name(), g_app.g->turn, side->Colour(), side->Edge()};
+    g_app.banner = Banner{side->Name(), g_app.g->Turn(), side->Colour(), side->Edge()};
     sound::Effect("turn");  // the fanfare, TURN.8SN
 }
 
@@ -183,9 +183,9 @@ bool offer_typing = false;
  * among its humans and only holds back the re-centring.
  */
 bool HotseatHidden() {
-    if (g_app.g->map->options.hidden_map == 0) return false;
+    if (g_app.g->GetMap().GameOptions().hidden_map == 0) return false;
     int humans = 0;
-    for (const auto& side : g_app.g->map->sides)
+    for (const auto& side : g_app.g->GetMap().Sides())
         if (side.IsHuman()) humans++;
     return humans > 1;
 }
@@ -218,7 +218,7 @@ static void AfterBanner() {
             const auto& offer = g_app.g->TurnNews(g_app.player->Id()).hero_offer;
             sound::Music(offer ? w2::cues::kHero : w2::cues::kPlay);
             std::vector<std::string> moments;
-            if (g_app.g->turn == 2) moments.push_back("turn2");
+            if (g_app.g->Turn() == 2) moments.push_back("turn2");
             if (offer) moments.push_back("hero");
             tutorial::Chain(moments, []() {
                 if (!PresentOffer(g_app.player)) AfterOffer();
@@ -290,7 +290,7 @@ static void AfterOffer() {
     StratDirty();
     auto cap = CapOf(g_app.player);
     City* city = game::CityAt(*g_app.g, cap.first, cap.second);
-    if (g_app.g->turn == 1 && city) {
+    if (g_app.g->Turn() == 1 && city) {
         city::Open(city, city::kProduction);
         return;
     }
@@ -441,16 +441,16 @@ void OpenStart() {
                     StratDirty();
                     SyncLayout();
                     BeginGame();
-                    if (g_app.g->side && g_app.g->side->IsComputerControlled()) {
+                    if (g_app.g->CurrentSide() && g_app.g->CurrentSide()->IsComputerControlled()) {
                         // A game with no human in it says so as it begins.
                         bool human = false;
-                        for (Side* side : g_app.g->sides)
+                        for (Side* side : g_app.g->Sides())
                             if (!side->IsComputerControlled()) human = true;
                         if (human)
-                            PlayComputers(g_app.g->side);
+                            PlayComputers(g_app.g->CurrentSide());
                         else
                             search::ShowMessage(kit::Text(0xe, 0), kit::Text(0xe, 1),
-                                                []() { PlayComputers(g_app.g->side); });
+                                                []() { PlayComputers(g_app.g->CurrentSide()); });
                     }
                 };
                 if (!HasScript() && sound::SpeechOn()) {
@@ -514,12 +514,14 @@ absl::Status StartCliScenario(const std::string& scenario, double seed, bool for
     auto created_game = game::NewGame(g_app.data_dir, scenario, game_opts);
     if (!created_game.ok()) return created_game.status();
     g_app.g = std::move(*created_game);
-    for (size_t i = 0; i < g_app.g->sides.size(); i++)
-        g_app.g->sides[i]->SetComputerControlled(spectate_all_ai || (i > 0));
+    auto sides = g_app.g->Sides();
+    for (size_t i = 0; i < sides.size(); i++)
+        sides[i]->SetComputerControlled(spectate_all_ai || (i > 0));
     auto start_war = [=]() {
         SyncLayout();
         BeginGame();
-        if (g_app.g->side && g_app.g->side->IsComputerControlled()) PlayComputers(g_app.g->side);
+        if (g_app.g->CurrentSide() && g_app.g->CurrentSide()->IsComputerControlled())
+            PlayComputers(g_app.g->CurrentSide());
     };
     if (!HasScript() && !spectate_all_ai && sound::SpeechOn()) {
         sound::Music(w2::cues::kBegin);

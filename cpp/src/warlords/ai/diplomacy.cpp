@@ -29,10 +29,11 @@ bool CanAttack(Game& game, Side& side, const City& city) {
 
 bool Spared(Game& game, Side& side, int other) {
     AIData& data = Data(game, side);
-    if (game.map->options.diplomacy == 0 || data.solidarity == 0 || !side.IsComputerControlled())
+    const Map& map = game.GetMap();
+    if (map.GameOptions().diplomacy == 0 || data.solidarity == 0 || !side.IsComputerControlled())
         return false;
     for (int human = 7; human >= 0; human--) {
-        const Side& human_side = game.map->sides[human];
+        const Side& human_side = map.Sides()[human];
         if (InPlay(game, human) && !human_side.IsComputerControlled() &&
             State(game, other, human) == 2 && human_side.AiSolidarity() != 0)
             return true;
@@ -45,12 +46,13 @@ bool Spared(Game& game, Side& side, int other) {
  *        city within 40 of its capital that no side in play claims.
  */
 static void Claim(Game& game, Side& side) {
-    City* capital = side.CapitalCity(*game.map);
+    Map& map = game.GetMap();
+    City* capital = side.CapitalCity(map);
     if (!capital) return;
     City* best = nullptr;
     int best_distance = kNone;
-    for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
-        City& city = game.map->cities[i];
+    for (int i = map.CityCount() - 1; i >= 0; i--) {
+        City& city = map.Cities()[i];
         SideId claim = city.Claim();
         if (Standing(city) && claim != side.Id() &&
             (!claim.IsValid() || !InPlay(game, claim.Value()))) {
@@ -69,7 +71,8 @@ void Phase(Game& game, Side& side) {
     int side_index = side.Index();
     bool human = !side.IsComputerControlled();
     Claim(game, side);
-    if (game.map->options.diplomacy == 0) return;
+    Map& map = game.GetMap();
+    if (map.GameOptions().diplomacy == 0) return;
     int enemy = groups::PickEnemy(game, side);
 
     // Per side: cities claimed by one and held by the other, cities owned,
@@ -84,8 +87,8 @@ void Phase(Game& game, Side& side) {
             they_peace[other] = 1;
     }
     int tiles = 0;
-    for (int i = static_cast<int>(game.map->cities.size()) - 1; i >= 0; i--) {
-        City& city = game.map->cities[i];
+    for (int i = map.CityCount() - 1; i >= 0; i--) {
+        City& city = map.Cities()[i];
         if (Standing(city)) tiles++;
         int owner = city.OwnerIndex();
         if (owner != kNone) {
@@ -155,12 +158,12 @@ void Phase(Game& game, Side& side) {
         if (at_war_with_human) {
             for (int other = 7; other >= 0; other--) {
                 if (InPlay(game, other) && IsComputer(game, other) &&
-                    game.map->sides[other].AiSolidarity() != 0)
+                    map.Sides()[other].AiSolidarity() != 0)
                     Propose(game, side_index, other, 0);
             }
         }
     }
-    if (!human && game.greatest) {
+    if (!human && game.IsGreatestCampaign()) {
         auto fights = groups::FightingHumans(game);
         for (int other = 7; other >= 0; other--) {
             if (InPlay(game, other) && IsComputer(game, other) &&

@@ -68,11 +68,11 @@ void SmallShield(int side, int x, int y) {
 std::string EventText(const w2::Deed& deed) {
     auto line = [](int line_index) { return kit::Text(0x5e, line_index); };
     auto side_name = [](int side_index) {
-        return side_index >= 0 && side_index < 8 ? g_app.g->map->sides[side_index].Name()
+        return side_index >= 0 && side_index < 8 ? g_app.g->GetMap().Sides()[side_index].Name()
                                                  : std::string();
     };
     auto city_name = [](int city_index) {
-        w2::City* city = g_app.g->map->City(city_index);
+        w2::City* city = g_app.g->GetMap().CityAt(city_index);
         return city ? city->Name() : std::string();
     };
     // What a deed's two values mean depends on its type.
@@ -103,7 +103,7 @@ std::string EventText(const w2::Deed& deed) {
         else if (subject == history::kFoundGold)
             what = line(15);
         else
-            for (auto& item : g_app.g->map->items)
+            for (const auto& item : g_app.g->GetMap().Items())
                 if (item.index == subject) what = item.name;
         return Format(line(9), deed.name, what);
     }
@@ -127,7 +127,7 @@ struct History : kit::Modal {
     int turns = 1;             ///< The turns on record, the last one shown.
 
     /** @brief The record of turn `turn_number`, counted from 1. */
-    const w2::HistoryRecord& Rec(int turn_number) { return g_app.g->history[turn_number - 1]; }
+    const w2::HistoryRecord& Rec(int turn_number) { return g_app.g->History()[turn_number - 1]; }
 
     /** @brief Marks the tab shown and enables the arrows that have a turn to go to. */
     void Refresh() {
@@ -187,7 +187,8 @@ struct History : kit::Modal {
                 int y = kGraphY + kGraphH - 1 -
                         static_cast<int>(
                                 std::floor(static_cast<double>(values[side]) / top * kGraphH));
-                kit::Line(g_app.g->map->sides[side].Colour(), last_x[side], last_y[side], x, y);
+                kit::Line(g_app.g->GetMap().Sides()[side].Colour(), last_x[side], last_y[side], x,
+                          y);
                 last_x[side] = x;
                 last_y[side] = y;
             }
@@ -203,7 +204,7 @@ struct History : kit::Modal {
                     best = record.score[side];
                     lead = side;
                 }
-            text = Format(kit::Text(0x5c, 3), turn, g_app.g->map->sides[lead].Name());
+            text = Format(kit::Text(0x5c, 3), turn, g_app.g->GetMap().Sides()[lead].Name());
         } else {
             text = Format(kit::Text(0x5c, mode), turn, Values(record, mode)[g_app.player->Index()]);
         }
@@ -385,7 +386,7 @@ struct TriumphsDialog : kit::Modal {
  * With nothing on record yet, a message says so instead.
  */
 void Open(int which) {
-    int turns = std::min(static_cast<int>(g_app.g->history.size()), history::kLastRecordedTurn);
+    int turns = std::min(static_cast<int>(g_app.g->History().size()), history::kLastRecordedTurn);
     if (turns < 1) {
         search::ShowMessage(kit::Text(0x5d, 0), kit::Text(0x5d, 1));
         return;

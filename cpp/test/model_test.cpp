@@ -4,8 +4,10 @@
  */
 #include <algorithm>
 #include <array>
+#include <memory>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -225,15 +227,17 @@ TEST(CityEncapsulationTest, VectorTargetsProductionSlotsAttacksAndRazeInvariants
 
 TEST(SideEncapsulationTest, CapitalResolutionWithoutPointersTreasuryAndMissives) {
     Map scenario_map;
-    scenario_map.cities.resize(2);
-    scenario_map.cities[0].SetId(CityId(0));
-    scenario_map.cities[0].Rename("Stormheim");
-    scenario_map.cities[0].SetPosition(TilePos(14, 22));
-    scenario_map.cities[1].SetId(CityId(1));
-    scenario_map.cities[1].Rename("Kor");
-    scenario_map.cities[1].SetPosition(TilePos(40, 50));
+    City stormheim;
+    stormheim.SetId(CityId(0));
+    stormheim.Rename("Stormheim");
+    stormheim.SetPosition(TilePos(14, 22));
+    City kor;
+    kor.SetId(CityId(1));
+    kor.Rename("Kor");
+    kor.SetPosition(TilePos(40, 50));
+    scenario_map.SetCities({stormheim, kor});
 
-    Side& faction = scenario_map.sides[1];
+    Side& faction = scenario_map.Sides()[1];
     faction.SetId(SideId(1));
     faction.SetName("Storm Giants");
     faction.SetInUse(true);
@@ -250,8 +254,13 @@ TEST(SideEncapsulationTest, CapitalResolutionWithoutPointersTreasuryAndMissives)
     EXPECT_EQ(faction.NetIncome(), 55);
     EXPECT_EQ(faction.CapitalPosition(), TilePos(40, 50));
 
-    // Reallocating Map::cities invalidates raw pointers, while CapitalCity(map) stays valid.
-    scenario_map.cities.reserve(64);
+    // Growing Map::cities reallocates internal storage while CapitalCity(map) stays valid.
+    for (int extra = 2; extra < 64; ++extra) {
+        City extra_city;
+        extra_city.SetId(CityId(extra));
+        extra_city.SetPosition(TilePos(extra, 10));
+        scenario_map.AddCity(extra_city);
+    }
     ASSERT_NE(faction.CapitalCity(scenario_map), nullptr);
     EXPECT_EQ(faction.CapitalCity(scenario_map)->Name(), "Kor");
 
@@ -389,17 +398,17 @@ TEST(GameModelTest, NewGameAndMapQueries) {
     ASSERT_TRUE(created_game.ok()) << created_game.status();
     auto& game_state = *created_game;
     ASSERT_NE(game_state, nullptr);
-    ASSERT_NE(game_state->map, nullptr);
+    ASSERT_TRUE(game_state->HasMap());
+    const Map& scenario_map = game_state->GetMap();
     EXPECT_EQ(game_state->LivingSideCount(), 8);
-    EXPECT_TRUE(game_state->map->InBounds(0, 0));
-    EXPECT_FALSE(game_state->map->InBounds(-1, 0));
-    EXPECT_FALSE(game_state->map->InBounds(kMapW, kMapH));
+    EXPECT_TRUE(scenario_map.InBounds(0, 0));
+    EXPECT_FALSE(scenario_map.InBounds(-1, 0));
+    EXPECT_FALSE(scenario_map.InBounds(kMapW, kMapH));
 
-    const City* first_city = game_state->map->City(0);
+    const City* first_city = scenario_map.CityAt(0);
     ASSERT_NE(first_city, nullptr);
-    EXPECT_EQ(game_state->map->CityAtTopLeft(first_city->X(), first_city->Y()), first_city);
-    EXPECT_EQ(game_state->map->CityAtFootprint(first_city->X() + 1, first_city->Y() + 1),
-              first_city);
+    EXPECT_EQ(scenario_map.CityAtTopLeft(first_city->X(), first_city->Y()), first_city);
+    EXPECT_EQ(scenario_map.CityAtFootprint(first_city->X() + 1, first_city->Y() + 1), first_city);
 
     Army scout;
     scout.PlaceAt(first_city->Position());
@@ -500,7 +509,7 @@ TEST(QuestAndProducedModelTest, VariantTargetsResolutionAndPerGameBugs) {
     Game& game = **created_game;
 
     Army hero_proto;
-    hero_proto.PlaceAt(game.map->cities[0].Position());
+    hero_proto.PlaceAt(game.GetMap().Cities()[0].Position());
     hero_proto.SetOwner(SideId(0));
     hero_proto.SetType(ArmyTypeId(armytype::kHero));
     Army* hero = game.Add(hero_proto);
@@ -509,7 +518,7 @@ TEST(QuestAndProducedModelTest, VariantTargetsResolutionAndPerGameBugs) {
     EXPECT_TRUE(city_quest.HasTarget());
     EXPECT_EQ(city_quest.TargetCityId(), CityId(2));
     EXPECT_EQ(city_quest.ResolveHero(game), hero);
-    EXPECT_EQ(city_quest.ResolveCity(game), &game.map->cities[2]);
+    EXPECT_EQ(city_quest.ResolveCity(game), game.GetMap().CityAt(2));
 
     Quest pillage_quest(quest::kPillageGold, hero->Id(), std::monostate{}, 800, 0);
     EXPECT_TRUE(pillage_quest.HasTarget());
@@ -537,13 +546,13 @@ TEST(Phase4ArchitectureTest, TurnReportPathfinderAndComputerPlayerStrategy) {
     ASSERT_TRUE(created_game.ok()) << created_game.status();
     Game& game = **created_game;
 
-    for (const Side* side : game.sides) {
+    for (const Side* side : game.Sides()) {
         ASSERT_NE(side->ComputerPlayer(), nullptr);
         EXPECT_TRUE(side->IsClassicAi());
     }
 
     AttitudeBreakdown attitude =
-            game.sides[1]->ComputerPlayer()->EvaluateProposal(game, SideId(1), SideId(0));
+            game.Sides()[1]->ComputerPlayer()->EvaluateProposal(game, SideId(1), SideId(0));
     EXPECT_EQ(attitude.from_side, 1);
     EXPECT_EQ(attitude.to_side, 0);
 
@@ -558,9 +567,244 @@ TEST(Phase4ArchitectureTest, TurnReportPathfinderAndComputerPlayerStrategy) {
     pathfinder.InvalidateSide(current->Id());
     pathfinder.Invalidate();
 
-    auto saved_ai = game.sides[1]->ComputerPlayer()->SaveState();
+    auto saved_ai = game.Sides()[1]->ComputerPlayer()->SaveState();
     EXPECT_TRUE(saved_ai.is_object());
-    EXPECT_TRUE(game.sides[1]->ComputerPlayer()->LoadState(saved_ai, game).ok());
+    EXPECT_TRUE(game.Sides()[1]->ComputerPlayer()->LoadState(saved_ai, game).ok());
+}
+
+TEST(MapEncapsulationTest, SpatialIndicesRebindOnCopyMoveResizeAndTruncate) {
+    Map world;
+    world.SetName("TESTMAP");
+    EXPECT_EQ(world.Name(), "TESTMAP");
+
+    City first_city;
+    first_city.SetId(CityId(0));
+    first_city.Rename("Illoc");
+    first_city.SetPosition(TilePos(10, 20));
+
+    City second_city;
+    second_city.SetId(CityId(1));
+    second_city.Rename("Bane");
+    second_city.SetPosition(TilePos(30, 40));
+
+    world.SetCities({first_city});
+    world.AddCity(second_city);
+    ASSERT_EQ(world.CityCount(), 2);
+    EXPECT_EQ(world.CityAtTopLeft(10, 20), &world.Cities()[0]);
+    EXPECT_EQ(world.CityAtTopLeft(11, 20), nullptr);
+    EXPECT_EQ(world.CityAtFootprint(10, 20), &world.Cities()[0]);
+    EXPECT_EQ(world.CityAtFootprint(11, 20), &world.Cities()[0]);
+    EXPECT_EQ(world.CityAtFootprint(10, 21), &world.Cities()[0]);
+    EXPECT_EQ(world.CityAtFootprint(11, 21), &world.Cities()[0]);
+    EXPECT_EQ(world.CityAtFootprint(12, 21), nullptr);
+    EXPECT_EQ(world.CityAtTopLeft(30, 40), &world.Cities()[1]);
+
+    Site ruin;
+    ruin.index = 0;
+    ruin.x = 15;
+    ruin.y = 25;
+    ruin.name = "Old Tower";
+    ruin.type = 2;
+
+    Site temple;
+    temple.index = 1;
+    temple.x = 35;
+    temple.y = 45;
+    temple.name = "Shrine";
+    temple.type = 1;
+
+    world.SetSites({ruin});
+    world.AddSite(temple);
+    ASSERT_EQ(world.SiteCount(), 2);
+    EXPECT_EQ(world.SiteAt(15, 25), &world.Sites()[0]);
+    EXPECT_EQ(world.SiteAt(35, 45), &world.Sites()[1]);
+    EXPECT_EQ(world.SiteById(SiteId(1)), &world.Sites()[1]);
+    EXPECT_EQ(world.SiteAt(16, 25), nullptr);
+
+    // Copy construction and copy assignment rebind spatial pointers to the copy's storage.
+    Map copied(world);
+    EXPECT_EQ(copied.CityAtTopLeft(10, 20), &copied.Cities()[0]);
+    EXPECT_NE(copied.CityAtTopLeft(10, 20), &world.Cities()[0]);
+    EXPECT_EQ(copied.CityAtFootprint(31, 41), &copied.Cities()[1]);
+    EXPECT_EQ(copied.SiteAt(15, 25), &copied.Sites()[0]);
+    EXPECT_NE(copied.SiteAt(15, 25), &world.Sites()[0]);
+
+    Map copy_assigned;
+    copy_assigned = world;
+    EXPECT_EQ(copy_assigned.CityAtTopLeft(30, 40), &copy_assigned.Cities()[1]);
+    EXPECT_EQ(copy_assigned.SiteAt(35, 45), &copy_assigned.Sites()[1]);
+
+    // Move construction and move assignment keep spatial pointers pointing at moved storage.
+    Map moved(std::move(copied));
+    EXPECT_EQ(moved.CityAtTopLeft(10, 20), &moved.Cities()[0]);
+    EXPECT_EQ(moved.SiteAt(15, 25), &moved.Sites()[0]);
+
+    Map move_assigned;
+    move_assigned = std::move(copy_assigned);
+    EXPECT_EQ(move_assigned.CityAtFootprint(11, 21), &move_assigned.Cities()[0]);
+    EXPECT_EQ(move_assigned.SiteAt(35, 45), &move_assigned.Sites()[1]);
+
+    // TruncateCities drops removed cities from both spatial lookup tables.
+    world.TruncateCities(1);
+    EXPECT_EQ(world.CityCount(), 1);
+    EXPECT_EQ(world.CityAtTopLeft(10, 20), &world.Cities()[0]);
+    EXPECT_EQ(world.CityAtTopLeft(30, 40), nullptr);
+    EXPECT_EQ(world.CityAtFootprint(31, 41), nullptr);
+
+    // Active-area cropping and dimension resizing clamp bounds and re-index cities/sites.
+    world.CropActiveArea(-5, 4, 500, 60);
+    EXPECT_EQ(world.ActiveArea(), (ActiveRect{0, 4, kMapW - 1, 60}));
+    EXPECT_TRUE(world.InActiveArea(10, 20));
+    EXPECT_FALSE(world.InActiveArea(10, 3));
+
+    world.SetDimensions(24, 32);
+    EXPECT_EQ(world.Width(), 24);
+    EXPECT_EQ(world.Height(), 32);
+    EXPECT_EQ(world.ActiveArea(), (ActiveRect{0, 4, 23, 31}));
+    EXPECT_EQ(world.CityAtTopLeft(10, 20), &world.Cities()[0]);
+    EXPECT_EQ(world.SiteAt(15, 25), &world.Sites()[0]);
+    EXPECT_EQ(world.SiteAt(35, 45), nullptr);
+
+    // Sparse ItemById, SignAt, descriptions, and lazy per-tile grid mutators.
+    Item blade;
+    blade.index = 7;
+    blade.name = "Firesword";
+    world.AddItem(blade);
+    EXPECT_EQ(world.ItemById(ItemId(0)), nullptr);
+    ASSERT_NE(world.ItemById(ItemId(7)), nullptr);
+    EXPECT_EQ(world.ItemById(ItemId(7))->name, "Firesword");
+
+    Sign signpost{0, 8, 9, {"Beware", "Dragons"}};
+    world.AddSign(signpost);
+    ASSERT_NE(world.SignAt(8, 9), nullptr);
+    EXPECT_EQ(world.SignAt(8, 9)->lines[0], "Beware");
+    EXPECT_EQ(world.SignAt(9, 9), nullptr);
+
+    Map::DescriptionMap city_lore{{0, {"Ancient", "walled", "citadel"}}};
+    world.SetCityDescriptions(city_lore);
+    ASSERT_NE(world.CityDescription(0), nullptr);
+    EXPECT_EQ((*world.CityDescription(0))[2], "citadel");
+    EXPECT_EQ(world.CityDescription(5), nullptr);
+
+    world.SetTileWord(3, 4, 0x1234);
+    world.SetRoadByte(3, 4, 7);
+    world.SetCrossing(3, 4, true);
+    EXPECT_EQ(world.TileWord(3, 4), 0x1234);
+    EXPECT_EQ(world.RoadByte(3, 4), 7);
+    EXPECT_TRUE(world.IsCrossing(3, 4));
+}
+
+TEST(GameEncapsulationTest, CurrentSideSingleSourceOfTruthTowersDeedsAndTriumphs) {
+    Game game;
+    auto world_ptr = std::make_unique<Map>();
+    Side* sirians = &world_ptr->Sides()[0];
+    Side* giants = &world_ptr->Sides()[2];
+    Side* dwarves = &world_ptr->Sides()[5];
+    sirians->SetId(SideId(0));
+    sirians->SetAlive(true);
+    giants->SetId(SideId(2));
+    giants->SetAlive(true);
+    dwarves->SetId(SideId(5));
+    dwarves->SetAlive(false);
+
+    City capital;
+    capital.SetId(CityId(0));
+    capital.SetPosition(TilePos(20, 20));
+    world_ptr->SetCities({capital});
+
+    game.SetMap(std::move(world_ptr));
+    game.SetActiveSides({sirians, giants});
+    game.AddActiveSide(dwarves);
+    ASSERT_EQ(game.Sides().size(), 3U);
+    EXPECT_EQ(game.LivingSideCount(), 2);
+
+    // Single-source-of-truth invariants between CurrentSideIndex() and CurrentSide().
+    EXPECT_EQ(game.CurrentSideIndex(), kNone);
+    EXPECT_EQ(game.CurrentSide(), nullptr);
+
+    game.SetCurrentSideIndex(1);
+    EXPECT_EQ(game.CurrentSideIndex(), 1);
+    EXPECT_EQ(game.CurrentSide(), giants);
+
+    game.SetCurrentSide(dwarves);
+    EXPECT_EQ(game.CurrentSideIndex(), 2);
+    EXPECT_EQ(game.CurrentSide(), dwarves);
+
+    // Side pointer outside Game::Sides() or out-of-range index clears both atomically.
+    game.SetCurrentSide(&game.GetMap().Sides()[1]);
+    EXPECT_EQ(game.CurrentSideIndex(), kNone);
+    EXPECT_EQ(game.CurrentSide(), nullptr);
+
+    game.SetCurrentSide(giants);
+    game.SetCurrentSideIndex(99);
+    EXPECT_EQ(game.CurrentSideIndex(), kNone);
+    EXPECT_EQ(game.CurrentSide(), nullptr);
+
+    // Shrinking active sides below CurrentSideIndex() clears the stale cursor automatically.
+    game.SetCurrentSideIndex(2);
+    game.SetActiveSides({sirians, giants});
+    EXPECT_EQ(game.CurrentSideIndex(), kNone);
+    EXPECT_EQ(game.CurrentSide(), nullptr);
+
+    // Tower placement, bounds enforcement, removal, and ClearAbandonedTowers.
+    game.PlaceTower(TilePos(-1, 5));
+    game.PlaceTower(TilePos(kMapW, 5));
+    EXPECT_TRUE(game.TowerKeys().empty());
+
+    game.PlaceTower(TilePos(10, 20));
+    game.PlaceTower(TilePos(12, 20));
+    game.PlaceTower(TilePos(14, 20));
+    EXPECT_TRUE(game.HasTower(TilePos(10, 20)));
+    EXPECT_TRUE(game.HasTower(12, 20));
+    EXPECT_TRUE(game.HasTower(14, 20));
+
+    Army garrison;
+    garrison.PlaceAt(TilePos(10, 20));
+    garrison.SetOwner(SideId(0));
+    garrison.SetType(ArmyTypeId(0));
+    game.Add(garrison);
+
+    Army traveler;
+    traveler.PlaceAt(TilePos(12, 20));
+    traveler.SetOwner(SideId(0));
+    traveler.SetType(ArmyTypeId(0));
+    Army* in_transit = game.Add(traveler);
+    in_transit->SendIntoTransit(Transit{2, PlantedStandard{}}, /*returning=*/false);
+
+    game.ClearAbandonedTowers();
+    EXPECT_TRUE(game.HasTower(10, 20));
+    EXPECT_FALSE(game.HasTower(12, 20));
+    EXPECT_FALSE(game.HasTower(14, 20));
+
+    game.RemoveTower(TilePos(10, 20));
+    EXPECT_FALSE(game.HasTower(10, 20));
+
+    // SetCityOwner updates city ownership and invalidates Pathfinder caches.
+    City* target_city = game.GetMap().CityAt(0);
+    ASSERT_NE(target_city, nullptr);
+    game.SetCityOwner(*target_city, SideId(2));
+    EXPECT_EQ(target_city->Owner(), SideId(2));
+
+    // RecordDeed retains at most the two lowest-ordinal DeedType entries and truncates names.
+    game.RecordDeed(SideId(0), DeedType::kAtPeace, 0, 2, "Sirians");
+    game.RecordDeed(SideId(0), DeedType::kCityWon, 0, 3, "LordLongHeroNameExceedingFifteen");
+    game.RecordDeed(SideId(0), DeedType::kHeroEmerges, 1, 0, "Valkyrie");
+    const auto& deeds = game.DeedsForSide(0);
+    ASSERT_EQ(deeds.size(), 2U);
+    EXPECT_EQ(deeds[0].type, DeedType::kHeroEmerges);
+    EXPECT_EQ(deeds[0].name, "Valkyrie");
+    EXPECT_EQ(deeds[1].type, DeedType::kCityWon);
+    EXPECT_EQ(deeds[1].name, "LordLongHeroNam");
+
+    // Triumph loss counters and tutorial moment tracking.
+    game.RecordTriumphLoss(0, 2, 1, 3);
+    game.RecordTriumphLoss(0, 2, 1, 2);
+    EXPECT_EQ(game.TriumphCount(0, 2, 1), 5);
+    EXPECT_EQ(game.TriumphCount(0, 2, 4), 0);
+
+    EXPECT_TRUE(game.MarkTutorialSeen("first_hero"));
+    EXPECT_FALSE(game.MarkTutorialSeen("first_hero"));
+    EXPECT_TRUE(game.HasSeenTutorial("first_hero"));
 }
 
 }  // namespace

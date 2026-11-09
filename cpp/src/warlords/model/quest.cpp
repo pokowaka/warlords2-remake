@@ -56,47 +56,47 @@ ArmyId Quest::TargetArmyId() const {
 }
 
 Army* Quest::ResolveHero(Game& game) const {
-    return game.armies.FindInPool(hero_);
+    return game.Armies().FindInPool(hero_);
 }
 
 const Army* Quest::ResolveHero(const Game& game) const {
-    return game.armies.FindInPool(hero_);
+    return game.Armies().FindInPool(hero_);
 }
 
 City* Quest::ResolveCity(Game& game) const {
-    return game.map ? game.map->City(TargetCityId()) : nullptr;
+    return game.HasMap() ? game.GetMap().CityById(TargetCityId()) : nullptr;
 }
 
 const City* Quest::ResolveCity(const Game& game) const {
-    return game.map ? game.map->City(TargetCityId()) : nullptr;
+    return game.HasMap() ? game.GetMap().CityById(TargetCityId()) : nullptr;
 }
 
 Side* Quest::ResolveSide(Game& game) const {
-    return game.map ? game.map->Side(TargetSideId()) : nullptr;
+    return game.HasMap() ? game.GetMap().SideById(TargetSideId()) : nullptr;
 }
 
 const Side* Quest::ResolveSide(const Game& game) const {
-    return game.map ? game.map->Side(TargetSideId()) : nullptr;
+    return game.HasMap() ? game.GetMap().SideById(TargetSideId()) : nullptr;
 }
 
 Item* Quest::ResolveItem(Game& game) const {
-    return game.map ? game.map->ItemById(TargetItemId()) : nullptr;
+    return game.HasMap() ? game.GetMap().ItemById(TargetItemId()) : nullptr;
 }
 
 const Item* Quest::ResolveItem(const Game& game) const {
-    return game.map ? game.map->ItemById(TargetItemId()) : nullptr;
+    return game.HasMap() ? game.GetMap().ItemById(TargetItemId()) : nullptr;
 }
 
 const ArmyType* Quest::ResolveArmyType(const Game& game) const {
-    return game.types.ById(TargetArmyTypeId());
+    return game.ArmyTypes().ById(TargetArmyTypeId());
 }
 
 Army* Quest::ResolveTargetArmy(Game& game) const {
-    return game.armies.FindInPool(TargetArmyId());
+    return game.Armies().FindInPool(TargetArmyId());
 }
 
 const Army* Quest::ResolveTargetArmy(const Game& game) const {
-    return game.armies.FindInPool(TargetArmyId());
+    return game.Armies().FindInPool(TargetArmyId());
 }
 
 }  // namespace w2

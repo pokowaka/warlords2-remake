@@ -142,17 +142,18 @@ void StepScript() {
         } else if (cmd == "eval") {
             printf("turn=%d player=%s modals=%d banner=%d offer=%d ai=%d over=%d walk=%d "
                    "assault=%d status=%s\n",
-                   g_app.g ? g_app.g->turn : 0, g_app.player ? g_app.player->Name().c_str() : "-",
+                   g_app.g ? g_app.g->Turn() : 0, g_app.player ? g_app.player->Name().c_str() : "-",
                    static_cast<int>(g_app.modals.size()), static_cast<bool>(g_app.banner),
                    static_cast<bool>(g_app.offer), static_cast<bool>(g_app.ai_run), g_app.over,
                    static_cast<bool>(g_app.walk), static_cast<bool>(g_app.assault),
                    g_app.ai_status ? g_app.ai_status->text.c_str() : "");
-            if (g_app.g && g_app.g->map)
-                printf("  options: milAdv=%d diplo=%d hidden=%d viewEn=%d\n",
-                       g_app.g->map->options.military_advisor, g_app.g->map->options.diplomacy,
-                       g_app.g->map->options.hidden_map, g_app.g->map->options.view_enemies);
-            if (g_app.g && g_app.g->map && g_app.player) {
-                if (const City* cap = g_app.player->CapitalCity(*g_app.g->map)) {
+            if (g_app.g && g_app.g->HasMap()) {
+                const auto& opts = g_app.g->GetMap().GameOptions();
+                printf("  options: milAdv=%d diplo=%d hidden=%d viewEn=%d\n", opts.military_advisor,
+                       opts.diplomacy, opts.hidden_map, opts.view_enemies);
+            }
+            if (g_app.g && g_app.g->HasMap() && g_app.player) {
+                if (const City* cap = g_app.player->CapitalCity(g_app.g->GetMap())) {
                     printf("  cam=%.2f,%.2f zoom=%d map=%d,%d,%d,%d capital=%d,%d pointer=%d,%d\n",
                            g_app.cx, g_app.cy, g_app.zoom, g_app.map_rect.x, g_app.map_rect.y,
                            g_app.map_rect.w, g_app.map_rect.h, cap->X(), cap->Y(), g_app.mouse_x,
@@ -164,8 +165,8 @@ void StepScript() {
             std::string opt_name;
             int val;
             stream >> opt_name >> val;
-            if (g_app.g && g_app.g->map) {
-                if (int* field = g_app.g->map->options.Field(opt_name)) *field = val;
+            if (g_app.g && g_app.g->HasMap()) {
+                if (int* field = g_app.g->GetMap().MutableOptions().Field(opt_name)) *field = val;
             }
         } else if (cmd == "load") {
             std::string slot_name;
@@ -216,7 +217,7 @@ void StepScript() {
             AttackTile(x, y);
         } else if (cmd == "near" && g_app.g && g_app.selection) {
             std::vector<std::pair<int, City*>> found;
-            for (auto& city : g_app.g->map->cities) {
+            for (auto& city : g_app.g->GetMap().Cities()) {
                 if (city.OwnerIndex() != g_app.player->Index() && !city.IsRazed())
                     found.push_back({std::max(std::abs(city.X() - g_app.selection->x),
                                               std::abs(city.Y() - g_app.selection->y)),

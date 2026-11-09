@@ -68,7 +68,7 @@ Side* EndTurn(Game& game) {
 }
 
 void AdvanceRounds(Game& game, size_t rounds) {
-    size_t total_turns = rounds * game.sides.size();
+    size_t total_turns = rounds * game.Sides().size();
     for (size_t i = 0; i < total_turns; ++i) {
         EndTurn(game);
     }
@@ -92,13 +92,13 @@ Army* AddArmy(Game& game, int x, int y, int owner, int type, int strength, int m
     army.SetStrength(strength);
     army.SetMoves(moves);
     army.SetMaxMoves(max_moves);
-    const ArmyType* army_type = game.types.ById(type);
+    const ArmyType* army_type = game.ArmyTypes().ById(type);
     army.SetName(army_type != nullptr ? army_type->name : "");
     return game.Add(army);
 }
 
 Army* AddTypedArmy(Game& game, int x, int y, int owner, int type, int strength) {
-    const ArmyType* army_type = game.types.ById(type);
+    const ArmyType* army_type = game.ArmyTypes().ById(type);
     Army army;
     army.PlaceAt(TilePos(x, y));
     army.SetOwner(SideId(owner));
@@ -112,7 +112,7 @@ Army* AddTypedArmy(Game& game, int x, int y, int owner, int type, int strength) 
 }
 
 City* FindNeutralCity(Game& game, size_t min_slots, const City* exclude) {
-    for (auto& city : game.map->cities) {
+    for (auto& city : game.GetMap().Cities()) {
         if (&city != exclude && city.IsNeutral() && !city.IsRazed() &&
             city.Slots().size() >= min_slots) {
             return &city;
@@ -122,7 +122,7 @@ City* FindNeutralCity(Game& game, size_t min_slots, const City* exclude) {
 }
 
 City* FindEnemyCity(Game& game, int side_index) {
-    for (auto& city : game.map->cities) {
+    for (auto& city : game.GetMap().Cities()) {
         if (!city.OwnedBy(side_index)) {
             return &city;
         }
@@ -131,7 +131,7 @@ City* FindEnemyCity(Game& game, int side_index) {
 }
 
 City* FindCityByName(Game& game, std::string_view name) {
-    for (auto& city : game.map->cities) {
+    for (auto& city : game.GetMap().Cities()) {
         if (city.Name() == name) {
             return &city;
         }
@@ -140,7 +140,7 @@ City* FindCityByName(Game& game, std::string_view name) {
 }
 
 Site* FindSiteByContent(Game& game, int content) {
-    for (auto& map_site : game.map->sites) {
+    for (auto& map_site : game.GetMap().Sites()) {
         if (map_site.content == content) {
             return &map_site;
         }
@@ -149,13 +149,14 @@ Site* FindSiteByContent(Game& game, int content) {
 }
 
 TilePos FindTerrainTile(const Game& game, int terrain, bool empty_non_crossing) {
-    for (int y = 0; y < game.map->height; ++y) {
-        for (int x = 0; x < game.map->width; ++x) {
-            if (scn::TerrainAt(*game.map, x, y) != terrain) {
+    const Map& map = game.GetMap();
+    for (int y = 0; y < map.Height(); ++y) {
+        for (int x = 0; x < map.Width(); ++x) {
+            if (scn::TerrainAt(map, x, y) != terrain) {
                 continue;
             }
             if (empty_non_crossing &&
-                (scn::IsCrossing(*game.map, x, y) || !game.ArmiesOnTile(x, y).empty())) {
+                (scn::IsCrossing(map, x, y) || !game.ArmiesOnTile(x, y).empty())) {
                 continue;
             }
             return TilePos(x, y);

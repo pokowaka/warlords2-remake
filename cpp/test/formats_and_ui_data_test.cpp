@@ -115,15 +115,15 @@ class SlotsTest : public ::testing::Test {
     /** @brief Populates `game_` with `n` ungrouped armies ranked highest-first in fight order. */
     void BuildStandInStack(int n) {
         game_ = std::make_unique<Game>();
-        game_->map = std::make_unique<Map>();
-        game_->map->fight_order.assign(9, std::vector<int>(29, 0));
+        game_->SetMap(std::make_unique<Map>());
+        game_->GetMap().MutableFightOrder().assign(9, std::vector<int>(29, 0));
         armies_.clear();
         for (int i = 1; i <= n; ++i) {
             Army army;
             army.SetType(ArmyTypeId(i));
             army.SetMoves(10 + i);
             army.SetGroup(0);
-            game_->map->fight_order[0][i] = n - i;
+            game_->GetMap().MutableFightOrder()[0][i] = n - i;
             armies_.push_back(game_->Add(army));
         }
     }
@@ -399,10 +399,10 @@ TEST(ScreenLayoutTest, UiDataDialogsShortcutsAndSpriteSheets) {
 
 TEST(CityCastlesTest, CastleAndRuinTileBlocksMatchOwnerAndRazer) {
     auto game_ptr = SetupGame("TUTORIA", Seed(11));
-    Map& map = *game_ptr->map;
+    Map& map = game_ptr->GetMap();
     const std::map<int, int> expected_by_owner = {{-1, 96}, {0, 98},  {1, 100}, {2, 102}, {3, 104},
                                                   {4, 106}, {5, 108}, {6, 128}, {7, 130}};
-    City& city = map.cities[0];
+    City& city = map.Cities()[0];
     for (auto [owner, base] : expected_by_owner) {
         city.SetRazed(false);
         city.SetOwner(owner >= 0 ? SideId(owner) : SideId::None());
@@ -431,18 +431,18 @@ TEST(CityCastlesTest, CastleAndRuinTileBlocksMatchOwnerAndRazer) {
     }
 
     auto game2 = SetupGame("TUTORIA", Seed(12));
-    City& city2 = game2->map->cities[0];
-    for (Side* side : game2->sides) {
+    City& city2 = game2->GetMap().Cities()[0];
+    for (Side* side : game2->Sides()) {
         game::SetCityOwner(*game2, city2, side->Index());
-        scn::SetCityTiles(*game2->map, city2);
+        scn::SetCityTiles(game2->GetMap(), city2);
     }
-    auto mine_list = game::SideCities(*game2, *game2->sides[0]);
+    auto mine_list = game::SideCities(*game2, *game2->Sides()[0]);
     ASSERT_FALSE(mine_list.empty());
     City* mine = mine_list[0];
     int previous_owner = mine->OwnerIndex();
-    game::Raze(*game2, *game2->sides[0], *mine, {});
+    game::Raze(*game2, *game2->Sides()[0], *mine, {});
     EXPECT_EQ(mine->RazedBy(), SideId(previous_owner));
-    EXPECT_EQ(scn::TileAt(*game2->map, mine->X(), mine->Y()), 0xa0 + 2 * previous_owner);
+    EXPECT_EQ(scn::TileAt(game2->GetMap(), mine->X(), mine->Y()), 0xa0 + 2 * previous_owner);
 }
 
 TEST(SoundCuesTest, MusicSelectionAndVoiceAdvisorThresholds) {
@@ -461,29 +461,30 @@ TEST(SoundCuesTest, MusicSelectionAndVoiceAdvisorThresholds) {
     EXPECT_EQ(cues::Song(files, cues::kBegin, {}, first).first, "INT22.XMI");
 
     Game game;
-    game.map = std::make_unique<Map>();
-    game.turn = 1;
+    game.SetMap(std::make_unique<Map>());
+    game.SetTurn(1);
     Side side;
     side.SetId(SideId(0));
     side.SetGold(500);
-    game.map->cities.resize(6);
-    for (auto& city : game.map->cities) {
+    Map::CityList initial_cities(6);
+    for (auto& city : initial_cities) {
         city.SetOwner(SideId(0));
     }
+    game.GetMap().SetCities(std::move(initial_cities));
     EXPECT_EQ(cues::AdvisorCue(game, side, first), kNone);
     EXPECT_EQ(side.AdvisorState().mark, 5);
-    game.turn = 2;
+    game.SetTurn(2);
     EXPECT_EQ(cues::AdvisorCue(game, side, first), kNone);
     for (int i = 0; i < 5; ++i) {
-        game.map->cities[i].SetOwner(SideId(1));
+        game.GetMap().Cities()[i].SetOwner(SideId(1));
     }
     EXPECT_EQ(cues::AdvisorCue(game, side, first), 40);
     EXPECT_EQ(side.AdvisorState().dir, 2);
     for (int i = 0; i < 5; ++i) {
-        game.map->cities[i].SetOwner(SideId(0));
+        game.GetMap().Cities()[i].SetOwner(SideId(0));
     }
     EXPECT_EQ(cues::AdvisorCue(game, side, first), 47);
-    game.turn = 7;
+    game.SetTurn(7);
     side.SetGold(50);
     EXPECT_EQ(cues::AdvisorCue(game, side, first), 54);
 }

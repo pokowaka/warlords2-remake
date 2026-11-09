@@ -63,7 +63,7 @@ struct Bonus : kit::Modal {
         for (int i = 0; i < kRows; i++) {
             auto ranked = by_rank.find(top_row + i);
             const w2::ArmyType* type =
-                    ranked != by_rank.end() ? g_app.g->types.ById(ranked->second) : nullptr;
+                    ranked != by_rank.end() ? g_app.g->ArmyTypes().ById(ranked->second) : nullptr;
             if (type) {
                 int y = 148 + 30 * i;
                 kit::Army(type->id, side->Index(), 128, y, side->Index() + 2);
@@ -156,7 +156,7 @@ std::string BonusText(const w2::ArmyType& type, const w2::Army* army) {
 /** @brief Opens Army Bonus with the player's fight order. */
 void Open() {
     auto dialog = std::make_shared<Bonus>();
-    const auto& row = g_app.g->map->fight_order[g_app.player->Index()];
+    const auto& row = g_app.g->GetMap().FightOrder()[g_app.player->Index()];
     for (int rank = 0; rank <= 28 && rank < static_cast<int>(row.size()); rank++)
         dialog->by_rank[row[rank]] = rank;
     dialog->dialog_view = kit::View(kDialog);

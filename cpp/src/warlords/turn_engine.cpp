@@ -26,7 +26,7 @@ namespace {
 bool CanFlyOff(const Game& game, const std::vector<Army*>& armies) {
     bool hero_flight = false, all_fly = true, non_heroes_fly = true, free_flier = false;
     for (Army* army : armies) {
-        bool flies = game.types.ById(army->Type())->flies;
+        bool flies = game.ArmyTypes().ById(army->Type())->flies;
         if (army->Hero()) {
             for (Item* item : army->Items()) {
                 if (item->type == rules::kItemFlight) hero_flight = true;
@@ -43,26 +43,26 @@ bool CanFlyOff(const Game& game, const std::vector<Army*>& armies) {
 
 Fallen TurnEngine::EliminateSide(Side& side, bool boxed) {
     ArmyStack mine;
-    for (int i = static_cast<int>(game_.armies.size()) - 1; i >= 0; i--) {
-        if (game_.armies[i]->OwnedBy(side.Id())) mine.push_back(game_.armies[i]);
+    for (int i = static_cast<int>(game_.Armies().size()) - 1; i >= 0; i--) {
+        if (game_.Armies()[i]->OwnedBy(side.Id())) mine.push_back(game_.Armies()[i]);
     }
     Disband(side, mine);
     history::RecordDeed(game_, &side, DeedType::kSideVanquished, side.Index(), 0, "");
-    int line = game_.rng.Dice(1, game::kFallenLines, -1);
-    game_.log.push_back(side.Name() + " has been eliminated.");
+    int line = game_.GetRng().Dice(1, game::kFallenLines, -1);
+    game_.AppendLog(side.Name() + " has been eliminated.");
     side.SetAlive(false);
     side.SetGold(0);
-    game_.diplomacy.ResetFallenSide(side.Id(), diplomacy::kIntermediate);
+    game_.Diplomacy().ResetFallenSide(side.Id(), diplomacy::kIntermediate);
     return Fallen{&side, line, boxed};
 }
 
 std::vector<Fallen> TurnEngine::EliminateFallen() {
     bool human = false;
-    for (Side* side : game_.sides) {
+    for (Side* side : game_.Sides()) {
         if (side->IsAlive() && !side->IsComputerControlled()) human = true;
     }
     std::vector<Fallen> fallen;
-    for (Side* side : game_.sides) {
+    for (Side* side : game_.Sides()) {
         if (side->IsAlive() && game::SideCities(game_, *side).empty())
             fallen.push_back(EliminateSide(*side, human || !side->IsComputerControlled()));
     }
@@ -70,21 +70,21 @@ std::vector<Fallen> TurnEngine::EliminateFallen() {
 }
 
 void TurnEngine::ResetMovement(Side& side) {
-    for (Army* army : game_.armies) {
+    for (Army* army : game_.Armies()) {
         if (army->OwnedBy(side.Id())) {
             army->ResetTurnMarks();
         }
     }
-    for (int i = static_cast<int>(game_.armies.size()) - 1; i >= 0; i--) {
-        Army* army = game_.armies[i];
+    for (int i = static_cast<int>(game_.Armies().size()) - 1; i >= 0; i--) {
+        Army* army = game_.Armies()[i];
         if (army->OwnedBy(side.Id()) && !army->InTransit()) {
             int carry = std::min(army->Moves(), rules::kMoveCarry);
             army->SetMoves((army->IsAtSea() ? rules::kSeaMoves : army->MaxMoves()) + carry);
             if (army->HasTarget() && *army->Target() == army->Position()) army->ClearTarget();
         }
     }
-    for (int i = static_cast<int>(game_.armies.size()) - 1; i >= 0; i--) {
-        Army* hero = game_.armies[i];
+    for (int i = static_cast<int>(game_.Armies().size()) - 1; i >= 0; i--) {
+        Army* hero = game_.Armies()[i];
         if (!hero->OwnedBy(side.Id()) || !hero->Hero() || hero->InTransit()) continue;
         bool double_move = false;
         for (Item* item : hero->Items()) {
@@ -95,7 +95,7 @@ void TurnEngine::ResetMovement(Side& side) {
         if (static_cast<int>(here.size()) > rules::kMaxStack) here.resize(rules::kMaxStack);
         for (Army* army : here) army->AddMoves(army->MaxMoves());
     }
-    for (Army* army : game_.armies) {
+    for (Army* army : game_.Armies()) {
         if (army->OwnedBy(side.Id()) && army->Moves() > rules::kMaxMove)
             army->SetMoves(rules::kMaxMove);
     }
@@ -104,19 +104,20 @@ void TurnEngine::ResetMovement(Side& side) {
 void TurnEngine::Encamp(Side& side) {
     static const std::set<int> kEncampOn = {move::kPlain,  move::kForest, move::kHills,
                                             move::kBridge, move::kMarsh,  move::kTower};
-    for (Army* army : game_.armies) {
+    const Map& map = game_.GetMap();
+    for (Army* army : game_.Armies()) {
         if (army->OwnedBy(side.Id()) && army->IsFortified() && army->OnMap() &&
             army->Moves() >= army->MaxMoves()) {
-            bool road = scn::RoadAt(*game_.map, army->X(), army->Y()) % 32 != 0;
-            if (road || kEncampOn.count(scn::TerrainAt(*game_.map, army->X(), army->Y()))) {
-                game_.towers.insert(army->Y() * game_.map->width + army->X());
+            bool road = scn::RoadAt(map, army->X(), army->Y()) % 32 != 0;
+            if (road || kEncampOn.count(scn::TerrainAt(map, army->X(), army->Y()))) {
+                game_.PlaceTower(army->Position());
             }
         }
     }
 }
 
 void TurnEngine::ComeAshore(Side& side) {
-    for (Army* army : game_.armies) {
+    for (Army* army : game_.Armies()) {
         if (army->OwnedBy(side.Id()) && army->IsAtSea() && army->OnMap() &&
             game::CityAt(game_, army->X(), army->Y())) {
             army->ComeAshore();
@@ -129,7 +130,7 @@ void TurnEngine::FollowCapital(Side& side) {
         side.SetCurrentCapitalPos(side.OriginCapitalPos());
     }
     int playing = 0;
-    for (Side* other : game_.sides) {
+    for (Side* other : game_.Sides()) {
         if (other->IsAlive()) playing++;
     }
     TilePos origin = side.OriginCapitalPos();
@@ -152,7 +153,7 @@ void TurnEngine::FollowCapital(Side& side) {
 void TurnEngine::NotifyTurnQuest(Side& side) {
     auto quest_result = quest::Notify(game_, side, "turn");
     if (quest_result && !quest_result->failed.empty())
-        game_.log.push_back("Quest abandoned: " + quest_result->failed + ".");
+        game_.AppendLog("Quest abandoned: " + quest_result->failed + ".");
 }
 
 bool TurnEngine::StartTurn(Side& side) {
@@ -162,7 +163,7 @@ bool TurnEngine::StartTurn(Side& side) {
     FollowCapital(side);
     game::TidyExplored(game_, side.Index());
     news.diplo_news = diplomacy::Apply(game_, side);
-    for (const auto& msg : news.diplo_news) game_.log.push_back(msg);
+    for (const auto& msg : news.diplo_news) game_.AppendLog(msg);
     news.hero_offer.reset();
     side.SetProductionDue(false);
     if (side.IsComputerControlled()) {
@@ -193,10 +194,10 @@ bool TurnEngine::StartTurn(Side& side) {
 void TurnEngine::HumanProduction(Side& side) {
     if (!side.IsProductionDue()) return;
     side.SetProductionDue(false);
-    if (game_.turn == 1) return;
+    if (game_.Turn() == 1) return;
     CityEconomy economy(game_);
     for (const auto& entry : economy.RunProduction(side)) {
-        City* city = game_.map->City(entry.city);
+        City* city = game_.GetMap().CityById(entry.city);
         if (city) {
             if (const Slot* slot = city->ActiveSlot()) {
                 city->SetCountdown(slot->time);
@@ -207,75 +208,74 @@ void TurnEngine::HumanProduction(Side& side) {
 
 Side* TurnEngine::AdvanceToNextSide(Side* leaving) {
     for (int step = 0; step < 3 * 8 + 1; step++) {
-        if (game_.turn_schedule.AtRoundEnd()) {
-            game_.turn++;
-            game_.turn_schedule.StartNewRound(game_.map->options.random_turns != 0, game_.rng);
+        if (game_.Schedule().AtRoundEnd()) {
+            game_.AdvanceTurn();
+            game_.Schedule().StartNewRound(game_.GetMap().GameOptions().random_turns != 0,
+                                           game_.GetRng());
             EndRound(leaving);
-            if (game_.ending.over) {
-                game_.side = nullptr;
+            if (game_.EndingState().over) {
+                game_.ClearCurrentSide();
                 return nullptr;
             }
             history::Record(game_);
         }
-        SideId scheduled_side = game_.turn_schedule.Advance();
-        Side* side = game_.map->Side(scheduled_side);
+        SideId scheduled_side = game_.Schedule().Advance();
+        Side* side = game_.GetMap().SideById(scheduled_side);
         if (side && side->IsActive()) {
-            game_.side = side;
-            game_.current = static_cast<int>(
-                    std::find(game_.sides.begin(), game_.sides.end(), side) - game_.sides.begin());
+            game_.SetCurrentSide(side);
             if (StartTurn(*side)) return side;
         }
     }
-    game_.side = nullptr;
+    game_.ClearCurrentSide();
     return nullptr;
 }
 
 Side* TurnEngine::EndTurn() {
-    Side* leaving = game_.side;
-    if (leaving && leaving->IsAlive() && (leaving->IsComputerControlled() || !game_.won))
+    Side* leaving = game_.CurrentSide();
+    if (leaving && leaving->IsAlive() && (leaving->IsComputerControlled() || !game_.IsWon()))
         diplomacy::ScoreUpdate(game_, *leaving);
-    game_.ending = Ending{};
+    game_.SetEndingState(Ending{});
     return AdvanceToNextSide(leaving);
 }
 
 Side* TurnEngine::Begin() {
-    game_.turn_schedule.RewindCursor();
-    game_.ending = Ending{};
+    game_.Schedule().RewindCursor();
+    game_.SetEndingState(Ending{});
     return AdvanceToNextSide(nullptr);
 }
 
 Side* TurnEngine::NextHuman() const {
-    for (int i = std::max(game_.turn_schedule.Cursor(), 0); i <= 7; i++) {
-        Side* side = game_.map->Side(game_.turn_schedule.SideAt(i));
+    for (int i = std::max(game_.Schedule().Cursor(), 0); i <= 7; i++) {
+        Side* side = game_.GetMap().SideById(game_.Schedule().SideAt(i));
         if (side && side->IsHuman()) return side;
     }
-    for (Side* side : game_.sides) {
+    for (Side* side : game_.Sides()) {
         if (side->IsAlive() && !side->IsComputerControlled()) return side;
     }
     return nullptr;
 }
 
 int TurnEngine::SinkStranded(Side& side, int x, int y) {
+    const Map& map = game_.GetMap();
     auto wet = [&](int tile_x, int tile_y) {
-        return scn::TerrainAt(*game_.map, tile_x, tile_y) == move::kWater ||
-               scn::IsCrossing(*game_.map, tile_x, tile_y);
+        return scn::TerrainAt(map, tile_x, tile_y) == move::kWater ||
+               scn::IsCrossing(map, tile_x, tile_y);
     };
     std::map<int, ArmyStack> tiles;
-    for (Army* army : game_.armies) {
+    for (Army* army : game_.Armies()) {
         if (!army->OwnedBy(side.Id()) || !army->OnMap() || army->X() < 0 || army->Y() < 0) continue;
         if (x != kNone && (army->X() != x || army->Y() != y)) continue;
-        if (wet(army->X(), army->Y()))
-            tiles[army->Y() * game_.map->width + army->X()].push_back(army);
+        if (wet(army->X(), army->Y())) tiles[army->Y() * map.Width() + army->X()].push_back(army);
     }
     ArmyStack dead;
     for (auto& [tile_key, here] : tiles) {
         if (CanFlyOff(game_, here)) continue;
         for (Army* army : here) {
-            if (!army->IsAtSea() && !army->Hero() && !game_.types.ById(army->Type())->flies)
+            if (!army->IsAtSea() && !army->Hero() && !game_.ArmyTypes().ById(army->Type())->flies)
                 dead.push_back(army);
         }
     }
-    game_.armies.RemoveAll(dead);
+    game_.Armies().RemoveAll(dead);
     return static_cast<int>(dead.size());
 }
 
@@ -289,46 +289,47 @@ void TurnEngine::Disband(Side& side, const ArmyStack& armies) {
             }
         }
     }
-    game_.armies.RemoveAll(armies);
+    game_.Armies().RemoveAll(armies);
 }
 
 void TurnEngine::Resign(Side& side) {
     CityEconomy economy(game_);
-    for (auto& city : game_.map->cities) {
+    Map& map = game_.GetMap();
+    for (auto& city : map.Cities()) {
         if (!city.IsRazed() && city.OwnedBy(side.Id())) economy.MakeRuins(city);
     }
     Disband(side, game::SideArmies(game_, side));
-    if (game_.map->options.hidden_map != 0) {
-        game_.explored.ResetSide(side.Id(), game_.map->width, game_.map->height, true);
+    if (map.GameOptions().hidden_map != 0) {
+        game_.Explored().ResetSide(side.Id(), map.Width(), map.Height(), true);
     }
 }
 
 void TurnEngine::AcceptSurrender(Side& side) {
-    for (Side* other : game_.sides) {
+    for (Side* other : game_.Sides()) {
         if (other->IsComputerControlled()) other->SetAlive(false);
     }
-    game_.won = true;
+    game_.SetWon(true);
     history::RecordDeed(game_, &side, DeedType::kSideVictorious, side.Index(), 0, "");
 }
 
 bool TurnEngine::SurrenderPending() const {
-    return game_.surrender_offered && !game_.surrender_shown && !game_.won;
+    return game_.SurrenderOffered() && !game_.SurrenderShown() && !game_.IsWon();
 }
 
 Ending TurnEngine::EndRound(Side* last) {
     auto fallen = EliminateFallen();
     Ending ending = CheckEnd();
     ending.fallen = fallen;
-    if (!ending.message.empty()) game_.log.push_back(ending.message);
-    game_.ending = ending;
-    CityEconomy(game_).NeutralProduction(last ? last : game_.map->Side(game::kSetupPlayer));
+    if (!ending.message.empty()) game_.AppendLog(ending.message);
+    game_.SetEndingState(ending);
+    CityEconomy(game_).NeutralProduction(last ? last : game_.GetMap().SideAt(game::kSetupPlayer));
     return ending;
 }
 
 Ending TurnEngine::CheckEnd() {
     std::vector<Side*> humans, computers;
     bool fallen_human = false;
-    for (Side* side : game_.sides) {
+    for (Side* side : game_.Sides()) {
         if (side->IsAlive()) {
             (side->IsComputerControlled() ? computers : humans).push_back(side);
         } else if (!side->IsComputerControlled()) {
@@ -337,25 +338,25 @@ Ending TurnEngine::CheckEnd() {
         }
     }
     int standing = 0;
-    for (const auto& city : game_.map->cities) {
+    for (const auto& city : game_.GetMap().Cities()) {
         if (!city.IsRazed()) standing++;
     }
 
     Ending ending;
     if (humans.empty() && computers.empty()) {
-        game_.over = true;
+        game_.SetOver(true);
         ending.over = true;
         ending.message = "Alas! No more players are left!";
         return ending;
     }
-    if (!game_.won && humans.empty() && fallen_human && !game_.no_humans_said) {
-        game_.no_humans_said = true;
+    if (!game_.IsWon() && humans.empty() && fallen_human && !game_.NoHumansSaid()) {
+        game_.SetNoHumansSaid(true);
         ending.no_humans = true;
     }
-    if (!game_.won && humans.size() == 1 && computers.empty()) {
+    if (!game_.IsWon() && humans.size() == 1 && computers.empty()) {
         int mine = static_cast<int>(game::SideCities(game_, *humans[0]).size());
         if (mine * 2 > standing) {
-            game_.won = true;
+            game_.SetWon(true);
             history::RecordDeed(game_, humans[0], DeedType::kSideVictorious, humans[0]->Index(), 0,
                                 "");
             ending.won = true;
@@ -363,23 +364,23 @@ Ending TurnEngine::CheckEnd() {
             ending.message = humans[0]->Name() + " rules the world!";
         }
     }
-    if (!game_.won && humans.empty() && computers.size() == 1) {
+    if (!game_.IsWon() && humans.empty() && computers.size() == 1) {
         Side* winner = computers[0];
-        game_.won = true;
+        game_.SetWon(true);
         winner->SetComputerControlled(false);
         history::RecordDeed(game_, winner, DeedType::kSideVictorious, winner->Index(), 0, "");
         ending.triumph = true;
         ending.winner = winner;
         ending.message = winner->Name() + " has triumphed!";
     }
-    if (!game_.won && humans.size() == 1 && !computers.empty() && !game_.surrender_offered) {
+    if (!game_.IsWon() && humans.size() == 1 && !computers.empty() && !game_.SurrenderOffered()) {
         int mine = static_cast<int>(game::SideCities(game_, *humans[0]).size());
         int biggest = 0;
         for (Side* side : computers)
             biggest = std::max(biggest, static_cast<int>(game::SideCities(game_, *side).size()));
-        int all = static_cast<int>(game_.map->cities.size());
+        int all = game_.GetMap().CityCount();
         if (mine > all / 2 && mine > biggest + all / 8) {
-            game_.surrender_offered = true;
+            game_.SetSurrenderOffered(true);
             ending.surrender = true;
             ending.message = "Your enemies offer their surrender!";
         }

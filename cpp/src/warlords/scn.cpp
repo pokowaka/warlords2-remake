@@ -189,17 +189,17 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromSource(const IScenarioSource& sourc
     if (!rd_file.ok()) return rd_file.status();
 
     auto map = std::make_unique<Map>();
-    map->name = std::string(name);
+    map->SetName(std::string(name));
 
     for (const auto& [option, offset] : kOptions) {
         uint16_t value = static_cast<uint16_t>(U16(scn_bytes, offset));
         if (std::string_view(option) == "militaryAdvisor" && value == 0) value = 1;
-        *map->options.Field(option) = value;
+        *map->MutableOptions().Field(option) = value;
     }
 
     for (int i = 0; i < 8; i++) {
         SideRecordView rec(scn_bytes, i);
-        Side& side = map->sides[i];
+        Side& side = map->Sides()[i];
         side.SetId(SideId(i));
         side.SetName(rec.Name());
         side.SetColour(rec.Colour());
@@ -215,12 +215,10 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromSource(const IScenarioSource& sourc
     }
 
     int n_cities = U16(scn_bytes, kCitiesCount);
-    map->cities.resize(n_cities);
-    map->city_at.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
-    map->city_tile.assign(static_cast<size_t>(kMapW) * kMapH, nullptr);
+    Map::CityList cities(static_cast<size_t>(n_cities));
     for (int i = 0; i < n_cities; i++) {
         CityRecordView rec(scn_bytes, i);
-        City& city = map->cities[i];
+        City& city = cities[static_cast<size_t>(i)];
         city.SetId(CityId(i));
         city.SetPosition(TilePos(rec.X(), rec.Y()));
         city.Rename(rec.Name());
@@ -231,36 +229,30 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromSource(const IScenarioSource& sourc
             if (army_type != kEmptySlot && army_type != 5) city.AddProducedType(army_type);
         }
         city.SetDefence(city.Produces().size() >= 3 ? 2 : 1);
-        map->city_at[city.Y() * kMapW + city.X()] = &city;
     }
-    // A city covers a 2x2 footprint; cityAt keys the top-left, cityTile every tile.
-    for (auto& city : map->cities) {
-        for (int dx = 0; dx <= 1; dx++) {
-            for (int dy = 0; dy <= 1; dy++) {
-                int tile = (city.Y() + dy) * kMapW + (city.X() + dx);
-                if (tile >= 0 && tile < kMapW * kMapH) map->city_tile[tile] = &city;
-            }
-        }
-    }
+    map->SetCities(std::move(cities));
+
     // Ownership is derived: at scenario start a side owns only its capital.
-    for (auto& side : map->sides) {
+    for (auto& side : map->Sides()) {
         TilePos cap_pos = side.OriginCapitalPos();
-        int tile = cap_pos.y * kMapW + cap_pos.x;
-        City* capital = tile >= 0 && tile < kMapW * kMapH ? map->city_at[tile] : nullptr;
+        City* capital = map->CityAtTopLeft(cap_pos.x, cap_pos.y);
         side.SetInUse(capital != nullptr);
         side.SetCapitalCityId(capital ? capital->Id() : CityId::None());
         if (capital) capital->SetOwner(side.Id());
     }
 
     // fight order: 29 bytes per player, row 8 for neutral
-    map->fight_order.assign(kFightRows, std::vector<int>(kFightTypes, 0));
+    Map::FightOrderTable fight_order(kFightRows, Map::FightOrderRow(kFightTypes, 0));
     for (int row = 0; row < kFightRows; row++) {
         for (int type = 0; type < kFightTypes; type++) {
-            map->fight_order[row][type] = U8(scn_bytes, kFightOrder + row * kFightTypes + type);
+            fight_order[row][type] = U8(scn_bytes, kFightOrder + row * kFightTypes + type);
         }
     }
+    map->SetFightOrder(std::move(fight_order));
 
     int n_sites = U16(scn_bytes, kSitesCount);
+    Map::SiteList sites;
+    sites.reserve(static_cast<size_t>(n_sites));
     for (int i = 0; i < n_sites; i++) {
         SiteRecordView rec(scn_bytes, i);
         Site site;
@@ -269,61 +261,68 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromSource(const IScenarioSource& sourc
         site.y = rec.Y();
         site.name = rec.Name();
         site.type = rec.Type();
-        map->sites.push_back(site);
+        sites.push_back(std::move(site));
     }
+    map->SetSites(std::move(sites));
 
+    Map::ItemList items;
     for (int i = 0; i < kNItems; i++) {
         ItemRecordView rec(scn_bytes, i);
         std::string item_name = rec.Name();
         if (!item_name.empty()) {
             Item item;
             item.index = i;
-            item.name = item_name;
+            item.name = std::move(item_name);
             item.type = rec.Type();
             item.value = rec.Value();
-            map->items.push_back(item);
+            items.push_back(std::move(item));
         }
     }
+    map->SetItems(std::move(items));
 
     for (int i = 0; i < kNMonsters; i++) {
         std::string monster_name = Cstr(scn_bytes, kMonsters + kMonsterStride * i, 12);
         // keyed by slot: a site's guardian byte indexes this directly
         if (!monster_name.empty()) {
-            map->monsters[i] = Monster{i, monster_name, U16(scn_bytes, kMonsterStrength + 2 * i)};
+            map->SetMonster(i, Monster{i, std::move(monster_name),
+                                       U16(scn_bytes, kMonsterStrength + 2 * i)});
         }
     }
 
     // tile index -> terrain type id, the same table the original reads
     for (int i = 0; i < kTerrainCount; i++) {
-        map->terrain_type[i] = U8(scn_bytes, kTerrainTable + i);
+        map->SetTerrainType(i, U8(scn_bytes, kTerrainTable + i));
     }
 
     // terrain grid + road overlay; bit 15 of a map word marks a crossing
-    map->tiles.resize(static_cast<size_t>(kMapW) * kMapH);
-    map->crossing.resize(static_cast<size_t>(kMapW) * kMapH);
+    Map::TileGrid tiles(static_cast<size_t>(kMapW) * kMapH);
+    Map::CrossingGrid crossing(static_cast<size_t>(kMapW) * kMapH);
     for (int i = 0; i < kMapW * kMapH; i++) {
         int word = U16(map_bytes, static_cast<size_t>(i) * 2);
-        map->tiles[i] = word % 0x8000;
-        map->crossing[i] = word >= 0x8000;
+        tiles[static_cast<size_t>(i)] = word % 0x8000;
+        crossing[static_cast<size_t>(i)] = word >= 0x8000;
     }
-    map->roads = std::move(*rd_file);
-    if (static_cast<int>(map->roads.size()) < kMapW * kMapH) {
-        map->roads.resize(static_cast<size_t>(kMapW) * kMapH, 0);
+    map->SetTiles(std::move(tiles));
+    map->SetCrossings(std::move(crossing));
+    Map::RoadGrid roads = std::move(*rd_file);
+    if (static_cast<int>(roads.size()) < kMapW * kMapH) {
+        roads.resize(static_cast<size_t>(kMapW) * kMapH, 0);
     }
+    map->SetRoads(std::move(roads));
 
     if (auto itm_bytes = source.ReadExtension("ITM"); itm_bytes.ok()) {
-        map->item_pool = ParseItemPool(BytesToLines(*itm_bytes));
+        map->SetItemPool(ParseItemPool(BytesToLines(*itm_bytes)));
     }
     if (auto cty_bytes = source.ReadExtension("CTY"); cty_bytes.ok()) {
-        map->city_text = ParseDescriptions(BytesToLines(*cty_bytes));
+        map->SetCityDescriptions(ParseDescriptions(BytesToLines(*cty_bytes)));
     }
     if (auto spc_bytes = source.ReadExtension("SPC"); spc_bytes.ok()) {
-        map->site_text = ParseDescriptions(BytesToLines(*spc_bytes));
+        map->SetSiteDescriptions(ParseDescriptions(BytesToLines(*spc_bytes)));
     }
     if (auto sgn_bytes = source.ReadExtension("SGN"); sgn_bytes.ok()) {
-        map->signs = ParseSigns(*sgn_bytes);
+        map->SetSigns(ParseSigns(*sgn_bytes));
     }
-    map->combat_cap = U16(scn_bytes, kCombatCap);
+    map->SetCombatCap(U16(scn_bytes, kCombatCap));
     return map;
 }
 
@@ -338,7 +337,7 @@ absl::StatusOr<std::unique_ptr<Map>> LoadFromFiles(const std::filesystem::path& 
     MemoryScenarioSource source(files, dir, std::string(name));
     auto loaded = LoadFromSource(source, name);
     if (!loaded.ok()) return loaded.status();
-    (*loaded)->source_files = source.Files();
+    (*loaded)->SetSourceFiles(source.Files());
     return loaded;
 }
 
@@ -352,15 +351,14 @@ int CityTileBase(const City& city) {
 
 void SetCityTiles(Map& map, const City& city) {
     int base_tile = CityTileBase(city);
-    int top_left = city.Y() * kMapW + city.X();
-    map.tiles[top_left] = base_tile;
-    map.tiles[top_left + 1] = base_tile + 1;
-    map.tiles[top_left + kMapW] = base_tile + 16;
-    map.tiles[top_left + kMapW + 1] = base_tile + 17;
+    map.SetTileWord(city.X(), city.Y(), base_tile);
+    map.SetTileWord(city.X() + 1, city.Y(), base_tile + 1);
+    map.SetTileWord(city.X(), city.Y() + 1, base_tile + 16);
+    map.SetTileWord(city.X() + 1, city.Y() + 1, base_tile + 17);
 }
 
 void RefreshCityTiles(Map& map) {
-    for (auto& city : map.cities) SetCityTiles(map, city);
+    for (const auto& city : map.Cities()) SetCityTiles(map, city);
 }
 
 }  // namespace scn

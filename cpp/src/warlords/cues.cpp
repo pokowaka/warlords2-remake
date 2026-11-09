@@ -63,10 +63,10 @@ std::pair<std::string, bool> Song(const uidata::Strings& files, int cue,
 
 int AdvisorCue(const Game& game, Side& side, const Roll& roll) {
     int cities = 0, heroes = 0;
-    for (const auto& city : game.map->cities)
+    for (const auto& city : game.GetMap().Cities())
         if (city.OwnedBy(side.Id()) && !city.IsRazed()) cities++;
     if (cities > 39) return kNone;
-    for (const Army* army : game.armies)
+    for (const Army* army : game.Armies())
         if (army->OwnedBy(side.Id()) && army->Hero()) heroes++;
     Advisor& advisor = side.MutableAdvisorState();
     int group;
@@ -83,7 +83,7 @@ int AdvisorCue(const Game& game, Side& side, const Roll& roll) {
         auto line = kWinning.find(mark);
         group = line != kWinning.end() ? line->second : 47;
     } else {
-        if (game.turn % 7 != 0) return kNone;
+        if (game.Turn() % 7 != 0) return kNone;
         if (side.Gold() < 100)
             group = 54;
         else if (side.Gold() > 2800)
@@ -97,7 +97,7 @@ int AdvisorCue(const Game& game, Side& side, const Roll& roll) {
         else
             return kNone;
     }
-    if (game.turn == 1) return kNone;
+    if (game.Turn() == 1) return kNone;
     return group;
 }
 

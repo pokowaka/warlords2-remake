@@ -75,10 +75,9 @@ void Open(int tile_x, int tile_y) {
     int owner = armies.empty() ? w2::kNone : armies[0]->OwnerIndex();
     bool tower = w2::game::TowerAt(game, tile_x, tile_y);
     w2::City* city = w2::game::CityAt(game, tile_x, tile_y);
-    w2::Site* site = game.map->site_at.empty()
-                             ? nullptr
-                             : game.map->site_at[tile_y * game.map->width + tile_x];
-    int terrain = w2::scn::TerrainAt(*game.map, tile_x, tile_y);
+    w2::Map& map = game.GetMap();
+    w2::Site* site = map.SiteAt(tile_x, tile_y);
+    int terrain = w2::scn::TerrainAt(map, tile_x, tile_y);
     // the text font in a side's colours
     auto colours = [](const w2::Side* side) -> const Font& {
         return kit::GetFont(2).Colours(side->Colour(), side->Edge());
@@ -92,10 +91,10 @@ void Open(int tile_x, int tile_y) {
         kit::Centred(font, second, box_x + kBoxWidth / 2 - 8, box_y + 35);
     };
 
-    if (!armies.empty() && (viewer == w2::kNone || game.map->options.view_enemies != 0 ||
+    if (!armies.empty() && (viewer == w2::kNone || map.GameOptions().view_enemies != 0 ||
                             owner == player->Index() || tower)) {
         if (viewer != w2::kNone && owner != player->Index() && tower &&
-            game.map->options.view_enemies == 0) {
+            map.GameOptions().view_enemies == 0) {
             box->paint = [two_lines]() {
                 two_lines(kit::Text(0x82, 0), kit::Text(0x82, 1), false);
             };
@@ -112,7 +111,7 @@ void Open(int tile_x, int tile_y) {
         box->paint = [city, player, box_x, box_y, colours]() {
             const Font& font = kit::GetFont(2);
             const w2::Side* owner_side =
-                    !city->IsNeutral() ? &g_app.g->map->sides[city->OwnerIndex()] : player;
+                    !city->IsNeutral() ? &g_app.g->GetMap().Sides()[city->OwnerIndex()] : player;
             kit::Centred(colours(owner_side), city->Name(), box_x + kBoxWidth / 2 - 8, box_y + 11);
             if (city->IsRazed()) {
                 kit::Centred(font, "Razed!", box_x + kBoxWidth / 2 - 8, box_y + 35);
@@ -135,7 +134,8 @@ void Open(int tile_x, int tile_y) {
             // a capital is marked on both sides with its side's cell of art 38
             auto capital_marks = g_app.screen->ArtFor(38);
             for (int i = 0; i < 8; i++) {
-                if (g_app.g->map->sides[i].CapitalCity(*g_app.g->map) == city && capital_marks) {
+                if (g_app.g->GetMap().Sides()[i].CapitalCity(g_app.g->GetMap()) == city &&
+                    capital_marks) {
                     for (int x : {box_x + 16, box_x + kBoxWidth - 56}) {
                         gfx::SetColor(1, 1, 1);
                         gfx::Draw(capital_marks->image, gfx::NewQuad(i * 32, 36, 32, 23), x,
@@ -160,8 +160,8 @@ void Open(int tile_x, int tile_y) {
         box->signpost_board = true;
         box->paint = [sign, two_lines]() { two_lines(sign->lines[0], sign->lines[1], true); };
     } else {
-        bool road = w2::scn::RoadAt(*game.map, tile_x, tile_y) % 32 != 0;
-        bool port = game.map->crossing[tile_y * game.map->width + tile_x];
+        bool road = w2::scn::RoadAt(map, tile_x, tile_y) % 32 != 0;
+        bool port = map.IsCrossing(tile_x, tile_y);
         if (port) {
             box->paint = [two_lines]() {
                 two_lines("Port", "A way for armies to put to sea", false);
