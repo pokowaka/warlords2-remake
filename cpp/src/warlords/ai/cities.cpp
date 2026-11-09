@@ -501,8 +501,11 @@ bool Garrison(Game& game, Side& side, City& city, bool force) {
                 Disband(game, owner_side ? *owner_side : side, army);
             } else {
                 data.garrison[city.index]++;
-                if (army->ai_order == kOrderCity && army->ai_dest == city.index) ClearOrder(army);
-                if (army->ai_order != 0) ordered++;
+                if (OrderOf(game, army).order == kOrderCity &&
+                    OrderOf(game, army).dest == city.index) {
+                    ClearOrder(game, army);
+                }
+                if (OrderOf(game, army).order != 0) ordered++;
                 if (IsHero(army) && heroes.size() < 8) {
                     heroes.push_back(army);
                     last_hero = army;
@@ -585,7 +588,7 @@ bool Garrison(Game& game, Side& side, City& city, bool force) {
             Army* army = sorted[i];
             if (to_send > 0 && army && Alive(game, army) && Flies(game, army)) {
                 data.explorers++;
-                army->ai_explore = true;
+                MutableOrderOf(game, army).explore = true;
                 moves::Explore(game, side, army, nullptr);
                 sorted[i] = nullptr;
                 to_send--;
@@ -612,7 +615,7 @@ bool Garrison(Game& game, Side& side, City& city, bool force) {
             army->at_sea = false;
             army->target.reset();
             army->group = 0;
-            army->ai_group = 0;
+            MutableOrderOf(game, army).group = 0;
             army->done = false;
             per_tile--;
             if (per_tile == 0) {
@@ -719,7 +722,8 @@ template <class Test>
 static std::vector<Army*> Idle(Game& game, Side& side, const City& city, int reserve, Test test) {
     std::vector<Army*> found;
     for (Army* army : OnTile(game, side.index, city.x, city.y)) {
-        if (army->ai_group == 0 && !army->done && army->ai_order == 0 && test(army)) {
+        const ClassicArmyOrder& ord = OrderOf(game, army);
+        if (ord.group == 0 && !army->done && ord.order == 0 && test(army)) {
             if (reserve > 0)
                 reserve--;
             else if (found.size() < 8)
@@ -838,9 +842,10 @@ void Neutral(Game& game, Side& side) {
     // Armies already on their way, by the city they are heading for.
     std::map<int, int> heading;
     for (Army* army : Armies(game, side.index)) {
-        if (army->ai_order == kOrderCity && army->ai_dest != kNone &&
-            army->ai_dest < static_cast<int>(game.map->cities.size())) {
-            heading[army->ai_dest] = Get(heading, army->ai_dest) + 1;
+        const ClassicArmyOrder& ord = OrderOf(game, army);
+        if (ord.order == kOrderCity && ord.dest != kNone &&
+            ord.dest < static_cast<int>(game.map->cities.size())) {
+            heading[ord.dest] = Get(heading, ord.dest) + 1;
         }
     }
     for (int pass = 0; pass <= 9; pass++) {

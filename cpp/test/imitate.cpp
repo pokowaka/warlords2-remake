@@ -161,10 +161,11 @@ int LabelSnapshot(Game& game, int my_side, const ai::modern::MissionSnapshot& sn
         return out;
     };
     std::vector<size_t> matches;
+    const ClassicArmyOrder& mover_ord = ai::core::OrderOf(game, mover);
     if (end_city && end_city->owner_index == my_side && end_city != start_city) {
         matches = city_options(end_city->index);
-    } else if (mover->ai_order == ai::core::kOrderCity && mover->ai_dest != kNone) {
-        matches = city_options(mover->ai_dest);
+    } else if (mover_ord.order == ai::core::kOrderCity && mover_ord.dest != kNone) {
+        matches = city_options(mover_ord.dest);
     } else {
         // the target it ended closest to, among those it moved towards
         int best_d = 1 << 30;
@@ -339,7 +340,7 @@ int main(int argc, char** argv) {
                 std::vector<int> in_use;
                 for (int side = 0; side < 8; side++) {
                     if (game.map->sides[side].in_use) in_use.push_back(side);
-                    game.map->sides[side].classic_ai = true;
+                    ai::SetSideClassicAi(game, game.map->sides[side], true);
                 }
                 if (in_use.empty()) continue;
                 const int recorded_a = in_use[static_cast<size_t>(game_index) % in_use.size()],

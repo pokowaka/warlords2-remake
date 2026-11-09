@@ -1,8 +1,10 @@
 #include "warlords/ai/belief.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
+#include "warlords/ai/modern_ml_player.hpp"
 #include "warlords/combat.hpp"
 #include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
@@ -13,8 +15,14 @@
 namespace w2::ai::belief {
 
 SideBelief& Ensure(Side& side) {
-    if (!side.belief) side.belief = std::make_shared<SideBelief>();
-    return *side.belief;
+    if (ModernMlPlayer* modern = ModernMlPlayer::FindMutableOn(side)) {
+        return modern->MutableBelief();
+    }
+    if (!side.computer_player) {
+        return ModernMlPlayer::EnsureOn(side).MutableBelief();
+    }
+    thread_local std::array<SideBelief, 8> inspector_belief;
+    return inspector_belief[std::clamp(side.index, 0, 7)];
 }
 
 bool IsTileVisible(const Game& game, int side_index, int x, int y) {
@@ -380,7 +388,8 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
         return estimate;
     }
 
-    const SideBelief& belief = side.belief ? *side.belief : Ensure(const_cast<Side&>(side));
+    const SideBelief* existing = side.computer_player ? side.computer_player->Belief() : nullptr;
+    const SideBelief& belief = existing ? *existing : Ensure(const_cast<Side&>(side));
 
     // Gather visible defender tiles (4 tiles if city, 1 tile otherwise)
     std::vector<std::pair<int, int>> defender_tiles;

@@ -11,6 +11,7 @@
 
 #include "test/test_helpers.hpp"
 #include "warlords/ai.hpp"
+#include "warlords/ai/classic_ai_player.hpp"
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/diplomacy.hpp"
 #include "warlords/ai/groups.hpp"
@@ -144,13 +145,15 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     rabid_opts.sides[1] = rabid;
     auto rabid_game = SetupGame("ERYTHEA", rabid_opts);
     Side& rabid_side = rabid_game->map->sides[1];
+    const AIData& rabid_ai = ClassicAiPlayer::EnsureOn(*rabid_game, rabid_side).Data();
     EXPECT_EQ(rabid_side.card, 2);
     EXPECT_EQ(rabid_side.name, "Rabids");
-    EXPECT_EQ(rabid_side.ai->max_groups, 2);
-    EXPECT_EQ(rabid_side.ai->raze, 14);
-    EXPECT_EQ(rabid_side.ai->sack, 100);
-    EXPECT_EQ(rabid_side.ai->early, 1);
-    EXPECT_EQ(rabid_game->map->sides[2].ai->max_groups, 4);
+    EXPECT_EQ(rabid_ai.max_groups, 2);
+    EXPECT_EQ(rabid_ai.raze, 14);
+    EXPECT_EQ(rabid_ai.sack, 100);
+    EXPECT_EQ(rabid_ai.early, 1);
+    EXPECT_EQ(ClassicAiPlayer::EnsureOn(*rabid_game, rabid_game->map->sides[2]).Data().max_groups,
+              4);
 
     EXPECT_EQ(Rng(5).Dice(1, 0, 3), 3);
     EXPECT_EQ(ai::core::Dist(0, 0, 3, 4), 5);
@@ -166,17 +169,20 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     Side& knight = game.map->sides[3];
     Side& lord = game.map->sides[1];
     Side& warlord = game.map->sides[2];
+    const AIData& knight_ai = ClassicAiPlayer::EnsureOn(game, knight).Data();
+    const AIData& lord_ai = ClassicAiPlayer::EnsureOn(game, lord).Data();
+    AIData& warlord_ai = ClassicAiPlayer::EnsureOn(game, warlord).MutableData();
     EXPECT_EQ(knight.level, 0);
-    EXPECT_EQ(knight.ai->max_groups, 1);
-    EXPECT_EQ(knight.ai->cautious, 1);
-    EXPECT_FALSE(knight.ai->bold);
-    EXPECT_EQ(lord.ai->max_groups, 3);
-    EXPECT_TRUE(lord.ai->bold);
-    EXPECT_EQ(warlord.ai->max_groups, 4);
-    EXPECT_GE(warlord.ai->human_share, 31);
-    EXPECT_LE(warlord.ai->human_share, 40);
-    EXPECT_GE(knight.ai->human_share, 81);
-    EXPECT_LE(knight.ai->human_share, 90);
+    EXPECT_EQ(knight_ai.max_groups, 1);
+    EXPECT_EQ(knight_ai.cautious, 1);
+    EXPECT_FALSE(knight_ai.bold);
+    EXPECT_EQ(lord_ai.max_groups, 3);
+    EXPECT_TRUE(lord_ai.bold);
+    EXPECT_EQ(warlord_ai.max_groups, 4);
+    EXPECT_GE(warlord_ai.human_share, 31);
+    EXPECT_LE(warlord_ai.human_share, 40);
+    EXPECT_GE(knight_ai.human_share, 81);
+    EXPECT_LE(knight_ai.human_share, 90);
     EXPECT_EQ(game.map->fight_order[3][8], warlord_card->fight_order[8]);
 
     int unclaimed = 0;
@@ -240,8 +246,8 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
     }
 
     EXPECT_EQ(ai::groups::PickEnemy(game, warlord), kNone);
-    warlord.ai->battles[4] = 3;
-    warlord.ai->cities_lost[4] = 2;
+    warlord_ai.battles[4] = 3;
+    warlord_ai.cities_lost[4] = 2;
     EXPECT_NE(ai::groups::PickEnemy(game, warlord), kNone);
 
     City* target_city = &game.map->cities[0];
@@ -264,7 +270,7 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
         }
         current_side = EndTurn(game);
     }
-    auto grp = warlord.ai->groups[1];
+    auto grp = warlord_ai.groups[1];
     grp->active = 2;
     grp->target = 1;
     grp->rally = warlord.capital->index;
@@ -272,8 +278,9 @@ TEST(ComputerPlayersTest, CharacterCardsLevelsClaimsFogAndSavePersistence) {
 
     auto reloaded = *save::Decode(save::Encode(game), kData);
     ASSERT_NE(reloaded, nullptr);
-    const auto& reloaded_ai = *reloaded->map->sides[warlord.index].ai;
-    EXPECT_EQ(reloaded_ai.max_groups, warlord.ai->max_groups);
+    const AIData& reloaded_ai =
+            ClassicAiPlayer::EnsureOn(*reloaded, reloaded->map->sides[warlord.index]).Data();
+    EXPECT_EQ(reloaded_ai.max_groups, warlord_ai.max_groups);
     EXPECT_EQ(reloaded_ai.groups[1]->rally, warlord.capital->index);
     EXPECT_EQ(reloaded_ai.groups[1]->staged[2], reloaded->armies[reloaded->armies.size() - 1]);
     EXPECT_EQ(reloaded->map->cities[4].claim, game.map->cities[4].claim);

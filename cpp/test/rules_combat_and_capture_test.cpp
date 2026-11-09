@@ -502,7 +502,7 @@ TEST(VerifiedRulesTest, AlliesRuinQuestsSurrenderCacheFloodAndMovementFlags) {
         auto first_path = movement::FindPath(*game, {army}, army->x, army->y, far->x, far->y);
         ASSERT_TRUE(first_path && first_path->size() > 3);
         bool cached = false;
-        for (const auto& entry : game->path_cache->slots) {
+        for (const auto& entry : game->GetPathfinder().CachedRoutes()) {
             if (entry && entry->dx == far->x && entry->dy == far->y) cached = true;
         }
         EXPECT_TRUE(cached);

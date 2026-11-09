@@ -1,10 +1,6 @@
 /**
  * @file
- * @brief Ruins, temples and sages: what they hold, and what searching them does.
- *
- * See docs/rules.md > Ruins, temples and sages. The contents are rolled once
- * at game start (the original's setup_random_sites); searching is the
- * original's site_search.
+ * @brief `SearchResult`, `SiteExplorer` domain service, and `w2::site` wrappers.
  */
 #pragma once
 
@@ -39,94 +35,77 @@ struct SearchResult {
 
 namespace site {
 
-/// What a site holds (Site::content).
 constexpr int kEmpty = 0, kTemple = 1, kItem = 2, kSage = 3, kGold = 4, kAllies = 5;
-/// Display names of the contents, by content value.
 extern const char* const kContentNames[6];
 
-constexpr int kCapitalRange = 15;    ///< "A capital within 15 tiles" makes a site near.
-constexpr int kRichShare = 3;        ///< sites * 3 / 10 are rich.
-constexpr int kBlessingTemples = 4;  ///< Only the first four temples can bless.
-constexpr int kSageRange = 35;       ///< How far from the hero a sage can tell of a site.
+constexpr int kCapitalRange = 15;
+constexpr int kRichShare = 3;
+constexpr int kBlessingTemples = 4;
+constexpr int kSageRange = 35;
 
-/**
- * @brief Whether an item may only be hidden in a rich ruin (the original's
- * item_reserved): flight, double move, the standards, and command 2 or more.
- */
 bool ItemReserved(int type, int value);
-/** @brief ItemReserved() for an item record. */
 inline bool ItemReserved(const Item& item) {
     return ItemReserved(item.type, item.value);
 }
-/** @brief ItemReserved() for an entry of the scenario's .ITM pool. */
 inline bool ItemReserved(const PoolItem& item) {
     return ItemReserved(item.type, item.value);
 }
 
-/**
- * @brief Refills item records 8..21 from the scenario's .ITM pool (see
- * docs/formats/itm.md).
- * @param reserved How many of the records, from 8 up, get reserved items.
- */
-void FillItemPool(Game& game, int reserved);
-/**
- * @brief Marks `sites * 3 / 10` non-temple sites rich (the original's
- * mark_rich_sites); with quests on, rich sites start hidden from every side.
- */
-void MarkRich(Game& game);
-/** @brief Rolls what every site holds (the original's setup_random_sites). */
-void Setup(Game& game);
-/**
- * @brief Whether the hero survives the ruin's guardian: 3 more in 100 for
- * every army on its tile, whoever's.
- */
-bool SurvivesGuardian(Game& game, const Army& hero, int monster_strength);
-/** @brief The strength of a site's guardian, from the scenario's monster table. */
-int GuardianStrength(const Game& game, const Site& site);
-/**
- * @brief Blesses a stack at a temple: +1 strength (max 9), once per temple
- * per army; only the first four temples can bless.
- * @return How many armies were blessed.
- */
-int Bless(Game& game, const Site& site, const std::vector<Army*>& stack);
-/**
- * @brief Searches the site under a stack (the original's site_search).
- *
- * The stack's first army needs a move left. With no hero only a temple does
- * anything: it blesses at once. With one, a human chooses at a temple; a
- * found item is left on the ground for Take to pick up.
- * @return What was found, or nullptr when there is nothing to search.
- */
-std::shared_ptr<SearchResult> Search(Game& game, const std::vector<Army*>& stack, int x, int y,
-                                     bool human = false);
-
-/** @brief Whether a side has been shown the site (its bit in Site::revealed). */
 bool ShownTo(const Site& site, const Side& side);
+
 /** @brief One thing a sage can tell a side about. */
 struct SageEntry {
     std::string kind;      ///< "gold", "allies", "item".
     std::string name;      ///< What the sage's list shows.
     Item* item = nullptr;  ///< The item, for an "item" entry.
 };
-/**
- * @brief What a sage can tell a side, for its hero at (hero_x, hero_y):
- * unshown, unsearched rich sites within kSageRange; gold and allies once
- * each, every item.
- */
+
+void FillItemPool(Game& game, int reserved);
+void MarkRich(Game& game);
+void Setup(Game& game);
+bool SurvivesGuardian(Game& game, const Army& hero, int monster_strength);
+int GuardianStrength(const Game& game, const Site& site);
+int Bless(Game& game, const Site& site, const std::vector<Army*>& stack);
+std::shared_ptr<SearchResult> Search(Game& game, const std::vector<Army*>& stack, int x, int y,
+                                     bool human = false);
 std::vector<SageEntry> SageList(Game& game, const Side& side, int hero_x, int hero_y);
-/**
- * @brief Shows the side where an entry of SageList() lies: the item's site,
- * or the nearest such gold or allies site.
- * @return The site shown, or nullptr when there is none.
- */
 Site* SageShow(Game& game, const Side& side, const SageEntry& entry, int hero_x, int hero_y);
-/** @brief The sage's gem: 3d500 + 500 gold for the side. @return The gold given. */
 int SageGem(Game& game, Side& side);
-/**
- * @brief Uncovers a patch of the map round the tile pointed at.
- * @return {x, y, w, h} of the patch, in tiles.
- */
 std::array<int, 4> SageMap(Game& game, const Side& side, int target_x, int target_y);
 
 }  // namespace site
+
+/**
+ * @brief Domain service governing site content generation, temple blessings, ruin guardian
+ * duels, treasure/ally rewards, and sage lore revelations.
+ */
+class SiteExplorer {
+  public:
+    /** @brief Ordered list of army pointers forming a searching stack. */
+    using ArmyStack = std::vector<Army*>;
+    /** @brief Rectangular map region `{x, y, width, height}` revealed by a sage map. */
+    using MapPatch = std::array<int, 4>;
+
+    /** @brief Binds a site-exploration service to `game` (must outlive this service instance). */
+    explicit SiteExplorer(Game& game) : game_(game) {}
+
+    void FillItemPool(int reserved);
+    void MarkRich();
+    void Setup();
+    bool SurvivesGuardian(const Army& hero, int monster_strength);
+    int GuardianStrength(const Site& site) const;
+    int Bless(const Site& site, const ArmyStack& stack);
+    std::shared_ptr<SearchResult> Search(const ArmyStack& stack, int x, int y, bool human = false);
+    std::vector<site::SageEntry> SageList(const Side& side, int hero_x, int hero_y) const;
+    Site* SageShow(const Side& side, const site::SageEntry& entry, int hero_x, int hero_y);
+    int SageGem(Side& side);
+    MapPatch SageMap(const Side& side, int target_x, int target_y);
+
+    /** @brief Formats a single-line prose summary of `result`. */
+    static std::string DescribeSearch(const SearchResult* result);
+
+  private:
+    Game& game_;  ///< Active game aggregate root.
+};
+
 }  // namespace w2

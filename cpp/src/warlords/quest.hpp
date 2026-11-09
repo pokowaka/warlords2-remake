@@ -1,9 +1,6 @@
 /**
  * @file
- * @brief Quests: taking one at a temple, checking it off, and the reward.
- *
- * See docs/rules.md > Quests. The original's routines are quest_assign,
- * quest_check and quest_choose_reward. One quest per side at a time.
+ * @brief `Reward`, `QuestResult`, `QuestSystem` domain service, and `w2::quest` wrappers.
  */
 #pragma once
 
@@ -36,7 +33,6 @@ struct QuestResult {
 
 namespace quest {
 
-/// The quest types (Quest::Type()).
 constexpr int kSlayHero = Quest::kSlayHero;
 constexpr int kRetrieveItem = Quest::kRetrieveItem;
 constexpr int kSlayType = Quest::kSlayType;
@@ -45,34 +41,12 @@ constexpr int kOccupy = Quest::kOccupy;
 constexpr int kRaze = Quest::kRaze;
 constexpr int kPillageGold = Quest::kPillageGold;
 
-/// The original's quest type table, rolled with 1d10: types 4, 5 and 6 come
-/// up twice as often.
 extern const std::vector<int> kTypeTable;
-/// A line of prose per quest type; some take the required count.
 extern const char* const kDescriptions[7];
-/// How far a target may be from the hero: a human's, a computer's.
 constexpr int kItemRange = 50, kCityRange = 60;
 constexpr int kAiItemRange = 30, kAiCityRange = 40, kRazeRange = 60;
-constexpr int kExperience = 10;  ///< Experience a hero gains for finishing a quest.
-/// The allies a quest gives are always Archons (army type 19), as in the
-/// original.
+constexpr int kExperience = 10;
 constexpr int kRewardAlly = 19;
-
-/**
- * @brief Takes a quest at a temple, or none (the original's quest_assign).
- *
- * Tries until a quest finds a target; pillage gold always does.
- * @param hero The hero taking the quest.
- * @param computer For a computer player's quest: other types first and
- *     shorter ranges.
- * @param flying Whether the searching stack flies: a retrieve-item quest
- *     uncovers more round the item's site.
- * @return The quest, or nullptr when the side has one or quests are off.
- */
-std::shared_ptr<Quest> Assign(Game& game, Side& side, Army* hero, bool computer = false,
-                              bool flying = false);
-/** @brief A line of prose for `quest`, resolving city or army-type names via `game`. */
-std::string Describe(const Game& game, const Quest& quest);
 
 /** @brief What just happened, for Notify(). */
 struct Event {
@@ -82,18 +56,44 @@ struct Event {
     int gold = 0;               ///< The gold pillaged.
     Army* hero = nullptr;       ///< The hero concerned.
 };
-/**
- * @brief Tells the quest what just happened (the original's quest_check).
- * @param event "battle", "item", "pillage", "occupy", "raze" or "turn".
- * @return How the quest ended, or nullptr while it goes on.
- */
+
+std::shared_ptr<Quest> Assign(Game& game, Side& side, Army* hero, bool computer = false,
+                              bool flying = false);
+std::string Describe(const Game& game, const Quest& quest);
 std::shared_ptr<QuestResult> Notify(Game& game, Side& side, const std::string& event,
                                     const Event& data = Event());
-/**
- * @brief Chooses and gives the reward (the original's quest_choose_reward
- * and quest_give_reward).
- */
 std::shared_ptr<Reward> ChooseReward(Game& game, Side& side, const Quest* quest);
 
 }  // namespace quest
+
+/**
+ * @brief Domain service governing temple quest assignment, progress/failure tracking,
+ * reward selection, and human quest-news reporting on `Game::TurnNews`.
+ */
+class QuestSystem {
+  public:
+    /** @brief Binds a quest service to `game` (must outlive this service instance). */
+    explicit QuestSystem(Game& game) : game_(game) {}
+
+    /** @brief Assigns a new quest to `hero` at a temple if `side` has none active. */
+    std::shared_ptr<Quest> Assign(Side& side, Army* hero, bool computer = false,
+                                  bool flying = false);
+
+    /** @brief Processes a turn or action event (`"turn"`, `"battle"`, `"item"`, etc.) for `side`.
+     */
+    std::shared_ptr<QuestResult> Notify(Side& side, const std::string& event,
+                                        const quest::Event& data = quest::Event());
+
+    /** @brief Chooses and grants a completion reward for `quest` to `side`. */
+    std::shared_ptr<Reward> ChooseReward(Side& side, const Quest* quest);
+
+    /** @brief Formats a human-readable objective description for `quest`. */
+    static std::string Describe(const Game& game, const Quest& quest);
+
+  private:
+    std::shared_ptr<QuestResult> Finish(Side& side, const std::string& reason, int why = 0);
+
+    Game& game_;  ///< Active game aggregate root.
+};
+
 }  // namespace w2

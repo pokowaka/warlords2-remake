@@ -25,6 +25,23 @@
 
 namespace w2 {
 
+/** @brief Standing order and turn-execution flags held by `ClassicAiPlayer` for one `ArmyId`. */
+struct ClassicArmyOrder {
+    int order = 0;         ///< Standing order (`ai::core::kOrder*`).
+    int dest = kNone;      ///< Destination city, item, or site index.
+    int group = 0;         ///< 1-based assault group slot (`1..4`), or `0` for none.
+    bool explore = false;  ///< Sent exploring unseen or open tiles.
+    bool neutral = false;  ///< Sent after a neutral city.
+    bool party = false;    ///< Part of a hero exploration party.
+    bool moved = false;    ///< Marked moved during the current phase.
+
+    /** @brief True when all standing-order fields hold their default idle values. */
+    bool IsDefault() const {
+        return order == 0 && dest == kNone && group == 0 && !explore && !neutral && !party &&
+               !moved;
+    }
+};
+
 /**
  * @brief An assault group: a strike force gathering at one of the side's
  *        cities to take a list of an enemy's cities.
@@ -297,11 +314,12 @@ std::optional<Sel> Order(Game& game, const std::vector<Army*>& list, int order, 
                          int flags);
 /** @brief Points an army at the tile its order leads to. */
 void SetTarget(Game& game, Army* army, int order, int dest);
-/** @brief Forgets an army's order. */
-inline void ClearOrder(Army* army) {
-    army->ai_order = kOrderNone;
-    army->ai_dest = kNone;
-}
+/** @brief Read-only standing-order state for `army` on its owning `ClassicAiPlayer`. */
+const ClassicArmyOrder& OrderOf(const Game& game, const Army* army);
+/** @brief Mutable standing-order state for `army` on its owning `ClassicAiPlayer`. */
+ClassicArmyOrder& MutableOrderOf(Game& game, Army* army);
+/** @brief Forgets an army's standing order on its owning `ClassicAiPlayer`. */
+void ClearOrder(Game& game, Army* army);
 /** @brief Selects the stack an army moves with; they are marked moved. */
 Sel SelectStackOf(Game& game, Army* army);
 /** @brief The side's armies on a tile with at least `min_moves` moves left, up to eight. */

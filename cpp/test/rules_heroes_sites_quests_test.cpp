@@ -104,7 +104,7 @@ TEST(HeroItemsTest, StandardTakeDropPlantFlagAndVectorToStandard) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(29));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    Army* hero = hero::Recruit(game, *side, *side->hero_offer).hero;
+    Army* hero = hero::Recruit(game, *side, *game.TurnNews(SideId(side->index)).hero_offer).hero;
     EXPECT_EQ(hero->items[0], &game.map->items[side->index]);
     EXPECT_EQ(hero->items[0]->status, 3);
     EXPECT_EQ(hero::ItemsHere(game, hero).size(), 1U);
@@ -194,7 +194,7 @@ TEST(HeroesTest, RecruitmentPromotionsAlliesCapsAndItemDrops) {
     auto game_ptr = SetupGame("ERYTHEA", Seed(37));
     Game& game = *game_ptr;
     Side* side = game::Begin(game);
-    auto offer = side->hero_offer;
+    auto offer = game.TurnNews(SideId(side->index)).hero_offer;
     ASSERT_NE(offer, nullptr);
     EXPECT_TRUE(offer->price == 0 && offer->city == side->capital);
 
@@ -466,19 +466,20 @@ TEST(QuestsTest, AssignmentCompletionFailureModesAndRewards) {
     EXPECT_EQ(hero->experience, quest::kExperience);
 
     bool was_computer = side->computer;
+    auto& quest_news = game.TurnNews(SideId(side->index)).quest_news;
     side->computer = false;
-    side->quest_news.reset();
+    quest_news.reset();
     side->quest = MakeCityQuest(quest::kOccupy, hero, city_by_one(2));
     result = quest::Notify(game, *side, "occupy", occupy_ev);
-    EXPECT_EQ(side->quest_news, result);
+    EXPECT_EQ(quest_news, result);
 
     side->computer = true;
-    side->quest_news.reset();
+    quest_news.reset();
     side->quest = MakeCityQuest(quest::kOccupy, hero, city_by_one(2));
     quest::Notify(game, *side, "occupy", occupy_ev);
-    EXPECT_EQ(side->quest_news, nullptr);
+    EXPECT_EQ(quest_news, nullptr);
     side->computer = was_computer;
-    side->quest_news.reset();
+    quest_news.reset();
 
     hero->experience = 0;
     side->quest = MakeCityQuest(quest::kOccupy, hero, city_by_one(3));
@@ -579,7 +580,8 @@ TEST(BugFlagsTest, DefaultFlagsAreEnabledAndReadByEngineSources) {
     EXPECT_TRUE(default_game.RulesBugs().hero_experience_reads_attacker_types);
     std::set<std::string> used;
     std::regex flag_read("(?:RulesBugs\\(\\)|\\.bugs)\\.(\\w+)");
-    for (const char* module : {"hero", "combat", "game", "move", "ai", "site", "quest"}) {
+    for (const char* module : {"hero", "combat", "game", "game_setup", "turn_engine",
+                               "city_economy", "move", "pathfinder", "ai", "site", "quest"}) {
         auto text = ReadFile(std::filesystem::path("cpp/src/warlords") /
                              (std::string(module) + ".cpp"));
         if (!text.ok()) continue;

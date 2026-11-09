@@ -148,7 +148,7 @@ void PlayCandidate(Game& game, int side_index, int candidate, uint32_t base_seed
 
 /** @brief Plays the current side's turn with its own kind of AI (Modern: greedy). */
 void PlayOwnTurn(Game& game, Side& side, const ml::PolicyNetwork& policy) {
-    if (side.classic_ai)
+    if (side.IsClassicAi())
         ai::PlayTurn(game, side, nullptr);
     else
         ai::modern::PlayTurn(game, side, nullptr, &policy, nullptr);
@@ -267,7 +267,7 @@ std::array<bool, 8> AssignSeats(Game& game, int swap) {
         Side& side = game.map->sides[side_index];
         if (!side.in_use) continue;
         modern[side_index] = ((seat + swap) % 2 == 0);
-        side.classic_ai = !modern[side_index];
+        ai::SetSideClassicAi(game, side, !modern[side_index]);
         seat++;
     }
     return modern;

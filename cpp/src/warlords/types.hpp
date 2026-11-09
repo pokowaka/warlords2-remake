@@ -11,8 +11,9 @@
  *   - `site.hpp`: `Site`, `Monster`, `Sign`
  *   - `options.hpp`: `Options`
  *   - `quest.hpp`: `Quest`
- *   - `side.hpp`: `ProducedKind`, `Produced`, `Advisor`, `Promotion`, `AIThought`,
- *     `DiplomaticMissive`, `Side`
+ *   - `turn_report.hpp`: `ProducedKind`, `Produced`, `Promotion`, `TurnReport`
+ *   - `computer_player.hpp`: `AttitudeFactor`, `AttitudeBreakdown`, `IComputerPlayer`
+ *   - `side.hpp`: `Advisor`, `AIThought`, `DiplomaticMissive`, `Side`
  *   - `army.hpp`: `Transit`, `Army`
  *   - `army_registry.hpp`: `ArmyRegistry`
  *   - `map.hpp`: `kMapW`, `kMapH`, `Map`
@@ -28,6 +29,7 @@
 #include "warlords/model/army_registry.hpp"
 #include "warlords/model/army_type.hpp"
 #include "warlords/model/city.hpp"
+#include "warlords/model/computer_player.hpp"
 #include "warlords/model/diplomacy_state.hpp"
 #include "warlords/model/fog_of_war.hpp"
 #include "warlords/model/game_state.hpp"
@@ -40,5 +42,6 @@
 #include "warlords/model/side.hpp"
 #include "warlords/model/site.hpp"
 #include "warlords/model/tile_pos.hpp"
+#include "warlords/model/turn_report.hpp"
 #include "warlords/model/turn_schedule.hpp"
 #include "warlords/rng.hpp"

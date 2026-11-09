@@ -21,7 +21,7 @@ Figures ComputeFigures(const Game& game, const Side& side, int report_index) {
         figures.value[i] = 0;
     }
     if (report_index == kProduction) {
-        figures.result = static_cast<int>(side.produced.size());
+        figures.result = static_cast<int>(game.TurnNews(SideId(side.index)).produced.size());
         return figures;
     }
     if (report_index == kArmy) {
@@ -48,7 +48,6 @@ Figures ComputeFigures(const Game& game, const Side& side, int report_index) {
         return figures;
     }
     for (int i = 0; i < 8; i++) figures.max = std::max(figures.max, figures.value[i]);
-    // the top of the scale is the largest figure made even
     if (figures.max > 0 && figures.max / 2 == (figures.max - 1) / 2) figures.max++;
     figures.result = figures.value[side.index];
     return figures;

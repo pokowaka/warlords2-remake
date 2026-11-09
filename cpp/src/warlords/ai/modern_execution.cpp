@@ -114,14 +114,15 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
  */
 bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, CandidateTarget& tgt,
                          bool stage_near, const ml::PolicyNetwork& policy,
-                         const ml::ContextVec& ctx, ml::RolloutSampler* sampler) {
+                         const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
+                         MovedArmySet& moved_armies) {
     stack.erase(std::remove_if(stack.begin(), stack.end(),
                                [&](Army* army) { return !game.Alive(army) || army->moves <= 0; }),
                 stack.end());
     if (stack.empty()) return false;
 
     if (tgt.kind == TargetKind::kHoldGarrison) {
-        for (Army* army : stack) army->ai_moved = true;
+        for (Army* army : stack) moved_armies.insert(army->id);
         return true;
     }
 
@@ -383,9 +384,11 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         if (completed_objective && spent_moves && army->moves >= 2 && !stage_near &&
             tgt.kind != TargetKind::kReinforceCity) {
             // Allow remaining movement points to be dispatched in the next wave of this turn
-            army->ai_moved = false;
+            moved_armies.erase(army->id);
+        } else if (made_progress) {
+            moved_armies.insert(army->id);
         } else {
-            army->ai_moved = made_progress;
+            moved_armies.erase(army->id);
         }
     }
     return made_progress;

@@ -56,14 +56,6 @@ struct Army {
     bool done = false;       ///< Done for the turn.
     bool offered = false;    ///< Offered by the army cycle already this pass.
     bool disbanded = false;  ///< Disbanded this turn.
-    // the computer player's
-    int ai_order = 0;         ///< The computer's order for it.
-    int ai_dest = kNone;      ///< The order's destination.
-    int ai_group = 0;         ///< The computer's group it moves with.
-    bool ai_explore = false;  ///< Sent exploring.
-    bool ai_neutral = false;  ///< Sent after a neutral city.
-    bool ai_party = false;    ///< Part of a party.
-    bool ai_moved = false;    ///< Moved this turn.
 
     /** @brief Is it a hero? */
     bool Hero() const;

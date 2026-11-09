@@ -1,28 +1,14 @@
 /**
  * @file
- * @brief The computer players.
+ * @brief Computer player facade, frontend turn hooks, and default strategy registration.
  *
- * A port of WARLORD2.EXE's AI (docs/re/ai.md). Every side has a block of AI
- * data (ai/core) filled at game start from its level and its character card
- * (docs/formats/crd.md); each computer turn runs the original's nineteen
- * phases in the original's order.
- *
- *   ai/core       data, neighbours, the selection, flood, battles, walk
- *   ai/cities     evaluate, garrisons, neutrals, production, vectoring
- *   ai/groups     the assault groups and picking an enemy
- *   ai/moves      standing orders, rescue, explorers, hero parties
- *   ai/heroes     the hero phase
- *   ai/diplomacy  proposals
- *
- * The Lua runs a computer turn as a coroutine, so the front end can show each
- * walk and battle as it happens. Here the turn is plain code, and the hooks
- * are where the front end shows things: it runs the turn on a thread of its
- * own and has each hook wait for the showing to finish (front/aithread).
- * With no hooks set the turn simply plays through.
+ * Bridges the nineteen-phase 1993 Classic AI (`ClassicAiPlayer`) and the fair-information
+ * neural-policy AI (`ModernMlPlayer`) through `Side::computer_player`.
  */
 #pragma once
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -30,51 +16,70 @@
 #include "warlords/types.hpp"
 
 namespace w2 {
+struct AIData;
 struct Battle;
-}
+}  // namespace w2
 
 namespace w2::ai {
 
-/** @brief The callbacks the front end listens to a computer turn with. */
+/** @brief Callbacks the front end registers to animate computer turns. */
 struct Hooks {
-    /// A computer stack has walked.
+    /// Invoked after a computer stack walks one or more steps.
     std::function<void(Game&, const std::vector<Army*>&, const move::WalkResult&)> on_walk;
-    /// A computer stack fights at the given tile.
+    /// Invoked when a computer stack initiates combat at a tile.
     std::function<void(Game&, const std::vector<Army*>&, int, int, Battle&)> on_fight;
-    /// A computer side has razed, sacked or pillaged a city; the string says which.
+    /// Invoked when a computer side razes, sacks, or pillages a city.
     std::function<void(Game&, Side&, City&, const std::string&)> on_spoils;
 };
-extern Hooks hooks;  ///< The front end's hooks; empty ones are skipped.
+extern Hooks hooks;  ///< Active front-end hooks; empty callbacks are skipped.
 
 /**
- * @brief Whether newly initialized computer sides default to the 1993
- * Classic AI (true, for the parity tests) or the learnable ML AI (false, in
- * the app).
+ * @brief Returns whether newly initialized sides default to `ClassicAiPlayer` (`true`, for 1993
+ * parity tests) or `ModernMlPlayer` (`false`, in the application).
  */
 bool DefaultClassicAi();
-/** @brief Sets what DefaultClassicAi() returns. */
+
+/** @brief Sets the process-wide default returned by `DefaultClassicAi()`. */
 void SetDefaultClassicAi(bool classic);
 
-/** @brief Gives a side its AI data at game start, from its level and card. */
-AIData& InitSide(Game& game, Side& side);
-/** @brief Sets the computer players up for a new game. */
-void StartGame(Game& game);
 /**
- * @brief Plays one computer turn, phase by phase.
- * @param pause If given, called between phases with the phase's name.
+ * @brief Instantiates a `ClassicAiPlayer` (`classic == true`) or `ModernMlPlayer` (`false`) for
+ * `side` on `game` without advancing `game.rng`.
+ */
+std::shared_ptr<IComputerPlayer> MakeComputerPlayer(bool classic, Game& game, Side& side);
+
+/**
+ * @brief Ensures `side` is backed by a `ClassicAiPlayer` (`classic == true`) or `ModernMlPlayer`
+ * (`classic == false`), preserving existing strategy instances when the mode already matches.
+ */
+void SetSideClassicAi(Game& game, Side& side, bool classic);
+
+/** @brief Initializes `side` with a `ClassicAiPlayer` populated from level defaults and its card.
+ */
+AIData& InitSide(Game& game, Side& side);
+
+/** @brief Initializes computer strategies, city claims, and diplomacy scores for a new game. */
+void StartGame(Game& game);
+
+/**
+ * @brief Executes one computer turn on `side` via `side.computer_player`.
+ * @param pause Optional callback invoked between phases with the phase's name.
  */
 void PlayTurn(Game& game, Side& side, const std::function<void(const char*)>& pause = nullptr);
-/** @brief Every walk a computer stack makes is reported here once it is made. */
+
+/** @brief Reports a completed computer stack walk to `hooks.on_walk`. */
 void Walked(Game& game, const std::vector<Army*>& stack, const move::WalkResult& walk);
-/** @brief Where a hired hero appears for a computer; `fallback` when nowhere is better. */
+
+/** @brief Selects the owned city where a newly hired computer hero appears. */
 City* HeroCity(Game& game, Side& side, City* fallback);
+
 /**
- * @brief A computer's quest hero has taken a city.
- * @return True when it razed or sacked, so the capture is not also taken for
- *         an occupation.
+ * @brief Applies computer quest-capture spoils when `stack` conquers `city`.
+ * @return True if `city` was razed or sacked.
  */
 bool QuestCapture(Game& game, Side& side, City& city, const std::vector<Army*>& stack);
-/** @brief Records a battle fought on a side's tile in the defender's AI data. */
+
+/** @brief Records combat casualties and fair-information observations for battle participants. */
 void RecordBattle(Game& game, int defender, int attacker, int x, int y, int heroes_lost,
                   int armies_lost, bool all_lost, bool city_tile);
 

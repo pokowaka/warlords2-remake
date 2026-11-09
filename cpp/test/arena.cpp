@@ -388,7 +388,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
         classic[side_index] = (solo || mixed_vs_classic)
                                       ? !learner_side
                                       : ((mode == Opponent::kClassic) && !learner_side);
-        side.classic_ai = classic[side_index];
+        ai::SetSideClassicAi(game, side, classic[side_index]);
         float raid_roll =
                 static_cast<float>(((seed * 747796405U) ^
                                     static_cast<uint32_t>((side_index + 1) * 2891336453U)) >>
@@ -403,7 +403,10 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
                 raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
         if (classic[side_index] && g_frozen && frozen_roll < cfg.frozen_frac) {
             classic_kind[side_index] = opponents::Kind::kFrozen;
-            side.classic_ai = false;  // a Modern AI seat, just not a learning one
+            ai::SetSideClassicAi(game, side, false);  // a Modern AI seat, just not a learning one
+        }
+        if (classic[side_index]) {
+            opponents::InstallOpponent(game, side, classic_kind[side_index], g_frozen);
         }
         episodes[side_index].side_index = side_index;
         samplers[side_index].rng_state =
@@ -520,7 +523,7 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
         if (!side.in_use) continue;
         const bool is_learner = (seat++ == solo_seat);
         if (is_learner) learner_side = side_index;
-        side.classic_ai = !is_learner;
+        ai::SetSideClassicAi(*current_game, side, !is_learner);
         float raid_roll =
                 static_cast<float>(((seed * 747796405U) ^
                                     static_cast<uint32_t>((side_index + 1) * 2891336453U)) >>
@@ -535,7 +538,10 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
                 raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
         if (!is_learner && g_frozen && frozen_roll < cfg.frozen_frac) {
             kind[side_index] = opponents::Kind::kFrozen;
-            side.classic_ai = false;
+            ai::SetSideClassicAi(*current_game, side, false);
+        }
+        if (!is_learner) {
+            opponents::InstallOpponent(*current_game, side, kind[side_index], g_frozen);
         }
     }
 
@@ -1036,9 +1042,13 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
         if (!game.map->sides[side_index].in_use) continue;
         modern[side_index] = solo ? (seat == solo_seat) : ((seat + eval_case.swap) % 2 == 0);
         // Opponent seats are Classic AI sides unless the Frozen Modern checkpoint plays them
-        game.map->sides[side_index].classic_ai =
-                !modern[side_index] && cfg.eval_opponent != opponents::Kind::kFrozen;
-        if (modern[side_index]) eval_case.modern_sides++;
+        if (modern[side_index]) {
+            ai::SetSideClassicAi(game, game.map->sides[side_index], false);
+            eval_case.modern_sides++;
+        } else {
+            opponents::InstallOpponent(game, game.map->sides[side_index], cfg.eval_opponent,
+                                       g_frozen);
+        }
         eval_case.sides++;
         seat++;
     }

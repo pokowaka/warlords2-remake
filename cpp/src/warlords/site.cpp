@@ -1,9 +1,14 @@
+/**
+ * @file
+ * @brief Implementation of `SiteExplorer` and `w2::site` wrappers.
+ */
 #include "warlords/site.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <map>
+#include <utility>
 
 #include "warlords/armytype.hpp"
 #include "warlords/combat.hpp"
@@ -14,38 +19,121 @@
 #include "warlords/rules.hpp"
 #include "warlords/scn.hpp"
 
-namespace w2::site {
+namespace w2 {
 
-const char* const kContentNames[6] = {"empty",  "temple", "a magic item",
-                                      "a sage", "gold",   "allies"};
+namespace {
 
-/**
- * @brief The contents an empty site may roll, by band ("rich", "near",
- * "far"): kSage, kGold or kAllies.
- */
-static const std::vector<int>& Content(const std::string& band) {
+const std::vector<int>& Content(const std::string& band) {
     static const std::vector<int> kRich = {5, 5, 4}, kFar = {3, 4, 5, 3, 4}, kNear = {3, 4, 5};
     return band == "rich" ? kRich : band == "near" ? kNear : kFar;
 }
-/** @brief The army type ids an allies site may hold, by band. */
-static const std::vector<int>& AllyTypes(const std::string& band) {
-    static const std::vector<int> kRich = {25, 23, 27, 19},  // Dragons, Wizards, Devils, Archons
-            kFar = {24, 20, 26},                             // Ghosts, Giant Worms, Demons
-            kNear = {22, 20};                                // Elementals, Giant Worms
+
+const std::vector<int>& AllyTypes(const std::string& band) {
+    static const std::vector<int> kRich = {25, 23, 27, 19}, kFar = {24, 20, 26}, kNear = {22, 20};
     return band == "rich" ? kRich : band == "near" ? kNear : kFar;
 }
+
+std::string Band(const Site& target_site, const std::vector<std::pair<int, int>>& capitals) {
+    if (target_site.rich) return "rich";
+    for (const auto& capital : capitals) {
+        double dx = target_site.x - capital.first, dy = target_site.y - capital.second;
+        if (static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy))) < site::kCapitalRange)
+            return "near";
+    }
+    return "far";
+}
+
+Army* HeroIn(const std::vector<Army*>& stack) {
+    for (Army* army : stack) {
+        if (army->type == armytype::kHero) return army;
+    }
+    return nullptr;
+}
+
+const Monster* MonsterOf(const Game& game, int index) {
+    if (index < 0 || index > 9 || !game.map->monsters[index]) return nullptr;
+    return &*game.map->monsters[index];
+}
+
+int SageDistance(const Site& target_site, int hero_x, int hero_y) {
+    double dx = target_site.x - hero_x, dy = target_site.y - hero_y;
+    return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
+}
+
+bool Unshown(const Side& side, const Site& target_site, int hero_x, int hero_y) {
+    return target_site.rich && !target_site.searched && !site::ShownTo(target_site, side) &&
+           SageDistance(target_site, hero_x, hero_y) < site::kSageRange;
+}
+
+}  // namespace
+
+namespace site {
+
+const char* const kContentNames[6] = {"empty",  "temple", "a magic item",
+                                      "a sage", "gold",   "allies"};
 
 bool ItemReserved(int type, int value) {
     return type == rules::kItemFlight || type == rules::kItemDoubleMove ||
            type == rules::kItemStandard || (type == rules::kItemCommand && value >= 2);
 }
 
+bool ShownTo(const Site& target_site, const Side& side) {
+    return ((target_site.revealed >> side.index) & 1) == 1;
+}
+
 void FillItemPool(Game& game, int reserved) {
-    if (!game.map->item_pool) return;
-    const auto& pool = *game.map->item_pool;
+    SiteExplorer(game).FillItemPool(reserved);
+}
+
+void MarkRich(Game& game) {
+    SiteExplorer(game).MarkRich();
+}
+
+void Setup(Game& game) {
+    SiteExplorer(game).Setup();
+}
+
+bool SurvivesGuardian(Game& game, const Army& hero, int monster_strength) {
+    return SiteExplorer(game).SurvivesGuardian(hero, monster_strength);
+}
+
+int GuardianStrength(const Game& game, const Site& target_site) {
+    return SiteExplorer(const_cast<Game&>(game)).GuardianStrength(target_site);
+}
+
+int Bless(Game& game, const Site& target_site, const std::vector<Army*>& stack) {
+    return SiteExplorer(game).Bless(target_site, stack);
+}
+
+std::shared_ptr<SearchResult> Search(Game& game, const std::vector<Army*>& stack, int x, int y,
+                                     bool human) {
+    return SiteExplorer(game).Search(stack, x, y, human);
+}
+
+std::vector<SageEntry> SageList(Game& game, const Side& side, int hero_x, int hero_y) {
+    return SiteExplorer(game).SageList(side, hero_x, hero_y);
+}
+
+Site* SageShow(Game& game, const Side& side, const SageEntry& entry, int hero_x, int hero_y) {
+    return SiteExplorer(game).SageShow(side, entry, hero_x, hero_y);
+}
+
+int SageGem(Game& game, Side& side) {
+    return SiteExplorer(game).SageGem(side);
+}
+
+std::array<int, 4> SageMap(Game& game, const Side& side, int target_x, int target_y) {
+    return SiteExplorer(game).SageMap(side, target_x, target_y);
+}
+
+}  // namespace site
+
+void SiteExplorer::FillItemPool(int reserved) {
+    if (!game_.map->item_pool) return;
+    const auto& pool = *game_.map->item_pool;
     std::map<int, Item*> by_index;
     std::map<int, bool> used;
-    for (auto& item : game.map->items) by_index[item.index] = &item;
+    for (auto& item : game_.map->items) by_index[item.index] = &item;
     for (int idx = 8; idx <= 21; idx++) {
         auto entry = by_index.find(idx);
         if (entry == by_index.end()) continue;
@@ -53,10 +141,10 @@ void FillItemPool(Game& game, int reserved) {
         bool want = idx < 8 + reserved;
         std::vector<int> choices;
         for (size_t i = 0; i < pool.size(); i++) {
-            if (!used[static_cast<int>(i)] && ItemReserved(pool[i]) == want)
+            if (!used[static_cast<int>(i)] && site::ItemReserved(pool[i]) == want)
                 choices.push_back(static_cast<int>(i));
         }
-        int choice = game.rng.PickIndex(choices.size());
+        int choice = game_.rng.PickIndex(choices.size());
         if (choice >= 0) {
             int pick = choices[choice];
             used[pick] = true;
@@ -67,164 +155,140 @@ void FillItemPool(Game& game, int reserved) {
     }
 }
 
-void MarkRich(Game& game) {
+void SiteExplorer::MarkRich() {
     std::vector<Site*> ruins;
-    for (auto& site : game.map->sites) {
-        site.rich = false;
-        site.revealed = 0xff;
-        if (site.type != kTemple) ruins.push_back(&site);
+    for (auto& map_site : game_.map->sites) {
+        map_site.rich = false;
+        map_site.revealed = 0xff;
+        if (map_site.type != site::kTemple) ruins.push_back(&map_site);
     }
-    int want = static_cast<int>(game.map->sites.size()) * kRichShare / 10;
-    game.rng.Shuffle(ruins);
+    int want = static_cast<int>(game_.map->sites.size()) * site::kRichShare / 10;
+    game_.rng.Shuffle(ruins);
     for (int i = 0; i < std::min(want, static_cast<int>(ruins.size())); i++) {
         ruins[i]->rich = true;
-        if (game.map->options.quests != 0) ruins[i]->revealed = 0;
+        if (game_.map->options.quests != 0) ruins[i]->revealed = 0;
     }
 }
 
-/**
- * @brief A site's band: "rich", "near" (an in-play side's capital less than
- * kCapitalRange away, by straight-line map distance) or "far".
- */
-static std::string Band(const Site& site, const std::vector<std::pair<int, int>>& capitals) {
-    if (site.rich) return "rich";
-    for (auto& capital : capitals) {
-        double dx = site.x - capital.first, dy = site.y - capital.second;
-        if (static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy))) < kCapitalRange)
-            return "near";
-    }
-    return "far";
-}
-
-void Setup(Game& game) {
-    // the in-play sides' capitals where they stand, city or not
+void SiteExplorer::Setup() {
     std::vector<std::pair<int, int>> capitals;
-    for (Side* side : game.sides) capitals.emplace_back(side->cap_x, side->cap_y);
+    for (Side* side : game_.sides) capitals.emplace_back(side->cap_x, side->cap_y);
 
-    MarkRich(game);
+    MarkRich();
     int temples = 0;
-    for (auto& site : game.map->sites) {
-        site.content = site.type == kTemple ? kTemple : kEmpty;
-        if (site.content == kTemple) {
-            site.temple_index = temples;
+    for (auto& map_site : game_.map->sites) {
+        map_site.content = map_site.type == site::kTemple ? site::kTemple : site::kEmpty;
+        if (map_site.content == site::kTemple) {
+            map_site.temple_index = temples;
             temples++;
         }
-        site.item = kNone;
-        site.guardian = kNone;
-        site.ally_type = kNone;
-        site.searched = false;
-        site.band = Band(site, capitals);
+        map_site.item = kNone;
+        map_site.guardian = kNone;
+        map_site.ally_type = kNone;
+        map_site.searched = false;
+        map_site.band = Band(map_site, capitals);
     }
 
-    int n_sites = static_cast<int>(game.map->sites.size());
+    int n_sites = static_cast<int>(game_.map->sites.size());
     int reserved = n_sites * 2 / 10;
-    FillItemPool(game, reserved);
+    FillItemPool(reserved);
 
     int band_hi = reserved;
-    int band_lo = std::min(game.rng.Dice(2, 3, 1), band_hi);
-    int last = std::min(22, n_sites / 3 + game.rng.Dice(1, 5, -3) + 8);
+    int band_lo = std::min(game_.rng.Dice(2, 3, 1), band_hi);
+    int last = std::min(22, n_sites / 3 + game_.rng.Dice(1, 5, -3) + 8);
 
-    std::vector<Site*> free;
-    for (auto& site : game.map->sites)
-        if (site.content == kEmpty) free.push_back(&site);
-    game.rng.Shuffle(free);
+    std::vector<Site*> free_sites;
+    for (auto& map_site : game_.map->sites) {
+        if (map_site.content == site::kEmpty) free_sites.push_back(&map_site);
+    }
+    game_.rng.Shuffle(free_sites);
 
     std::map<int, Item*> by_index;
-    for (auto& item : game.map->items) {
+    for (auto& item : game_.map->items) {
         by_index[item.index] = &item;
         item.status = 0;
     }
 
     for (int idx = 8; idx <= last - 1; idx++) {
         auto entry = by_index.find(idx);
-        // the band between band_lo and band_hi is held back, probably for quests
         if (entry != by_index.end() && !(idx >= 8 + band_lo && idx < 8 + band_hi)) {
             Item* item = entry->second;
-            bool want = ItemReserved(*item);
-            for (size_t i = 0; i < free.size(); i++) {
-                Site* site = free[i];
-                if (site->rich == want) {
-                    site->content = kItem;
-                    site->item = idx;
-                    item->status = 2;  // hidden in a ruin
-                    free.erase(free.begin() + i);
+            bool want = site::ItemReserved(*item);
+            for (size_t i = 0; i < free_sites.size(); i++) {
+                Site* chosen = free_sites[i];
+                if (chosen->rich == want) {
+                    chosen->content = site::kItem;
+                    chosen->item = idx;
+                    item->status = 2;
+                    free_sites.erase(free_sites.begin() + static_cast<std::ptrdiff_t>(i));
                     break;
                 }
             }
         }
     }
 
-    for (auto& site : game.map->sites) {
-        if (site.content == kEmpty) site.content = game.rng.Pick(Content(site.band), 0);
-        if (site.content == kTemple) {
-            site.guardian = kNone;
-        } else if (site.content == kAllies) {
-            // the allies' type takes the guardian's place, as in the original
-            site.ally_type = game.rng.Pick(AllyTypes(site.band), 0);
-            site.guardian = kNone;
+    for (auto& map_site : game_.map->sites) {
+        if (map_site.content == site::kEmpty)
+            map_site.content = game_.rng.Pick(Content(map_site.band), 0);
+        if (map_site.content == site::kTemple) {
+            map_site.guardian = kNone;
+        } else if (map_site.content == site::kAllies) {
+            map_site.ally_type = game_.rng.Pick(AllyTypes(map_site.band), 0);
+            map_site.guardian = kNone;
         } else {
-            site.guardian = game.rng.Dice(1, 9, 0);
+            map_site.guardian = game_.rng.Dice(1, 9, 0);
         }
     }
-    game.map->site_at.assign(static_cast<size_t>(game.map->width) * game.map->height, nullptr);
-    for (auto& site : game.map->sites) game.map->site_at[site.y * game.map->width + site.x] = &site;
+    game_.map->site_at.assign(static_cast<size_t>(game_.map->width) * game_.map->height, nullptr);
+    for (auto& map_site : game_.map->sites) {
+        game_.map->site_at[map_site.y * game_.map->width + map_site.x] = &map_site;
+    }
 }
 
-/** @brief The first hero in a stack, or nullptr. */
-static Army* HeroIn(const std::vector<Army*>& stack) {
-    for (Army* army : stack)
-        if (army->type == armytype::kHero) return army;
-    return nullptr;
-}
-
-bool SurvivesGuardian(Game& game, const Army& hero, int monster_strength) {
+bool SiteExplorer::SurvivesGuardian(const Army& hero, int monster_strength) {
     int margin = 90 + 5 * (hero.strength + combat::BattleItems(hero) - monster_strength) +
-                 3 * static_cast<int>(game::ArmiesAt(game, hero.x, hero.y).size());
-    return game.rng.Dice(1, 100, 0) <= margin;
+                 3 * static_cast<int>(game::ArmiesAt(game_, hero.x, hero.y).size());
+    return game_.rng.Dice(1, 100, 0) <= margin;
 }
 
-int GuardianStrength(const Game& game, const Site& site) {
-    if (site.guardian < 0 || site.guardian > 9) return 0;
-    const auto& monster = game.map->monsters[site.guardian];
+int SiteExplorer::GuardianStrength(const Site& target_site) const {
+    if (target_site.guardian < 0 || target_site.guardian > 9) return 0;
+    const auto& monster = game_.map->monsters[target_site.guardian];
     return monster ? monster->strength : 0;
 }
 
-int Bless(Game& game, const Site& site, const std::vector<Army*>& stack) {
-    if ((site.temple_index == kNone ? 0 : site.temple_index) >= kBlessingTemples) return 0;
-    int bit = site.temple_index;
+int SiteExplorer::Bless(const Site& target_site, const ArmyStack& stack) {
+    if ((target_site.temple_index == kNone ? 0 : target_site.temple_index) >=
+        site::kBlessingTemples)
+        return 0;
+    int bit = target_site.temple_index;
     int blessed = 0;
     for (Army* army : stack) {
         if (!army->blessings.count(bit)) {
             army->blessings.insert(bit);
             army->strength = std::min(9, army->strength + 1);
             blessed++;
-            if (army->type == armytype::kHero) hero::AddExperience(game, army, 1);
+            if (army->type == armytype::kHero) hero::AddExperience(game_, army, 1);
         }
     }
     return blessed;
 }
 
-/** @brief The scenario's monster with this index (0..9), or nullptr. */
-static const Monster* MonsterOf(const Game& game, int index) {
-    if (index < 0 || index > 9 || !game.map->monsters[index]) return nullptr;
-    return &*game.map->monsters[index];
-}
-
-std::shared_ptr<SearchResult> Search(Game& game, const std::vector<Army*>& stack, int x, int y,
-                                     bool human) {
-    if (game.map->site_at.empty() || x < 0 || y < 0) return nullptr;
-    Site* site = game.map->site_at[y * game.map->width + x];
-    if (!site || site->searched) return nullptr;
+std::shared_ptr<SearchResult> SiteExplorer::Search(const ArmyStack& stack, int x, int y,
+                                                   bool human) {
+    if (game_.map->site_at.empty() || x < 0 || y < 0) return nullptr;
+    Site* target_site = game_.map->site_at[y * game_.map->width + x];
+    if (!target_site || target_site->searched) return nullptr;
     if (stack.empty() || stack[0]->moves < 1) return nullptr;
     Army* hero = HeroIn(stack);
     auto out = std::make_shared<SearchResult>();
-    out->site = site;
+    out->site = target_site;
 
-    if (site->content == kTemple) {
+    if (target_site->content == site::kTemple) {
         out->kind = "temple";
         out->hero = hero;
         if (human && hero) return out;
-        out->blessed = Bless(game, *site, stack);
+        out->blessed = Bless(*target_site, stack);
         return out;
     }
 
@@ -232,78 +296,78 @@ std::shared_ptr<SearchResult> Search(Game& game, const std::vector<Army*>& stack
         out->kind = "no hero";
         return out;
     }
-    Side* side = game.map->Side(hero->owner);
+    Side* side = game_.map->Side(hero->owner);
     out->hero = hero;
 
-    if (site->content == kSage) {
-        hero::AddExperience(game, hero, 3);
-        history::RecordDeed(game, side, DeedType::kFound, history::kFoundSage, 0, hero->name);
-        site->searched = true;
+    if (target_site->content == site::kSage) {
+        hero::AddExperience(game_, hero, 3);
+        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundSage, 0, hero->name);
+        target_site->searched = true;
         out->kind = "sage";
         return out;
     }
 
-    // a ruin: the original's ruin_search
-    hero::AddExperience(game, hero, 3);
-
-    // an allies site holds its allies' type where the guardian would be, and
-    // nothing guards it
+    hero::AddExperience(game_, hero, 3);
     const Monster* beaten = nullptr;
-    if (site->content != kAllies && site->guardian != kNone && site->guardian > 0) {
-        int strength = GuardianStrength(game, *site);
-        const Monster* monster = MonsterOf(game, site->guardian);
-        if (!SurvivesGuardian(game, *hero, strength)) {
-            history::RecordDeed(game, side, DeedType::kHeroKilled, history::kKilledSearching, 0,
+    if (target_site->content != site::kAllies && target_site->guardian != kNone &&
+        target_site->guardian > 0) {
+        int strength = GuardianStrength(*target_site);
+        const Monster* monster = MonsterOf(game_, target_site->guardian);
+        if (!SurvivesGuardian(*hero, strength)) {
+            history::RecordDeed(game_, side, DeedType::kHeroKilled, history::kKilledSearching, 0,
                                 hero->name);
-            history::Tally(game, hero, kNone, false);  // the side's own losses
-            hero::DropItems(game, hero, hero->x, hero->y, hero->owner);
-            game.Remove(hero);
+            history::Tally(game_, hero, kNone, false);
+            hero::DropItems(game_, hero, hero->x, hero->y, hero->owner);
+            game_.Remove(hero);
             out->kind = "killed";
             out->monster = monster;
             return out;
         }
         beaten = monster;
-        site->guardian = 0;
+        target_site->guardian = 0;
     }
     out->guardian = beaten;
 
-    if (site->content == kItem) {
+    if (target_site->content == site::kItem) {
         Item* found = nullptr;
-        for (auto& item : game.map->items)
-            if (item.index == site->item) found = &item;
+        for (auto& item : game_.map->items) {
+            if (item.index == target_site->item) found = &item;
+        }
         if (found && human) {
             found->status = 1;
             found->x = x;
-            found->y = y;  // on the ground, to take
+            found->y = y;
         } else if (found) {
-            found->status = 3;  // carried
+            found->status = 3;
             hero->items.push_back(found);
         }
-        if (found) history::RecordDeed(game, side, DeedType::kFound, found->index, 0, hero->name);
-        site->searched = true;
-        site->content = kEmpty;
+        if (found) history::RecordDeed(game_, side, DeedType::kFound, found->index, 0, hero->name);
+        target_site->searched = true;
+        target_site->content = site::kEmpty;
         out->kind = "item";
         out->item = found;
         return out;
-    } else if (site->content == kGold) {
-        int gold = site->rich ? game.rng.Dice(3, 1000, 1000) : game.rng.Dice(3, 500, 500);
+    }
+    if (target_site->content == site::kGold) {
+        int gold = target_site->rich ? game_.rng.Dice(3, 1000, 1000) : game_.rng.Dice(3, 500, 500);
         if (side) side->gold += gold;
-        site->searched = true;
-        history::RecordDeed(game, side, DeedType::kFound, history::kFoundGold, 0, hero->name);
+        target_site->searched = true;
+        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundGold, 0, hero->name);
         out->kind = "gold";
         out->gold = gold;
         return out;
-    } else if (site->content == kAllies) {
-        site->searched = true;
-        const ArmyType* type = game.types.ById(site->ally_type);
-        if (!type) type = game.types.ById(armytype::kScouts);
-        int count = game.rng.Dice(1, 2, 0);
-        if (site->rich) count += 2;
+    }
+    if (target_site->content == site::kAllies) {
+        target_site->searched = true;
+        const ArmyType* type = game_.types.ById(target_site->ally_type);
+        if (!type) type = game_.types.ById(armytype::kScouts);
+        int count = game_.rng.Dice(1, 2, 0);
+        if (target_site->rich) count += 2;
         for (int i = 0; i < count; i++) {
-            Army* ally = hero::PlaceAlly(game, type, x, y, *side);
+            Army* ally = hero::PlaceAlly(game_, type, x, y, *side);
             if (ally) out->armies.push_back(ally);
         }
-        history::RecordDeed(game, side, DeedType::kFound, history::kFoundAllies, 0, hero->name);
+        history::RecordDeed(game_, side, DeedType::kFound, history::kFoundAllies, 0, hero->name);
         out->kind = "allies";
         out->type = type;
         out->count = count;
@@ -313,40 +377,22 @@ std::shared_ptr<SearchResult> Search(Game& game, const std::vector<Army*>& stack
     return out;
 }
 
-/** @brief Straight-line distance from a site to the hero, rounded down. */
-static int SageDistance(const Site& site, int hero_x, int hero_y) {
-    double dx = site.x - hero_x, dy = site.y - hero_y;
-    return static_cast<int>(std::floor(std::sqrt(dx * dx + dy * dy)));
-}
-
-bool ShownTo(const Site& site, const Side& side) {
-    return ((site.revealed >> side.index) & 1) == 1;
-}
-
-/**
- * @brief Whether a sage may tell the side of this site: rich, unsearched,
- * not yet shown to the side, and within kSageRange of the hero.
- */
-static bool Unshown(const Side& side, const Site& site, int hero_x, int hero_y) {
-    return site.rich && !site.searched && !ShownTo(site, side) &&
-           SageDistance(site, hero_x, hero_y) < kSageRange;
-}
-
-std::vector<SageEntry> SageList(Game& game, const Side& side, int hero_x, int hero_y) {
-    std::vector<SageEntry> list;
+std::vector<site::SageEntry> SiteExplorer::SageList(const Side& side, int hero_x,
+                                                    int hero_y) const {
+    std::vector<site::SageEntry> list;
     bool gold = false, allies = false;
-    for (auto& site : game.map->sites) {
-        if (Unshown(side, site, hero_x, hero_y)) {
-            if (site.content == kGold && !gold) {
+    for (auto& map_site : game_.map->sites) {
+        if (Unshown(side, map_site, hero_x, hero_y)) {
+            if (map_site.content == site::kGold && !gold) {
                 gold = true;
-                list.push_back(SageEntry{"gold", "Gold", nullptr});
-            } else if (site.content == kAllies && !allies) {
+                list.push_back(site::SageEntry{"gold", "Gold", nullptr});
+            } else if (map_site.content == site::kAllies && !allies) {
                 allies = true;
-                list.push_back(SageEntry{"allies", "Allies", nullptr});
-            } else if (site.content == kItem) {
-                for (auto& item : game.map->items) {
-                    if (item.index == site.item)
-                        list.push_back(SageEntry{"item", item.name, &item});
+                list.push_back(site::SageEntry{"allies", "Allies", nullptr});
+            } else if (map_site.content == site::kItem) {
+                for (auto& item : game_.map->items) {
+                    if (item.index == map_site.item)
+                        list.push_back(site::SageEntry{"item", item.name, &item});
                 }
             }
         }
@@ -354,45 +400,74 @@ std::vector<SageEntry> SageList(Game& game, const Side& side, int hero_x, int he
     return list;
 }
 
-Site* SageShow(Game& game, const Side& side, const SageEntry& entry, int hero_x, int hero_y) {
+Site* SiteExplorer::SageShow(const Side& side, const site::SageEntry& entry, int hero_x,
+                             int hero_y) {
     Site* found = nullptr;
     int best = kNone;
-    for (auto& site : game.map->sites) {
+    for (auto& map_site : game_.map->sites) {
         if (entry.kind == "item") {
-            if (site.content == kItem && entry.item && site.item == entry.item->index) {
-                found = &site;
+            if (map_site.content == site::kItem && entry.item &&
+                map_site.item == entry.item->index) {
+                found = &map_site;
                 break;
             }
-        } else if (Unshown(side, site, hero_x, hero_y) &&
-                   site.content == (entry.kind == "gold" ? kGold : kAllies)) {
-            int distance = SageDistance(site, hero_x, hero_y);
+        } else if (Unshown(side, map_site, hero_x, hero_y) &&
+                   map_site.content == (entry.kind == "gold" ? site::kGold : site::kAllies)) {
+            int distance = SageDistance(map_site, hero_x, hero_y);
             if (best == kNone || distance < best) {
-                found = &site;
+                found = &map_site;
                 best = distance;
             }
         }
     }
     if (!found) return nullptr;
-    if (!ShownTo(*found, side)) found->revealed = found->revealed + (1 << side.index);
-    game::Reveal(game, side.index, found->x, found->y, false);
+    if (!site::ShownTo(*found, side)) found->revealed = found->revealed + (1 << side.index);
+    game::Reveal(game_, side.index, found->x, found->y, false);
     return found;
 }
 
-int SageGem(Game& game, Side& side) {
-    int gold = game.rng.Dice(3, 500, 500);
+int SiteExplorer::SageGem(Side& side) {
+    int gold = game_.rng.Dice(3, 500, 500);
     side.gold += gold;
     return gold;
 }
 
-std::array<int, 4> SageMap(Game& game, const Side& side, int target_x, int target_y) {
-    int left = std::max(0, target_x - game.rng.Dice(1, 5, 8));
-    int top = std::max(0, target_y - game.rng.Dice(1, 5, 8));
-    int width = game.rng.Dice(1, 10, 15), height = game.rng.Dice(1, 10, 15);
-    if (left + width >= game.map->width) width = game.map->width - left - 1;
-    if (top + height >= game.map->height) height = game.map->height - top - 1;
-    for (int x = left; x < left + width; x++)
-        for (int y = top; y < top + height; y++) game::Reveal(game, side.index, x, y, false);
+SiteExplorer::MapPatch SiteExplorer::SageMap(const Side& side, int target_x, int target_y) {
+    int left = std::max(0, target_x - game_.rng.Dice(1, 5, 8));
+    int top = std::max(0, target_y - game_.rng.Dice(1, 5, 8));
+    int width = game_.rng.Dice(1, 10, 15), height = game_.rng.Dice(1, 10, 15);
+    if (left + width >= game_.map->width) width = game_.map->width - left - 1;
+    if (top + height >= game_.map->height) height = game_.map->height - top - 1;
+    for (int x = left; x < left + width; x++) {
+        for (int y = top; y < top + height; y++) game::Reveal(game_, side.index, x, y, false);
+    }
     return {left, top, width, height};
 }
 
-}  // namespace w2::site
+std::string SiteExplorer::DescribeSearch(const SearchResult* result) {
+    if (!result) return "";
+    const std::string& name = result->site->name;
+    if (result->kind == "temple") {
+        return result->blessed > 0
+                       ? name + " blesses " + std::to_string(result->blessed) + " of your armies."
+                       : name + " has blessed them already.";
+    }
+    if (result->kind == "no hero") return name + " can only be searched by a hero.";
+    if (result->kind == "killed") {
+        return "Your hero is slain in " + name + " by a " +
+               (result->monster ? result->monster->name : "guardian") + "!";
+    }
+    if (result->kind == "gold") return name + " yields " + std::to_string(result->gold) + " gold!";
+    if (result->kind == "item") {
+        return "Your hero finds the " +
+               (result->item ? result->item->name : std::string("treasure")) + " in " + name + "!";
+    }
+    if (result->kind == "allies") {
+        return std::to_string(result->armies.size()) + " " + result->type->name + " join you at " +
+               name + "!";
+    }
+    if (result->kind == "sage") return "A sage dwells in " + name + ".";
+    return name + " holds nothing.";
+}
+
+}  // namespace w2

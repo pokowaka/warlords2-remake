@@ -14,6 +14,7 @@
 
 #include <gtest/gtest.h>
 
+#include "test/opponents.hpp"
 #include "test/test_helpers.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
@@ -57,7 +58,7 @@ TEST(ModernAiTest, PersonalityProfilesFogPathblockingAndAlliedDiplomacy) {
         auto game = SetupGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
         Side* side0 = game->map->Side(0);
         side0->computer = true;
-        side0->classic_ai = false;
+        ai::SetSideClassicAi(*game, *side0, false);
         int unseen_x = kNone;
         int unseen_y = kNone;
         for (int y = 5; y < game->map->height - 5 && unseen_x == kNone; ++y) {
@@ -109,7 +110,7 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
         auto game = SetupGame("ERYTHEA", SeedWith(1, {{"hiddenMap", 1}, {"viewEnemies", 0}}));
         Side& side0 = game->map->sides[0];
         side0.computer = true;
-        side0.classic_ai = false;
+        ai::SetSideClassicAi(*game, side0, false);
         ai::belief::Update(*game, side0);
         const SideBelief& belief = ai::belief::Ensure(side0);
         for (const City* city : belief.visible_cities) {
@@ -130,7 +131,7 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
         ai::ml::PolicyNetwork net;
         auto game = SetupGame("TUTORIA", Seed(1));
         Side& side0 = game->map->sides[0];
-        side0.classic_ai = false;
+        ai::SetSideClassicAi(*game, side0, false);
         ai::belief::Update(*game, side0);
         auto ctx = ai::ml::BuildContext(*game, side0);
         float board_val = net.EvaluateValue(ctx, ai::ml::BuildCriticFeatures(*game, side0));
@@ -154,7 +155,7 @@ TEST(ModernAiTest, SideBeliefPolicyRoundTripAndMultiTurnPlay) {
         }
         auto game = SetupGame("TUTORIA", opts);
         for (auto& side : game->map->sides) {
-            if (side.in_use) side.classic_ai = false;
+            if (side.in_use) ai::SetSideClassicAi(*game, side, false);
         }
         Side* cur = game::Begin(*game);
         int turns_played = 0;
@@ -188,7 +189,7 @@ TEST(ModernAiTest, PartialVisibilityFrontiersGradientsPotentialAndSampling) {
     Game& game = *game_ptr;
     Side& side7 = game.map->sides[7];
     side7.computer = true;
-    side7.classic_ai = false;
+    ai::SetSideClassicAi(game, side7, false);
 
     City* target_neutral = nullptr;
     for (auto& city : game.map->cities) {
@@ -285,7 +286,6 @@ TEST(ModernAiTest, PartialVisibilityFrontiersGradientsPotentialAndSampling) {
     side7.gold = 200;
     for (Army* army : game::SideArmies(game, side7)) {
         army->moves = army->max_moves;
-        army->ai_moved = false;
     }
     ai::ml::RolloutSampler rec_sampler;
     ai::ml::TurnStepRecord rec_turn;
@@ -360,20 +360,20 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
     {
         ScopedDefaultAi default_ai_guard(true);
         auto classic_game = SetupGame("ERYTHEA", Seed(13));
-        EXPECT_TRUE(classic_game->sides[0]->classic_ai);
+        EXPECT_TRUE(classic_game->sides[0]->IsClassicAi());
         std::string classic_json = save::Encode(*classic_game);
 
         ai::SetDefaultClassicAi(false);
         auto modern_game = SetupGame("ERYTHEA", Seed(13));
-        EXPECT_FALSE(modern_game->sides[0]->classic_ai);
+        EXPECT_FALSE(modern_game->sides[0]->IsClassicAi());
         std::string modern_json = save::Encode(*modern_game);
 
         auto decoded_classic = *save::Decode(classic_json, kData);
-        EXPECT_TRUE(decoded_classic->sides[0]->classic_ai);
+        EXPECT_TRUE(decoded_classic->sides[0]->IsClassicAi());
 
         ai::SetDefaultClassicAi(true);
         auto decoded_modern = *save::Decode(modern_json, kData);
-        EXPECT_FALSE(decoded_modern->sides[0]->classic_ai);
+        EXPECT_FALSE(decoded_modern->sides[0]->IsClassicAi());
 
         for (Side* side : decoded_modern->sides) side->computer = true;
         Side* cur = game::Begin(*decoded_modern);
@@ -383,7 +383,9 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
         bool positions_valid = true;
         while (cur != nullptr && !decoded_modern->over && decoded_modern->turn <= 6) {
             bool use_classic = decoded_modern->turn % 2 == 0;
-            for (auto& side : decoded_modern->map->sides) side.classic_ai = use_classic;
+            for (auto& side : decoded_modern->map->sides) {
+                ai::SetSideClassicAi(*decoded_modern, side, use_classic);
+            }
             ai::PlayTurn(*decoded_modern, *cur);
             ++switched_turns;
             std::map<int, int> per_tile;
@@ -434,8 +436,8 @@ TEST(ModernAiTest, SpectatorVisibilityEngineSwitchingAndCroppedSmallMaps) {
         EXPECT_EQ(scn::TerrainAt(*small_game->map, 0, 0), movement::kWater);
         EXPECT_TRUE(game::Seen(*small_game, small_game->sides[0]->index, 0, 0));
 
-        small_game->sides[0]->classic_ai = false;
-        small_game->sides[1]->classic_ai = true;
+        ai::SetSideClassicAi(*small_game, *small_game->sides[0], false);
+        ai::SetSideClassicAi(*small_game, *small_game->sides[1], true);
         Side* cur = game::Begin(*small_game);
         while (cur != nullptr && !small_game->over && !small_game->won && small_game->turn <= 10) {
             if (cur->alive) ai::PlayTurn(*small_game, *cur);
@@ -565,6 +567,26 @@ TEST(ModernAiTest, PolicyNetworkWeightsLegacyMigrationAndTemperaturePrior) {
         if (ml::SelectFromLogits(utilities, &samp, nullptr, &log_mults) == 0) ++picks0;
     }
     EXPECT_TRUE(picks0 > 880 && picks0 < 1120);
+}
+
+TEST(ModernAiTest, RaiderAndFrozenComputerPlayerStrategiesExecutePolymorphically) {
+    ai::ml::PolicyNetwork frozen_net;
+    EXPECT_TRUE(frozen_net.LoadJson("cpp/ai_weights.json").ok());
+
+    GameOpts opts = Seed(21);
+    for (int i = 0; i < 8; ++i) opts.sides[i].computer = true;
+    auto game = SetupGame("TUTORIA", opts);
+    opponents::InstallOpponent(*game, *game->sides[0], opponents::Kind::kRaider);
+    opponents::InstallOpponent(*game, *game->sides[1], opponents::Kind::kFrozen, &frozen_net);
+    EXPECT_TRUE(game->sides[0]->IsClassicAi());
+    EXPECT_FALSE(game->sides[1]->IsClassicAi());
+
+    Side* cur = game::Begin(*game);
+    while (cur != nullptr && !game->over && game->turn <= 3) {
+        cur->computer_player->PlayTurn(*game, *cur);
+        cur = game::EndTurn(*game);
+    }
+    EXPECT_FALSE(game->sides[1]->computer_player->Thoughts().empty());
 }
 
 }  // namespace

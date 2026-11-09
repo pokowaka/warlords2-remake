@@ -7,8 +7,11 @@
 #include <mutex>
 #include <queue>
 
+#include "absl/base/no_destructor.h"
+
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
+#include "warlords/ai/classic_ai_player.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/moves.hpp"
 #include "warlords/armytype.hpp"
@@ -127,24 +130,57 @@ AIData NewData() {
 }
 
 AIData& Data(Game& game, Side& side) {
-    if (!side.ai) side.ai = std::make_shared<AIData>(NewData());
-    return *side.ai;
+    return ClassicAiPlayer::EnsureOn(game, side).MutableData();
 }
 
 AIData& Data(Game& game, int side_index) {
     return Data(game, *game.map->Side(side_index));
 }
 
-// The shared neighbour table: each city's six nearest cities by land, with
-// the distance to each. It is built once, as the game is set up, over side
-// 0's cost grid -- the cities as they are then -- and kept with the game
-// (game.ai_neighbours, city indices).
+const ClassicArmyOrder& OrderOf(const Game& game, const Army* army) {
+    static const absl::NoDestructor<ClassicArmyOrder> kDefault;
+    if (!army || !game.map || army->owner < 0 || army->owner > 7) return *kDefault;
+    const ClassicAiPlayer* player = ClassicAiPlayer::FindOn(game.map->sides[army->owner]);
+    return player ? player->OrderFor(army->id) : *kDefault;
+}
+
+ClassicArmyOrder& MutableOrderOf(Game& game, Army* army) {
+    static ClassicArmyOrder fallback_scratch;
+    if (!army || !game.map || army->owner < 0 || army->owner > 7) {
+        fallback_scratch = ClassicArmyOrder{};
+        return fallback_scratch;
+    }
+    return ClassicAiPlayer::EnsureOn(game, game.map->sides[army->owner]).MutableOrderFor(army->id);
+}
+
+void ClearOrder(Game& game, Army* army) {
+    if (!army || !game.map || army->owner < 0 || army->owner > 7) return;
+    if (ClassicAiPlayer* player = ClassicAiPlayer::FindMutableOn(game.map->sides[army->owner])) {
+        player->ClearOrder(army->id);
+    }
+}
 
 std::pair<std::vector<City*>, std::vector<int>> FindNeighbours(Game& game, const City& city) {
-    if (!game.ai_neighbours) game.ai_neighbours = BuildNeighbours(game);
+    std::shared_ptr<Neighbours> table;
+    for (const auto& side : game.map->sides) {
+        if (const ClassicAiPlayer* player = ClassicAiPlayer::FindOn(side)) {
+            if (player->NeighbourTable()) {
+                table = player->NeighbourTable();
+                break;
+            }
+        }
+    }
+    if (!table) {
+        table = BuildNeighbours(game);
+        for (auto& side : game.map->sides) {
+            if (ClassicAiPlayer* player = ClassicAiPlayer::FindMutableOn(side)) {
+                player->SetNeighbourTable(table);
+            }
+        }
+    }
     std::pair<std::vector<City*>, std::vector<int>> out;
-    if (city.index >= 0 && city.index < static_cast<int>(game.ai_neighbours->by_city.size())) {
-        const auto& entry = game.ai_neighbours->by_city[city.index];
+    if (city.index >= 0 && city.index < static_cast<int>(table->by_city.size())) {
+        const auto& entry = table->by_city[city.index];
         for (int city_index : entry.cities) out.first.push_back(&game.map->cities[city_index]);
         out.second = entry.dist;
     }
@@ -290,16 +326,17 @@ std::optional<Sel> Order(Game& game, const std::vector<Army*>& list, int order, 
     sel.leader = best;
     int group_number = sel.armies.size() > 1 ? NewGroup(game, best->owner) : 0;
     for (Army* army : sel.armies) {
-        army->ai_order = order;
-        army->ai_dest = dest;
+        ClassicArmyOrder& ord = MutableOrderOf(game, army);
+        ord.order = order;
+        ord.dest = dest;
         army->group = group_number;
         SetTarget(game, army, order, dest);
-        army->ai_neutral = false;
-        army->ai_explore = false;
+        ord.neutral = false;
+        ord.explore = false;
         if (flags) {
-            if (Has(flags, 0x80)) army->ai_neutral = true;
-            if (Has(flags, 0x20)) army->ai_explore = true;
-            if (Has(flags, 0x100)) army->ai_party = true;
+            if (Has(flags, 0x80)) ord.neutral = true;
+            if (Has(flags, 0x20)) ord.explore = true;
+            if (Has(flags, 0x100)) ord.party = true;
         }
     }
     Refresh(game, sel);
@@ -346,7 +383,7 @@ Sel SelectStackOf(Game& game, Army* army) {
     for (Army* other : OnTile(game, army->owner, army->x, army->y)) {
         if (other == army || (army->group != 0 && other->group == army->group)) {
             list.push_back(other);
-            other->ai_moved = true;
+            MutableOrderOf(game, other).moved = true;
         }
     }
     Sel sel = Select(game, list);
@@ -371,8 +408,8 @@ std::vector<Army*> CollectOrdered(const Game& game, int side_index, int x, int y
     std::vector<Army*> out;
     for (Army* army : OnTile(game, side_index, x, y)) {
         if (static_cast<int>(out.size()) >= rules::kMaxStack) break;
-        if (army->ai_group == group && army->ai_order == order &&
-            (!min_max || army->max_moves >= min_max))
+        const ClassicArmyOrder& ord = OrderOf(game, army);
+        if (ord.group == group && ord.order == order && (!min_max || army->max_moves >= min_max))
             out.push_back(army);
     }
     return out;
@@ -566,8 +603,8 @@ int MoveTo(Game& game, Sel& sel, int target_x, int target_y, bool keep) {
         } else if (code == 5) {
             City* city = CityAt(game, target_x, target_y);
             if (city && Standing(*city)) {
-                City* dest =
-                        (lead && lead->ai_dest != kNone) ? game.map->City(lead->ai_dest) : nullptr;
+                int lead_dest = lead ? OrderOf(game, lead).dest : kNone;
+                City* dest = lead_dest != kNone ? game.map->City(lead_dest) : nullptr;
                 if (!dest) dest = city;
                 auto [walk_on, next_x, next_y] = AttackCity(game, sel, dest, attack_x, attack_y);
                 again = walk_on;
@@ -577,13 +614,13 @@ int MoveTo(Game& game, Sel& sel, int target_x, int target_y, bool keep) {
                 }
             }
         } else if (code == 4) {
-            if (lead && lead->ai_order == kOrderSite && sel.hero) {
+            if (lead && OrderOf(game, lead).order == kOrderSite && sel.hero) {
                 Site* site = SiteAt(game, sel.hero->x, sel.hero->y);
                 if (site) moves::SearchSite(game, &sel, sel.hero, *site);
             }
             for (Army* army : sel.armies) {
-                ClearOrder(army);
-                army->ai_group = 0;
+                ClearOrder(game, army);
+                MutableOrderOf(game, army).group = 0;
             }
         } else if (code == 3) {
             Fight(game, sel, attack_x, attack_y);
@@ -611,8 +648,9 @@ std::tuple<bool, int, int> AttackCity(Game& game, Sel& sel, City* dest, int atta
             pick = Retarget(game, sel, dest, attack_x, attack_y);
         if (pick != dest) {
             for (Army* army : sel.armies) {
-                army->ai_order = kOrderCity;
-                army->ai_dest = pick->index;
+                ClassicArmyOrder& ord = MutableOrderOf(game, army);
+                ord.order = kOrderCity;
+                ord.dest = pick->index;
             }
             return {true, pick->x, pick->y};
         }
@@ -621,7 +659,7 @@ std::tuple<bool, int, int> AttackCity(Game& game, Sel& sel, City* dest, int atta
         if (city && city->owner_index == side_index)
             groups::EarlyVengeance(game, side_index, *city, previous_owner);
     }
-    for (Army* army : sel.armies) ClearOrder(army);
+    for (Army* army : sel.armies) ClearOrder(game, army);
     return {false, kNone, kNone};
 }
 

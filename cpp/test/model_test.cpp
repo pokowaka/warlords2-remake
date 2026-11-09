@@ -22,6 +22,7 @@
 #include "warlords/model/ids.hpp"
 #include "warlords/model/quest.hpp"
 #include "warlords/model/turn_schedule.hpp"
+#include "warlords/move.hpp"
 #include "warlords/quest.hpp"
 #include "warlords/scn.hpp"
 #include "warlords/scn_format.hpp"
@@ -408,6 +409,39 @@ TEST(QuestAndProducedModelTest, VariantTargetsResolutionAndPerGameBugs) {
     game.RulesBugs().hero_experience_reads_attacker_types = false;
     EXPECT_FALSE(game.RulesBugs().hero_experience_reads_attacker_types);
     EXPECT_TRUE(other_game.RulesBugs().hero_experience_reads_attacker_types);
+}
+
+TEST(Phase4ArchitectureTest, TurnReportPathfinderAndComputerPlayerStrategy) {
+    game::NewGameOptions game_opts;
+    game_opts.seed = 17;
+    auto created_game = game::NewGame("original", "ERYTHEA", game_opts);
+    ASSERT_TRUE(created_game.ok()) << created_game.status();
+    Game& game = **created_game;
+
+    for (const Side* side : game.sides) {
+        ASSERT_NE(side->computer_player, nullptr);
+        EXPECT_TRUE(side->IsClassicAi());
+    }
+
+    AttitudeBreakdown attitude =
+            game.sides[1]->computer_player->EvaluateProposal(game, SideId(1), SideId(0));
+    EXPECT_EQ(attitude.from_side, 1);
+    EXPECT_EQ(attitude.to_side, 0);
+
+    Side* current = game::Begin(game);
+    ASSERT_NE(current, nullptr);
+    TurnReport& news = game.TurnNews(SideId(current->index));
+    EXPECT_NE(news.hero_offer, nullptr);
+
+    Pathfinder& pathfinder = game.GetPathfinder();
+    auto& grid0 = pathfinder.GridFor(game, current->index);
+    EXPECT_FALSE(grid0.empty());
+    pathfinder.InvalidateSide(SideId(current->index));
+    pathfinder.Invalidate();
+
+    auto saved_ai = game.sides[1]->computer_player->SaveState();
+    EXPECT_TRUE(saved_ai.is_object());
+    EXPECT_TRUE(game.sides[1]->computer_player->LoadState(saved_ai, game).ok());
 }
 
 }  // namespace

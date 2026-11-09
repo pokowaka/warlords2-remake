@@ -12,9 +12,11 @@
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
+#include "warlords/ai/classic_ai_player.hpp"
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/modern_internal.hpp"
+#include "warlords/ai/modern_ml_player.hpp"
 #include "warlords/ai/personality.hpp"
 #include "warlords/combat.hpp"
 #include "warlords/diplomacy.hpp"
@@ -281,9 +283,14 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         }
 
         int grudge = 0;
-        if (side.ai) {
-            grudge = side.ai->cities_lost[other_idx] * 8 + side.ai->heroes_killed[other_idx] * 6 +
-                     side.ai->lost[other_idx] * 2;
+        if (const ModernMlPlayer* modern_player = ModernMlPlayer::FindOn(side)) {
+            const ai::BattleGrudge& battle_grudge = modern_player->Grudge();
+            grudge = battle_grudge.cities_lost[other_idx] * 8 +
+                     battle_grudge.heroes_killed[other_idx] * 6 + battle_grudge.lost[other_idx] * 2;
+        } else if (const ClassicAiPlayer* classic_player = ClassicAiPlayer::FindOn(side)) {
+            const AIData& data = classic_player->Data();
+            grudge = data.cities_lost[other_idx] * 8 + data.heroes_killed[other_idx] * 6 +
+                     data.lost[other_idx] * 2;
         }
 
         int other_wars = wars_committed - (cur_st == diplomacy::kWar ? 1 : 0);
@@ -367,11 +374,14 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         }
 
         const char* stance_names[4] = {"ALLIED", "PEACE", "UNEASY", "WAR"};
-        side.ai_thoughts.push_back(AIThought{
-            "Diplomacy", side.name, other.name, side.cap_x, side.cap_y, other.cap_x, other.cap_y,
-            best_logit, 0.0F, false,
-            absl::StrFormat("Stance -> %s (Attitude %+d, Trust %+d): %s", stance_names[best_choice],
-                            att.total_score, att.trust_score, att.stance_summary)});
+        if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+            modern_player->PushThought(
+                    AIThought{"Diplomacy", side.name, other.name, side.cap_x, side.cap_y,
+                              other.cap_x, other.cap_y, best_logit, 0.0F, false,
+                              absl::StrFormat("Stance -> %s (Attitude %+d, Trust %+d): %s",
+                                              stance_names[best_choice], att.total_score,
+                                              att.trust_score, att.stance_summary)});
+        }
 
         if (!other.computer && other.missives.empty() && game.turn > 1 &&
             game.turn - other.last_missive_turn[our_side] >= 4) {

@@ -131,7 +131,8 @@ struct Reports : kit::Modal {
         states[kDone] = w2::uidata::kNormal;
         hidden.clear();
         if (shown_report == report::kProduction) {
-            int count = static_cast<int>(g_app.player->produced.size());
+            int count = static_cast<int>(
+                    g_app.g->TurnNews(w2::SideId(g_app.player->index)).produced.size());
             states[kUp] = top_row > 0 ? w2::uidata::kNormal : w2::uidata::kDisabled;
             states[kPageUp] = states[kUp];
             states[kDown] = top_row + kRows < count ? w2::uidata::kNormal : w2::uidata::kDisabled;
@@ -142,13 +143,14 @@ struct Reports : kit::Modal {
     }
     /** @brief Scrolls the Production list by `rows`, kept within the list. */
     void Scroll(int rows) {
-        int count = static_cast<int>(g_app.player->produced.size());
+        int count = static_cast<int>(
+                g_app.g->TurnNews(w2::SideId(g_app.player->index)).produced.size());
         top_row = std::max(0, std::min(std::max(0, count - kRows), top_row + rows));
         Refresh();
     }
     /** @brief The Production list: a page of what was built or sent this turn. */
     void DrawProduction() {
-        const auto& list = g_app.player->produced;
+        const auto& list = g_app.g->TurnNews(w2::SideId(g_app.player->index)).produced;
         const Font& font = kit::GetFont(2);
         for (int i = 0; i < kRows; i++) {
             if (top_row + i >= static_cast<int>(list.size())) break;

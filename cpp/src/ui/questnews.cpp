@@ -112,9 +112,11 @@ void Show(std::shared_ptr<w2::QuestResult> news, kit::Done after) {
  */
 void Poll() {
     w2::Side* side = g_app.player;
-    if (!side || side->computer || !side->quest_news) return;
-    auto news = side->quest_news;
-    side->quest_news.reset();
+    if (!g_app.g || !side || side->computer) return;
+    auto& quest_news = g_app.g->TurnNews(w2::SideId(side->index)).quest_news;
+    if (!quest_news) return;
+    auto news = quest_news;
+    quest_news.reset();
     Show(news);
 }
 

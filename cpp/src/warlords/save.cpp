@@ -16,8 +16,6 @@
 
 #include "nlohmann/json.hpp"
 #include "util/util.hpp"
-#include "warlords/ai/belief.hpp"
-#include "warlords/ai/core.hpp"
 #include "warlords/armytype.hpp"
 #include "warlords/game.hpp"
 #include "warlords/move.hpp"
@@ -111,23 +109,6 @@ absl::StatusOr<std::vector<uint8_t>> HexToBytes(std::string_view hex_str) {
     return out;
 }
 
-/** @brief Serializes an integer-to-integer map as a JSON object keyed by stringified ints. */
-Json IntMap(const std::map<int, int>& map_in) {
-    Json obj = Json::object();
-    for (const auto& [key, val] : map_in) obj[std::to_string(key)] = val;
-    return obj;
-}
-
-/** @brief Deserializes a JSON object with integer string keys into `std::map<int, int>`. */
-std::map<int, int> ReadIntMap(const Json& json_obj) {
-    std::map<int, int> out;
-    if (!json_obj.is_object()) return out;
-    for (const auto& [key, val] : json_obj.items()) {
-        if (auto parsed_key = ToInt(key)) out[static_cast<int>(*parsed_key)] = IntOf(val);
-    }
-    return out;
-}
-
 /** @brief Serializes a fixed-size array of integral/boolean values into a JSON array. */
 template <typename T, size_t N>
 Json IntArray(const std::array<T, N>& arr) {
@@ -195,183 +176,6 @@ std::vector<uint8_t> UnpackMask(const Json& runs, size_t size) {
         val = 1 - val;
     }
     return mask;
-}
-
-/** @brief Serializes classic AI per-side state (`AIData`) to a JSON object. */
-Json SaveAi(const AIData& data, const std::map<const Army*, int>& ids) {
-    Json obj = Json::object();
-    obj["turns"] = data.turns;
-    obj["own"] = data.own;
-    obj["enemy"] = data.enemy;
-    obj["neutral"] = data.neutral;
-    obj["unseen"] = data.unseen;
-    obj["rebuildLimit"] = data.rebuild_limit;
-    obj["bold"] = data.bold;
-    obj["heroes"] = data.heroes;
-    obj["rebuildType"] = data.rebuild_type;
-    obj["rebuildTypeRich"] = data.rebuild_type_rich;
-    obj["bought"] = data.bought;
-    obj["dieHuman"] = data.die_human;
-    obj["dieLord"] = data.die_lord;
-    obj["dieKnight"] = data.die_knight;
-    obj["dieWarlord"] = data.die_warlord;
-    obj["sims"] = data.sims;
-    obj["searchers"] = data.searchers;
-    obj["explorers"] = data.explorers;
-    obj["raze"] = data.raze;
-    obj["sack"] = data.sack;
-    obj["pillage"] = data.pillage;
-    obj["perCity"] = data.per_city;
-    obj["bonusHuman"] = data.bonus_human;
-    obj["bonusWarlord"] = data.bonus_warlord;
-    obj["bonusLord"] = data.bonus_lord;
-    obj["bonusKnight"] = data.bonus_knight;
-    obj["poor"] = data.poor;
-    obj["solidarity"] = data.solidarity;
-    obj["minStrength"] = data.min_strength;
-    obj["flyCities"] = data.fly_cities;
-    obj["strongCities"] = data.strong_cities;
-    obj["fastCities"] = data.fast_cities;
-    obj["early"] = data.early;
-    obj["humanShare"] = data.human_share;
-    obj["questCity"] = OptInt(data.quest_city);
-    obj["cautious"] = data.cautious;
-    obj["questsDone"] = data.quests_done;
-    obj["itemsPassed"] = data.items_passed;
-    obj["maxGroups"] = data.max_groups;
-    obj["roles"] = IntMap(data.roles);
-    obj["held"] = IntMap(data.held);
-    obj["flags"] = IntMap(data.flags);
-    obj["garrison"] = IntMap(data.garrison);
-    obj["keep"] = IntMap(data.keep);
-    obj["heroesKilled"] = IntArray(data.heroes_killed);
-    obj["armiesKilled"] = IntArray(data.armies_killed);
-    obj["battles"] = IntArray(data.battles);
-    obj["lost"] = IntArray(data.lost);
-    obj["cityBattles"] = IntArray(data.city_battles);
-    obj["citiesLost"] = IntArray(data.cities_lost);
-    if (data.cursor) {
-        obj["cursor"] = Json::array({data.cursor->first, data.cursor->second});
-    }
-    Json groups = Json::array();
-    for (int group_idx = 1; group_idx <= ai::core::kMaxGroups; group_idx++) {
-        const Group& grp = *data.groups[group_idx];
-        Json grp_json = Json::object();
-        grp_json["active"] = grp.active;
-        grp_json["target"] = OptInt(grp.target);
-        grp_json["rally"] = OptInt(grp.rally);
-        grp_json["members"] = IntMap(grp.members);
-        grp_json["cities"] = IntMap(grp.cities);
-        grp_json["dist"] = IntMap(grp.dist);
-        grp_json["bonus"] = IntMap(grp.bonus);
-        grp_json["taken"] = IntMap(grp.taken);
-        Json staged = Json::object();
-        for (const auto& [slot_key, army] : grp.staged) {
-            auto found_it = ids.find(army);
-            if (army && found_it != ids.end()) {
-                staged[std::to_string(slot_key)] = found_it->second;
-            }
-        }
-        grp_json["staged"] = std::move(staged);
-        grp_json["size"] = grp.size;
-        grp_json["flags"] = grp.flags;
-        groups.push_back(std::move(grp_json));
-    }
-    obj["groups"] = std::move(groups);
-    return obj;
-}
-
-/** @brief Deserializes classic AI per-side state (`AIData`) from `obj`. */
-void LoadAi(AIData& data, const Json& obj, const std::vector<Army*>& armies) {
-    auto read_int = [&](std::string_view key, int& target) {
-        if (HasField(obj, key)) target = IntField(obj, key, target);
-    };
-    read_int("turns", data.turns);
-    read_int("own", data.own);
-    read_int("enemy", data.enemy);
-    read_int("neutral", data.neutral);
-    read_int("unseen", data.unseen);
-    read_int("rebuildLimit", data.rebuild_limit);
-    data.bold = BoolField(obj, "bold");
-    read_int("heroes", data.heroes);
-    read_int("rebuildType", data.rebuild_type);
-    read_int("rebuildTypeRich", data.rebuild_type_rich);
-    read_int("bought", data.bought);
-    read_int("dieHuman", data.die_human);
-    read_int("dieLord", data.die_lord);
-    read_int("dieKnight", data.die_knight);
-    read_int("dieWarlord", data.die_warlord);
-    read_int("sims", data.sims);
-    read_int("searchers", data.searchers);
-    read_int("explorers", data.explorers);
-    read_int("raze", data.raze);
-    read_int("sack", data.sack);
-    read_int("pillage", data.pillage);
-    read_int("perCity", data.per_city);
-    read_int("bonusHuman", data.bonus_human);
-    read_int("bonusWarlord", data.bonus_warlord);
-    read_int("bonusLord", data.bonus_lord);
-    read_int("bonusKnight", data.bonus_knight);
-    read_int("poor", data.poor);
-    read_int("solidarity", data.solidarity);
-    read_int("minStrength", data.min_strength);
-    read_int("flyCities", data.fly_cities);
-    read_int("strongCities", data.strong_cities);
-    read_int("fastCities", data.fast_cities);
-    read_int("early", data.early);
-    read_int("humanShare", data.human_share);
-    data.quest_city = OptField(obj, "questCity");
-    read_int("cautious", data.cautious);
-    read_int("questsDone", data.quests_done);
-    read_int("itemsPassed", data.items_passed);
-    read_int("maxGroups", data.max_groups);
-    data.roles = ReadIntMap(Field(obj, "roles"));
-    data.held = ReadIntMap(Field(obj, "held"));
-    data.flags = ReadIntMap(Field(obj, "flags"));
-    data.garrison = ReadIntMap(Field(obj, "garrison"));
-    data.keep = ReadIntMap(Field(obj, "keep"));
-    ReadIntArray(Field(obj, "heroesKilled"), data.heroes_killed);
-    ReadIntArray(Field(obj, "armiesKilled"), data.armies_killed);
-    ReadIntArray(Field(obj, "battles"), data.battles);
-    ReadIntArray(Field(obj, "lost"), data.lost);
-    ReadIntArray(Field(obj, "cityBattles"), data.city_battles);
-    ReadIntArray(Field(obj, "citiesLost"), data.cities_lost);
-    const Json& cursor = Field(obj, "cursor");
-    if (cursor.is_array() && cursor.size() >= 2) {
-        data.cursor = std::make_pair(IntOf(cursor[0]), IntOf(cursor[1]));
-    } else {
-        data.cursor.reset();
-    }
-    const Json& groups = Field(obj, "groups");
-    for (int group_idx = 1; group_idx <= ai::core::kMaxGroups; group_idx++) {
-        auto grp = ai::core::EmptyGroup();
-        size_t idx = static_cast<size_t>(group_idx - 1);
-        if (groups.is_array() && idx < groups.size() && groups[idx].is_object()) {
-            const Json& grp_json = groups[idx];
-            grp->active = IntField(grp_json, "active");
-            grp->target = OptField(grp_json, "target");
-            grp->rally = OptField(grp_json, "rally");
-            grp->members = ReadIntMap(Field(grp_json, "members"));
-            grp->cities = ReadIntMap(Field(grp_json, "cities"));
-            grp->dist = ReadIntMap(Field(grp_json, "dist"));
-            grp->bonus = ReadIntMap(Field(grp_json, "bonus"));
-            grp->taken = ReadIntMap(Field(grp_json, "taken"));
-            const Json& staged = Field(grp_json, "staged");
-            if (staged.is_object()) {
-                for (const auto& [slot_key, val] : staged.items()) {
-                    int army_id = IntOf(val, -1);
-                    auto slot_idx = ToInt(slot_key);
-                    if (slot_idx && army_id >= 0 && army_id < static_cast<int>(armies.size())) {
-                        grp->staged[static_cast<int>(*slot_idx)] =
-                                armies[static_cast<size_t>(army_id)];
-                    }
-                }
-            }
-            grp->size = IntField(grp_json, "size");
-            grp->flags = IntField(grp_json, "flags");
-        }
-        data.groups[group_idx] = grp;
-    }
 }
 
 /** @brief Serializes a city production `Slot` to JSON. */
@@ -446,12 +250,6 @@ std::string Encode(const Game& game) {
             obj["transit"] = std::move(trn);
         }
         if (army->returning) obj["returning"] = true;
-        if (army->ai_order) obj["aiOrder"] = army->ai_order;
-        if (army->ai_dest != kNone) obj["aiDest"] = army->ai_dest;
-        if (army->ai_group) obj["aiGroup"] = army->ai_group;
-        if (army->ai_explore) obj["aiExplore"] = true;
-        if (army->ai_neutral) obj["aiNeutral"] = true;
-        if (army->ai_party) obj["aiParty"] = true;
         armies.push_back(std::move(obj));
     }
 
@@ -478,12 +276,14 @@ std::string Encode(const Game& game) {
         obj["upkeepTotal"] = side->upkeep_total;
         obj["aiSolidarity"] = side->ai_solidarity;
         obj["card"] = side->card;
-        if (!side->classic_ai) obj["classicAi"] = false;
+        if (!side->IsClassicAi()) obj["classicAi"] = false;
         Json adv = Json::object();
         adv["dir"] = side->advisor.dir;
         adv["mark"] = side->advisor.mark;
         obj["advisor"] = std::move(adv);
-        if (side->ai) obj["ai"] = SaveAi(*side->ai, ids);
+        if (side->computer_player) {
+            obj["computerPlayer"] = side->computer_player->SaveState();
+        }
         if (side->quest) {
             const Quest& quest = *side->quest;
             Json quest_json = Json::object();
@@ -669,21 +469,6 @@ std::string Encode(const Game& game) {
         for (int val : game.turn_schedule.Order()) order.push_back(val);
         out["turnOrder"] = std::move(order);
         out["orderAt"] = game.turn_schedule.Cursor();
-        if (game.ai_neighbours) {
-            Json nbrs = Json::object();
-            for (size_t i = 0; i < game.ai_neighbours->by_city.size(); i++) {
-                const auto& entry = game.ai_neighbours->by_city[i];
-                Json obj = Json::object();
-                Json city_arr = Json::array();
-                Json dist_arr = Json::array();
-                for (int city_idx : entry.cities) city_arr.push_back(city_idx);
-                for (int dist : entry.dist) dist_arr.push_back(dist);
-                obj["cities"] = std::move(city_arr);
-                obj["dist"] = std::move(dist_arr);
-                nbrs[std::to_string(i)] = std::move(obj);
-            }
-            out["aiNeighbours"] = std::move(nbrs);
-        }
     }
     out["won"] = game.won;
     out["over"] = game.over;
@@ -735,7 +520,8 @@ std::string Encode(const Game& game) {
 }
 
 absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
-                                             const std::filesystem::path& data_dir) {
+                                             const std::filesystem::path& data_dir,
+                                             const ComputerPlayerFactory& player_factory) {
     Json state = Json::parse(text, nullptr, /*allow_exceptions=*/false);
     if (state.is_discarded() || !state.is_object()) {
         return absl::InvalidArgumentError(
@@ -802,30 +588,6 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             loaded_order[i] = IntOf(turn_order[i]);
         }
         game.turn_schedule.SetOrder(loaded_order);
-    }
-    const Json& ai_nbrs = Field(state, "aiNeighbours");
-    if (ai_nbrs.is_object()) {
-        auto nbrs = std::make_shared<Neighbours>();
-        nbrs->by_city.resize(game.map->cities.size());
-        for (const auto& [key, entry] : ai_nbrs.items()) {
-            auto parsed_idx = ToInt(key);
-            if (!parsed_idx || *parsed_idx < 0) continue;
-            auto city_idx = static_cast<size_t>(*parsed_idx);
-            if (city_idx >= nbrs->by_city.size()) continue;
-            const Json& entry_cities = Field(entry, "cities");
-            if (entry_cities.is_array()) {
-                for (const auto& val : entry_cities) {
-                    nbrs->by_city[city_idx].cities.push_back(IntOf(val));
-                }
-            }
-            const Json& entry_dist = Field(entry, "dist");
-            if (entry_dist.is_array()) {
-                for (const auto& val : entry_dist) {
-                    nbrs->by_city[city_idx].dist.push_back(IntOf(val));
-                }
-            }
-        }
-        game.ai_neighbours = nbrs;
     }
     const Json& seed_val = Field(state, "seed");
     if (seed_val.is_number()) {
@@ -1091,12 +853,6 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
                         Transit{IntField(transit_json, "turns"), IntField(transit_json, "dest")};
             }
             army.returning = BoolField(saved, "returning");
-            army.ai_order = IntField(saved, "aiOrder");
-            army.ai_dest = HasField(saved, "aiDest") ? IntField(saved, "aiDest") : kNone;
-            army.ai_group = IntField(saved, "aiGroup");
-            army.ai_explore = BoolField(saved, "aiExplore");
-            army.ai_neutral = BoolField(saved, "aiNeutral");
-            army.ai_party = BoolField(saved, "aiParty");
             // Keep the army table in slot order; older saves without slot numbers
             // preserve their array order.
             const Json& slot_val = Field(saved, "slot");
@@ -1128,16 +884,19 @@ absl::StatusOr<std::unique_ptr<Game>> Decode(std::string_view text,
             side->upkeep_total = IntField(saved, "upkeepTotal");
             side->ai_solidarity = IntField(saved, "aiSolidarity");
             side->card = IntField(saved, "card");
-            side->classic_ai =
+            bool is_classic =
                     HasField(saved, "classicAi") ? BoolField(saved, "classicAi", true) : true;
-            ai::belief::Ensure(*side);
+            side->computer_player = player_factory
+                                            ? player_factory(is_classic, game, *side)
+                                            : CreateDefaultComputerPlayer(is_classic, game, *side);
             const Json& advisor_json = Field(saved, "advisor");
             side->advisor.dir = IntField(advisor_json, "dir");
             side->advisor.mark = IntField(advisor_json, "mark");
-            const Json& ai_json = Field(saved, "ai");
-            if (ai_json.is_object()) {
-                side->ai = std::make_shared<AIData>(ai::core::NewData());
-                LoadAi(*side->ai, ai_json, armies);
+            const Json& cp_json = HasField(saved, "computerPlayer") ? Field(saved, "computerPlayer")
+                                                                    : Field(saved, "ai");
+            if (side->computer_player && cp_json.is_object()) {
+                absl::Status load_status = side->computer_player->LoadState(cp_json, game);
+                if (!load_status.ok()) return load_status;
             }
             side->quest.reset();
             const Json& quest_json = Field(saved, "quest");

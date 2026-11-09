@@ -302,8 +302,8 @@ static void CleanStaged(Game& game, Side& side, int group_index) {
         auto entry = group->staged.find(slot);
         if (entry == group->staged.end()) continue;
         Army* army = entry->second;
-        if (army &&
-            !(Alive(game, army) && army->owner == side.index && army->ai_group == group_index))
+        if (army && !(Alive(game, army) && army->owner == side.index &&
+                      OrderOf(game, army).group == group_index))
             group->staged.erase(entry);
     }
 }
@@ -592,7 +592,8 @@ static int HitArmies(Game& game, Side& side, int group_index, std::vector<Army*>
         }
     }
     if (best_x == kNone) return 0;
-    int dest = lead->ai_order == kOrderCity ? lead->ai_dest : kNone;
+    const ClassicArmyOrder& lead_ord = OrderOf(game, lead);
+    int dest = lead_ord.order == kOrderCity ? lead_ord.dest : kNone;
     auto stack = Order(game, list, kOrderRoam, 0, 0x20);
     if (stack) {
         stack->leader->target = std::make_pair(best_x, best_y);
@@ -600,8 +601,9 @@ static int HitArmies(Game& game, Side& side, int group_index, std::vector<Army*>
         // Back to the city it was going for.
         for (Army* army : list) {
             if (Alive(game, army) && army->owner == side.index && dest != kNone) {
-                army->ai_order = kOrderCity;
-                army->ai_dest = dest;
+                ClassicArmyOrder& ord = MutableOrderOf(game, army);
+                ord.order = kOrderCity;
+                ord.dest = dest;
             }
         }
     }
@@ -647,8 +649,9 @@ static void Gather(Game& game, Side& side, int group_index) {
             auto entry = group->staged.find(slot);
             Army* lead = entry == group->staged.end() ? nullptr : entry->second;
             if (!lead) break;
-            auto list = CollectOrdered(game, side.index, lead->x, lead->y, lead->ai_group,
-                                       lead->ai_order, 0);
+            const ClassicArmyOrder& lead_ord = OrderOf(game, lead);
+            auto list = CollectOrdered(game, side.index, lead->x, lead->y, lead_ord.group,
+                                       lead_ord.order, 0);
             if (list.empty()) break;
             Sel sel = Select(game, list);
             Flood flood = FloodFrom(game, side.index, lead->x, lead->y, 15, &sel);
@@ -658,9 +661,11 @@ static void Gather(Game& game, Side& side, int group_index) {
             int result = StagedStep(game, side, group_index, list, group->target, flood, sel);
             if (result == 0) {
                 Army* last = list.empty() ? nullptr : list.back();
-                if (last && Alive(game, last) && last->ai_order == kOrderCity &&
-                    CityOrNull(game, last->ai_dest)) {
-                    March(game, side, group_index, list, CityOrNull(game, last->ai_dest));
+                if (last && Alive(game, last)) {
+                    const ClassicArmyOrder& last_ord = OrderOf(game, last);
+                    if (last_ord.order == kOrderCity && CityOrNull(game, last_ord.dest)) {
+                        March(game, side, group_index, list, CityOrNull(game, last_ord.dest));
+                    }
                 }
             } else if (result == 2) {
                 // The original goes round again for as long as a stack is found to
@@ -737,7 +742,7 @@ static bool Strike(Game& game, Side& side, int group_index) {
         }
         group->staged[free_slot] = pick;
     }
-    for (Army* army : list) army->ai_group = group_index;
+    for (Army* army : list) MutableOrderOf(game, army).group = group_index;
     March(game, side, group_index, list, best);
     return true;
 }

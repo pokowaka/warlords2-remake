@@ -16,6 +16,7 @@
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/modern_internal.hpp"
+#include "warlords/ai/modern_ml_player.hpp"
 #include "warlords/ai/personality.hpp"
 #include "warlords/combat.hpp"
 #include "warlords/diplomacy.hpp"
@@ -364,11 +365,13 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             City* best_dest = dest_cities[pick];
             game::Vector(game, *src, best_dest);
             if (best_dest) {
-                side.ai_thoughts.push_back(
-                        AIThought{"Economy", src->name, best_dest->name, src->x, src->y,
-                                  best_dest->x, best_dest->y, logits[pick], 1.0F, false,
-                                  absl::StrFormat("Vectoring %s from %s -> %s", slot.name,
-                                                  src->name, best_dest->name)});
+                if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                    modern_player->PushThought(
+                            AIThought{"Economy", src->name, best_dest->name, src->x, src->y,
+                                      best_dest->x, best_dest->y, logits[pick], 1.0F, false,
+                                      absl::StrFormat("Vectoring %s from %s -> %s", slot.name,
+                                                      src->name, best_dest->name)});
+                }
             }
         }
     }

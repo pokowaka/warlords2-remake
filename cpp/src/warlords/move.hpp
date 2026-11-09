@@ -1,10 +1,10 @@
 /**
  * @file
- * @brief Movement: the cost grid, stack modes, pathfinding and walking a path.
+ * @brief Movement domain types, `Pathfinder` cost-grid and route-cache service, and stack walking.
  *
- * This follows the original game: it builds a one-byte-per-tile cost grid for
- * the moving side, runs a wavefront over it from the destination and walks
- * the resulting path. See docs/rules.md > Movement and > Moving a stack.
+ * Models the 1993 Warlords II movement system: builds a one-byte-per-tile terrain and city
+ * cost grid per side, runs a bounded wavefront search from the destination, caches short
+ * and long routes across moves, and steps stacks along traced paths.
  */
 #pragma once
 
@@ -13,7 +13,11 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
+
+#include "absl/container/flat_hash_map.h"
+#include "absl/types/span.h"
 
 #include "warlords/types.hpp"
 
@@ -91,13 +95,10 @@ inline int ModeOf(const Game& game, const Stack& stack) {
  */
 bool IsPort(const Game& game, const City& city);
 
-/**
- * @brief The cost grid for one side, cached on the game state; Invalidate()
- * drops it.
- */
+/** @brief The cost grid for one side, cached on `game`'s `Pathfinder`. */
 std::vector<int>& Grid(Game& game, int side_index);
 
-/** @brief Drops the cached grids. Call after a city changes hands. */
+/** @brief Drops all cached per-side cost grids on `game`'s `Pathfinder`. */
 void Invalidate(Game& game);
 
 /**
@@ -157,12 +158,6 @@ struct RoadGround {
 
 /**
  * @brief The route the random map generator lays a road along.
- *
- * This is the pathfinder run as pseudo-player 14. Its terrain costs are its
- * own (`costs`, the second table in docs/rules.md > Terrain costs) and leave
- * no ground impassable but a city; it moves by land rules, crossing water
- * only at bridges and crossings; one pass of the wavefront, spreading only
- * straight; and a trace that steps diagonally only over water.
  */
 std::optional<std::vector<std::pair<int, int>>> RoadRoute(const RoadGround& ground,
                                                           const int costs[12], int width,
@@ -185,44 +180,12 @@ struct CachedRoute {
     int dy = 0;             ///< Where the route ends.
     std::vector<int> dirs;  ///< The route as compass directions.
 };
-}  // namespace w2::move
-namespace w2 {
-/** @brief The routes the pathfinder keeps. See docs/rules.md > The search. */
-struct PathCache {
-    std::array<std::optional<move::CachedRoute>, move::kCacheSlots> slots;  ///< Empty when unused.
-};
-}  // namespace w2
-namespace w2::move {
-/** @brief An empty route cache. */
-std::shared_ptr<PathCache> NewPathCache();
 
-/**
- * @brief The path from (start_x, start_y) to (dest_x, dest_y) for a stack, or
- * none if there is no route.
- *
- * A route cached for the same destination that the stack stands on is taken
- * as it is; then a step to a neighbouring tile; then the search, its route
- * kept. An empty path means "already there".
- */
+/** @brief The path from (start_x, start_y) to (dest_x, dest_y) for a stack, or none. */
 std::optional<Path> FindPath(Game& game, const Stack& stack, int start_x, int start_y, int dest_x,
                              int dest_y);
 
-/**
- * @brief The flood the computer players measure distance with.
- *
- * The pathfinder run from (x, y) to itself with flag 0x10 -- no route, no
- * cache -- which runs the wavefront for `range` sweeps at most, each
- * spreading every tile of a square that grows by one round (x, y), and stops
- * early only when a sweep spreads nothing. A cost travels across the scan in
- * one sweep but only a tile a sweep against it, so a winding route can be
- * left long, or not reached.
- *
- * @param grid_side Whose cost grid to use.
- * @param fog_side Whose hidden map shuts what it has not seen (only a
- *     human's, mid-turn).
- * @return The grid: kShut, 30000 unreached, else the cost from (x, y) plus 1
- *     (negative while the tile had still to spread).
- */
+/** @brief The flood the computer players measure distance with. */
 std::vector<int> Flood(Game& game, int grid_side, int x, int y, int range, int mode, bool woods,
                        bool hills, int fog_side);
 
@@ -255,8 +218,7 @@ struct WalkResult {
     std::optional<Attack> attack;             ///< The attack it stopped for, if any.
     std::vector<std::pair<int, int>> walked;  ///< The tiles walked over, in order.
     bool out_of_moves = false;  ///< The walk left the stack out of moves: a human's is put down.
-    /// Whether the stack was at sea as it set off, which is how the walk is shown: every step is
-    /// drawn as it set off, and only after the last is it put to sea or ashore.
+    /// Whether the stack was at sea as it set off, which is how the walk is shown.
     bool sea_before = false;
 };
 
@@ -273,3 +235,93 @@ WalkResult Walk(Game& game, const Stack& stack, const Path& path);
 WalkResult MoveTo(Game& game, const Stack& stack, int x, int y);
 
 }  // namespace w2::move
+
+namespace w2 {
+
+/**
+ * @brief Encapsulated movement cost-grid cache, wavefront pathfinder, and stack walker for a
+ * `Game`.
+ *
+ * Maintains per-side terrain/city movement-cost grids (`grids_`) that are lazily constructed
+ * from the active `Map` and invalidated when city ownership or exploration changes, alongside
+ * the 20-slot route cache (`route_slots_`) shared across turns from game start or load.
+ *
+ * Invariants:
+ * - Every cached grid in `grids_` has length `map.width * map.height` and reflects current
+ *   city ownership unless invalidated.
+ * - Slot 0 of `route_slots_` stores routes shorter than 15 tiles; slots 1..19 store longer
+ *   routes, replacing the shortest cached route when full.
+ *
+ * Not thread-safe without external synchronization; owned exclusively by `Game`.
+ */
+class Pathfinder {
+  public:
+    /** @brief Optional cached route entry stored in a route-cache slot. */
+    using OptionalRoute = std::optional<move::CachedRoute>;
+    /** @brief Read-only view over all 20 route-cache slots. */
+    using RouteSlotSpan = absl::Span<const OptionalRoute>;
+
+    Pathfinder() = default;
+    ~Pathfinder() = default;
+
+    Pathfinder(const Pathfinder&) = delete;
+    Pathfinder& operator=(const Pathfinder&) = delete;
+    Pathfinder(Pathfinder&&) noexcept = default;
+    Pathfinder& operator=(Pathfinder&&) noexcept = default;
+
+    /** @brief Drops all cached per-side cost grids while retaining `route_slots_`. */
+    void Invalidate();
+
+    /** @brief Drops only `side_id`'s cached cost grid. */
+    void InvalidateSide(SideId side_id);
+
+    /** @brief Empties all 20 cached route slots (used on fresh game setup or save reload). */
+    void ClearRouteCache();
+
+    /**
+     * @brief Returns (building if absent) the cached movement-cost grid for `side_index`
+     * (`kNone` for neutral/no-side).
+     */
+    std::vector<int>& GridFor(Game& game, int side_index);
+
+    /**
+     * @brief Computes or retrieves from `route_slots_` the path for `stack` from
+     * `(start_x, start_y)` to `(dest_x, dest_y)`.
+     */
+    std::optional<move::Path> FindPath(Game& game, const move::Stack& stack, int start_x,
+                                       int start_y, int dest_x, int dest_y);
+
+    /** @brief Previews the route `stack` would take to `(x, y)` and its current-turn reach. */
+    std::optional<move::Preview> PreviewRoute(Game& game, const move::Stack& stack, int x, int y);
+
+    /** @brief Runs a bounded `range`-sweep wavefront flood from `(x, y)` over `grid_side`'s grid.
+     */
+    std::vector<int> Flood(Game& game, int grid_side, int x, int y, int range, int mode, bool woods,
+                           bool hills, int fog_side);
+
+    /** @brief Walks `stack` along `path`, updating positions, fog of war, and encampments. */
+    move::WalkResult Walk(Game& game, const move::Stack& stack, const move::Path& path);
+
+    /** @brief Finds a route for `stack` to `(x, y)` and walks it immediately. */
+    move::WalkResult MoveTo(Game& game, const move::Stack& stack, int x, int y);
+
+    /** @brief Returns a read-only span over the 20 cached route slots. */
+    RouteSlotSpan CachedRoutes() const { return route_slots_; }
+
+  private:
+    using CostGrid = std::vector<int>;
+    using DirList = std::vector<int>;
+    using OptionalDirList = std::optional<DirList>;
+    using SideGridCache = absl::flat_hash_map<int, CostGrid>;
+    using RouteSlotArray = std::array<OptionalRoute, move::kCacheSlots>;
+
+    OptionalDirList FindMatchingCachedDirs(const Game& game, int start_x, int start_y, int dest_x,
+                                           int dest_y, int mode, int flags, int distance) const;
+    void StoreCachedRoute(int distance, int start_x, int start_y, int dest_x, int dest_y, int mode,
+                          int flags, const DirList& dirs);
+
+    SideGridCache grids_;         ///< Per-side cached cost grids (`kNone` for unowned).
+    RouteSlotArray route_slots_;  ///< Fixed 20-slot route cache mirroring the 1993 engine.
+};
+
+}  // namespace w2

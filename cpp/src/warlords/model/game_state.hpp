@@ -17,18 +17,18 @@
 #include "warlords/model/army.hpp"
 #include "warlords/model/army_registry.hpp"
 #include "warlords/model/army_type.hpp"
+#include "warlords/model/computer_player.hpp"
 #include "warlords/model/diplomacy_state.hpp"
 #include "warlords/model/fog_of_war.hpp"
 #include "warlords/model/history_types.hpp"
 #include "warlords/model/map.hpp"
+#include "warlords/model/turn_report.hpp"
 #include "warlords/model/turn_schedule.hpp"
 #include "warlords/rng.hpp"
 
 namespace w2 {
 
-struct Grids;      // move.cpp's cached cost grids
-struct PathCache;  // move.cpp's route cache
-struct Neighbours;
+class Pathfinder;
 
 /** @brief Deliberate faults in the 1993 original reproduced per `Game` instance by default. */
 struct Bugs {
@@ -71,15 +71,24 @@ struct Game {
     std::set<std::string> tutorial_seen;  ///< The tutorial's moments, as shown.
     /// By side: the hero names, and whether each is a heroine's.
     std::map<int, std::vector<std::pair<std::string, bool>>> hero_names;
-    std::shared_ptr<Grids> grids;               ///< Cached movement cost grids.
-    std::shared_ptr<Neighbours> ai_neighbours;  ///< The computer's view of who borders whom.
-    std::shared_ptr<PathCache> path_cache;      ///< Cached routes.
-    TurnSchedule turn_schedule;                 ///< Round turn-order permutation and cursor.
+    std::array<TurnReport, 8> turn_news;     ///< Transient per-side turn-opening news reports.
+    std::unique_ptr<Pathfinder> pathfinder;  ///< Owned movement cost-grid and route-cache service.
+    TurnSchedule turn_schedule;              ///< Round turn-order permutation and cursor.
 
     /** @brief Returns the per-game bug-compatibility configuration (const). */
     const Bugs& RulesBugs() const { return bugs; }
     /** @brief Returns a mutable reference to the per-game bug-compatibility configuration. */
     Bugs& RulesBugs() { return bugs; }
+
+    /** @brief Returns mutable transient turn-opening news for `side_id` (`0..7`). */
+    TurnReport& TurnNews(SideId side_id);
+    /** @brief Returns read-only transient turn-opening news for `side_id` (`0..7`). */
+    const TurnReport& TurnNews(SideId side_id) const;
+
+    /** @brief Returns the owned `Pathfinder` movement and route-cache service. */
+    Pathfinder& GetPathfinder();
+    /** @brief Returns the owned `Pathfinder` movement and route-cache service (const). */
+    const Pathfinder& GetPathfinder() const;
 
     /** @brief A new army, owned by the game but not yet in it. */
     Army* Make(const Army& army);

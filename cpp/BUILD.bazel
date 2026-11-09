@@ -44,10 +44,13 @@ cc_library(
     includes = ["src"],
     deps = [
         ":util",
+        "@abseil-cpp//absl/base:no_destructor",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
         "@abseil-cpp//absl/log:absl_check",
+        "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/types:span",
+        "@nlohmann_json//:json",
     ],
     visibility = ["//cpp:__subpackages__"],
 )
@@ -104,27 +107,30 @@ cc_library(
     visibility = ["//cpp:__subpackages__"],
 )
 
-# Layer 4: Core game rules, movement, combat, diplomacy, and AI controllers.
+# Layer 4: Core game rules, movement, combat, diplomacy, quests, sites, and turn economy.
 cc_library(
     name = "rules",
     copts = W2_COPTS,
     srcs = [
-        "src/warlords/ai.cpp",
+        "src/warlords/city_economy.cpp",
         "src/warlords/combat.cpp",
         "src/warlords/diplomacy.cpp",
         "src/warlords/game.cpp",
+        "src/warlords/game_setup.cpp",
         "src/warlords/hero.cpp",
         "src/warlords/history.cpp",
         "src/warlords/move.cpp",
+        "src/warlords/pathfinder.cpp",
         "src/warlords/quest.cpp",
         "src/warlords/report.cpp",
         "src/warlords/rules.cpp",
         "src/warlords/site.cpp",
         "src/warlords/slots.cpp",
         "src/warlords/travel.cpp",
-    ] + glob(["src/warlords/ai/*.cpp"]),
+        "src/warlords/turn_engine.cpp",
+    ],
     hdrs = [
-        "src/warlords/ai.hpp",
+        "src/warlords/city_economy.hpp",
         "src/warlords/combat.hpp",
         "src/warlords/diplomacy.hpp",
         "src/warlords/game.hpp",
@@ -137,16 +143,44 @@ cc_library(
         "src/warlords/site.hpp",
         "src/warlords/slots.hpp",
         "src/warlords/travel.hpp",
-    ] + glob(["src/warlords/ai/*.hpp"]),
+        "src/warlords/turn_engine.hpp",
+    ],
     includes = ["src"],
     deps = [
         ":formats",
         ":model",
         ":util",
+        "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/strings:str_format",
+        "@abseil-cpp//absl/types:span",
+    ],
+    visibility = ["//cpp:__subpackages__"],
+)
+
+# Layer 4.5: Polymorphic computer player strategies (1993 Classic AI & Modern ML AI).
+cc_library(
+    name = "ai",
+    alwayslink = True,
+    copts = W2_COPTS,
+    srcs = ["src/warlords/ai.cpp"] + glob(["src/warlords/ai/*.cpp"]),
+    hdrs = ["src/warlords/ai.hpp"] + glob(["src/warlords/ai/*.hpp"]),
+    includes = ["src"],
+    deps = [
+        ":formats",
+        ":model",
+        ":rules",
+        ":util",
+        "@abseil-cpp//absl/base:no_destructor",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/strings:str_format",
+        "@abseil-cpp//absl/types:span",
         "@nlohmann_json//:json",
     ],
     visibility = ["//cpp:__subpackages__"],
@@ -193,15 +227,18 @@ cc_library(
     ],
     includes = ["src"],
     deps = [
+        ":ai",
         ":formats",
         ":model",
         ":rules",
         ":util",
         ":worldgen",
+        "@abseil-cpp//absl/base:no_destructor",
         "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/strings:str_format",
+        "@abseil-cpp//absl/types:span",
         "@nlohmann_json//:json",
     ],
     visibility = ["//cpp:__subpackages__"],
@@ -214,6 +251,7 @@ cc_library(
     includes = ["src"],
     linkopts = ["-lpthread"],
     deps = [
+        ":ai",
         ":formats",
         ":model",
         ":persistence",
@@ -455,6 +493,7 @@ cc_test(
     srcs = ["test/ai_modern_test.cpp"],
     data = DATA + ["ai_weights.json"],
     deps = [
+        ":opponents",
         ":test_helpers",
         ":w2core",
         "@googletest//:gtest_main",
@@ -555,7 +594,12 @@ cc_library(
     copts = W2_COPTS,
     srcs = ["test/opponents.cpp"],
     hdrs = ["test/opponents.hpp"],
-    deps = [":w2core"],
+    includes = ["."],
+    deps = [
+        ":w2core",
+        "@abseil-cpp//absl/status",
+        "@nlohmann_json//:json",
+    ],
 )
 
 cc_binary(

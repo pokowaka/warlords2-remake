@@ -207,11 +207,12 @@ static void ComputerTurns(Coroutine& coroutine, Side* side) {
         sound::Music(w2::cues::kComputer, g_app.g->sides);
         g_app.ai_status = AiStatus{side, side->name, 5};
         yield_what("progress");
+        auto& side_news = g_app.g->TurnNews(w2::SideId(side->index));
         if (ShownSide(side)) {
-            auto news = side->diplo_news;
+            auto news = side_news.diplo_news;
             for (auto& news_line : news) Status(news_line, 20);
         }
-        side->diplo_news.clear();
+        side_news.diplo_news.clear();
         w2::ai::PlayTurn(*g_app.g, *side, [&](const char* phase) {
             g_app.ai_status->progress = ProgressOf(phase);
             yield_what("progress");

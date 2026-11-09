@@ -9,10 +9,15 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_set.h"
+
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/modern_ai.hpp"
 
 namespace w2::ai::modern {
+
+/** @brief Set of `ArmyId` handles marked moved during the active modern AI turn. */
+using MovedArmySet = absl::flat_hash_set<ArmyId>;
 
 /** @brief Category of mission objective scored by MissionNet. */
 enum class TargetKind : int {
@@ -76,7 +81,8 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
 /** @brief Moves `stack` along its path toward `tgt`, fighting blockers or the target. */
 bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, CandidateTarget& tgt,
                          bool stage_near, const ml::PolicyNetwork& policy,
-                         const ml::ContextVec& ctx, ml::RolloutSampler* sampler);
+                         const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
+                         MovedArmySet& moved_armies);
 
 /** @brief Returns the distinct candidate stack sizes to consider for a group led by `seed`. */
 std::vector<size_t> BuildCoalitionSizes(const Game& game, Army* seed,
@@ -85,7 +91,7 @@ std::vector<size_t> BuildCoalitionSizes(const Game& game, Army* seed,
 /** @brief Forms army coalitions, scores mission options with MissionNet, and executes moves. */
 void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                                     const ml::ContextVec& ctx, const PauseCallback& pause,
-                                    ml::RolloutSampler* sampler,
+                                    ml::RolloutSampler* sampler, MovedArmySet& moved_armies,
                                     std::vector<MissionSnapshot>* snapshots = nullptr);
 
 /** @brief Uses EconNet to decide unit retention, empire-wide slot purchases, production, and

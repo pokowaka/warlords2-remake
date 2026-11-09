@@ -416,7 +416,7 @@ void TakeCity(int what) {
         auto news = game::Occupy(*g_app.g, *g_app.player, *city, stack);
         auto production = [city]() { city::Open(city, city::kProduction); };
         if (news) {
-            g_app.player->quest_news.reset();
+            g_app.g->TurnNews(w2::SideId(g_app.player->index)).quest_news.reset();
             if (!news->failed.empty())
                 questnews::Show(news, production);
             else

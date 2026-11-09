@@ -193,7 +193,7 @@ TEST(VectoringTest, TwoTurnTransitFourSenderCapAndSelfLift) {
     for (int i = 0; i < 10 && sent == nullptr; ++i) {
         AdvanceRounds(game, 1);
         bool any_sent = false;
-        for (const auto& entry : side->produced) {
+        for (const auto& entry : game.TurnNews(SideId(side->index)).produced) {
             if (entry.kind == ProducedKind::kSent) any_sent = true;
         }
         if (!any_sent) continue;
@@ -328,16 +328,19 @@ TEST(ReportsAndDisbandTest, ReportFiguresStackDisbandSignpostsAndResignation) {
         EndTurn(report_game);
         if (report_game.side == side) break;
     }
-    ASSERT_FALSE(side->produced.empty());
-    EXPECT_EQ(side->produced[0].city, CityId(capital->index));
-    EXPECT_EQ(side->produced[0].kind, ProducedKind::kBuilt);
+    const auto& produced = report_game.TurnNews(SideId(side->index)).produced;
+    ASSERT_FALSE(produced.empty());
+    EXPECT_EQ(produced[0].city, CityId(capital->index));
+    EXPECT_EQ(produced[0].kind, ProducedKind::kBuilt);
     EXPECT_EQ(report::ComputeFigures(report_game, *side, report::kProduction).result,
-              static_cast<int>(side->produced.size()));
+              static_cast<int>(produced.size()));
 
     auto disband_game_ptr = SetupGame("ERYTHEA", Seed(29));
     Game& disband_game = *disband_game_ptr;
     Side* d_side = game::Begin(disband_game);
-    Army* hero = hero::Recruit(disband_game, *d_side, *d_side->hero_offer).hero;
+    Army* hero = hero::Recruit(disband_game, *d_side,
+                               *disband_game.TurnNews(SideId(d_side->index)).hero_offer)
+                         .hero;
     auto stack = game::ArmiesAt(disband_game, hero->x, hero->y);
     hero->strength = 5;
     auto fight_strengths = combat::StackStrengths(disband_game, {hero}, hero->x, hero->y);

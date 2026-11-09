@@ -155,7 +155,11 @@ int main(int argc, char** argv) {
         if (!game.map->sides[side_index].in_use) continue;
         modern[side_index] = (solo_seat >= 0) ? (seat == solo_seat) : (seat % 2 == 0);
         seat++;
-        game.map->sides[side_index].classic_ai = !modern[side_index];
+        if (modern[side_index]) {
+            ai::SetSideClassicAi(game, game.map->sides[side_index], false);
+        } else {
+            opponents::InstallOpponent(game, game.map->sides[side_index], opponent);
+        }
     }
 
     std::map<std::string, int> missions, built;
@@ -218,7 +222,9 @@ int main(int argc, char** argv) {
                     army_turns++;
                     if (army->x != kNone && army->y * 1000 + army->x != pos) moved++;
                 }
-                for (auto& thought : current->ai_thoughts) {
+                auto thoughts = current->computer_player ? current->computer_player->Thoughts()
+                                                         : IComputerPlayer::ThoughtSpan{};
+                for (const auto& thought : thoughts) {
                     if (thought.category != "Mission") continue;
                     std::string label =
                             thought.target_name.substr(0, thought.target_name.find(' '));

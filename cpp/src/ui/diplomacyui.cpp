@@ -12,6 +12,7 @@
 
 #include "ui/dialogs.hpp"
 #include "util/util.hpp"
+#include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/ai/personality.hpp"
@@ -1223,17 +1224,18 @@ struct BrainInspectorModal : kit::Modal {
 
         int explored_percent =
                 static_cast<int>(std::round((1.0F - belief.frontier_ratio) * 100.0F));
+        float board_val = side.computer_player ? side.computer_player->LastBoardValue() : 0.0F;
         std::string evaluation =
                 absl::StrFormat("[%s]  V(s):%+.2f  Expl:%d%%  Cit:%d  Gold:%d gp",
-                                profile.archetype.c_str(), side.last_board_value, explored_percent,
+                                profile.archetype.c_str(), board_val, explored_percent,
                                 static_cast<int>(belief.visible_cities.size()), side.gold);
-        int value_colour =
-                side.last_board_value >= 0.05F ? 10 : (side.last_board_value <= -0.05F ? 8 : 7);
+        int value_colour = board_val >= 0.05F ? 10 : (board_val <= -0.05F ? 8 : 7);
         small_font.Colours(value_colour, 0).Draw(FitText(small_font, evaluation, 464), 112, 106);
 
         DrawButton(btn_toggle_engine.x, btn_toggle_engine.y, btn_toggle_engine.w,
-                   btn_toggle_engine.h, side.classic_ai ? "AI: 1993 Classic" : "AI: Learnable RL",
-                   !side.classic_ai, false, 11);
+                   btn_toggle_engine.h,
+                   side.IsClassicAi() ? "AI: 1993 Classic" : "AI: Learnable RL",
+                   !side.IsClassicAi(), false, 11);
         DrawButton(btn_close.x, btn_close.y, btn_close.w, btn_close.h, "Close");
 
         // Left Panel: 10D Personality Vector Trait Bars (56, 130, 212 x 165)
@@ -1301,7 +1303,9 @@ struct BrainInspectorModal : kit::Modal {
         DrawSunkenPanel(56, 301, 528, 135, "RECENT NEURAL POLICY DECISIONS",
                         "Left/Right: Switch Side", 1);
         gfx::SetScissor(58, 321, 524, 113);
-        if (side.ai_thoughts.empty()) {
+        auto thoughts = side.computer_player ? side.computer_player->Thoughts()
+                                             : w2::IComputerPlayer::ThoughtSpan{};
+        if (thoughts.empty()) {
             small_font.Colours(1, 0).Draw(
                     "No neural thoughts recorded yet (advance a turn to watch this AI act).", 66,
                     330);
@@ -1310,7 +1314,7 @@ struct BrainInspectorModal : kit::Modal {
             int shown = 0;
             // the other thoughts first, then the diplomatic ones
             for (int pass = 0; pass < 2; pass++) {
-                for (const auto& thought : side.ai_thoughts) {
+                for (const auto& thought : thoughts) {
                     bool is_diplo = (thought.category == "Diplomacy");
                     if ((pass == 0 && is_diplo) || (pass == 1 && !is_diplo)) continue;
                     if (shown >= 7 || thought_y > 420) break;
@@ -1362,7 +1366,8 @@ struct BrainInspectorModal : kit::Modal {
             }
         }
         if (btn_toggle_engine.Contains(x, y)) {
-            game.map->sides[side_idx].classic_ai = !game.map->sides[side_idx].classic_ai;
+            w2::Side& target_side = game.map->sides[side_idx];
+            w2::ai::SetSideClassicAi(game, target_side, !target_side.IsClassicAi());
             return;
         }
         if (btn_close.Contains(x, y)) {

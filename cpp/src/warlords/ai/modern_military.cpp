@@ -16,6 +16,7 @@
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/modern_internal.hpp"
+#include "warlords/ai/modern_ml_player.hpp"
 #include "warlords/ai/personality.hpp"
 #include "warlords/combat.hpp"
 #include "warlords/diplomacy.hpp"
@@ -36,7 +37,7 @@ namespace w2::ai::modern {
  */
 void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                                     const ml::ContextVec& ctx, const PauseCallback& pause,
-                                    ml::RolloutSampler* sampler,
+                                    ml::RolloutSampler* sampler, MovedArmySet& moved_armies,
                                     std::vector<MissionSnapshot>* snapshots) {
     int our_side = side.index;
     SideBelief& belief = belief::Ensure(side);
@@ -68,7 +69,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                         if (army->owner == our_side) {
                             existing_garrison_str += static_cast<float>(army->strength);
                             existing_count++;
-                            if (army->moves <= 0 || army->ai_moved) {
+                            if (army->moves <= 0 || moved_armies.contains(army->id)) {
                                 stationary_garrison_str += static_cast<float>(army->strength);
                             }
                         }
@@ -222,7 +223,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
     std::map<int, LocGroup> groups_by_loc;
     for (Army* army : game.armies) {
         if (army->owner != our_side || army->x == kNone || army->transit || army->moves <= 0 ||
-            army->ai_moved)
+            moved_armies.contains(army->id))
             continue;
         City* city = game::CityAt(game, army->x, army->y);
         int key = city ? -(city->index + 1) : (army->y * game.map->width + army->x);
@@ -363,12 +364,12 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
         while (!pool.empty()) {
             Army* seed = pool.front();
             pool.erase(pool.begin());
-            if (!game.Alive(seed) || seed->moves <= 0 || seed->ai_moved) continue;
+            if (!game.Alive(seed) || seed->moves <= 0 || moved_armies.contains(seed->id)) continue;
 
             std::vector<Army*> eligible_escorts;
             for (auto iter = pool.begin(); iter != pool.end();) {
                 Army* cand = *iter;
-                if (!game.Alive(cand) || cand->moves <= 0 || cand->ai_moved) {
+                if (!game.Alive(cand) || cand->moves <= 0 || moved_armies.contains(cand->id)) {
                     iter = pool.erase(iter);
                     continue;
                 }
@@ -391,7 +392,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                     for (int dx = 0; dx <= 1; dx++) {
                         for (Army* army :
                              game::ArmiesAt(game, loc_group.city->x + dx, loc_group.city->y + dy)) {
-                            if (army->owner == our_side && (army->moves <= 0 || army->ai_moved)) {
+                            if (army->owner == our_side &&
+                                (army->moves <= 0 || moved_armies.contains(army->id))) {
                                 committed_city_guard_str += static_cast<float>(army->strength);
                             }
                         }
@@ -531,7 +533,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             }  // scoringIndex
 
             if (options.empty()) {
-                seed->ai_moved = true;
+                moved_armies.insert(seed->id);
                 continue;
             }
 
@@ -621,7 +623,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                          : 0.0F;
 
             if (chosen_tgt.kind == TargetKind::kHoldGarrison) {
-                for (Army* army : current_stack) army->ai_moved = true;
+                for (Army* army : current_stack) moved_armies.insert(army->id);
                 chosen_tgt.assigned_stacks++;
                 chosen_tgt.assigned_strength += stack_str;
             } else {
@@ -635,31 +637,33 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                 }
 
                 bool moved = ExecuteStackMission(game, side, current_stack, chosen_tgt, stage_near,
-                                                 policy, ctx, sampler);
+                                                 policy, ctx, sampler, moved_armies);
                 if (!moved) {
                     blocked_targets.insert(chosen_opt.target_idx);
                     chosen_tgt.assigned_stacks = std::max(0, chosen_tgt.assigned_stacks - 1);
                     chosen_tgt.assigned_strength =
                             std::max(0.0F, chosen_tgt.assigned_strength - stack_str);
                     for (Army* army : current_stack) {
-                        if (game.Alive(army) && army->moves > 0) army->ai_moved = true;
+                        if (game.Alive(army) && army->moves > 0) moved_armies.insert(army->id);
                     }
                 } else {
                     if (!current_stack.empty() && game.Alive(current_stack[0])) {
                         float inv_disc =
                                 chosen_opt.tv[8] > 1e-4F ? (1.0F / chosen_opt.tv[8] - 1.0F) : 0.0F;
-                        side.ai_thoughts.push_back(AIThought{
-                            "Mission",
-                            absl::StrFormat("%d-unit stack (%s)",
-                                            static_cast<int>(current_stack.size()),
-                                            current_stack[0]->name),
-                            chosen_tgt.label, current_stack[0]->x, current_stack[0]->y,
-                            chosen_tgt.x, chosen_tgt.y, chosen_opt.out.utility, chosen_opt.tv[10],
-                            stage_near,
-                            absl::StrFormat("U=%.2f Win=%.0f%% Turns=%.1f %s",
-                                            chosen_opt.out.utility, chosen_opt.tv[10] * 100.0F,
-                                            inv_disc,
-                                            stage_near ? "[STAGE FOR SYNC]" : "[EXECUTE]")});
+                        if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                            modern_player->PushThought(AIThought{
+                                "Mission",
+                                absl::StrFormat("%d-unit stack (%s)",
+                                                static_cast<int>(current_stack.size()),
+                                                current_stack[0]->name),
+                                chosen_tgt.label, current_stack[0]->x, current_stack[0]->y,
+                                chosen_tgt.x, chosen_tgt.y, chosen_opt.out.utility,
+                                chosen_opt.tv[10], stage_near,
+                                absl::StrFormat("U=%.2f Win=%.0f%% Turns=%.1f %s",
+                                                chosen_opt.out.utility, chosen_opt.tv[10] * 100.0F,
+                                                inv_disc,
+                                                stage_near ? "[STAGE FOR SYNC]" : "[EXECUTE]")});
+                        }
                     }
 
                     // Add newly revealed neutral or enemy cities immediately so remaining stacks

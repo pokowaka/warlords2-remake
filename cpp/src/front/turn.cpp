@@ -211,13 +211,15 @@ static void AfterBanner() {
     // then the heroes promoted, each in its own popup, and the hero offer
     // with its music, or the turn's
     advisor::Say(says, []() {
-        auto promoted = g_app.player->promoted;
-        g_app.player->promoted.clear();
+        auto& news = g_app.g->TurnNews(w2::SideId(g_app.player->index));
+        auto promoted = news.promoted;
+        news.promoted.clear();
         honours::Promotions(promoted, []() {
-            sound::Music(g_app.player->hero_offer ? w2::cues::kHero : w2::cues::kPlay);
+            const auto& offer = g_app.g->TurnNews(w2::SideId(g_app.player->index)).hero_offer;
+            sound::Music(offer ? w2::cues::kHero : w2::cues::kPlay);
             std::vector<std::string> moments;
             if (g_app.g->turn == 2) moments.push_back("turn2");
-            if (g_app.player->hero_offer) moments.push_back("hero");
+            if (offer) moments.push_back("hero");
             tutorial::Chain(moments, []() {
                 if (!PresentOffer(g_app.player)) AfterOffer();
             });
@@ -244,9 +246,10 @@ static std::vector<std::string> HeroLines(const w2::HeroOffer& offer, bool femal
  * @return Whether it had one.
  */
 static bool PresentOffer(Side* side) {
-    if (!side->hero_offer) return false;
+    const auto& side_offer = g_app.g->TurnNews(w2::SideId(side->index)).hero_offer;
+    if (!side_offer) return false;
     if (!g_app.hero_view) g_app.hero_view = screen::MakeView(*g_app.screen, kHeroDialog);
-    g_app.offer = side->hero_offer;
+    g_app.offer = side_offer;
     // the name and sex were rolled with the offer; the checkboxes only change
     // the wording and the picture
     g_app.offer_female = g_app.offer->female;
@@ -264,7 +267,7 @@ void AcceptOffer() {
     auto hired = w2::hero::Recruit(*g_app.g, *g_app.player, *offer);
     Army* hero = hired.hero;
     g_app.offer.reset();
-    g_app.player->hero_offer.reset();
+    g_app.g->TurnNews(w2::SideId(g_app.player->index)).hero_offer.reset();
     CentreOn(hero->x, hero->y);
     if (hired.count > 0) {
         // "And the hero brings 1 ally!" / "... %d allies!": the number rolled,
@@ -301,7 +304,7 @@ static void AfterOffer() {
 /** @brief Turns the hero offer down. */
 void RefuseOffer() {
     g_app.offer.reset();
-    g_app.player->hero_offer.reset();
+    g_app.g->TurnNews(w2::SideId(g_app.player->index)).hero_offer.reset();
     AfterOffer();
 }
 

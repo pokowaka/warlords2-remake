@@ -79,7 +79,7 @@ Info Survey(Game& game, Side& side) {
  */
 void Sites(Game& game, Side& side, size_t hero_index, Info& info) {
     Army* hero = info.heroes[hero_index];
-    int range = hero->ai_order == kOrderCity ? 5 : 25;
+    int range = OrderOf(game, hero).order == kOrderCity ? 5 : 25;
     int quest_d = 100, site_d = 100;
     Site* quest_site = nullptr;
     Site* best = nullptr;
@@ -98,8 +98,9 @@ void Sites(Game& game, Side& side, size_t hero_index, Info& info) {
             } else {
                 for (size_t j = 0; j < info.heroes.size(); j++) {
                     Army* other = info.heroes[j];
-                    if (j != hero_index && other->ai_order == kOrderSite &&
-                        other->ai_dest == candidate.index)
+                    const ClassicArmyOrder& other_ord = OrderOf(game, other);
+                    if (j != hero_index && other_ord.order == kOrderSite &&
+                        other_ord.dest == candidate.index)
                         worth = false;
                 }
             }
@@ -121,7 +122,7 @@ void Sites(Game& game, Side& side, size_t hero_index, Info& info) {
  */
 void Items(Game& game, Side& side, size_t hero_index, Info& info) {
     Army* hero = info.heroes[hero_index];
-    int range = hero->ai_order == kOrderCity ? 5 : 15;
+    int range = OrderOf(game, hero).order == kOrderCity ? 5 : 15;
     Item* best = nullptr;
     int best_distance = 100;
     for (int i = static_cast<int>(game.map->items.size()) - 1; i >= 0; i--) {
@@ -130,8 +131,9 @@ void Items(Game& game, Side& side, size_t hero_index, Info& info) {
             bool taken = false;
             for (size_t j = 0; j < info.heroes.size(); j++) {
                 Army* other = info.heroes[j];
-                if (j != hero_index && other->ai_order == kOrderItem &&
-                    other->ai_dest == item.index)
+                const ClassicArmyOrder& other_ord = OrderOf(game, other);
+                if (j != hero_index && other_ord.order == kOrderItem &&
+                    other_ord.dest == item.index)
                     taken = true;
             }
             if (!taken) {
@@ -157,9 +159,10 @@ void Enemy(Game& game, Side& side, size_t hero_index, Info& info) {
     Army* hero = info.heroes[hero_index];
     info.enemy = nullptr;
     info.enemy_d = 20;
-    int dest = hero->ai_order == kOrderCity ? hero->ai_dest : kNone;
+    const ClassicArmyOrder& hero_ord = OrderOf(game, hero);
+    int dest = hero_ord.order == kOrderCity ? hero_ord.dest : kNone;
     auto list =
-            CollectOrdered(game, side.index, hero->x, hero->y, hero->ai_group, hero->ai_order, 12);
+            CollectOrdered(game, side.index, hero->x, hero->y, hero_ord.group, hero_ord.order, 12);
     if (list.empty()) return;
     Sel sel = Select(game, list);
     int need = list.size() < 3 ? 95 : 75;
@@ -237,8 +240,9 @@ int Go(Game& game, Side& side, size_t hero_index, int kind, Info& info) {
         target_y = info.item->y;
         index = info.item->index;
     }
+    const ClassicArmyOrder& hero_ord = OrderOf(game, hero);
     auto list =
-            CollectOrdered(game, side.index, hero->x, hero->y, hero->ai_group, hero->ai_order, 12);
+            CollectOrdered(game, side.index, hero->x, hero->y, hero_ord.group, hero_ord.order, 12);
     int stack_size = static_cast<int>(list.size());
     if (stack_size == 0) return 0;
     City* city = info.city[hero_index];
@@ -283,8 +287,9 @@ int Attack(Game& game, Side& side, size_t hero_index, Info& info) {
     Army* hero = info.heroes[hero_index];
     City* target = info.enemy;
     if (!target) return 0;
+    const ClassicArmyOrder& hero_ord = OrderOf(game, hero);
     auto list =
-            CollectOrdered(game, side.index, hero->x, hero->y, hero->ai_group, hero->ai_order, 12);
+            CollectOrdered(game, side.index, hero->x, hero->y, hero_ord.group, hero_ord.order, 12);
     if (list.empty()) return 0;
     City* city = info.city[hero_index];
     if (city && Get(data.garrison, city->index) == static_cast<int>(list.size())) {
@@ -314,7 +319,8 @@ bool QuestGo(Game& game, Side& side, size_t hero_index, Info& info) {
     int need = (city->owner_index == kNone || game.turn < 8) ? 1 : 2;
     auto list = Collect(game, side.index, hero->x, hero->y, 8);
     if (static_cast<int>(list.size()) < need) return false;
-    if (!(hero->ai_order == kOrderCity && hero->ai_dest == city->index)) {
+    const ClassicArmyOrder& hero_ord = OrderOf(game, hero);
+    if (!(hero_ord.order == kOrderCity && hero_ord.dest == city->index)) {
         Sel sel = Select(game, list);
         if (Odds(game, sel, city->x, city->y) < 75) return false;
     }
@@ -343,16 +349,16 @@ void Phase(Game& game, Side& side) {
             if (!skip && Alive(game, hero)) {
                 // A hero sent at a site goes on there while it is still worth
                 // it; otherwise its stack forgets the order.
-                if (hero->ai_order == kOrderSite) {
+                if (OrderOf(game, hero).order == kOrderSite) {
+                    int hero_dest = OrderOf(game, hero).dest;
                     Site* site =
-                            hero->ai_dest >= 0 &&
-                                            hero->ai_dest < static_cast<int>(game.map->sites.size())
-                                    ? &game.map->sites[hero->ai_dest]
+                            hero_dest >= 0 && hero_dest < static_cast<int>(game.map->sites.size())
+                                    ? &game.map->sites[hero_dest]
                                     : nullptr;
                     if (!site || !Worth(game, side, *site, hero)) {
                         for (Army* army : OnTile(game, side.index, hero->x, hero->y)) {
-                            if (army->ai_order == hero->ai_order) {
-                                ClearOrder(army);
+                            if (OrderOf(game, army).order == OrderOf(game, hero).order) {
+                                ClearOrder(game, army);
                                 army->target.reset();
                             }
                         }

@@ -707,7 +707,7 @@ CriticVec BuildCriticFeatures(const Game& game, const Side& side) {
         alive++;
         if (side_idx == our_side) continue;
         rivals++;
-        if (other.classic_ai) classic_rivals++;
+        if (other.IsClassicAi()) classic_rivals++;
         if (cities[side_idx] > cities[our_side]) richer_rivals++;
         max_rival_cities = std::max(max_rival_cities, cities[side_idx]);
         max_rival_power = std::max(max_rival_power, power[side_idx]);

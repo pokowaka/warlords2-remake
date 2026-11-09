@@ -1,7 +1,7 @@
-// Combat: building the two lines, the modifiers, and the fight itself.
-//
-// See docs/rules.md > Combat. BattleLines() builds the lines, TerrainClass()
-// classifies the battle tile and Resolve() fights.
+/**
+ * @file
+ * @brief `Battle` outcome model and `CombatResolver` domain service (`w2::combat`).
+ */
 #pragma once
 
 #include <map>
@@ -9,6 +9,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "warlords/types.hpp"
@@ -18,11 +19,11 @@ namespace w2 {
 struct QuestResult;
 
 /**
- * @brief A battle, first decided and then applied.
+ * @brief Outcome and pending aftermath of a single tactical battle.
  *
- * combat::Resolve() fights it and fills in the outcome; game::DecideAttack()
- * adds the lines, the loot and what was fought, and game::ApplyAttack()
- * removes the dead and records the consequences.
+ * `CombatResolver::Resolve` runs the round-by-round dice duel; `DecideAttack` attaches
+ * battle lines, city loot, and pending target state; `ApplyAttack` commits casualties,
+ * hero item drops, experience, quest progress, city capture, and medals.
  */
 struct Battle {
     bool won = false;                    ///< True when every defender died.
@@ -35,18 +36,14 @@ struct Battle {
     std::vector<Army*> defenders;  ///< The defenders that survived.
     std::vector<Army*> dead_attackers;  ///< The attackers that died, in fighting order.
     std::vector<Army*> dead_defenders;  ///< The defenders that died, in fighting order.
-    /**
-     * @brief Both battle lines as they were drawn up, set by game::DecideAttack().
-     */
+    /** @brief Both battle lines as they were drawn up. */
     struct Lines {
         std::vector<Army*> attackers;  ///< The attacking line, in fighting order.
         std::vector<Army*> defenders;  ///< The defending line, in fighting order.
         City* city = nullptr;          ///< The standing city fought for, or null.
     } lines;                           ///< The lines as they were drawn up.
     int loot = 0;                      ///< Gold taken from the losing side when a city falls.
-    /**
-     * @brief What was attacked and where, kept until the battle is applied.
-     */
+    /** @brief What was attacked and where, kept until the battle is applied. */
     struct Fought {
         std::vector<Army*> stack;  ///< The attacking stack.
         int x = 0;                 ///< The attacked tile's column.
@@ -58,18 +55,15 @@ struct Battle {
     City* captured = nullptr;            ///< The city the attacker took, or null.
     std::set<const Army*> boats;         ///< Those that fought as boats, at sea on water or shore.
     int def_strength0 = 0;               ///< The first defender's battle strength.
-    Army* hero = nullptr;                ///< The stack's hero, set by game::DecideAttack().
-    Army* medal = nullptr;               ///< The army that won a medal, set by game::ApplyAttack().
+    Army* hero = nullptr;                ///< The stack's hero.
+    Army* medal = nullptr;               ///< The army that won a medal.
 };
 
 namespace combat {
 
-// Terrain classes, in the order the ARMYTYPE bonus fields are stored
-// (see docs/formats/armytype.md).
 constexpr int kCity = 0, kOpen = 1, kWoods = 2, kHills = 3;
-extern const char* const kClassNames[4];  ///< The terrain classes' names, by class.
+extern const char* const kClassNames[4];
 
-// The ARMYTYPE ability enum (see docs/formats/armytype.md).
 constexpr int kSiege = 1, kNegateHero = 2, kNegateOther = 3;
 
 /// Hero strength -> command bonus, indexed 0..9.
@@ -81,72 +75,95 @@ constexpr int kDie = 20;           ///< The die each side throws per round.
 constexpr int kDieIntense = 24;    ///< The die with the Intense Combat option.
 constexpr int kStalemate = 10000;  ///< Throws in one duel before the attacker loses it.
 
-/**
- * @brief Classifies the battle tile: city (towers, cities and sites), woods,
- *        hills (hills and mountains) or open.
- */
-int TerrainClass(const Game& game, int x, int y);
-
-/**
- * @brief The two battle lines for an attack, each in fighting order.
- */
+/** @brief The two battle lines for an attack, each in fighting order. */
 struct Lines {
     std::vector<Army*> attackers;  ///< The attacking line, in fighting order.
     std::vector<Army*> defenders;  ///< The defending line, in fighting order.
     int def_owner = kNone;         ///< The defending side's index, or kNone.
     City* city = nullptr;          ///< The standing city fought for, or null.
 };
-/**
- * @brief Builds both battle lines for an attack on (x, y).
- *
- * Every army of another side on the tile -- or anywhere in the city, when a
- * standing city is attacked -- defends. Each line is sorted by its owner's
- * fight order.
- */
-Lines BattleLines(const Game& game, const std::vector<Army*>& stack, int x, int y);
+
+extern const char* const kAdvice[10];
+constexpr int kAdviceBattles = 19;
 
 /** @brief Battle items (+n in battle) carried by one army. */
 int BattleItems(const Army& army);
 /** @brief Command items carried by one army, a standard counting 1. */
 int CommandItems(const Army& army);
-/**
- * @brief The side's hero bonus: the table lookup on its strongest hero, plus
- *        every command item it carries.
- */
+
+int TerrainClass(const Game& game, int x, int y);
+Lines BattleLines(const Game& game, const std::vector<Army*>& stack, int x, int y);
 int HeroBonus(const Game& game, const std::vector<Army*>& line);
-/** @brief The city's fortification bonus for the defender, or 0. */
 int Fortify(const Game& game, const std::vector<Army*>& attackers, int x, int y, int cls);
-/** @brief Both sides' modifiers: {attack_mod, defend_mod}. */
 std::pair<int, int> Modifiers(const Game& game, const std::vector<Army*>& attackers,
                               const std::vector<Army*>& defenders, int x, int y, int cls);
-/** @brief One army's fighting strength. A boat at sea on water or shore is 4. */
 int Strength(const Game& game, const Army& army, int mod, int cls, int terrain);
-/**
- * @brief What View > Stack shows beside each army of the group that moves:
- *        its strength in a fight on (x, y).
- */
 std::map<const Army*, int> StackStrengths(const Game& game, const std::vector<Army*>& armies, int x,
                                           int y);
-/**
- * @brief Fights a battle.
- *
- * The armies are not removed; the caller applies the outcome
- * (game::ApplyAttack()).
- */
 Battle Resolve(Game& game, const std::vector<Army*>& attackers, const std::vector<Army*>& defenders,
                int x, int y);
-
-/// The Military Advisor's verdicts, by wins / 2 (STRING.DAT group 126).
-extern const char* const kAdvice[10];
-constexpr int kAdviceBattles = 19;  ///< Battles the Military Advisor simulates.
-/**
- * @brief The Military Advisor's verdict on an attack.
- *
- * Simulates kAdviceBattles battles and picks the verdict by wins / 2.
- * @return The verdict and the number of simulated battles won.
- */
 std::pair<std::string, int> Advise(Game& game, const std::vector<Army*>& attackers,
                                    const std::vector<Army*>& defenders, int x, int y);
 
 }  // namespace combat
+
+/**
+ * @brief Domain service resolving tactical combat, modifier calculation, military advice,
+ * and post-battle world-state updates (casualties, city capture, hero XP, and medals).
+ *
+ * Operates over a borrowed `Game&` aggregate root, invoking `IComputerPlayer` hooks on
+ * participating sides without depending on AI implementation headers.
+ */
+class CombatResolver {
+  public:
+    /** @brief Ordered list of army pointers forming a battle line or stack. */
+    using ArmyStack = std::vector<Army*>;
+    /** @brief Per-army effective battle strength lookup map. */
+    using StrengthMap = std::map<const Army*, int>;
+    /** @brief Attack and defence modifier pair `{attack_mod, defend_mod}`. */
+    using ModifierPair = std::pair<int, int>;
+    /** @brief Military advisor verdict string and simulated win count. */
+    using AdviceVerdict = std::pair<std::string, int>;
+
+    /** @brief Binds a combat resolver to `game` (must outlive this service instance). */
+    explicit CombatResolver(Game& game) : game_(game) {}
+
+    int TerrainClass(int x, int y) const;
+    combat::Lines BattleLines(const ArmyStack& stack, int x, int y) const;
+    int HeroBonus(const ArmyStack& line) const;
+    int Fortify(const ArmyStack& attackers, int x, int y, int cls) const;
+    ModifierPair Modifiers(const ArmyStack& attackers, const ArmyStack& defenders, int x, int y,
+                           int cls) const;
+    int Strength(const Army& army, int mod, int cls, int terrain) const;
+    StrengthMap StackStrengths(const ArmyStack& armies, int x, int y) const;
+
+    /** @brief Fights a duel between `attackers` and `defenders` at `(x, y)` without mutating
+     * armies. */
+    Battle Resolve(const ArmyStack& attackers, const ArmyStack& defenders, int x, int y);
+
+    /** @brief Simulates `combat::kAdviceBattles` engagements to produce the advisor verdict. */
+    AdviceVerdict Advise(const ArmyStack& attackers, const ArmyStack& defenders, int x, int y);
+
+    /** @brief Computes gold plundered when a city belonging to `loser` falls. */
+    int Loot(const Side* loser) const;
+
+    /** @brief Draws battle lines and resolves an attack on `(x, y)` without applying casualties
+     * yet. */
+    Battle DecideAttack(const ArmyStack& stack, int x, int y);
+
+    /** @brief Deducts movement cost and embarks non-flying attackers onto water/shore if needed. */
+    void ChargeAttack(const ArmyStack& stack, int x, int y);
+
+    /** @brief Commits a previously decided `Battle` to `game_` (once only). */
+    Battle& ApplyAttack(Battle& result);
+
+    /** @brief Decides and immediately applies an attack by `stack` on `(x, y)`. */
+    Battle ResolveAttack(const ArmyStack& stack, int x, int y);
+
+  private:
+    Army* AwardMedal(const Battle& result, int side_index);
+
+    Game& game_;  ///< Active game aggregate root.
+};
+
 }  // namespace w2

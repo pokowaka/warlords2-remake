@@ -75,9 +75,10 @@ void AdvanceRounds(Game& game, size_t rounds) {
 }
 
 void PlayAi(Game& game, Side& side) {
-    if (!side.computer && side.hero_offer) {
-        hero::Recruit(game, side, *side.hero_offer);
-        side.hero_offer.reset();
+    auto& offer = game.TurnNews(SideId(side.index)).hero_offer;
+    if (!side.computer && offer) {
+        hero::Recruit(game, side, *offer);
+        offer.reset();
     }
     ai::PlayTurn(game, side);
 }

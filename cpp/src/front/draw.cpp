@@ -1016,7 +1016,7 @@ void Draw() {
     }
     AdvanceWalk();
     // a quest that ended is told once the screen is the player's again
-    if (g_app.player && g_app.player->quest_news &&
+    if (g_app.player && g_app.g->TurnNews(w2::SideId(g_app.player->index)).quest_news &&
         !(g_app.over || g_app.banner || g_app.offer || g_app.assault || g_app.victory ||
           g_app.victory_under || g_app.walk || g_app.move_all || g_app.ai_run ||
           g_app.open_menu >= 0 || kit::Top())) {

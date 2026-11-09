@@ -13,6 +13,7 @@
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/modern_internal.hpp"
+#include "warlords/ai/modern_ml_player.hpp"
 #include "warlords/ai/personality.hpp"
 #include "warlords/combat.hpp"
 #include "warlords/diplomacy.hpp"
@@ -43,10 +44,9 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
                                    static_cast<uint32_t>((side.index + 1) * 2246822519U);
         sampler = &deploy_sampler;
     }
-    for (Army* army : game.armies) {
-        if (army->owner == side.index) army->ai_moved = false;
-    }
-    side.ai_thoughts.clear();
+    MovedArmySet moved_armies;
+    ModernMlPlayer& modern_player = ModernMlPlayer::EnsureOn(side);
+    modern_player.ClearThoughts();
 
     std::array<bool, 8> diplo_decided{};
     for (int wave = 0; wave < 6; wave++) {
@@ -55,7 +55,7 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
         if (wave == 0) {
             ml::CriticVec critic = ml::BuildCriticFeatures(game, side);
             float board_value = policy.EvaluateValue(wave_ctx, critic);
-            side.last_board_value = board_value;
+            modern_player.SetLastBoardValue(board_value);
             if (sampler && sampler->current_turn) {
                 sampler->current_turn->start_ctx = wave_ctx;
                 sampler->current_turn->start_critic = critic;
@@ -66,11 +66,11 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
         RunDiplomacyPhase(game, side, policy, wave_ctx, sampler, diplo_decided);
         if (wave == 0 && pause) pause("diplomacy");
         RunMilitaryAndExplorationPhase(game, side, policy, wave_ctx, wave == 0 ? pause : nullptr,
-                                       sampler);
+                                       sampler, moved_armies);
         bool any_left = false;
         for (Army* army : game.armies) {
             if (army->owner == side.index && army->x != kNone && !army->transit &&
-                !army->ai_moved && army->moves >= 2) {
+                !moved_armies.contains(army->id) && army->moves >= 2) {
                 any_left = true;
                 break;
             }
@@ -101,7 +101,7 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
 
     belief::Update(game, side);
     ml::ContextVec ctx = ml::BuildContext(game, side);
-    side.last_board_value = policy.EvaluateValue(ctx, ml::BuildCriticFeatures(game, side));
+    modern_player.SetLastBoardValue(policy.EvaluateValue(ctx, ml::BuildCriticFeatures(game, side)));
 
     RunEconomyPhase(game, side, policy, ctx, sampler);
     if (pause) pause("economy");
@@ -110,16 +110,10 @@ void PlayTurn(Game& game, Side& side, const PauseCallback& pause,
 std::vector<MissionSnapshot> SnapshotMissions(Game& game, Side& side,
                                               const ml::PolicyNetwork& policy) {
     std::vector<MissionSnapshot> out;
-    std::vector<bool> moved_before;
-    for (Army* army : game.armies) moved_before.push_back(army->ai_moved);
-    for (Army* army : game.armies) {
-        if (army->owner == side.index) army->ai_moved = false;
-    }
+    MovedArmySet moved_armies;
     belief::Update(game, side);
     ml::ContextVec ctx = ml::BuildContext(game, side);
-    RunMilitaryAndExplorationPhase(game, side, policy, ctx, nullptr, nullptr, &out);
-    for (size_t i = 0; i < game.armies.size() && i < moved_before.size(); i++)
-        game.armies[i]->ai_moved = moved_before[i];
+    RunMilitaryAndExplorationPhase(game, side, policy, ctx, nullptr, nullptr, moved_armies, &out);
     return out;
 }
 

@@ -249,10 +249,10 @@ void ToggleCrt() {
 static bool ActiveClassicAi() {
     if (g_app.g && g_app.g->map && !g_app.starting) {
         for (const auto& side : g_app.g->map->sides) {
-            if (side.in_use && side.computer) return side.classic_ai;
+            if (side.in_use && side.computer) return side.IsClassicAi();
         }
         for (const auto& side : g_app.g->map->sides) {
-            if (side.in_use) return side.classic_ai;
+            if (side.in_use) return side.IsClassicAi();
         }
     }
     return w2::ai::DefaultClassicAi();
@@ -267,9 +267,7 @@ void SetAiMode(bool classic) {
     prefs::Set("ai", classic ? "classic" : "modern");
     if (g_app.g && g_app.g->map) {
         for (auto& side : g_app.g->map->sides) {
-            side.classic_ai = classic;
-            if (!side.ai) side.ai = std::make_shared<w2::AIData>(w2::ai::core::NewData());
-            if (!classic) w2::ai::belief::Ensure(side);
+            w2::ai::SetSideClassicAi(*g_app.g, side, classic);
         }
     }
 }

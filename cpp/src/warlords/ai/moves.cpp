@@ -99,8 +99,8 @@ int SearchSite(Game& game, Sel* sel, Army* hero, Site& place) {
         for (Army* member : stack) member->done = false;
         if (game.map->options.hidden_map != 0 && place.content == site::kAllies) {
             for (Army* ally : OnTile(game, side.index, place.x, place.y)) {
-                if (ally->ai_order == 0 && Magical(game, ally)) {
-                    ally->ai_explore = true;
+                if (OrderOf(game, ally).order == 0 && Magical(game, ally)) {
+                    MutableOrderOf(game, ally).explore = true;
                     Explore(game, side, ally, nullptr);
                 }
             }
@@ -120,8 +120,8 @@ int Party(Game& game, Side& side, std::vector<Army*> list) {
     if (!flier) return 1;
     AIData& data = Data(game, side);
     list = {hero, flier};
-    ClearOrder(hero);
-    ClearOrder(flier);
+    ClearOrder(game, hero);
+    ClearOrder(game, flier);
     // A near site (under 15 tiles) scores 215 less its distance, a far one
     // (under 40) 90 less; a candidate replaces the best only if it scores more.
     int score = -1;
@@ -131,8 +131,9 @@ int Party(Game& game, Side& side, std::vector<Army*> list) {
         Site& candidate = game.map->sites[i];
         bool taken = false;
         for (Army* other : Armies(game, side.index)) {
-            if (other != hero && IsHero(other) && other->ai_order == kOrderSite &&
-                other->ai_dest == candidate.index)
+            const ClassicArmyOrder& other_ord = OrderOf(game, other);
+            if (other != hero && IsHero(other) && other_ord.order == kOrderSite &&
+                other_ord.dest == candidate.index)
                 taken = true;
         }
         if (!taken && Explored(game, side.index, candidate.x, candidate.y) &&
@@ -350,7 +351,7 @@ bool TryCity(Game& game, Side& side, Army* explorer, int near_x, int near_y) {
             need = 40;
     }
     if (odds < need) return false;
-    explorer->ai_explore = false;
+    MutableOrderOf(game, explorer).explore = false;
     sel = Order(game, {explorer}, kOrderCity, pick->index, 0x80);
     if (sel) MoveTo(game, *sel, sel->leader->target->first, sel->leader->target->second);
     return true;
@@ -385,7 +386,8 @@ bool TrySite(Game& game, Side& side, Army* explorer, int site_x, int site_y) {
                 site::Search(game, {explorer}, site_x, site_y, false);
             if (place->content == site::kAllies) {
                 for (Army* ally : OnTile(game, side.index, site_x, site_y)) {
-                    if (ally->ai_order == 0 && Magical(game, ally)) ally->ai_explore = true;
+                    if (OrderOf(game, ally).order == 0 && Magical(game, ally))
+                        MutableOrderOf(game, ally).explore = true;
                 }
             }
         } else {
@@ -395,8 +397,8 @@ bool TrySite(Game& game, Side& side, Army* explorer, int site_x, int site_y) {
                 explorer->blessings.insert(place->temple_index);
             explorer->done = true;
         }
-        explorer->ai_explore = true;
-        ClearOrder(explorer);
+        MutableOrderOf(game, explorer).explore = true;
+        ClearOrder(game, explorer);
         explorer->target.reset();
     }
     return true;
@@ -414,8 +416,8 @@ void WalkTo(Game& game, Army* explorer, int x, int y) {
     int code = MoveTo(game, sel, x, y);
     if (Alive(game, explorer)) {
         if (code == 1) {  // the walk found no path
-            explorer->ai_explore = false;
-            ClearOrder(explorer);
+            MutableOrderOf(game, explorer).explore = false;
+            ClearOrder(game, explorer);
         }
         explorer->done = true;
         explorer->target.reset();
@@ -440,8 +442,8 @@ void ExploreStep(Game& game, Side& side, Army* explorer, City* home) {
             std::map<int, int> no_headings;
             City* neutral = home ? cities::OpenNeutral(game, side, *home, no_headings) : nullptr;
             if (!neutral) {
-                ClearOrder(explorer);
-                explorer->ai_explore = false;
+                ClearOrder(game, explorer);
+                MutableOrderOf(game, explorer).explore = false;
                 explorer->target.reset();
                 explorer->group = 0;
                 return;
@@ -471,7 +473,7 @@ void Explore(Game& game, Side& side, Army* army, City* home) {
         if (!Alive(game, army) || (army->x == start_x && army->y == start_y)) return;
         if (army->moves < 4) return;
         if (steps == 0) return;
-        if (!army->ai_explore) return;
+        if (!OrderOf(game, army).explore) return;
         steps--;
     }
 }
@@ -488,12 +490,12 @@ void Search(Game& game, Side& side) {
     // when the side has a rally city, weak fliers when there are enough.
     for (int pass = 0; pass <= 1; pass++) {
         for (Army* army : Armies(game, side.index)) {
-            if (Alive(game, army) && !army->transit && army->ai_explore &&
+            if (Alive(game, army) && !army->transit && OrderOf(game, army).explore &&
                 ((pass == 0) == IsHero(army))) {
                 if ((IsHero(army) && rally) ||
                     (Flies(game, army) && data.explorers > 7 && army->strength < 4)) {
-                    ClearOrder(army);
-                    army->ai_explore = false;
+                    ClearOrder(game, army);
+                    MutableOrderOf(game, army).explore = false;
                 } else {
                     Explore(game, side, army, nullptr);
                     if (Alive(game, army) && army->owner == side.index) {
@@ -510,8 +512,8 @@ void Search(Game& game, Side& side) {
 
 void HeroParties(Game& game, Side& side) {
     for (Army* army : Armies(game, side.index)) {
-        if (Alive(game, army) && !army->transit && army->ai_party) {
-            army->ai_party = false;
+        if (Alive(game, army) && !army->transit && OrderOf(game, army).party) {
+            MutableOrderOf(game, army).party = false;
             if (IsHero(army)) {
                 // Keep sending the hero's party (at most 20 times) while it
                 // moves and finds more to do.
@@ -520,8 +522,9 @@ void HeroParties(Game& game, Side& side) {
                 while (going && guard < 20) {
                     guard++;
                     if (!Alive(game, army)) break;
-                    auto list = CollectOrdered(game, side.index, army->x, army->y, army->ai_group,
-                                               army->ai_order, 0);
+                    const ClassicArmyOrder& ord = OrderOf(game, army);
+                    auto list = CollectOrdered(game, side.index, army->x, army->y, ord.group,
+                                               ord.order, 0);
                     if (list.empty() || army->moves < 3) break;
                     int start_x = army->x, start_y = army->y;
                     int result = Party(game, side, list);
@@ -547,7 +550,7 @@ void HeroParties(Game& game, Side& side) {
 static bool NeutralStillOn(Game& game, Side& side, Sel& sel) {
     AIData& data = Data(game, side);
     Army* lead = sel.leader;
-    City* dest = CityOrNull(game, lead->ai_dest);
+    City* dest = CityOrNull(game, OrderOf(game, lead).dest);
     if (!dest) return true;
     if (dest->owner_index == side.index) {
         City* here = CityAt(game, lead->x, lead->y);
@@ -579,15 +582,16 @@ static bool NeutralStillOn(Game& game, Side& side, Sel& sel) {
             return true;
         }
         for (Army* army : sel.armies) {
-            army->ai_order = kOrderCity;
-            army->ai_dest = best->index;
+            ClassicArmyOrder& ord = MutableOrderOf(game, army);
+            ord.order = kOrderCity;
+            ord.dest = best->index;
             SetTarget(game, army, kOrderCity, best->index);
         }
         return true;
     }
     if (!diplo::CanAttack(game, side, *dest)) {
         for (Army* army : sel.armies) {
-            ClearOrder(army);
+            ClearOrder(game, army);
             army->target.reset();
         }
         return false;
@@ -598,7 +602,7 @@ static bool NeutralStillOn(Game& game, Side& side, Sel& sel) {
 void MoveAll(Game& game, Side& side) {
     AIData& data = Data(game, side);
     for (Army* army : Armies(game, side.index)) {
-        if (!army->transit) army->ai_moved = army->moves < 2;
+        if (!army->transit) MutableOrderOf(game, army).moved = army->moves < 2;
     }
     if (!data.cursor) data.cursor = std::make_pair(side.cap_x, side.cap_y);
     for (;;) {
@@ -607,7 +611,7 @@ void MoveAll(Game& game, Side& side) {
         Army* pick = nullptr;
         int pick_distance = kNone;
         for (Army* army : Armies(game, side.index)) {
-            if (!army->transit && army->x != kNone && !army->done && !army->ai_moved) {
+            if (!army->transit && army->x != kNone && !army->done && !OrderOf(game, army).moved) {
                 int distance = std::abs(army->x - data.cursor->first) +
                                std::abs(army->y - data.cursor->second);
                 if (distance == 0) distance = 9000;
@@ -619,26 +623,28 @@ void MoveAll(Game& game, Side& side) {
         }
         if (!pick) break;
         data.cursor = std::make_pair(pick->x, pick->y);
-        pick->ai_moved = true;
+        MutableOrderOf(game, pick).moved = true;
         if (pick->target && pick->target->first != kNone && pick->target->first >= 0 &&
             pick->moves > 1) {
             Sel sel = SelectStackOf(game, pick);
             Army* lead = sel.leader;
-            int order = lead->ai_order;
-            City* dest = CityOrNull(game, lead->ai_dest);
+            const ClassicArmyOrder& lead_ord = OrderOf(game, lead);
+            int order = lead_ord.order;
+            City* dest = CityOrNull(game, lead_ord.dest);
             if (order == kOrderNone ||
                 (order == kOrderCity &&
-                 (!dest || lead->ai_dest == data.quest_city || !Standing(*dest)))) {
+                 (!dest || lead_ord.dest == data.quest_city || !Standing(*dest)))) {
                 for (Army* army : sel.armies) {
-                    ClearOrder(army);
+                    ClearOrder(game, army);
                     army->target.reset();
                     army->done = true;
                 }
-            } else if (!lead->ai_neutral || NeutralStillOn(game, side, sel)) {
-                dest = CityOrNull(game, lead->ai_dest);
+            } else if (!lead_ord.neutral || NeutralStillOn(game, side, sel)) {
+                const ClassicArmyOrder& cur_ord = OrderOf(game, lead);
+                dest = CityOrNull(game, cur_ord.dest);
                 // A stack bound for one of its own cities aims at the city's
                 // tile (x + 1, y + 1).
-                if (lead->ai_order == kOrderCity && dest && dest->owner_index == side.index) {
+                if (cur_ord.order == kOrderCity && dest && dest->owner_index == side.index) {
                     lead->target = std::make_pair(dest->x + 1, dest->y + 1);
                 }
                 if (lead->target && Alive(game, lead)) {
@@ -747,20 +753,22 @@ void Rescue(Game& game, Side& side) {
             // An army that has not moved (two moves over its maximum) whose
             // target city is gone: its stack drops that order.
             if (army->moves == army->max_moves + 2 && !OnCityTile(game, army) &&
-                army->ai_order == kOrderCity) {
-                City* dest = CityOrNull(game, army->ai_dest);
+                OrderOf(game, army).order == kOrderCity) {
+                int army_dest = OrderOf(game, army).dest;
+                City* dest = CityOrNull(game, army_dest);
                 if (!dest || !Standing(*dest)) {
-                    int gone = army->ai_dest;
+                    int gone = army_dest;
                     for (Army* member : OnTile(game, side.index, army->x, army->y)) {
-                        if (member->ai_order == kOrderCity && member->ai_dest == gone) {
-                            ClearOrder(member);
-                            member->ai_group = 0;
+                        const ClassicArmyOrder& member_ord = OrderOf(game, member);
+                        if (member_ord.order == kOrderCity && member_ord.dest == gone) {
+                            ClearOrder(game, member);
+                            MutableOrderOf(game, member).group = 0;
                         }
                     }
                 }
             }
-            if (Alive(game, army) && !army->ai_explore && army->ai_order == 0 &&
-                !OnCityTile(game, army))
+            if (Alive(game, army) && !OrderOf(game, army).explore &&
+                OrderOf(game, army).order == 0 && !OnCityTile(game, army))
                 SendIdle(game, side, army);
         }
     }
@@ -770,9 +778,10 @@ void LastRescue(Game& game, Side& side) {
     for (Army* army : Armies(game, side.index)) {
         if (Alive(game, army) && !army->transit && army->x != kNone &&
             army->moves == army->max_moves + 2 && !OnCityTile(game, army)) {
-            army->ai_explore = false;
-            army->ai_neutral = false;
-            ClearOrder(army);
+            ClassicArmyOrder& ord = MutableOrderOf(game, army);
+            ord.explore = false;
+            ord.neutral = false;
+            ClearOrder(game, army);
             army->target.reset();
             SendIdle(game, side, army);
         }
