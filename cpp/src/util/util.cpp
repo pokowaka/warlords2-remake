@@ -12,8 +12,11 @@
 #include "absl/base/no_destructor.h"
 #include "absl/base/thread_annotations.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/flags/commandlineflag.h"
 #include "absl/flags/parse.h"
+#include "absl/flags/reflection.h"
 #include "absl/flags/usage.h"
+#include "absl/flags/usage_config.h"
 #include "absl/strings/str_format.h"
 #include "absl/synchronization/mutex.h"
 #include "absl/time/clock.h"
@@ -402,6 +405,56 @@ double Now() {
     return absl::ToDoubleSeconds(absl::Now() - kProcessStart);
 }
 
+static void PrintFlagHelp(std::string_view program_path, std::string_view filter, bool show_all) {
+    std::string prog_name = fs::path(program_path).filename().string();
+    if (prog_name.empty()) prog_name = "warlords2";
+    if (!absl::ProgramUsageMessage().empty()) {
+        std::printf("%s: %s\n\n", prog_name.c_str(), std::string(absl::ProgramUsageMessage()).c_str());
+    } else {
+        std::printf("%s\n\n", prog_name.c_str());
+    }
+
+    std::printf("  Flags:\n");
+    auto all_flags = absl::GetAllFlags();
+    std::vector<const absl::CommandLineFlag*> matched_flags;
+    matched_flags.reserve(all_flags.size());
+    for (const auto& [name, flag] : all_flags) {
+        if (!flag || flag->IsRetired()) continue;
+        if (!show_all) {
+            std::string filename = flag->Filename();
+            if (filename.empty() || filename.find("external/") != std::string::npos) {
+                continue;
+            }
+        }
+        if (!filter.empty()) {
+            if (flag->Name().find(filter) == std::string_view::npos &&
+                flag->Help().find(filter) == std::string::npos &&
+                flag->Filename().find(filter) == std::string::npos) {
+                continue;
+            }
+        }
+        matched_flags.push_back(flag);
+    }
+    std::sort(matched_flags.begin(), matched_flags.end(),
+              [](const absl::CommandLineFlag* a, const absl::CommandLineFlag* b) {
+                  return a->Name() < b->Name();
+              });
+
+    for (const auto* flag : matched_flags) {
+        std::string def_val = flag->DefaultValue();
+        if (def_val.empty()) {
+            def_val = "\"\"";
+        }
+        std::printf("    --%s (%s); default: %s;\n",
+                    std::string(flag->Name()).c_str(),
+                    flag->Help().c_str(),
+                    def_val.c_str());
+    }
+    std::printf("\nTry --helpfull to get a list of all flags or --help=substring shows help for\n"
+                "flags which include specified substring in either the name, description or path.\n");
+    std::exit(0);
+}
+
 std::vector<std::string> ParseCliFlags(int argc, char** argv, std::string_view usage_message) {
     if (!usage_message.empty()) {
         absl::SetProgramUsageMessage(usage_message);
@@ -419,6 +472,8 @@ std::vector<std::string> ParseCliFlags(int argc, char** argv, std::string_view u
         if (i > 0 && !past_double_dash) {
             if (arg == "--") {
                 past_double_dash = true;
+            } else if (arg == "-h") {
+                arg = "--help";
             } else if (arg.starts_with("--")) {
                 size_t eq_pos = arg.find('=');
                 size_t end_pos = eq_pos == std::string::npos ? arg.size() : eq_pos;
@@ -435,6 +490,19 @@ std::vector<std::string> ParseCliFlags(int argc, char** argv, std::string_view u
             }
         }
         owned_args.push_back(std::move(arg));
+    }
+
+    // Intercept help flags so we can format available flags cleanly and exit 0
+    // rather than Abseil's default exit-1 behavior.
+    std::string_view prog_arg = (argc > 0 && argv[0]) ? argv[0] : "warlords2";
+    for (const std::string& arg : owned_args) {
+        if (arg == "--help" || arg == "-help") {
+            PrintFlagHelp(prog_arg, "", false);
+        } else if (arg == "--helpfull") {
+            PrintFlagHelp(prog_arg, "", true);
+        } else if (arg.starts_with("--help=")) {
+            PrintFlagHelp(prog_arg, arg.substr(7), true);
+        }
     }
     std::vector<char*> mutable_argv;
     mutable_argv.reserve(owned_args.size());
