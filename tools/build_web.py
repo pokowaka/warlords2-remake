@@ -238,12 +238,20 @@ def build(out_dir: Path, clean: bool = False, debug: bool = False) -> None:
         opt_flag,
         "-sUSE_SDL=2",
         "-sALLOW_MEMORY_GROWTH=1",
-        "-sINITIAL_MEMORY=67108864",
+        "-sINITIAL_MEMORY=268435456",
+        "-sSTACK_SIZE=1048576",
         "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']",
         f"--preload-file={ROOT / 'original'}@/original",
+    ]
+    weights_path = ROOT / "cpp" / "ai_weights.json"
+    if weights_path.exists():
+        link_cmd.append(f"--preload-file={weights_path}@/cpp/ai_weights.json")
+    link_cmd += [
         "-o",
         str(output_js),
     ] + [str(o) for o in all_objs]
+    if debug:
+        link_cmd += ["-g", "-sASSERTIONS=2"]
 
     res = subprocess.run(link_cmd, capture_output=True, text=True)
     if res.returncode != 0:

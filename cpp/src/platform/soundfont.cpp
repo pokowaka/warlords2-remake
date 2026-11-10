@@ -95,7 +95,10 @@ bool SoundFontSynth::Load(const std::filesystem::path& path, int sample_rate) {
     if (soundfont_ == nullptr) {
         return false;
     }
-    tsf_set_output(soundfont_, TSF_STEREO_INTERLEAVED, rate_, 0.0f);
+    tsf_set_output(soundfont_, TSF_STEREO_INTERLEAVED, rate_, 0.0F);
+    for (int ch = 0; ch < 16; ++ch) {
+        tsf_channel_set_presetnumber(soundfont_, ch, 0, ch == 9 ? 1 : 0);
+    }
     return true;
 }
 
@@ -109,7 +112,10 @@ bool SoundFontSynth::Load(absl::Span<const uint8_t> data, int sample_rate) {
     if (soundfont_ == nullptr) {
         return false;
     }
-    tsf_set_output(soundfont_, TSF_STEREO_INTERLEAVED, rate_, 0.0f);
+    tsf_set_output(soundfont_, TSF_STEREO_INTERLEAVED, rate_, 0.0F);
+    for (int ch = 0; ch < 16; ++ch) {
+        tsf_channel_set_presetnumber(soundfont_, ch, 0, ch == 9 ? 1 : 0);
+    }
     return true;
 }
 
