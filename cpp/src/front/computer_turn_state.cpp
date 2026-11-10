@@ -45,8 +45,7 @@ class WorkerTurnEventsBridge final : public IAiTurnEvents {
     WorkerTurnEventsBridge(MapScreenController& ctrl, ITurnObserver& channel, Side* ai_side,
                            const bool& ai_skip, int& last_progress,
                            std::optional<TilePos>& pending_centre, std::string& latest_text,
-                           Battle*& pending_battle, AssaultSpec& pending_assault,
-                           bool& has_pending_assault)
+                           std::deque<AssaultSpec>& staged_assaults)
             : ctrl_(ctrl)
             , channel_(channel)
             , ai_side_(ai_side)
@@ -54,9 +53,7 @@ class WorkerTurnEventsBridge final : public IAiTurnEvents {
             , last_progress_(last_progress)
             , pending_centre_(pending_centre)
             , latest_text_(latest_text)
-            , pending_battle_(pending_battle)
-            , pending_assault_(pending_assault)
-            , has_pending_assault_(has_pending_assault) {}
+            , staged_assaults_(staged_assaults) {}
 
     bool IsAborted() const override { return channel_.IsAborted(); }
 
@@ -146,15 +143,11 @@ class WorkerTurnEventsBridge final : public IAiTurnEvents {
         if (!EmitStatus(def_text, 5)) return false;
 
         if (cloud && !ai_skip_) {
-            pending_battle_ = &result;
-            pending_assault_ =
-                    AssaultSpec{x, y, result, &result, /*computer=*/true, window, outcome, nullptr};
-            has_pending_assault_ = true;
+            staged_assaults_.push_back(
+                    AssaultSpec{x, y, result, &result, /*computer=*/true, window, outcome, nullptr});
             AssaultEvent assault_ev{TilePos(x, y), ai_side_->Id(),
                                     def_side ? def_side->Id() : SideId::None(), window, outcome};
             TurnControl ctl = channel_.OnTurnEvent(assault_ev);
-            pending_battle_ = nullptr;
-            has_pending_assault_ = false;
             if (ctl == TurnControl::kAbort) return false;
             if (window) return true;
         }
@@ -177,9 +170,7 @@ class WorkerTurnEventsBridge final : public IAiTurnEvents {
     int& last_progress_;
     std::optional<TilePos>& pending_centre_;
     std::string& latest_text_;
-    Battle*& pending_battle_;
-    AssaultSpec& pending_assault_;
-    bool& has_pending_assault_;
+    std::deque<AssaultSpec>& staged_assaults_;
 };
 
 /**
@@ -274,8 +265,7 @@ void ComputerTurnState::RunWorkerTurns(MapScreenController& ctrl, Side* start_si
         side_news.diplo_news.clear();
 
         WorkerTurnEventsBridge bridge(ctrl, channel, side, ai_skip_, current_progress,
-                                      pending_centre_, latest_text, pending_battle_,
-                                      pending_assault_, has_pending_assault_);
+                                      pending_centre_, latest_text, staged_assaults_);
         ai::PlayTurn(game, *side, &bridge);
         if (channel.IsAborted()) return;
         if (ai_status_) ai_status_->text = latest_text;
@@ -350,8 +340,9 @@ TurnControl ComputerTurnState::HandleMainEvent(MapScreenController& ctrl, const 
         ctx.CentreOn(assault_ev->target.x, assault_ev->target.y);
         ctx.GetViewport().StratDirty();
         ai_wait_ = true;
-        if (has_pending_assault_) {
-            AssaultSpec spec = std::move(pending_assault_);
+        if (!staged_assaults_.empty()) {
+            AssaultSpec spec = std::move(staged_assaults_.front());
+            staged_assaults_.pop_front();
             ctrl.EnterAssault(std::move(spec));
         }
         return TurnControl::kContinue;

@@ -1,136 +1,49 @@
-# Warlords II — in the browser
+# Warlords II — in the Browser (WebAssembly)
 
-The Lua remake (`love2d/`) ported to plain JavaScript, drawing on one
-`<canvas>`. There is no framework and no build step: the page loads ES modules
-as they are. The Lua remake defines how the game behaves. The rules core and
-the computer player follow it closely enough that an all-computer game plays
-out identically in both (see *Tests*).
+The modern C++23 remake of Warlords II compiled directly to WebAssembly (`warlords2.wasm` and `warlords2.js`) using Emscripten. The C++ codebase serves as the single source of truth for both desktop and web releases.
 
-## Running
+All game subsystems run natively inside the browser via WebAssembly:
+- Pure C++23 game model, rules, combat, and scenario loaders (`.SCN`, `.PCK`, `.XMI`).
+- Both classic 1993 AI and modern neural policy ML computer players.
+- Real-time live AdLib / OPL2 FM synthesizer (`AilFm`) running in Web Audio at 11,000 Hz, eliminating 160+ MB of pre-rendered songs.
+- SDL2 immediate-mode 2D graphics rendering to HTML5 Canvas via WebGL.
+- Persistent saved games and user preferences via browser IndexedDB (`IDBFS`).
 
-Serve `web/` from any static web server and open it:
+## Building
 
-```sh
-cd web && python3 -m http.server 8765
-# http://localhost:8765/                          the start screens
-# http://localhost:8765/?scenario=ISLADIA         straight into a scenario
-# http://localhost:8765/?scenario=ERYTHEA&seed=7  ... with a fixed seed
-# http://localhost:8765/?scenario=RANDOM&seed=7   a random world, made from that seed
-```
-
-It does not work from a `file://` URL, because the browser will not fetch the
-assets from disk. Every asset is fetched once at start-up, about 3 MB of game
-data. The music is fetched as it plays.
-
-The controls are the Lua remake's (`love2d/README.md`). The differences:
-
-- Random Map works: the start menu's settings, then Begin makes a new world
-  as the original does (`src/warlords/randommap.js`,
-  `docs/re/random_map.md`). The Lua and C++ remakes have it too. A random game's
-  save carries its map, about 100 KB more than another save.
-- The setup screen has the original's character choice. Click a side's
-  Character box or face to rename the side or, for a computer, to pick its
-  character from its level's deck. Random Characters deals every computer
-  a character other than the Standard one. Recall Options puts back the
-  options the last game began with. The screen opens on those options, not
-  the scenario's, as the original's does (`docs/re/ui.md` › The start
-  screens). The Lua and C++ remakes have them too.
-
-- Saves, the quick save, preferences, the button shortcuts and the sound
-  settings live in the browser's `localStorage` (keys `w2:*`), so they stay with
-  that browser. So do the files the game writes, `OPTIONS.DAT` and
-  `OPTIONS.SND` (keys `w2file:*`).
-- View › Full screen uses the browser's Fullscreen API. The browser decides
-  when to leave it (`Esc`).
-- View › CRT screen draws the frame through a WebGL2 shader, the same tube as
-  the C++ port's. Without WebGL2 the screen stays plain.
-- Sound starts after the first key press or click, as browsers require.
-- The music is always a recording: the AdLib songs were rendered in advance
-  through the remake's own OPL synthesizer, and the MT-32 and Sound Canvas
-  recordings are copied in. Nothing is synthesized live.
-
-## Publishing
-
-The site is static. Gather it into one folder and upload that folder to any
-HTTPS web server:
+To build the web distribution into `build/web/`:
 
 ```sh
-node web/dist.js            # into build/web/, or name another folder
+./tools/build_web.sh
 ```
 
-That is `index.html`, `src/`, `assets/` and `_headers`, about 165 MB. A player
-fetches about 3 MB at start-up, then each song (2-5 MB) as it plays. Before
-copying, the script checks that every file the page fetches is spelled as on
-disk: a Mac does not mind case, a Linux server does.
+Flags:
+- `--clean`: Clean previous intermediate build files.
+- `--debug`: Compile with `-g` assertions and symbols enabled.
+- `--out DIR`: Custom output directory (default: `build/web`).
 
-`_headers` sets the caching on Netlify and Cloudflare Pages. No file name
-carries a version, so everything but the songs is revalidated on every visit,
-and a returning player never mixes old modules with new ones. On a host that
-ignores `_headers` and caches longer, an update takes that long to reach
-everyone.
+## Running Locally
 
-Saves live in the browser under the site's address: if the site moves, its
-players' saves stay behind.
-
-GitHub Pages publishes the site on every push to `main` that touches `web/`
-(`.github/workflows/pages.yml`). It ignores `_headers` and caches every file
-for ten minutes.
-
-## Layout
-
-```
-index.html        the page: a canvas, the loading bar, an error panel
-src/main.js       the front end (love2d/main.lua): map, bars, input, menus, the computer's turn
-src/warlords/     the rules core and the computer player; runs under node too
-src/ui/           one module per dialog (love2d/ui/)
-src/gfx.js        a small love.graphics-alike over the 2D canvas
-src/vfs.js        the asset store: everything preloaded, so reads are synchronous
-src/display.js    scaling the 640x480 interface to the window
-src/crt.js        View › CRT screen: the frame through a WebGL shader
-src/sound.js      effects, the advisor and the music through Web Audio
-assets/           generated by tools/web_assets.py (committed)
-test/             node tests
-dist.js           copies what a web server needs into build/web/
-_headers          caching rules for Netlify and Cloudflare Pages
-```
-
-Notes for anyone porting more of the Lua:
-
-- Arrays count from 0. Ids that the Lua indexed with `+ 1` (sides, cities,
-  items) index the arrays directly.
-- Functions that return several values in Lua return an array here.
-- The computer player's coroutines are generators (`yield*`).
-- `PLAN.md` lists where the port deliberately differs from the Lua.
-
-## Assets
-
-The browser cannot read the 1993 formats, so `tools/web_assets.py` converts
-them once:
-
-- `.PCK` and `.FNT` become greyscale PNGs whose grey is the colour index × 17.
-  They are decoded back to indices at start-up, so palettes and colour swaps
-  work as they do in the Lua.
-- `.8SN` samples become WAVs.
-- The AdLib songs become OGGs.
-- Everything else is copied as it is, and listed in `assets/manifest.json`.
-
-To regenerate, run this from the repository root. It needs Python 3 with
-Pillow, plus `luajit` and `oggenc` for the songs:
+Serve `build/web/` with any local HTTP server:
 
 ```sh
-python3 tools/web_assets.py original web/assets
+python3 -m http.server -d build/web 8765
+# http://localhost:8765/                          start screen
+# http://localhost:8765/?scenario=ISLADIA         directly launch a scenario
+# http://localhost:8765/?scenario=ERYTHEA&seed=7  launch with fixed RNG seed
+# http://localhost:8765/?scenario=RANDOM&seed=7   launch a random world
+# http://localhost:8765/?spectate=1               AI-vs-AI spectator mode
 ```
 
-## Tests
+URL parameters are forwarded directly into CLI flags in `cpp/src/main.cpp`.
 
-From the repository root:
+## Deployment
 
-```sh
-node web/test/run.js                       # the rules suite, love2d/test/run.lua ported
-sh web/test/compare.sh                     # Lua vs JS over a set of games
-sh web/test/compare.sh ERYTHEA 3 40 save   # one game: scenario, seed, turns [hidden|diplo|save]
-```
+Pushes to `main` automatically build and deploy `build/web/` to GitHub Pages via `.github/workflows/pages.yml`.
 
-`compare.sh` plays the same all-computer game in LuaJIT and in node. After
-every turn it compares gold, armies, city owners and the dice's state, and
-prints `same` or the first difference.
+The static build package consists of:
+- `index.html`: Web wrapper and canvas host.
+- `warlords2.js`: Emscripten runtime loader (~190 KB).
+- `warlords2.wasm`: Compiled C++ engine (~2.7 MB).
+- `warlords2.data`: Preloaded original game assets (~4.5 MB).
+- `_headers`: Caching headers for Netlify / Cloudflare.

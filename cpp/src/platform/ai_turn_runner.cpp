@@ -74,6 +74,37 @@ OptionalTurnEvent AiTurnRunner::Resume() {
         }
     }
 
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    if (!started_) {
+        started_ = true;
+        class SingleThreadQueueObserver final : public ITurnObserver {
+          public:
+            explicit SingleThreadQueueObserver(std::vector<TurnEvent>& queue,
+                                               const bool& abort_flag)
+                    : queue_(queue), abort_flag_(abort_flag) {}
+            TurnControl OnTurnEvent(const TurnEvent& event) override {
+                if (abort_flag_) return TurnControl::kAbort;
+                queue_.push_back(event);
+                return TurnControl::kContinue;
+            }
+            bool IsAborted() const override { return abort_flag_; }
+
+          private:
+            std::vector<TurnEvent>& queue_;
+            const bool& abort_flag_;
+        };
+        SingleThreadQueueObserver observer(sync_queue_, abort_requested_);
+        if (body_) {
+            body_(observer);
+        }
+        finished_ = true;
+        sync_cursor_ = 0;
+    }
+    if (sync_cursor_ < sync_queue_.size()) {
+        return sync_queue_[sync_cursor_++];
+    }
+    return std::nullopt;
+#else
     if (!started_) {
         started_ = true;
         worker_thread_ = SDL_CreateThreadWithStackSize(&AiTurnRunner::WorkerThreadMain,
@@ -106,6 +137,7 @@ OptionalTurnEvent AiTurnRunner::Resume() {
         return std::nullopt;
     }
     return delivered;
+#endif
 }
 
 bool AiTurnRunner::Step(ITurnObserver& observer) {
@@ -128,6 +160,11 @@ void AiTurnRunner::RunToCompletion(ITurnObserver& observer) {
 }
 
 void AiTurnRunner::Abort() {
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    abort_requested_ = true;
+    finished_ = true;
+    sync_queue_.clear();
+#else
     {
         absl::MutexLock turn_lock(&turn_mutex_);
         abort_requested_ = true;
@@ -141,11 +178,16 @@ void AiTurnRunner::Abort() {
         }
     }
     JoinWorkerThread();
+#endif
 }
 
 bool AiTurnRunner::Done() const {
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    return finished_ && sync_cursor_ >= sync_queue_.size();
+#else
     absl::MutexLock turn_lock(&turn_mutex_);
     return finished_;
+#endif
 }
 
 void AiTurnRunner::JoinWorkerThread() {

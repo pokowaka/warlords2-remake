@@ -13,7 +13,7 @@ Steve Fawkner, who holds the rights to *Warlords* based video games, has given m
 | folder | what it is |
 |---|---|
 | [`cpp/`](cpp/README.md) | the core engine in modern C++ on SDL2 (source of truth) |
-| [`web/`](web/README.md) | the browser version drawing on a `<canvas>` |
+| [`web/`](web/README.md) | the browser WebAssembly release built from C++ via Emscripten |
 | [`docs/`](docs/) | the file formats, the rules, and the reverse engineering of `WARLORD2.EXE` |
 | `tools/` | decoders and exporters for the data files, the Ghidra and DOSBox helpers |
 | `original/` | the original game's files, read as they are at runtime |
@@ -22,8 +22,8 @@ Steve Fawkner, who holds the rights to *Warlords* based video games, has given m
 ## Quick start
 
 ```sh
-bazel run //cpp:play                           # C++, needs Bazel (bazelisk)
-cd web && python3 -m http.server 8765          # then open http://localhost:8765/
+bazel run //cpp:play                                                # desktop C++ on SDL2
+./tools/build_web.sh && python3 -m http.server -d build/web 8765    # WebAssembly browser release (http://localhost:8765/)
 ```
 
 Run from the repository root, so that `original/` is found. Each version's

@@ -69,6 +69,9 @@ class Application {
      */
     int Execute(const ApplicationConfig& config);
 
+    /** @brief Advances one frame (polls SDL events, updates UI state, and presents the frame). */
+    void Tick();
+
     /** @brief Convenience entry point constructing an `Application` on the stack and running it. */
     static int Run(const ApplicationConfig& config);
 

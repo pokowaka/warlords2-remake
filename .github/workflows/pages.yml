@@ -1,12 +1,12 @@
-# Publish the web port (web/) to GitHub Pages on every push to main.
-# web/dist.js checks the files' spelling and gathers the site into build/web/.
+# Publish the WebAssembly build of Warlords II to GitHub Pages on every push to main.
+# C++ is the single source of truth; tools/build_web.sh compiles it to wasm.
 
 name: Pages
 
 on:
   push:
     branches: [main]
-    paths: ["web/**", ".github/workflows/pages.yml"]
+    paths: ["cpp/**", "original/**", "web/**", "tools/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -24,10 +24,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-python@v5
         with:
-          node-version: 22
-      - run: node web/dist.js build/web
+          python-version: "3.12"
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel
+          key: bazel-${{ hashFiles('MODULE.bazel.lock') }}
+      - name: Build WebAssembly distribution
+        run: ./tools/build_web.sh --out build/web
       - uses: actions/upload-pages-artifact@v3
         with:
           path: build/web

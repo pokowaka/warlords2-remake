@@ -224,6 +224,10 @@ class AiTurnRunner {
     bool finished_ ABSL_GUARDED_BY(turn_mutex_) = false;            ///< Latched when `body_` exits.
     bool abort_requested_ ABSL_GUARDED_BY(turn_mutex_) = false;     ///< Latched on cancellation.
     OptionalTurnEvent pending_event_ ABSL_GUARDED_BY(turn_mutex_);  ///< Event awaiting main thread.
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+    std::vector<TurnEvent> sync_queue_;                             ///< Single-threaded event queue fallback.
+    size_t sync_cursor_ = 0;                                        ///< Single-threaded queue read cursor.
+#endif
 };
 
 }  // namespace w2

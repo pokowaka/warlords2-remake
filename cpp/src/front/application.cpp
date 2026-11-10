@@ -4,6 +4,10 @@
 #include <string>
 #include <string_view>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include <SDL.h>
 
 #include "front/layout.hpp"
@@ -59,8 +63,14 @@ Application::~Application() {
 }
 
 int Application::Run(const ApplicationConfig& config) {
+#ifdef __EMSCRIPTEN__
+    static std::unique_ptr<Application> s_app;
+    s_app = std::make_unique<Application>();
+    return s_app->Execute(config);
+#else
     Application app;
     return app.Execute(config);
+#endif
 }
 
 int Application::Execute(const ApplicationConfig& config) {
@@ -162,24 +172,41 @@ int Application::Execute(const ApplicationConfig& config) {
     }
 
     controller_.InitPointerState(win);
+#ifdef __EMSCRIPTEN__
+    static auto EmscriptenFrame = [](void* arg) {
+        auto* app = static_cast<Application*>(arg);
+        if (app->ui_context_.QuitRequested()) {
+            emscripten_cancel_main_loop();
+            app->controller_.ShutdownSession();
+            return;
+        }
+        app->Tick();
+    };
+    emscripten_set_main_loop_arg(EmscriptenFrame, this, 0, 1);
+#else
     while (!ui_context_.QuitRequested()) {
-        PumpEvents();
-        controller_.PollFocusedMouse(win);
-        display_.MutableState().min_h = (ui_context_.Starting() || !ui_context_.GamePtr())
-                                                ? layout::kScreenH
-                                                : layout::kShortH;
-        display_.Measure();
-        display_.BeginFrame(renderer_);
-        controller_.PadUpdate();
-        controller_.SyncTyping();
-        script_player_.Step(controller_);
-        controller_.Update();
-        controller_.Draw();
-        display_.Present(renderer_);
+        Tick();
     }
 
     controller_.ShutdownSession();
+#endif
     return 0;
+}
+
+void Application::Tick() {
+    PumpEvents();
+    controller_.PollFocusedMouse(display_.Window());
+    display_.MutableState().min_h = (ui_context_.Starting() || !ui_context_.GamePtr())
+                                            ? layout::kScreenH
+                                            : layout::kShortH;
+    display_.Measure();
+    display_.BeginFrame(renderer_);
+    controller_.PadUpdate();
+    controller_.SyncTyping();
+    script_player_.Step(controller_);
+    controller_.Update();
+    controller_.Draw();
+    display_.Present(renderer_);
 }
 
 void Application::PumpEvents() {

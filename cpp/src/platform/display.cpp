@@ -61,7 +61,9 @@ SDL_Renderer* DisplayWindow::CreateRenderer() {
         SDL_DestroyRenderer(owned_sdl_renderer_);
         owned_sdl_renderer_ = nullptr;
     }
+#ifndef __EMSCRIPTEN__
     SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+#endif
     owned_sdl_renderer_ =
             SDL_CreateRenderer(window_, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (owned_sdl_renderer_ == nullptr) {

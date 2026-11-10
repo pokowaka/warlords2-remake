@@ -368,9 +368,7 @@ class ComputerTurnState final : public IMapScreenState {
     double ai_resume_at_ = 0.0;          ///< Monotonic timestamp when a `PauseEvent` expires.
     Side* next_human_side_ = nullptr;    ///< Next human faction after AI turns end, or `nullptr`.
     std::optional<TilePos> pending_centre_;  ///< Deferred main-thread camera centre request.
-    Battle* pending_battle_ = nullptr;  ///< Worker `Battle` awaiting main-thread `AssaultEvent`.
-    AssaultSpec pending_assault_{};     ///< Prepared `AssaultSpec` staged before `AssaultEvent`.
-    bool has_pending_assault_ = false;  ///< True when `pending_assault_` holds a staged battle.
+    std::deque<AssaultSpec> staged_assaults_;  ///< Prepared `AssaultSpec`s staged for main thread.
 };
 
 /**
