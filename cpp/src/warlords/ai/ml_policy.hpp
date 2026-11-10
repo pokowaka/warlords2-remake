@@ -161,8 +161,18 @@ struct ResidualMLP {
     std::array<float, static_cast<size_t>(OutDim) * H2Dim> w3{};      ///< Hidden 2 to output.
     std::array<float, OutDim> b3{};                                   ///< Output biases.
 
+    /** @brief Hidden layer activations preserved for fast backpropagation. */
+    struct Activations {
+        std::array<float, H1Dim> hidden1{};  ///< First hidden layer tanh activations.
+        std::array<float, H2Dim> hidden2{};  ///< Second hidden layer tanh activations.
+    };
+
     /** @brief Evaluates the network on an input. */
     std::array<float, OutDim> Forward(const std::array<float, InDim>& input) const;
+
+    /** @brief Evaluates the network on an input and preserves hidden activations for backprop. */
+    std::array<float, OutDim> ForwardWithActivations(const std::array<float, InDim>& input,
+                                                     Activations& act) const;
 
     /**
      * @brief Accumulates the exact parameter gradients dL/dW and dL/db into
@@ -170,6 +180,14 @@ struct ResidualMLP {
      */
     void Backward(const std::array<float, InDim>& input, const std::array<float, OutDim>& d_out,
                   ResidualMLP& grad_accum) const;
+
+    /**
+     * @brief Accumulates parameter gradients using cached hidden activations, avoiding
+     * recomputing forward matrix multiplications during training passes.
+     */
+    void BackwardWithActivations(const std::array<float, InDim>& input, const Activations& act,
+                                 const std::array<float, OutDim>& d_out,
+                                 ResidualMLP& grad_accum) const;
 
     /** @brief Sets every weight and bias to zero. */
     void Zero();

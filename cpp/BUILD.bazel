@@ -828,6 +828,19 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "ai_benchmark",
+    testonly = True,
+    copts = W2_COPTS,
+    srcs = ["test/ai_benchmark.cpp"],
+    deps = [
+        ":w2core",
+        "@google_benchmark//:benchmark",
+        "@google_benchmark//:benchmark_main",
+    ],
+)
+
+
 # The refactor's safety net: the same games and worlds as when recorded
 # (cpp/test/golden.sh).
 GOLDEN_TOOLS = [

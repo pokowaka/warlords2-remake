@@ -1,5 +1,13 @@
 #include "warlords/ai/ml_policy.hpp"
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+#elif defined(__AVX2__)
+#include <immintrin.h>
+#elif defined(__SSE2__)
+#include <emmintrin.h>
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <sstream>
@@ -17,88 +25,219 @@
 
 namespace w2::ai::ml {
 
+namespace {
+
+inline float DotProduct(const float* a, const float* b, int n) {
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    float32x4_t acc0 = vdupq_n_f32(0.0F);
+    float32x4_t acc1 = vdupq_n_f32(0.0F);
+    int j = 0;
+    for (; j + 7 < n; j += 8) {
+        acc0 = vmlaq_f32(acc0, vld1q_f32(a + j), vld1q_f32(b + j));
+        acc1 = vmlaq_f32(acc1, vld1q_f32(a + j + 4), vld1q_f32(b + j + 4));
+    }
+    acc0 = vaddq_f32(acc0, acc1);
+    float sum = vaddvq_f32(acc0);
+    for (; j < n; ++j) {
+        sum += a[j] * b[j];
+    }
+    return sum;
+#elif defined(__AVX2__)
+    __m256 acc = _mm256_setzero_ps();
+    int j = 0;
+    for (; j + 7 < n; j += 8) {
+        acc = _mm256_fmadd_ps(_mm256_loadu_ps(a + j), _mm256_loadu_ps(b + j), acc);
+    }
+    __m128 lo = _mm256_castps256_ps128(acc);
+    __m128 hi = _mm256_extractf128_ps(acc, 1);
+    __m128 sum128 = _mm_add_ps(lo, hi);
+    sum128 = _mm_hadd_ps(sum128, sum128);
+    sum128 = _mm_hadd_ps(sum128, sum128);
+    float sum = _mm_cvtss_f32(sum128);
+    for (; j < n; ++j) {
+        sum += a[j] * b[j];
+    }
+    return sum;
+#elif defined(__SSE2__)
+    __m128 acc0 = _mm_setzero_ps();
+    __m128 acc1 = _mm_setzero_ps();
+    int j = 0;
+    for (; j + 7 < n; j += 8) {
+        acc0 = _mm_add_ps(acc0, _mm_mul_ps(_mm_loadu_ps(a + j), _mm_loadu_ps(b + j)));
+        acc1 = _mm_add_ps(acc1, _mm_mul_ps(_mm_loadu_ps(a + j + 4), _mm_loadu_ps(b + j + 4)));
+    }
+    acc0 = _mm_add_ps(acc0, acc1);
+    alignas(16) float buf[4];
+    _mm_store_ps(buf, acc0);
+    float sum = buf[0] + buf[1] + buf[2] + buf[3];
+    for (; j < n; ++j) {
+        sum += a[j] * b[j];
+    }
+    return sum;
+#else
+    float sum0 = 0.0F;
+    float sum1 = 0.0F;
+    float sum2 = 0.0F;
+    float sum3 = 0.0F;
+    int j = 0;
+    for (; j + 3 < n; j += 4) {
+        sum0 += a[j] * b[j];
+        sum1 += a[j + 1] * b[j + 1];
+        sum2 += a[j + 2] * b[j + 2];
+        sum3 += a[j + 3] * b[j + 3];
+    }
+    float sum = (sum0 + sum1) + (sum2 + sum3);
+    for (; j < n; ++j) {
+        sum += a[j] * b[j];
+    }
+    return sum;
+#endif
+}
+
+inline void Axpy(float* y, float alpha, const float* x, int n) {
+    if (alpha == 0.0F) return;
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    float32x4_t a = vdupq_n_f32(alpha);
+    int j = 0;
+    for (; j + 7 < n; j += 8) {
+        float32x4_t y0 = vld1q_f32(y + j);
+        float32x4_t x0 = vld1q_f32(x + j);
+        vst1q_f32(y + j, vmlaq_f32(y0, a, x0));
+
+        float32x4_t y1 = vld1q_f32(y + j + 4);
+        float32x4_t x1 = vld1q_f32(x + j + 4);
+        vst1q_f32(y + j + 4, vmlaq_f32(y1, a, x1));
+    }
+    for (; j < n; ++j) {
+        y[j] += alpha * x[j];
+    }
+#elif defined(__AVX2__)
+    __m256 a = _mm256_set1_ps(alpha);
+    int j = 0;
+    for (; j + 7 < n; j += 8) {
+        __m256 y_vec = _mm256_loadu_ps(y + j);
+        __m256 x_vec = _mm256_loadu_ps(x + j);
+        _mm256_storeu_ps(y + j, _mm256_fmadd_ps(a, x_vec, y_vec));
+    }
+    for (; j < n; ++j) {
+        y[j] += alpha * x[j];
+    }
+#elif defined(__SSE2__)
+    __m128 a = _mm_set1_ps(alpha);
+    int j = 0;
+    for (; j + 7 < n; j += 8) {
+        __m128 y0 = _mm_loadu_ps(y + j);
+        __m128 x0 = _mm_loadu_ps(x + j);
+        _mm_storeu_ps(y + j, _mm_add_ps(y0, _mm_mul_ps(a, x0)));
+
+        __m128 y1 = _mm_loadu_ps(y + j + 4);
+        __m128 x1 = _mm_loadu_ps(x + j + 4);
+        _mm_storeu_ps(y + j + 4, _mm_add_ps(y1, _mm_mul_ps(a, x1)));
+    }
+    for (; j < n; ++j) {
+        y[j] += alpha * x[j];
+    }
+#else
+    for (int j = 0; j < n; ++j) {
+        y[j] += alpha * x[j];
+    }
+#endif
+}
+
+}  // namespace
+
 template <int InDim, int H1Dim, int H2Dim, int OutDim>
-std::array<float, OutDim> ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Forward(
-        const std::array<float, InDim>& input) const {
-    std::array<float, H1Dim> hidden1{};
+std::array<float, OutDim> ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::ForwardWithActivations(
+        const std::array<float, InDim>& input, Activations& act) const {
     for (int i = 0; i < H1Dim; i++) {
-        float sum = b1[i];
         const float* row = &w1[static_cast<size_t>(i) * InDim];
-        for (int j = 0; j < InDim; j++) sum += row[j] * input[j];
-        hidden1[i] = std::tanh(sum);
+        float sum = b1[i] + DotProduct(row, input.data(), InDim);
+        act.hidden1[i] = std::tanh(sum);
     }
 
-    std::array<float, H2Dim> hidden2{};
     for (int i = 0; i < H2Dim; i++) {
-        float sum = b2[i];
         const float* row = &w2[static_cast<size_t>(i) * H1Dim];
-        for (int j = 0; j < H1Dim; j++) sum += row[j] * hidden1[j];
-        hidden2[i] = std::tanh(sum);
+        float sum = b2[i] + DotProduct(row, act.hidden1.data(), H1Dim);
+        act.hidden2[i] = std::tanh(sum);
     }
 
     std::array<float, OutDim> out{};
     for (int i = 0; i < OutDim; i++) {
-        float sum = b3[i];
         const float* skip_row = &w_skip[static_cast<size_t>(i) * InDim];
-        for (int j = 0; j < InDim; j++) sum += skip_row[j] * input[j];
         const float* row3 = &w3[static_cast<size_t>(i) * H2Dim];
-        for (int j = 0; j < H2Dim; j++) sum += row3[j] * hidden2[j];
-        out[i] = sum;
+        out[i] = b3[i] + DotProduct(skip_row, input.data(), InDim) +
+                 DotProduct(row3, act.hidden2.data(), H2Dim);
     }
     return out;
 }
 
 template <int InDim, int H1Dim, int H2Dim, int OutDim>
-void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Backward(const std::array<float, InDim>& input,
-                                                        const std::array<float, OutDim>& d_out,
-                                                        ResidualMLP& grad_accum) const {
-    std::array<float, H1Dim> hidden1{};
-    for (int i = 0; i < H1Dim; i++) {
-        float sum = b1[i];
-        const float* row = &w1[static_cast<size_t>(i) * InDim];
-        for (int j = 0; j < InDim; j++) sum += row[j] * input[j];
-        hidden1[i] = std::tanh(sum);
-    }
+std::array<float, OutDim> ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Forward(
+        const std::array<float, InDim>& input) const {
+    Activations act;
+    return ForwardWithActivations(input, act);
+}
 
-    std::array<float, H2Dim> hidden2{};
-    for (int i = 0; i < H2Dim; i++) {
-        float sum = b2[i];
-        const float* row = &w2[static_cast<size_t>(i) * H1Dim];
-        for (int j = 0; j < H1Dim; j++) sum += row[j] * hidden1[j];
-        hidden2[i] = std::tanh(sum);
-    }
+template <int InDim, int H1Dim, int H2Dim, int OutDim>
+void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::BackwardWithActivations(
+        const std::array<float, InDim>& input, const Activations& act,
+        const std::array<float, OutDim>& d_out, ResidualMLP& grad_accum) const {
+    const auto& hidden1 = act.hidden1;
+    const auto& hidden2 = act.hidden2;
 
     for (int out_idx = 0; out_idx < OutDim; out_idx++) {
         float grad_out = d_out[out_idx];
         if (grad_out == 0.0F) continue;
         grad_accum.b3[out_idx] += grad_out;
         float* grad_skip = &grad_accum.w_skip[static_cast<size_t>(out_idx) * InDim];
-        for (int j = 0; j < InDim; j++) grad_skip[j] += grad_out * input[j];
+        Axpy(grad_skip, grad_out, input.data(), InDim);
         float* grad_w3 = &grad_accum.w3[static_cast<size_t>(out_idx) * H2Dim];
-        for (int j = 0; j < H2Dim; j++) grad_w3[j] += grad_out * hidden2[j];
+        Axpy(grad_w3, grad_out, hidden2.data(), H2Dim);
     }
 
     std::array<float, H2Dim> grad_z2{};
     for (int i = 0; i < H2Dim; i++) {
         float grad_hidden2 = 0.0F;
-        for (int out_idx = 0; out_idx < OutDim; out_idx++)
+        for (int out_idx = 0; out_idx < OutDim; out_idx++) {
             grad_hidden2 += d_out[out_idx] * w3[static_cast<size_t>(out_idx) * H2Dim + i];
+        }
         float grad2 = grad_hidden2 * (1.0F - hidden2[i] * hidden2[i]);
         grad_z2[i] = grad2;
         grad_accum.b2[i] += grad2;
         float* grad_w2 = &grad_accum.w2[static_cast<size_t>(i) * H1Dim];
-        for (int j = 0; j < H1Dim; j++) grad_w2[j] += grad2 * hidden1[j];
+        Axpy(grad_w2, grad2, hidden1.data(), H1Dim);
+    }
+
+    std::array<float, H1Dim> grad_hidden1{};
+    for (int i = 0; i < H2Dim; i++) {
+        const float* row_w2 = &w2[static_cast<size_t>(i) * H1Dim];
+        Axpy(grad_hidden1.data(), grad_z2[i], row_w2, H1Dim);
     }
 
     for (int j = 0; j < H1Dim; j++) {
-        float grad_hidden1 = 0.0F;
-        for (int i = 0; i < H2Dim; i++)
-            grad_hidden1 += grad_z2[i] * w2[static_cast<size_t>(i) * H1Dim + j];
-        float grad1 = grad_hidden1 * (1.0F - hidden1[j] * hidden1[j]);
+        float grad1 = grad_hidden1[j] * (1.0F - hidden1[j] * hidden1[j]);
         grad_accum.b1[j] += grad1;
         float* grad_w1 = &grad_accum.w1[static_cast<size_t>(j) * InDim];
-        for (int in_idx = 0; in_idx < InDim; in_idx++) grad_w1[in_idx] += grad1 * input[in_idx];
+        Axpy(grad_w1, grad1, input.data(), InDim);
     }
+}
+
+template <int InDim, int H1Dim, int H2Dim, int OutDim>
+void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Backward(const std::array<float, InDim>& input,
+                                                        const std::array<float, OutDim>& d_out,
+                                                        ResidualMLP& grad_accum) const {
+    Activations act;
+    for (int i = 0; i < H1Dim; i++) {
+        const float* row = &w1[static_cast<size_t>(i) * InDim];
+        float sum = b1[i] + DotProduct(row, input.data(), InDim);
+        act.hidden1[i] = std::tanh(sum);
+    }
+    for (int i = 0; i < H2Dim; i++) {
+        const float* row = &w2[static_cast<size_t>(i) * H1Dim];
+        float sum = b2[i] + DotProduct(row, act.hidden1.data(), H1Dim);
+        act.hidden2[i] = std::tanh(sum);
+    }
+    BackwardWithActivations(input, act, d_out, grad_accum);
 }
 
 template <int InDim, int H1Dim, int H2Dim, int OutDim>

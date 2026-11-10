@@ -895,55 +895,67 @@ struct Normalizers {
 /**
  * @brief Accumulates the gradients of one turn's decisions and its critic target.
  *
- * Adds to `grad` and `stats`; `scores` and `d_scores` are scratch buffers
- * reused between calls.
+ * Adds to `grad` and `stats`; `scores`, `d_scores`, and activation buffers are
+ * scratch buffers reused between calls.
  */
 void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn,
                     const Normalizers& normalizers, float inv_t, const Config& cfg,
                     ml::PolicyNetwork& grad, HeadStats& stats, std::vector<float>& scores,
-                    std::vector<float>& d_scores) {
+                    std::vector<float>& d_scores,
+                    std::vector<ml::PolicyNetwork::MissionNet::Activations>& mission_acts,
+                    std::vector<ml::PolicyNetwork::EconNet::Activations>& econ_acts) {
     // Critic: 0.5 (V - G)^2 on a linear head (search-trained turns have no return target)
     const bool has_critic_target = !std::isnan(turn.return_target);
     if (has_critic_target) {
         const ml::ValueInVec value_in = ml::PackValueInput(turn.start_ctx, turn.start_critic);
-        float predicted_value = net.ValueHead().Forward(value_in)[0];
+        ml::PolicyNetwork::ValueNet::Activations val_act;
+        float predicted_value = net.ValueHead().ForwardWithActivations(value_in, val_act)[0];
         float value_error = predicted_value - turn.return_target;
         stats.value_loss += 0.5 * value_error * value_error;
         stats.turns++;
-        net.ValueHead().Backward(value_in, {value_error}, grad.ValueHead());
+        net.ValueHead().BackwardWithActivations(value_in, val_act, {value_error}, grad.ValueHead());
     }
 
     for (const auto& step : turn.mission_steps) {
         if (has_critic_target) {
-            float predicted_stack_value = net.EvaluateStackValue(step.stack_value_in);
+            ml::PolicyNetwork::StackValueNet::Activations stack_val_act;
+            float predicted_stack_value =
+                    net.StackValueHead().ForwardWithActivations(step.stack_value_in, stack_val_act)[0];
             float stack_value_error = predicted_stack_value - step.stack_return_target;
             stats.value_loss += 0.25 * stack_value_error * stack_value_error;
             stats.stack_values++;
-            net.StackValueHead().Backward(step.stack_value_in, {stack_value_error},
-                                          grad.StackValueHead());
+            net.StackValueHead().BackwardWithActivations(step.stack_value_in, stack_val_act,
+                                                        {stack_value_error}, grad.StackValueHead());
         }
 
         float adv = normalizers.mission(step.advantage);
         const size_t candidate_count = step.candidates.size();
         if (candidate_count > 1) {
             scores.resize(candidate_count);
-            for (size_t candidate = 0; candidate < candidate_count; candidate++)
-                scores[candidate] = net.MissionHead().Forward(step.candidates[candidate])[0];
+            mission_acts.resize(candidate_count);
+            for (size_t candidate = 0; candidate < candidate_count; candidate++) {
+                scores[candidate] = net.MissionHead().ForwardWithActivations(
+                        step.candidates[candidate], mission_acts[candidate])[0];
+            }
             CategoricalPpo(scores, &step.log_mult, step.chosen_idx, step.old_log_prob, adv, inv_t,
                            cfg, d_scores, stats);
             for (size_t candidate = 0; candidate < candidate_count; candidate++) {
-                if (d_scores[candidate] != 0.0F)
-                    net.MissionHead().Backward(step.candidates[candidate],
-                                               {d_scores[candidate], 0.0F}, grad.MissionHead());
+                if (d_scores[candidate] != 0.0F) {
+                    net.MissionHead().BackwardWithActivations(
+                            step.candidates[candidate], mission_acts[candidate],
+                            {d_scores[candidate], 0.0F}, grad.MissionHead());
+                }
             }
             stats.mission++;
         }
         if (step.has_stage_choice && step.chosen_idx < static_cast<int>(candidate_count)) {
-            float stage_logit = net.MissionHead().Forward(step.candidates[step.chosen_idx])[1];
+            ml::PolicyNetwork::MissionNet::Activations stage_act;
+            float stage_logit = net.MissionHead().ForwardWithActivations(
+                    step.candidates[step.chosen_idx], stage_act)[1];
             float d_stage_logit = BinaryPpo(stage_logit, step.stage_chosen, step.old_stage_log_prob,
                                             adv, inv_t, cfg, stats);
-            net.MissionHead().Backward(step.candidates[step.chosen_idx], {0.0F, d_stage_logit},
-                                       grad.MissionHead());
+            net.MissionHead().BackwardWithActivations(step.candidates[step.chosen_idx], stage_act,
+                                                     {0.0F, d_stage_logit}, grad.MissionHead());
             stats.mission++;
         }
     }
@@ -953,21 +965,27 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
         if (candidate_count <= 1) continue;
         float econ_adv = normalizers.econ(econ_step.advantage);
         scores.resize(candidate_count);
-        for (size_t candidate = 0; candidate < candidate_count; candidate++)
-            scores[candidate] = net.EconHead().Forward(econ_step.candidates[candidate])[0];
+        econ_acts.resize(candidate_count);
+        for (size_t candidate = 0; candidate < candidate_count; candidate++) {
+            scores[candidate] = net.EconHead().ForwardWithActivations(
+                    econ_step.candidates[candidate], econ_acts[candidate])[0];
+        }
         CategoricalPpo(scores, &econ_step.log_mult, econ_step.chosen_idx, econ_step.old_log_prob,
                        econ_adv, inv_t, cfg, d_scores, stats);
         for (size_t candidate = 0; candidate < candidate_count; candidate++) {
-            if (d_scores[candidate] != 0.0F)
-                net.EconHead().Backward(econ_step.candidates[candidate], {d_scores[candidate]},
-                                        grad.EconHead());
+            if (d_scores[candidate] != 0.0F) {
+                net.EconHead().BackwardWithActivations(
+                        econ_step.candidates[candidate], econ_acts[candidate],
+                        {d_scores[candidate]}, grad.EconHead());
+            }
         }
         stats.econ++;
     }
 
     float diplo_adv = normalizers.diplo(turn.advantage);
     for (const auto& diplo_step : turn.diplo_steps) {
-        auto raw = net.DiploHead().Forward(diplo_step.input);
+        ml::PolicyNetwork::DiploNet::Activations diplo_act;
+        auto raw = net.DiploHead().ForwardWithActivations(diplo_step.input, diplo_act);
         std::array<float, ml::kDiploOutDim> d_out{};
         scores = {raw[0], raw[1], raw[2], raw[3]};
         CategoricalPpo(scores, nullptr, diplo_step.chosen_stance, diplo_step.old_stance_log_prob,
@@ -984,7 +1002,7 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
                                  diplo_step.old_joint_war_log_prob, diplo_adv, inv_t, cfg, stats);
             stats.diplo++;
         }
-        net.DiploHead().Backward(diplo_step.input, d_out, grad.DiploHead());
+        net.DiploHead().BackwardWithActivations(diplo_step.input, diplo_act, d_out, grad.DiploHead());
     }
 }
 
@@ -1641,9 +1659,12 @@ int main(int argc, char** argv) {
                     grads[worker].Zero();
                     gpool.emplace_back([&, worker]() {
                         std::vector<float> scores, d_scores;
+                        std::vector<ml::PolicyNetwork::MissionNet::Activations> mission_acts;
+                        std::vector<ml::PolicyNetwork::EconNet::Activations> econ_acts;
                         for (size_t ti; (ti = next_turn.fetch_add(1)) < mb1;) {
                             AccumulateTurn(learner, *turns[ti], normalizers, inv_t, cfg,
-                                           grads[worker], stats[worker], scores, d_scores);
+                                           grads[worker], stats[worker], scores, d_scores,
+                                           mission_acts, econ_acts);
                         }
                     });
                 }
