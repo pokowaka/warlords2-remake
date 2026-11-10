@@ -33,6 +33,8 @@ warlords-prefs.txt
 # Generated scenarios (docs/scengen.md)
 original/GEN*/
 original/DATA/SCENGEN.LST
+reference/original/GEN*/
+reference/original/DATA/SCENGEN.LST
 
 # Bazel
 bazel-*

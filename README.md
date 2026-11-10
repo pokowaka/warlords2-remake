@@ -46,7 +46,8 @@ The Modern AI is trained entirely in C++ (no external ML framework) using PPO se
 | [`AI-DESIGN.md`](AI-DESIGN.md) | Design, network topology (`v7`/`v8`), training curriculum, and evaluation of the Modern ML AI |
 | [`docs/`](docs/) | Binary file format specs, decoded 1993 game rules, and reverse engineering notes for `WARLORD2.EXE` |
 | `tools/` | Web builder (`build_web.sh`), quality gate runner (`check.sh`, `tidy.sh`), format decoders, and Ghidra/DOSBox helpers |
-| `original/` | The original 1993 game's data files, read directly at runtime |
+| `reference/` | 1993 DOS reference material: game assets (`reference/original/`), Ghidra decompilation (`reference/decompiled/`), and screenshots (`reference/screenshots/`) |
+| `original/` | Symlink to `reference/original/` for runtime data access |
 
 ---
 
