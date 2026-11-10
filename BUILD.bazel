@@ -14,3 +14,9 @@ filegroup(
     ),
     visibility = ["//cpp:__subpackages__"],
 )
+
+alias(
+    name = "warlords2",
+    actual = "//cpp:warlords2",
+    visibility = ["//visibility:public"],
+)

@@ -442,7 +442,9 @@ cc_binary(
     copts = W2_COPTS,
     srcs = ["src/main.cpp"],
     defines = ["W2_VORBIS=1"],
+    data = ["//:original_data"],
     includes = ["src"],
+    visibility = ["//visibility:public"],
     deps = [
         ":config",
         ":ui_dialogs",

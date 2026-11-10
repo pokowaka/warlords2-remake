@@ -22,7 +22,7 @@ Steve Fawkner, who holds the rights to *Warlords* based video games, has given m
 ## Quick start
 
 ```sh
-bazel run //cpp:play                                                # desktop C++ on SDL2
+bazel run //:warlords2                                              # desktop C++ on SDL2
 ./tools/build_web.sh && python3 -m http.server -d build/web 8765    # WebAssembly browser release (http://localhost:8765/)
 ```
 
