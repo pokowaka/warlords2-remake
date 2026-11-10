@@ -258,8 +258,28 @@ def main() -> None:
     )
     parser.add_argument("--clean", action="store_true", help="Clean build directory before compiling")
     parser.add_argument("--debug", action="store_true", help="Build with debug assertions and symbols")
+    parser.add_argument("--serve", action="store_true", help="Start local web server after building")
+    parser.add_argument("--port", type=int, default=8765, help="Port to serve on with --serve (default: 8765)")
     args = parser.parse_args()
-    build(args.out.resolve(), clean=args.clean, debug=args.debug)
+    out_dir = args.out.resolve()
+    build(out_dir, clean=args.clean, debug=args.debug)
+
+    if args.serve:
+        import http.server
+        import socketserver
+
+        class Handler(http.server.SimpleHTTPRequestHandler):
+            def __init__(self, *a, **kw):
+                super().__init__(*a, directory=str(out_dir), **kw)
+
+        url = f"http://localhost:{args.port}/"
+        print(f"\nServing Warlords II Web at {url} (Press Ctrl+C to stop)...")
+        socketserver.TCPServer.allow_reuse_address = True
+        with socketserver.TCPServer(("", args.port), Handler) as httpd:
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                print("\nServer stopped.")
 
 
 if __name__ == "__main__":
