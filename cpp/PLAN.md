@@ -1,24 +1,22 @@
-# Warlords II — C++/SDL2 port plan
+# Warlords II — C++/SDL2 Engine
 
-A port of the Lua/LÖVE remake (`love2d/`) to C++20 on SDL2. The Lua remake is
-the spec for behaviour. The JavaScript port (`web/`) has already been checked
-against the Lua turn by turn, and is 0-based like C++, so it serves as a
-structural guide. Where the two disagree, the Lua wins.
+The core Warlords II engine in modern C++23 on SDL2. The C++ codebase serves as
+the single source of truth for all game rules, AI strategies, persistence, and
+rendering logic.
 
 ## Shape
 
 ```
 cpp/
-  CMakeLists.txt
+  BUILD.bazel
   src/
-    platform/        the slim layer over SDL2: window and display, a
-                     love.graphics-alike over SDL_Renderer, input names,
+    platform/        the layer over SDL2: window and display, renderer, input,
                      the audio device and mixer, files, timer
     warlords/        the rules core, headless (no SDL): links into the tests
-    warlords/ai/     the computer player
+    warlords/ai/     the computer player (Classic and Modern ML policy AI)
     ui/              the dialogs, one file per original dialog
-    main.cpp         the front end (love2d/main.lua)
-  test/              run.cpp (the rules suite), trace.cpp + compare.sh (Lua vs C++)
+    main.cpp         the CLI entry point and application loop
+  test/              headless gtests, golden regressions (trace + worldgen), and UI tests
 ```
 
 ### Decisions

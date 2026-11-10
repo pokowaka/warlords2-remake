@@ -235,8 +235,7 @@ Every change is gated by `sh tools/check.sh`, which runs four verification stage
   - `//cpp:golden_test` (`test/golden.sh`) — Verifies 15 full-game `w2trace` logs, 12 `w2scengen` worlds, and 24 `w2mapeval` classic/fair random maps against `cpp/test/golden/`.
   - `//cpp:ui_test` (`test/ui_test.sh`) — Drives `warlords2` headlessly through `cpp/test/ui/dialogs.txt` (`ScriptPlayer`) and verifies SHA-256 hashes of rendered screens against `cpp/test/golden/ui.sha256`.
 
-### 2. Cross-Port Equivalence & Static Analysis
+### 2. Regression Verification & Static Analysis
 
-- **`sh cpp/test/compare.sh`:** Runs 15 all-computer games (covering Hidden Map, Diplomacy, Random Worlds, and mid-game save/load round-trips) in both LuaJIT (`love2d/`) and C++ (`//cpp:w2trace`) and checks turn-by-turn byte identity.
-- **`sh cpp/test/scengen_compare.sh 1 4`:** Generates Continents, Pangaea, and Islands worlds in C++ (`//cpp:w2scengen`), JavaScript (`web/`), and LuaJIT (`love2d/`) and verifies 24/24 byte-identical scenario directories.
+- **Golden Game Regressions (`//cpp:golden_test`):** Verifies 15 full multi-turn trace games against pre-recorded golden trace logs in `cpp/test/golden/trace/`, and validates world generators against `scengen.sha256` and `classic.sha256`.
 - **`sh tools/tidy.sh`:** Runs `clang-tidy` (`cpp/.clang-tidy`, `WarningsAsErrors: '*'`) across every translation unit and header in `cpp/src/` and `cpp/test/`, requiring **0 findings**.

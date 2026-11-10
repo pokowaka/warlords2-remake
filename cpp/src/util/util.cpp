@@ -6,7 +6,6 @@
 #include <charconv>
 #include <cstring>
 #include <filesystem>
-#include <format>
 #include <fstream>
 #include <system_error>
 
@@ -83,11 +82,11 @@ std::string Sfmt(std::string_view fmt_str, const std::vector<FmtArg>& args) {
         }
         case 'x':
             formatted =
-                    std::format("{:x}", static_cast<unsigned long>(arg.is_str ? 0 : arg.num_val));
+                    absl::StrFormat("%x", static_cast<unsigned long>(arg.is_str ? 0 : arg.num_val));
             break;
         case 'X':
             formatted =
-                    std::format("{:X}", static_cast<unsigned long>(arg.is_str ? 0 : arg.num_val));
+                    absl::StrFormat("%X", static_cast<unsigned long>(arg.is_str ? 0 : arg.num_val));
             break;
         case 'c':
             formatted = std::string(

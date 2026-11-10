@@ -304,6 +304,7 @@ cc_library(
         "@abseil-cpp//absl/log:absl_check",
         "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings:str_format",
         "@abseil-cpp//absl/synchronization",
         "@sdl2",
         "@sdl2//:sdl2_headers_flat",
@@ -690,7 +691,7 @@ cc_test(
     ],
 )
 
-# Tools: the Lua-vs-C++ trace, the FM renderer, the AI trainer and its
+# Tools: the game trace CLI, the FM renderer, the AI trainer and its
 # helpers, the map evaluator and the scenario generator.
 cc_binary(
     name = "w2trace",

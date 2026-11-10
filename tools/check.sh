@@ -2,11 +2,10 @@
 # Every gate a C++ change must pass, in one go (the refactor's rule: each
 # commit passes all of them). From anywhere in the repository:
 #
-#   sh tools/check.sh           # build, tests, golden files, the Lua and
-#                               # the other ports' worlds
-#   sh tools/check.sh --quick   # build, tests and golden files only
+#   sh tools/check.sh           # build, unit tests, golden regressions, and clang-tidy
+#   sh tools/check.sh --quick   # build, unit tests and golden regressions only
 #
-# Needs bazel; the full run also luajit and node.
+# Needs bazel.
 set -eu
 cd "$(git rev-parse --show-toplevel)"
 
@@ -18,12 +17,6 @@ bazel test //cpp/...
 if [ "${1:-}" = "--quick" ]; then
   exit 0
 fi
-
-step "the same games as the Lua remake (compare.sh)"
-sh cpp/test/compare.sh
-
-step "the same worlds in all three ports (scengen_compare.sh)"
-sh cpp/test/scengen_compare.sh 1 4
 
 step "clang-tidy (tools/tidy.sh)"
 sh tools/tidy.sh

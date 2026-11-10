@@ -12,26 +12,21 @@ Steve Fawkner, who holds the rights to *Warlords* based video games, has given m
 
 | folder | what it is |
 |---|---|
-| [`love2d/`](love2d/README.md) | the engine in Lua on LÖVE; it defines how the game behaves |
-| [`cpp/`](cpp/README.md) | the Lua remake ported to C++20 on SDL2 |
-| [`web/`](web/README.md) | the Lua remake ported to plain JavaScript on a `<canvas>` |
+| [`cpp/`](cpp/README.md) | the core engine in modern C++ on SDL2 (source of truth) |
+| [`web/`](web/README.md) | the browser version drawing on a `<canvas>` |
 | [`docs/`](docs/) | the file formats, the rules, and the reverse engineering of `WARLORD2.EXE` |
 | `tools/` | decoders and exporters for the data files, the Ghidra and DOSBox helpers |
 | `original/` | the original game's files, read as they are at runtime |
 | `pre-rendered-sound/` | the music, recorded in advance |
 
-The three remakes play the same game: an all-computer game plays out
-identically in each.
-
 ## Quick start
 
 ```sh
-love love2d                                    # Lua, needs LÖVE 11+
 bazel run //cpp:play                           # C++, needs Bazel (bazelisk)
 cd web && python3 -m http.server 8765          # then open http://localhost:8765/
 ```
 
-Run the first two from the repository root, so that `original/` is found. Each remake's
+Run from the repository root, so that `original/` is found. Each version's
 README has its controls, options and tests.
 
 ## Beyond the original

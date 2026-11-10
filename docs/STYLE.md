@@ -6,16 +6,14 @@ How the C++23 codebase (`cpp/`) is designed, written, and verified. Mechanical r
 
 ## 1. Behavioural Equivalence & Verification Gates
 
-The C++ implementation plays the exact same games as the Lua reference (`love2d/`) turn by turn and generates byte-identical worlds across the C++, Lua, and JavaScript ports. Structural, naming, or architectural changes must never alter a single move, random roll, or rendered pixel. Every commit passes `sh tools/check.sh`:
+The C++ implementation is the source of truth for the remake: structural, naming, or architectural changes must never alter a single move, random roll, or rendered pixel. Every commit passes `sh tools/check.sh`:
 
 | Gate | Command | Requirement |
 |---|---|---|
-| Unit, integration & golden tests | `bazel test //cpp/...` | All 15 Bazel test suites pass (13 GoogleTest suites + `golden_test` + `ui_test`). |
-| Lua-vs-C++ game parity | `sh cpp/test/compare.sh` | 15/15 full games match turn by turn. |
-| Cross-port worldgen parity | `sh cpp/test/scengen_compare.sh 1 4` | 24/24 generated worlds match byte for byte across C++, JS, and Lua. |
+| Unit, integration & golden tests | `bazel test //cpp/...` | All Bazel test suites pass (GoogleTest suites + `golden_test` + `ui_test`). |
 | Static analysis | `sh tools/tidy.sh` | **0 findings** across `cpp/src/` and `cpp/test/`. |
 
-Intentional gameplay, world-generation, or UI visual changes belong in dedicated commits that state the change explicitly and regenerate golden baselines (`bazel run //cpp:golden_update`, `bazel run //cpp:ui_update`). Quirks required for 1993 / Lua parity are preserved and explained in plain English (`// Matches the reference: razed cities count here too.`).
+Intentional gameplay, world-generation, or UI visual changes belong in dedicated commits that state the change explicitly and regenerate golden baselines (`bazel run //cpp:golden_update`, `bazel run //cpp:ui_update`). Quirks required for 1993 parity are preserved and explained in plain English (`// Matches 1993 DOS reference: razed cities count here too.`).
 
 ---
 

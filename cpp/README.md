@@ -1,10 +1,8 @@
-# Warlords II — in C++ on SDL2
+# Warlords II — in modern C++ on SDL2
 
-The Lua remake (`love2d/`) ported to C++20, drawing and playing sound through
-SDL2. The Lua remake defines how the game behaves. The rules core, the
-computer player and the FM music follow it closely enough that an
-all-computer game plays out identically in both, and a song renders to the
-same samples (see *Tests*).
+The standalone engine in modern C++23, drawing and playing sound through
+SDL2. The rules core, the computer player and the FM music read the original
+game files directly and define how the game behaves.
 
 Nothing is converted and no assets are checked in. The game reads the
 original files from `original/` as they are, and streams the MT-32 and Sound
@@ -20,8 +18,8 @@ Central Registry (`MODULE.bazel`).
 ```sh
 brew install bazelisk                     # macOS
 bazel build //cpp/...                     # the game, the tools and the tests
-bazel test //cpp/...                      # the rules suite and the golden files
-sh tools/check.sh                         # every gate, the Lua and JS ports too
+bazel test //cpp/...                      # the rules suite, golden regressions, and UI tests
+sh tools/check.sh                         # all quality gates and clang-tidy
 sh tools/package.sh                       # a zip to share: the game and its files
 ```
 
@@ -98,11 +96,9 @@ Notes for anyone porting more of the Lua:
 From the repository root, after building:
 
 ```sh
-bazel-bin/cpp/w2test                    # the rules suite (love2d/test/run.lua, ported)
-sh cpp/test/compare.sh              # all-computer games, Lua vs C++, turn by turn (needs luajit)
-bazel-bin/cpp/w2fm original/SOUND/SINT12.XMI 10 > c.txt
-luajit cpp/test/fmrender.lua original/SOUND/SINT12.XMI 10 | tr '\t' ' ' > l.txt
-diff c.txt l.txt                    # the FM music, checksummed second by second
+bazel test //cpp:headless_tests         # 11 unit & subsystem test suites
+bazel test //cpp:golden_test            # 15 golden trace games and world generations
+bazel test //cpp:ui_test                # UI modal screens & dialog rendering verification
 ```
 
 The game can also be driven by a script, with no window, for checking the

@@ -4,6 +4,11 @@ module(name = "warlords2")
 
 # Apple's toolchain first: SDL2 compiles Objective-C on macOS.
 bazel_dep(name = "apple_support", version = "2.5.2", repo_name = "build_bazel_apple_support")
+single_version_override(
+    module_name = "apple_support",
+    patches = ["//:apple_support_sdk.patch"],
+    patch_strip = 1,
+)
 bazel_dep(name = "rules_cc", version = "0.2.18")
 bazel_dep(name = "rules_shell", version = "0.6.1")
 bazel_dep(name = "platforms", version = "1.0.0")

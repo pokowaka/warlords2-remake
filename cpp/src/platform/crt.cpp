@@ -4,12 +4,12 @@
 #include <array>
 #include <cmath>
 #include <cstring>
-#include <format>
 #include <string>
 #include <vector>
 
 #include <SDL.h>
 #include <SDL_opengl.h>
+#include "absl/strings/str_format.h"
 
 namespace crt {
 
@@ -61,7 +61,7 @@ CanvasPoint InverseBow(double can_x, double can_y) {
 
 /** @brief Formats `val` as a GLSL floating-point literal (always including a decimal point). */
 std::string GlslLiteral(double val) {
-    std::string formatted = std::format("{:.9g}", val);
+    std::string formatted = absl::StrFormat("%.9g", val);
     if (formatted.find_first_of(".e") == std::string::npos) formatted += ".0";
     return formatted;
 }

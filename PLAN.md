@@ -51,7 +51,7 @@ Order, easiest first (each win makes the next easier):
 2. ~~`DATA/STRING.DAT`~~ **Done** — 169 groups / 651 strings, whole UI corpus; see `docs/formats/string.md`. `.CTY` and `SOUND/*.TXT` are plain text.
 3. ~~`.8SN`~~ **Done** — `u8` PCM at 11 000 Hz, the rate the game hands DIGPAK; see `docs/formats/sound.md`.
 4. ~~`.MAP` / `.RD`~~ **Done** — 112×156 u16 tile grid + 1-byte/tile road overlay, rendered via `tools/mapren.py`. Note the 156×112 guess was wrong; see `docs/formats/map.md`.
-5. ~~`.SCN` / `.SGN` / `.SPC`~~ **Mostly done** — sides (incl. starting gold and capitals), cities, sites, items, monsters and signposts all parse and verify against the map and against the running game. City owner and defence are derived at game start (`docs/rules.md`); still open: the 16-byte per-city block and the `160..2062` per-side region. See `docs/formats/scenario.md`. `.ITM` is decoded (`docs/formats/itm.md`) and read by `love2d/warlords/scn.lua`.
+5. ~~`.SCN` / `.SGN` / `.SPC`~~ **Mostly done** — sides (incl. starting gold and capitals), cities, sites, items, monsters and signposts all parse and verify against the map and against the running game. City owner and defence are derived at game start (`docs/rules.md`); still open: the 16-byte per-city block and the `160..2062` per-side region. See `docs/formats/scenario.md`. `.ITM` is decoded (`docs/formats/itm.md`) and read by `cpp/src/warlords/scn.cpp`.
 6. ~~`ARMYTYPE.DAT`~~ **Done** — 29 x 62-byte records; strength/time/upkeep/move/cost solved, 6 of 15 bonus fields still open. See `docs/formats/armytype.md`.
 7. ~~**`.PCK`**~~ **Done** — see `docs/formats/pck.md`. Kept for the record, the original strategy was:
    - Known-plaintext attack: `CURS.PCK` (1274 B for 240×80 = 19200 px) is tiny and heavily compressed → mostly transparent. `BLACK.PCK` in `START/` is probably a solid fill → its byte stream will show the raw run-length primitive.
@@ -103,22 +103,22 @@ table) are all resolved from the executable; see `docs/rules.md`.
 `love2d/` is a LOVE 11 project that reads the original data files at runtime
 (no bundled assets) and draws a scenario at 100% scale. See `love2d/README.md`.
 
-### Phase 3 — Engine — **in progress**
+### Phase 3 — Engine — **DONE**
 
-**Lua, in `love2d/warlords/`.** The rules core is headless: it never touches
-`love.*`, so `lua love2d/test/run.lua` checks it without a window (~8000
-assertions). `tools/` stays Python and stays the format lab.
+**Modern C++23, in `cpp/src/warlords/`.** The rules core is headless: it never touches
+SDL, so Bazel runs the GoogleTest suites without a window. `tools/` stays Python and
+stays the format lab.
 
 Done: game state and the turn loop, movement, combat, city capture and
 pillage/sack/raze, heroes, ruins/temples/sages, quests, diplomacy, the hidden
-map, the end-of-game conditions, saving and loading, and a computer player.
-A scenario plays to victory on its own.
+map, the end-of-game conditions, JSON saving and loading, and both Classic 1993
+and Modern neural policy computer players. A scenario plays to victory on its own.
 
 `rules.bugs` reproduces the original's faults, one flag per fault the engine
 actually reads.
 
-The computer players are a port of the original's AI (`love2d/warlords/ai.lua`
-and `ai/`): all nineteen phases of `ai_turn` in order, the per-side AI data,
+The computer players include a faithful port of the original's AI (`cpp/src/warlords/ai/`):
+all nineteen phases of `ai_turn` in order, the per-side AI data,
 the character cards (`docs/formats/crd.md`) and the level defaults, the
 assault groups and `ai_pick_enemy`, diplomacy with the claims and computer
 solidarity, *I am the Greatest*, clean city's garrisons, neutrals, explorers,
@@ -127,15 +127,12 @@ the battle statistics. Their paths ignore the fog, as the original's do, so
 *Hidden Map* games expand at the original's pace. The original's quirks are
 kept as they are, not flagged (`docs/re/ai.md` › Found while porting it).
 
-Left in the engine itself: nothing known. Checking the AI's play against
-DOSBox is Phase 3.5 item 4's work.
+### Phase 3.5 — Interface — **DONE**
 
-### Phase 3.5 — Interface — **nearly done**
-
-The front end (`love2d/main.lua`, with the dialogs in `love2d/ui/`) is rebuilt
+The front end (`cpp/src/front/`, with the dialogs in `cpp/src/ui/`) is rebuilt
 on the original's own 640×480 screen, read from `AREA.DAT`/`BUTTON.DAT`/
 `JOIN.DAT` at runtime (`docs/formats/screens.md`, `docs/re/ui.md`).
-`love2d/test/ui.lua` drives it headless; `love2d/test/shot` renders PNGs.
+`//cpp:ui_test` drives it headless and verifies SHA-256 frame renders against `ui.sha256`.
 Checking against the original: native captures in
 `original-screenshots/native/` (made with `tools/dosbox/`, kept out of git),
 compared pixel for pixel. The main screen under the turn banner and the hero

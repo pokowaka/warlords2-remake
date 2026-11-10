@@ -8,6 +8,13 @@ build --per_file_copt=external/.*@-w
 build --copt=-ffp-contract=off --host_copt=-ffp-contract=off
 build -c opt
 
+# Enable platform-specific configurations automatically
+common --enable_platform_specific_config
+
+# macOS baseline: macOS 11+ for std::filesystem and Objective-C tooling
+build:macos --macos_minimum_os=11.0 --host_macos_minimum_os=11.0
+build:macos --features=-layering_check
+
 # Tests print their failures.
 test --test_output=errors
 

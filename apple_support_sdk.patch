@@ -1,0 +1,10 @@
+--- a/crosstool/universal_exec_tool.bzl
++++ b/crosstool/universal_exec_tool.bzl
+@@ -37,3 +37,3 @@
+   DEVELOPER_DIR="$${DEVELOPER_DIR:-}" \
+-  xcrun \
+-    --sdk macosx \
++  SDKROOT="/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" \
++  xcrun \
++    --sdk macosx26.5 \
+     clang \
