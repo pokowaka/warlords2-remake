@@ -833,7 +833,9 @@ cc_binary(
     testonly = True,
     copts = W2_COPTS,
     srcs = ["test/ai_benchmark.cpp"],
+    data = DATA,
     deps = [
+        ":test_helpers",
         ":w2core",
         "@google_benchmark//:benchmark",
         "@google_benchmark//:benchmark_main",

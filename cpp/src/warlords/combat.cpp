@@ -5,6 +5,8 @@
 #include "warlords/combat.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 
 #include "util/util.hpp"
 #include "warlords/armytype.hpp"
@@ -143,6 +145,18 @@ std::map<const Army*, int> StackStrengths(const Game& game, const std::vector<Ar
 Battle Resolve(Game& game, const std::vector<Army*>& attackers, const std::vector<Army*>& defenders,
                int x, int y) {
     return CombatResolver(game).Resolve(attackers, defenders, x, y);
+}
+
+FastResult FastSimulate(Game& game, const std::vector<Army*>& attackers,
+                        const std::vector<Army*>& defenders, int x, int y) {
+    return CombatResolver(game).FastSimulate(attackers, defenders, x, y);
+}
+
+void FastSimulateRepeated(Game& game, const std::vector<Army*>& attackers,
+                          const std::vector<Army*>& defenders, int x, int y, int count,
+                          int& out_wins, int& out_survivors, int& out_dead_defenders) {
+    CombatResolver(game).FastSimulateRepeated(attackers, defenders, x, y, count, out_wins,
+                                              out_survivors, out_dead_defenders);
 }
 
 std::pair<std::string, int> Advise(Game& game, const std::vector<Army*>& attackers,
@@ -357,12 +371,133 @@ Battle CombatResolver::Resolve(const ArmyStack& attackers, const ArmyStack& defe
     return battle;
 }
 
+combat::FastResult CombatResolver::FastSimulate(const ArmyStack& attackers,
+                                                const ArmyStack& defenders, int x, int y) {
+    int wins = 0, survivors = 0, dead_defenders = 0;
+    FastSimulateRepeated(attackers, defenders, x, y, 1, wins, survivors, dead_defenders);
+    return combat::FastResult{wins > 0, survivors, dead_defenders};
+}
+
+void CombatResolver::FastSimulateRepeated(const ArmyStack& attackers, const ArmyStack& defenders,
+                                          int x, int y, int count, int& out_wins,
+                                          int& out_survivors, int& out_dead_defenders) {
+    if (count <= 0) return;
+    if (attackers.empty()) return;
+    if (defenders.empty()) {
+        out_wins += count;
+        out_survivors += count * static_cast<int>(attackers.size());
+        return;
+    }
+
+    Map& map = game_.GetMap();
+    int cls = TerrainClass(x, y);
+    int terrain = scn::TerrainAt(map, x, y);
+    auto [attack_mod, defend_mod] = Modifiers(attackers, defenders, x, y, cls);
+    int die = map.GameOptions().intense_combat != 0 ? combat::kDieIntense : combat::kDie;
+    bool tutorial = (map.GameOptions().tutorial != 0);
+
+    struct FastFighter {
+        Army* army;
+        int strength;
+        int hits;
+    };
+
+    std::array<FastFighter, 32> atk_base;
+    std::array<FastFighter, 32> def_base;
+    std::vector<FastFighter> atk_dyn_base;
+    std::vector<FastFighter> def_dyn_base;
+
+    FastFighter* atk_base_ptr = atk_base.data();
+    FastFighter* def_base_ptr = def_base.data();
+    if (attackers.size() > 32) {
+        atk_dyn_base.resize(attackers.size());
+        atk_base_ptr = atk_dyn_base.data();
+    }
+    if (defenders.size() > 32) {
+        def_dyn_base.resize(defenders.size());
+        def_base_ptr = def_dyn_base.data();
+    }
+
+    for (size_t i = 0; i < attackers.size(); ++i) {
+        atk_base_ptr[i] = FastFighter{attackers[i],
+                                      std::max(1, Strength(*attackers[i], attack_mod, cls, terrain)),
+                                      combat::kHitPoints - 1};
+    }
+    for (size_t i = 0; i < defenders.size(); ++i) {
+        def_base_ptr[i] = FastFighter{defenders[i],
+                                      std::max(1, Strength(*defenders[i], defend_mod, cls, terrain)),
+                                      combat::kHitPoints - 1};
+    }
+
+    std::array<FastFighter, 32> atk_line;
+    std::array<FastFighter, 32> def_line;
+    std::vector<FastFighter> atk_line_dyn;
+    std::vector<FastFighter> def_line_dyn;
+    FastFighter* atk_ptr = atk_line.data();
+    FastFighter* def_ptr = def_line.data();
+    if (attackers.size() > 32) {
+        atk_line_dyn.resize(attackers.size());
+        atk_ptr = atk_line_dyn.data();
+    }
+    if (defenders.size() > 32) {
+        def_line_dyn.resize(defenders.size());
+        def_ptr = def_line_dyn.data();
+    }
+
+    for (int iter = 0; iter < count; ++iter) {
+        std::memcpy(atk_ptr, atk_base_ptr, attackers.size() * sizeof(FastFighter));
+        std::memcpy(def_ptr, def_base_ptr, defenders.size() * sizeof(FastFighter));
+
+        size_t attacker_index = 0, defender_index = 0;
+        int throws = 0;
+        while (attacker_index < attackers.size() && defender_index < defenders.size()) {
+            FastFighter& attacker = atk_ptr[attacker_index];
+            FastFighter& defender = def_ptr[defender_index];
+            int attacker_roll = game_.GetRng().Dice(1, die, 0);
+            int defender_roll = game_.GetRng().Dice(1, die, 0);
+            bool attacker_hits =
+                    attacker_roll <= attacker.strength && defender_roll > defender.strength;
+            bool defender_hits =
+                    defender_roll <= defender.strength && attacker_roll > attacker.strength;
+            if (throws > combat::kStalemate) {
+                attacker_hits = false;
+                defender_hits = true;
+            }
+            throws++;
+
+            if (defender_hits && tutorial && attacker.army->Hero()) {
+                Side* side = map.SideAt(attacker.army->IsNeutral() ? 0 : attacker.army->OwnerIndex());
+                if (!(side && side->IsComputerControlled()) && defender.army->IsNeutral()) {
+                    defender_hits = false;
+                }
+            }
+            if (attacker_hits) {
+                defender.hits--;
+                if (defender.hits < 0) {
+                    defender_index++;
+                    throws = 0;
+                }
+            } else if (defender_hits) {
+                attacker.hits--;
+                if (attacker.hits < 0) {
+                    attacker_index++;
+                    throws = 0;
+                }
+            }
+        }
+        if (defender_index >= defenders.size()) {
+            out_wins++;
+        }
+        out_survivors += static_cast<int>(attackers.size() - attacker_index);
+        out_dead_defenders += static_cast<int>(defender_index);
+    }
+}
+
 CombatResolver::AdviceVerdict CombatResolver::Advise(const ArmyStack& attackers,
                                                      const ArmyStack& defenders, int x, int y) {
-    int wins = 0;
-    for (int i = 0; i < combat::kAdviceBattles; i++) {
-        if (Resolve(attackers, defenders, x, y).won) wins++;
-    }
+    int wins = 0, survivors = 0, dead_defenders = 0;
+    FastSimulateRepeated(attackers, defenders, x, y, combat::kAdviceBattles, wins, survivors,
+                         dead_defenders);
     return {combat::kAdvice[wins / 2], wins};
 }
 

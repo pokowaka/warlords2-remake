@@ -86,6 +86,13 @@ struct Lines {
 extern const char* const kAdvice[10];
 constexpr int kAdviceBattles = 19;
 
+/** @brief Fast simulation summary with minimal allocations for Monte Carlo rollouts. */
+struct FastResult {
+    bool won = false;             ///< True if every defender was eliminated.
+    int surviving_attackers = 0;  ///< Number of surviving attacking units.
+    int dead_defenders = 0;       ///< Number of defending units eliminated.
+};
+
 /** @brief Battle items (+n in battle) carried by one army. */
 int BattleItems(const Army& army);
 /** @brief Command items carried by one army, a standard counting 1. */
@@ -102,6 +109,11 @@ std::map<const Army*, int> StackStrengths(const Game& game, const std::vector<Ar
                                           int y);
 Battle Resolve(Game& game, const std::vector<Army*>& attackers, const std::vector<Army*>& defenders,
                int x, int y);
+FastResult FastSimulate(Game& game, const std::vector<Army*>& attackers,
+                        const std::vector<Army*>& defenders, int x, int y);
+void FastSimulateRepeated(Game& game, const std::vector<Army*>& attackers,
+                          const std::vector<Army*>& defenders, int x, int y, int count,
+                          int& out_wins, int& out_survivors, int& out_dead_defenders);
 std::pair<std::string, int> Advise(Game& game, const std::vector<Army*>& attackers,
                                    const std::vector<Army*>& defenders, int x, int y);
 
@@ -140,6 +152,15 @@ class CombatResolver {
     /** @brief Fights a duel between `attackers` and `defenders` at `(x, y)` without mutating
      * armies. */
     Battle Resolve(const ArmyStack& attackers, const ArmyStack& defenders, int x, int y);
+
+    /** @brief Lightweight simulation without allocating Battle vectors or sets. */
+    combat::FastResult FastSimulate(const ArmyStack& attackers, const ArmyStack& defenders,
+                                    int x, int y);
+
+    /** @brief Simulates `count` battles with cached modifiers and unit strengths. */
+    void FastSimulateRepeated(const ArmyStack& attackers, const ArmyStack& defenders, int x, int y,
+                              int count, int& out_wins, int& out_survivors,
+                              int& out_dead_defenders);
 
     /** @brief Simulates `combat::kAdviceBattles` engagements to produce the advisor verdict. */
     AdviceVerdict Advise(const ArmyStack& attackers, const ArmyStack& defenders, int x, int y);

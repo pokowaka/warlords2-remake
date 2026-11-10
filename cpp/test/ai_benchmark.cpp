@@ -3,7 +3,12 @@
 #include <vector>
 
 #include "benchmark/benchmark.h"
+#include "test/test_helpers.hpp"
+#include "warlords/ai/belief.hpp"
 #include "warlords/ai/ml_policy.hpp"
+#include "warlords/combat.hpp"
+#include "warlords/game.hpp"
+#include "warlords/move.hpp"
 
 namespace w2::ai::ml {
 namespace {
@@ -227,6 +232,199 @@ static void BM_Learning_TurnStep_64Candidates_CachedActivations(benchmark::State
     state.SetItemsProcessed(state.iterations() * 64);
 }
 BENCHMARK(BM_Learning_TurnStep_64Candidates_CachedActivations);
+
+// ============================================================================
+// 3. Game Engine & Tactical Combat Optimization
+// ============================================================================
+
+static void BM_Engine_FrontierSort_UncachedDistance(benchmark::State& state) {
+    std::mt19937 rng(42);
+    std::vector<std::pair<int, int>> anchors;
+    for (int i = 0; i < 30; ++i) {
+        anchors.emplace_back(rng() % 112, rng() % 156);
+    }
+    std::vector<FrontierCluster> initial_frontiers;
+    for (int i = 0; i < 300; ++i) {
+        initial_frontiers.push_back(FrontierCluster{
+                static_cast<int>(rng() % 112), static_cast<int>(rng() % 156),
+                static_cast<int>(1 + rng() % 8), static_cast<int>(1 + rng() % 8),
+                (rng() % 4 == 0), (rng() % 2 == 0)});
+    }
+
+    for (auto _ : state) {
+        auto raw_frontiers = initial_frontiers;
+        std::sort(raw_frontiers.begin(), raw_frontiers.end(),
+                  [&](const FrontierCluster& lhs, const FrontierCluster& rhs) {
+                      int lhs_distance = 999, rhs_distance = 999;
+                      for (const auto& [anchor_x, anchor_y] : anchors) {
+                          lhs_distance = std::min(lhs_distance,
+                                                  move::Distance(lhs.x, lhs.y, anchor_x, anchor_y));
+                          rhs_distance = std::min(rhs_distance,
+                                                  move::Distance(rhs.x, rhs.y, anchor_x, anchor_y));
+                      }
+                      int lhs_score = lhs_distance - (lhs.on_road ? 4 : 0);
+                      int rhs_score = rhs_distance - (rhs.on_road ? 4 : 0);
+                      if (lhs_score != rhs_score) return lhs_score < rhs_score;
+                      return lhs.on_road > rhs.on_road;
+                  });
+        benchmark::DoNotOptimize(raw_frontiers);
+    }
+    state.SetItemsProcessed(state.iterations() * 300);
+}
+BENCHMARK(BM_Engine_FrontierSort_UncachedDistance);
+
+static void BM_Engine_FrontierSort_PrecomputedDistance(benchmark::State& state) {
+    std::mt19937 rng(42);
+    std::vector<std::pair<int, int>> anchors;
+    for (int i = 0; i < 30; ++i) {
+        anchors.emplace_back(rng() % 112, rng() % 156);
+    }
+    std::vector<FrontierCluster> initial_frontiers;
+    for (int i = 0; i < 300; ++i) {
+        initial_frontiers.push_back(FrontierCluster{
+                static_cast<int>(rng() % 112), static_cast<int>(rng() % 156),
+                static_cast<int>(1 + rng() % 8), static_cast<int>(1 + rng() % 8),
+                (rng() % 4 == 0), (rng() % 2 == 0)});
+    }
+
+    struct ScoredFrontier {
+        FrontierCluster cluster;
+        int score = 0;
+    };
+
+    for (auto _ : state) {
+        std::vector<ScoredFrontier> scored;
+        scored.reserve(initial_frontiers.size());
+        for (const auto& frontier : initial_frontiers) {
+            int min_distance = 999;
+            for (const auto& [anchor_x, anchor_y] : anchors) {
+                min_distance = std::min(min_distance,
+                                        move::Distance(frontier.x, frontier.y, anchor_x, anchor_y));
+            }
+            int score = min_distance - (frontier.on_road ? 4 : 0);
+            scored.push_back({frontier, score});
+        }
+        std::sort(scored.begin(), scored.end(),
+                  [](const ScoredFrontier& lhs, const ScoredFrontier& rhs) {
+                      if (lhs.score != rhs.score) return lhs.score < rhs.score;
+                      return lhs.cluster.on_road > rhs.cluster.on_road;
+                  });
+        benchmark::DoNotOptimize(scored);
+    }
+    state.SetItemsProcessed(state.iterations() * 300);
+}
+BENCHMARK(BM_Engine_FrontierSort_PrecomputedDistance);
+
+static void BM_Combat_8Battles_ResolveAllocating(benchmark::State& state) {
+    auto game_ptr = test::SetupGame("ERYTHEA", test::Seed(42));
+    Game& game = *game_ptr;
+    Side* side0 = game.GetMap().SideAt(0);
+    Side* side1 = game.GetMap().SideAt(1);
+
+    std::vector<Army> atk_storage(8);
+    std::vector<Army*> attackers;
+    for (int i = 0; i < 8; ++i) {
+        atk_storage[i].SetType(ArmyTypeId(1));
+        atk_storage[i].SetStrength(5);
+        atk_storage[i].SetOwner(side0->Id());
+        attackers.push_back(&atk_storage[i]);
+    }
+
+    std::vector<Army> def_storage(8);
+    std::vector<Army*> defenders;
+    for (int i = 0; i < 8; ++i) {
+        def_storage[i].SetType(ArmyTypeId(2));
+        def_storage[i].SetStrength(4);
+        def_storage[i].SetOwner(side1->Id());
+        defenders.push_back(&def_storage[i]);
+    }
+
+    for (auto _ : state) {
+        int wins = 0;
+        int survivors = 0;
+        int dead = 0;
+        for (int i = 0; i < 8; ++i) {
+            Battle b = combat::Resolve(game, attackers, defenders, 10, 10);
+            if (b.won) wins++;
+            survivors += static_cast<int>(b.attackers.size());
+            dead += static_cast<int>(b.dead_defenders.size());
+        }
+        benchmark::DoNotOptimize(wins);
+        benchmark::DoNotOptimize(survivors);
+        benchmark::DoNotOptimize(dead);
+    }
+    state.SetItemsProcessed(state.iterations() * 8);
+}
+BENCHMARK(BM_Combat_8Battles_ResolveAllocating);
+
+static void BM_Combat_8Battles_FastSimulateRepeated(benchmark::State& state) {
+    auto game_ptr = test::SetupGame("ERYTHEA", test::Seed(42));
+    Game& game = *game_ptr;
+    Side* side0 = game.GetMap().SideAt(0);
+    Side* side1 = game.GetMap().SideAt(1);
+
+    std::vector<Army> atk_storage(8);
+    std::vector<Army*> attackers;
+    for (int i = 0; i < 8; ++i) {
+        atk_storage[i].SetType(ArmyTypeId(1));
+        atk_storage[i].SetStrength(5);
+        atk_storage[i].SetOwner(side0->Id());
+        attackers.push_back(&atk_storage[i]);
+    }
+
+    std::vector<Army> def_storage(8);
+    std::vector<Army*> defenders;
+    for (int i = 0; i < 8; ++i) {
+        def_storage[i].SetType(ArmyTypeId(2));
+        def_storage[i].SetStrength(4);
+        def_storage[i].SetOwner(side1->Id());
+        defenders.push_back(&def_storage[i]);
+    }
+
+    for (auto _ : state) {
+        int wins = 0;
+        int survivors = 0;
+        int dead = 0;
+        combat::FastSimulateRepeated(game, attackers, defenders, 10, 10, 8, wins, survivors, dead);
+        benchmark::DoNotOptimize(wins);
+        benchmark::DoNotOptimize(survivors);
+        benchmark::DoNotOptimize(dead);
+    }
+    state.SetItemsProcessed(state.iterations() * 8);
+}
+BENCHMARK(BM_Combat_8Battles_FastSimulateRepeated);
+
+static void BM_Combat_Advise_19Battles(benchmark::State& state) {
+    auto game_ptr = test::SetupGame("ERYTHEA", test::Seed(42));
+    Game& game = *game_ptr;
+    Side* side0 = game.GetMap().SideAt(0);
+    Side* side1 = game.GetMap().SideAt(1);
+
+    std::vector<Army> atk_storage(8);
+    std::vector<Army*> attackers;
+    for (int i = 0; i < 8; ++i) {
+        atk_storage[i].SetType(ArmyTypeId(1));
+        atk_storage[i].SetStrength(5);
+        atk_storage[i].SetOwner(side0->Id());
+        attackers.push_back(&atk_storage[i]);
+    }
+
+    std::vector<Army> def_storage(8);
+    std::vector<Army*> defenders;
+    for (int i = 0; i < 8; ++i) {
+        def_storage[i].SetType(ArmyTypeId(2));
+        def_storage[i].SetStrength(4);
+        def_storage[i].SetOwner(side1->Id());
+        defenders.push_back(&def_storage[i]);
+    }
+
+    for (auto _ : state) {
+        auto verdict = combat::Advise(game, attackers, defenders, 10, 10);
+        benchmark::DoNotOptimize(verdict);
+    }
+    state.SetItemsProcessed(state.iterations() * 19);
+}
+BENCHMARK(BM_Combat_Advise_19Battles);
 
 }  // namespace
 }  // namespace w2::ai::ml

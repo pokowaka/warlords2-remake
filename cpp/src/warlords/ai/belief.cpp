@@ -206,25 +206,32 @@ void Update(Game& game, Side& side) {
         if (army->OwnerIndex() == side_index && army->X() != kNone && !army->InTransit())
             my_anchors.emplace_back(army->X(), army->Y());
     }
-    std::sort(raw_frontiers.begin(), raw_frontiers.end(),
-              [&](const FrontierCluster& lhs, const FrontierCluster& rhs) {
-                  int lhs_distance = 999, rhs_distance = 999;
-                  for (const auto& [anchor_x, anchor_y] : my_anchors) {
-                      lhs_distance = std::min(lhs_distance,
-                                              move::Distance(lhs.x, lhs.y, anchor_x, anchor_y));
-                      rhs_distance = std::min(rhs_distance,
-                                              move::Distance(rhs.x, rhs.y, anchor_x, anchor_y));
-                  }
-                  int lhs_score = lhs_distance - (lhs.on_road ? 4 : 0);
-                  int rhs_score = rhs_distance - (rhs.on_road ? 4 : 0);
-                  if (lhs_score != rhs_score) return lhs_score < rhs_score;
-                  return lhs.on_road > rhs.on_road;
+    struct ScoredFrontier {
+        FrontierCluster cluster;
+        int score = 0;
+    };
+    std::vector<ScoredFrontier> scored_frontiers;
+    scored_frontiers.reserve(raw_frontiers.size());
+    for (const auto& frontier : raw_frontiers) {
+        int min_distance = 999;
+        for (const auto& [anchor_x, anchor_y] : my_anchors) {
+            min_distance = std::min(min_distance,
+                                    move::Distance(frontier.x, frontier.y, anchor_x, anchor_y));
+        }
+        int score = min_distance - (frontier.on_road ? 4 : 0);
+        scored_frontiers.push_back({frontier, score});
+    }
+    std::sort(scored_frontiers.begin(), scored_frontiers.end(),
+              [](const ScoredFrontier& lhs, const ScoredFrontier& rhs) {
+                  if (lhs.score != rhs.score) return lhs.score < rhs.score;
+                  return lhs.cluster.on_road > rhs.cluster.on_road;
               });
 
     // Cluster land frontiers separately from water frontiers so coastal land does not suppress
     // amphibious sea lanes (and vice versa); snap cluster anchor onto road tiles when merged.
     int land_count = 0, water_count = 0;
-    for (const auto& frontier : raw_frontiers) {
+    for (const auto& entry : scored_frontiers) {
+        const auto& frontier = entry.cluster;
         bool merged = false;
         for (auto& existing : belief.fog_frontiers) {
             if (existing.is_water == frontier.is_water &&
@@ -513,21 +520,21 @@ CombatEstimate EstimateCombat(Game& game, const Side& side, const std::vector<Ar
     int wins = 0;
     int total_survivors = 0;
     int total_enemy_dead = 0;
-    for (int i = 0; i < kSimulations; i++) {
-        const std::vector<Army*>& simulated_defenders =
-                !defenders.empty()
-                        ? defenders
-                        : ((i * 4 < unseen_enemy_tiles * kSimulations) ? unseen_fallback_defenders
-                                                                       : defenders);
-        if (simulated_defenders.empty()) {
-            wins++;
-            total_survivors += static_cast<int>(attackers.size());
-            continue;
+    if (!defenders.empty()) {
+        combat::FastSimulateRepeated(game, attackers, defenders, target_x, target_y, kSimulations,
+                                     wins, total_survivors, total_enemy_dead);
+    } else {
+        int fallback_sims = std::min(kSimulations, unseen_enemy_tiles * 2);
+        if (fallback_sims > 0 && !unseen_fallback_defenders.empty()) {
+            combat::FastSimulateRepeated(game, attackers, unseen_fallback_defenders, target_x,
+                                         target_y, fallback_sims, wins, total_survivors,
+                                         total_enemy_dead);
         }
-        Battle battle = combat::Resolve(game, attackers, simulated_defenders, target_x, target_y);
-        if (battle.won) wins++;
-        total_survivors += static_cast<int>(battle.attackers.size());
-        total_enemy_dead += static_cast<int>(battle.dead_defenders.size());
+        int empty_sims = kSimulations - fallback_sims;
+        if (empty_sims > 0) {
+            wins += empty_sims;
+            total_survivors += empty_sims * static_cast<int>(attackers.size());
+        }
     }
 
     game.GetRng().SetState(saved_rng);
