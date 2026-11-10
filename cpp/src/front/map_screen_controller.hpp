@@ -156,6 +156,7 @@ class MapScreenController final : public IScreenActions {
     void SetScreen(bool window);
     void ToggleCrt();
     void SetAiMode(bool classic);
+    void SetMapGenMode(bool modern, int shape = 0);
     bool MenuTicked(const std::string& key) const;
     void ExecuteMenuAction(const std::string& menu_key);
 
@@ -203,6 +204,7 @@ class MapScreenController final : public IScreenActions {
     void ViewCity(int mode);
     std::string ShortcutKey(int slot_index) const;
     bool ActiveClassicAi() const;
+    std::string MapGenKey() const;
     std::string UiScaleKey() const;
     void PointTo(double x, double y);
     void PadMouse(int& held, int button, bool down);

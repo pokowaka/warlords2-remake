@@ -16,6 +16,7 @@
 #include "warlords/ai.hpp"
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/cues.hpp"
+#include "warlords/scengen.hpp"
 #include "warlords/uidata.hpp"
 
 namespace w2 {
@@ -89,6 +90,20 @@ int Application::Execute(const ApplicationConfig& config) {
     ui_context_.SetModernUi(config.modern_ui);
     ui_context_.SetOptMilitaryAdvisor(config.military_advisor_override);
     assets_.SetDataDir(config.data_dir);
+
+    std::string mapgen_mode = !config.mapgen.empty() ? config.mapgen : prefs_.Get("mapgen");
+    if (mapgen_mode == "modern" || mapgen_mode == "continents") {
+        ui_context_.StartWorld().modern_mapgen = true;
+        ui_context_.StartWorld().shape = static_cast<int>(scengen::Shape::kContinents);
+    } else if (mapgen_mode == "pangaea") {
+        ui_context_.StartWorld().modern_mapgen = true;
+        ui_context_.StartWorld().shape = static_cast<int>(scengen::Shape::kPangaea);
+    } else if (mapgen_mode == "islands") {
+        ui_context_.StartWorld().modern_mapgen = true;
+        ui_context_.StartWorld().shape = static_cast<int>(scengen::Shape::kIslands);
+    } else {
+        ui_context_.StartWorld().modern_mapgen = false;
+    }
 
     ai::SetDefaultClassicAi(use_classic_ai);
     std::string weights_path = config.weights_file;

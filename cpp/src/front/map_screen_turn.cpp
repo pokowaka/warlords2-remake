@@ -295,6 +295,11 @@ absl::Status MapScreenController::StartCliScenario(const std::string& scenario, 
         randommap::Options rand_opts;
         rand_opts.data_dir = ctx.Assets().DataDir();
         rand_opts.rng = &rng;
+        if (ctx.StartWorld().modern_mapgen) {
+            rand_opts.scenario = true;
+            rand_opts.world.shape =
+                    static_cast<scengen::Shape>(std::clamp(ctx.StartWorld().shape, 0, 2));
+        }
         auto generated = randommap::GenerateNow(rand_opts);
         if (!generated.ok()) return generated.status();
         generated_files = std::move(*generated);

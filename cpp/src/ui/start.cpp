@@ -1009,6 +1009,41 @@ void OpenChooser(w2::UiContext& ctx, const ScenarioList& list, int current,
 /// The sliders' left edge and width on the start menu.
 constexpr int kSliderX = 384;
 constexpr int kSliderW = 120;
+constexpr kit::Rect kGeneratorToggleRect{328, 386, 264, 24};
+
+/** @brief Returns the display label for the currently selected random map generator and shape. */
+std::string GeneratorLabel(const w2::StartWorldSettings& world) {
+    if (!world.modern_mapgen) return "Generator: Classic (1993)";
+    switch (static_cast<w2::scengen::Shape>(std::clamp(world.shape, 0, 2))) {
+    case w2::scengen::Shape::kContinents:
+        return "Generator: Modern (Continents)";
+    case w2::scengen::Shape::kPangaea:
+        return "Generator: Modern (Pangaea)";
+    case w2::scengen::Shape::kIslands:
+        return "Generator: Modern (Islands)";
+    }
+    return "Generator: Modern (Continents)";
+}
+
+/** @brief Cycles the random map generator mode through Classic -> Continents -> Pangaea -> Islands.
+ */
+void CycleGeneratorMode(w2::UiContext& ctx) {
+    w2::StartWorldSettings& world = ctx.StartWorld();
+    if (!world.modern_mapgen) {
+        world.modern_mapgen = true;
+        world.shape = static_cast<int>(w2::scengen::Shape::kContinents);
+        ctx.SavePref("mapgen", w2::scengen::ShapeName(w2::scengen::Shape::kContinents));
+    } else if (world.shape == static_cast<int>(w2::scengen::Shape::kContinents)) {
+        world.shape = static_cast<int>(w2::scengen::Shape::kPangaea);
+        ctx.SavePref("mapgen", w2::scengen::ShapeName(w2::scengen::Shape::kPangaea));
+    } else if (world.shape == static_cast<int>(w2::scengen::Shape::kPangaea)) {
+        world.shape = static_cast<int>(w2::scengen::Shape::kIslands);
+        ctx.SavePref("mapgen", w2::scengen::ShapeName(w2::scengen::Shape::kIslands));
+    } else {
+        world.modern_mapgen = false;
+        ctx.SavePref("mapgen", "classic");
+    }
+}
 
 /** @brief Draws the random world's settings, in place of the scenario's picture. */
 void DrawWorld(w2::UiContext& ctx) {
@@ -1034,6 +1069,7 @@ void DrawWorld(w2::UiContext& ctx) {
     }
     font.Draw(w2::randommap::TerrainSetName(ctx.Assets().DataDir(), world.terrain_set), 336, 340);
     font.Draw(kit::Text(ctx, 3, world.allies ? 1 : 0), 336, 365);
+    font.Draw(GeneratorLabel(world), 336, 390);
 }
 
 constexpr kit::Rect kMakeWorldPopupRect{160, 55, 336, 347};  ///< Popup 23, random world scroll.
@@ -1068,6 +1104,12 @@ class MakeWorldModal final : public kit::Modal {
         }
         options.allies = world.allies;
         options.terrain_set = world.terrain_set;
+        options.scenario = world.modern_mapgen;
+        if (world.modern_mapgen) {
+            options.sliders = w2::randommap::Settle(options.sliders, rng_);
+            auto shape = static_cast<w2::scengen::Shape>(std::clamp(world.shape, 0, 2));
+            options.world = w2::randommap::SettingsFromSliders(options.sliders, shape);
+        }
         auto created_run = w2::randommap::Run::Create(options);
         if (!created_run.ok()) {
             ctx.Actions().Say(std::string(created_run.status().message()));
@@ -1207,6 +1249,11 @@ class MenuModal final : public kit::Modal {
     void Mousepressed(int x, int y, int) override {
         w2::UiContext& ctx = Ctx();
         w2::StartWorldSettings& world = ctx.StartWorld();
+        if (world.enabled && kGeneratorToggleRect.Contains(x, y)) {
+            CycleGeneratorMode(ctx);
+            Refresh();
+            return;
+        }
         const auto* control = kit::ControlAt(dialog_view_, x, y, HiddenControls());
         if (!control || dialog_view_.StateOf(control->id) == w2::uidata::kDisabled) return;
         int control_id = control->id;
@@ -1254,6 +1301,15 @@ class MenuModal final : public kit::Modal {
             return;
         }
         Refresh();
+    }
+
+    /** @brief Shows right-click help for the custom Generator toggle in the Random Map panel. */
+    void Rightpressed(int frame_x, int frame_y, int screen_x, int screen_y) override {
+        w2::UiContext& ctx = Ctx();
+        if (ctx.StartWorld().enabled && kGeneratorToggleRect.Contains(frame_x, frame_y)) {
+            infobox::ShowLines(ctx, screen_x, screen_y, "Map Generator",
+                               "Switch Classic 1993 or Modern world");
+        }
     }
 
   private:

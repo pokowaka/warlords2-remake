@@ -83,6 +83,12 @@ std::vector<Menu> WithZooms(int max_ui, int max_map, double smooth_ui, double ma
                     extended.items.push_back({"-", "", ""});
                     extended.items.push_back({"Modern AI", "", "ai modern"});
                     extended.items.push_back({"Classic AI", "", "ai classic"});
+                    extended.items.push_back({"-", "", ""});
+                    extended.items.push_back({"Classic map generator", "", "mapgen classic"});
+                    extended.items.push_back(
+                            {"Modern map (Continents)", "", "mapgen continents"});
+                    extended.items.push_back({"Modern map (Pangaea)", "", "mapgen pangaea"});
+                    extended.items.push_back({"Modern map (Islands)", "", "mapgen islands"});
                 }
             }
         } else if (original.title == "View") {
@@ -119,7 +125,7 @@ std::vector<Menu> WithZooms(int max_ui, int max_map, double smooth_ui, double ma
 static const int kTickW = 5;
 /** @brief True for an item that is a setting, ticked when in use. */
 static bool Tickable(const std::string& act) {
-    for (const char* prefix : {"map zoom ", "ui scale ", "screen ", "music ", "ai "})
+    for (const char* prefix : {"map zoom ", "ui scale ", "screen ", "music ", "ai ", "mapgen "})
         if (act.rfind(prefix, 0) == 0) return true;
     return false;
 }

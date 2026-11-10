@@ -9,6 +9,7 @@
 #include "warlords/ai.hpp"
 #include "warlords/cues.hpp"
 #include "warlords/game.hpp"
+#include "warlords/scengen.hpp"
 #include "warlords/scn.hpp"
 #include "warlords/site.hpp"
 #include "warlords/uidata.hpp"
@@ -108,6 +109,25 @@ void MapScreenController::SetAiMode(bool classic) {
     }
 }
 
+void MapScreenController::SetMapGenMode(bool modern, int shape) {
+    UiContext& ctx = Ctx();
+    StartWorldSettings& world = ctx.StartWorld();
+    world.modern_mapgen = modern;
+    if (modern) {
+        world.shape = std::clamp(shape, 0, 2);
+        ctx.SavePref("mapgen", scengen::ShapeName(static_cast<scengen::Shape>(world.shape)));
+    } else {
+        ctx.SavePref("mapgen", "classic");
+    }
+}
+
+std::string MapScreenController::MapGenKey() const {
+    const StartWorldSettings& world = Ctx().StartWorld();
+    if (!world.modern_mapgen) return "mapgen classic";
+    int clamped = std::clamp(world.shape, 0, 2);
+    return std::string("mapgen ") + scengen::ShapeName(static_cast<scengen::Shape>(clamped));
+}
+
 std::string MapScreenController::UiScaleKey() const {
     const auto& state = Ctx().Display().GetState();
     if (state.chosen > state.max_scale && state.chosen <= state.max_short) {
@@ -125,7 +145,7 @@ bool MapScreenController::MenuTicked(const std::string& key) const {
            (key == "screen fit" && !disp_state.wanted.has_value()) ||
            (key == "screen crt" && disp_state.crt) ||
            key == "music " + std::string(sound::SynthName(ctx.Audio().Synth())) ||
-           key == (ActiveClassicAi() ? "ai classic" : "ai modern");
+           key == (ActiveClassicAi() ? "ai classic" : "ai modern") || key == MapGenKey();
 }
 
 void MapScreenController::ViewCity(int mode) {
@@ -375,6 +395,16 @@ void MapScreenController::InitActions() {
     }
     menu_actions_["ai modern"] = [this]() { SetAiMode(false); };
     menu_actions_["ai classic"] = [this]() { SetAiMode(true); };
+    menu_actions_["mapgen classic"] = [this]() { SetMapGenMode(false); };
+    menu_actions_["mapgen continents"] = [this]() {
+        SetMapGenMode(true, static_cast<int>(scengen::Shape::kContinents));
+    };
+    menu_actions_["mapgen pangaea"] = [this]() {
+        SetMapGenMode(true, static_cast<int>(scengen::Shape::kPangaea));
+    };
+    menu_actions_["mapgen islands"] = [this]() {
+        SetMapGenMode(true, static_cast<int>(scengen::Shape::kIslands));
+    };
 }
 
 void MapScreenController::ExecuteMenuAction(const std::string& menu_key) {
@@ -387,6 +417,7 @@ bool MapScreenController::MenuEnabled(const std::string& menu_key) {
     UiContext& ctx = Ctx();
     bool music = menu_key.starts_with("music ");
     bool ai_opt = menu_key.starts_with("ai ");
+    bool mapgen_opt = menu_key.starts_with("mapgen ");
     if (music) {
         auto synth = sound::ParseSynthKind(menu_key.substr(6));
         if (!synth || !ctx.Audio().SynthAvailable(*synth)) return false;
@@ -394,7 +425,7 @@ bool MapScreenController::MenuEnabled(const std::string& menu_key) {
     if (ctx.Starting() || !ctx.GamePtr()) {
         return menu_key == "^Q" || (menu_key == "alt L" && savegame::Used() > 0) ||
                menu_key.starts_with("ui scale ") || menu_key.starts_with("screen ") || music ||
-               ai_opt;
+               ai_opt || mapgen_opt;
     }
     if (state_->IsComputerTurn() && !HumansLeft()) {
         if (menu_key == "h" || menu_key == "e" || menu_key == "j" || menu_key == "y") {
@@ -405,7 +436,7 @@ bool MapScreenController::MenuEnabled(const std::string& menu_key) {
                menu_key == "." || menu_key == "a" || menu_key == "k" || menu_key == "g" ||
                menu_key == "n" || menu_key == "w" || menu_key == "l" ||
                menu_key.starts_with("map zoom ") || menu_key.starts_with("ui scale ") ||
-               menu_key.starts_with("screen ") || music || ai_opt;
+               menu_key.starts_with("screen ") || music || ai_opt || mapgen_opt;
     }
     Game& game_state = ctx.ActiveGame();
     Map& map = game_state.GetMap();

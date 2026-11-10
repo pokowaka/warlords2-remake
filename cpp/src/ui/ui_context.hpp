@@ -49,6 +49,8 @@ struct StartWorldSettings {
     bool enabled = false;                               ///< True when Random World is selected.
     int terrain_set = 0;                                ///< Selected terrain set index.
     bool allies = false;                                ///< True when cities can produce allies.
+    bool modern_mapgen = false;                         ///< True when using modern `scengen`.
+    int shape = 0;                                      ///< Landmass layout (`0`=Continents, `1`=Pangaea, `2`=Islands).
     std::array<int, 4> sliders{{3, 3, 2, 3}};           ///< Water, Hills, Cities, Forest (`0..6`).
     std::array<bool, 4> set{{true, true, true, true}};  ///< False (`?`) leaves slider random.
     ScenarioFiles generated_files;                      ///< Last generated in-memory world.

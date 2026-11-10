@@ -412,6 +412,29 @@ std::array<int, 4> Settle(std::array<int, 4> sliders, Rng& rng) {
     return sliders;
 }
 
+scengen::Settings SettingsFromSliders(const std::array<int, 4>& sliders, scengen::Shape shape) {
+    scengen::Settings world;
+    world.shape = shape;
+    int water = std::clamp(sliders[0], 0, 6);
+    int hills = std::clamp(sliders[1], 0, 6);
+    int cities = std::clamp(sliders[2], 0, 6);
+    int forest = std::clamp(sliders[3], 0, 6);
+
+    double default_land = shape == scengen::Shape::kPangaea   ? 0.60
+                          : shape == scengen::Shape::kIslands ? 0.42
+                                                              : 0.55;
+    world.land = std::clamp(default_land - (water - 3) * 0.03, 0.25, 0.75);
+    world.rivers = std::max(2, 2 + water);
+
+    double relief_scale = kSliderShows[1][hills] / 11.0;
+    world.mountains = 0.08 * relief_scale;
+    world.hills = 0.10 * relief_scale;
+
+    world.cities = kSliderShows[2][cities];
+    world.forest = kSliderShows[3][forest] / 100.0;
+    return world;
+}
+
 namespace {
 /** @brief Loads `RANDOM.DAT` and adds the chosen slider offsets to the parameters. */
 absl::StatusOr<std::vector<uint8_t>> Params(const std::filesystem::path& data_dir,

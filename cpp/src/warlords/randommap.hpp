@@ -73,6 +73,16 @@ struct Options {
  */
 std::array<int, 4> Settle(std::array<int, 4> sliders, Rng& rng);
 
+/**
+ * @brief Maps settled 0..6 Random Map UI sliders (Water, Hills, Cities, Forest) into modern
+ *        `scengen::Settings` for the given landmass `shape`.
+ * @param sliders Settled slider indices in `0..6` for Water, Hills, Cities, and Forest.
+ * @param shape Target landmass layout style.
+ * @return Populated `scengen::Settings` reflecting the slider selections.
+ */
+scengen::Settings SettingsFromSliders(const std::array<int, 4>& sliders,
+                                      scengen::Shape shape = scengen::Shape::kContinents);
+
 class Generator;
 
 /**

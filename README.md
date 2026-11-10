@@ -131,6 +131,11 @@ bazel run //:warlords2 -- --scenario GEN101
 
 Generated scenarios are registered in `original/DATA/SCENGEN.LST` and appear automatically after the 7 standard scenarios in the **New Scenario** list with full crystal ball metadata and menu artwork. See [`docs/scengen.md`](docs/scengen.md) for complete details on generator parameters, fairness metrics, and preview PNG generation.
 
+You can also use the modern scenario generator directly inside the game's **Random Map** screen:
+* Click the **Generator:** line on the Random Map panel to cycle between `Classic (1993)`, `Modern (Continents)`, `Modern (Pangaea)`, and `Modern (Islands)` (your Water, Hills, Cities, and Forest sliders map directly into the modern generator).
+* Toggle anytime via **Game › Classic map generator** or **Game › Modern map (Continents / Pangaea / Islands)** (saved in user preferences).
+* Or launch from the command line with `--mapgen=classic|continents|pangaea|islands`.
+
 ---
 
 ## Beyond the original
@@ -142,7 +147,7 @@ panel, and the bottom bar move to the edges. A few things are new:
 | To | Do |
 |---|---|
 | **Choose the AI & UI** | Game › Modern AI / Classic AI toggles the fair-information neural AI vs the 1993 AI; `--modern-ui` enables diplomatic Parley ledgers and the `F10` AI Brain Inspector |
-| **Generate worlds** | Play classic 1993 `RANDOM.DAT` maps or modern balanced random worlds (`scengen` / `mapeval`) |
+| **Generate worlds** | Switch between classic 1993 `RANDOM.DAT` maps and modern balanced random worlds (`Continents`, `Pangaea`, `Islands`) in the Random Map panel, the `Game` menu, or via `--mapgen` |
 | **Scale the interface** | View › Interface 1x, 2x… picks a whole-number scale so the pixel art stays sharp; the biggest that fits is the default |
 | **Zoom & pan the map** | Mouse wheel, `PageUp` / `PageDown`, keypad `+` / `-`, or View › Map 1x, 2x…; drag the map with the pointer for smooth pixel panning |
 | **Switch display & CRT** | View › Full screen / Window, View › 4:3 aspect lock, and optional OpenGL CRT shader (curvature, scanlines, aperture grille, and halation glow) |

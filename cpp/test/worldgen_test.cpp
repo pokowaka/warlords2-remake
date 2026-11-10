@@ -368,6 +368,23 @@ TEST(RandomMapTest, ClassicGeneratorDeterminismSlidersAndSaveRoundTrip) {
         EXPECT_LE(slider, 6);
     }
 
+    auto default_modern =
+            randommap::SettingsFromSliders({{3, 3, 2, 3}}, scengen::Shape::kContinents);
+    EXPECT_EQ(default_modern.shape, scengen::Shape::kContinents);
+    EXPECT_DOUBLE_EQ(default_modern.land, 0.55);
+    EXPECT_DOUBLE_EQ(default_modern.mountains, 0.08);
+    EXPECT_DOUBLE_EQ(default_modern.hills, 0.10);
+    EXPECT_EQ(default_modern.cities, 80);
+    EXPECT_DOUBLE_EQ(default_modern.forest, 0.15);
+    EXPECT_EQ(default_modern.rivers, 5);
+
+    auto island_modern = randommap::SettingsFromSliders({{6, 0, 6, 6}}, scengen::Shape::kIslands);
+    EXPECT_EQ(island_modern.shape, scengen::Shape::kIslands);
+    EXPECT_LT(island_modern.land, 0.42);
+    EXPECT_EQ(island_modern.cities, 100);
+    EXPECT_DOUBLE_EQ(island_modern.forest, 0.21);
+    EXPECT_EQ(island_modern.rivers, 8);
+
     auto on_disk = ReadBytes(kData / "RANDOM/RANDOM.SCN");
     if (on_disk.ok()) {
         EXPECT_NE(*on_disk, made["SCN"]);

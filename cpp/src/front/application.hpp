@@ -37,6 +37,7 @@ struct ApplicationConfig {
     bool force_fullscreen = false;       ///< True when `--fullscreen` was passed.
     bool force_classic_ai = false;       ///< True when `--classic-ai` was passed.
     bool force_modern_ai = false;        ///< True when `--modern-ai` was passed.
+    std::string mapgen;                  ///< Optional `--mapgen` mode (`classic`/`continents`/...).
     bool modern_ui = false;              ///< True when `--modern-ui` overlays are active.
     bool force_diplomacy = false;        ///< True when `--diplomacy` was passed.
     bool force_hidden_map = false;       ///< True when `--hidden-map` was passed.

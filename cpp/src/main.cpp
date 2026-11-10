@@ -25,6 +25,8 @@ ABSL_FLAG(std::string, script, "", "Automated UI test script file to execute.");
 ABSL_FLAG(std::string, size, "", "Initial window dimensions formatted as WxH.");
 ABSL_FLAG(bool, classic_ai, false, "Default computer sides to the 1993 Classic AI.");
 ABSL_FLAG(bool, modern_ai, false, "Default computer sides to the Modern neural AI.");
+ABSL_FLAG(std::string, mapgen, "",
+          "Random map generator mode: classic, modern, continents, pangaea, or islands.");
 ABSL_FLAG(bool, modern_ui, false, "Enable modern UI overlays and AI Brain Inspector.");
 ABSL_FLAG(bool, classic_ui, false, "Disable modern UI overlays.");
 ABSL_FLAG(std::string, weights, "", "Path to Modern AI policy weights JSON.");
@@ -69,6 +71,7 @@ int main(int argc, char** argv) {
     config.force_fullscreen = absl::GetFlag(FLAGS_fullscreen);
     config.force_classic_ai = absl::GetFlag(FLAGS_classic_ai);
     config.force_modern_ai = absl::GetFlag(FLAGS_modern_ai);
+    config.mapgen = w2::Lower(absl::GetFlag(FLAGS_mapgen));
     config.modern_ui = absl::GetFlag(FLAGS_modern_ui) && !absl::GetFlag(FLAGS_classic_ui);
     config.force_diplomacy = absl::GetFlag(FLAGS_diplomacy);
     config.force_hidden_map = absl::GetFlag(FLAGS_hidden_map);
