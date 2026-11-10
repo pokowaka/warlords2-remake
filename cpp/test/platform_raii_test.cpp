@@ -19,6 +19,7 @@
 #include "platform/keys.hpp"
 #include "platform/pad.hpp"
 #include "platform/sound.hpp"
+#include "platform/soundfont.hpp"
 #include "test/test_helpers.hpp"
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
@@ -341,7 +342,71 @@ TEST_F(DummySdlTest, AudioEngineHermeticOptionsSynthAndDummyDeviceLifecycle) {
     engine.Music(w2::cues::kComputer, /*has_active_human=*/false);
     engine.Update();
     engine.StopMusic();
+
+    // Verify SoundFont availability and switching
+    EXPECT_TRUE(engine.SynthAvailable(sound::SynthKind::kSc55));
+    EXPECT_TRUE(engine.SynthAvailable(sound::SynthKind::kMt32));
+    engine.SetSynth(sound::SynthKind::kSc55);
+    EXPECT_EQ(engine.Synth(), sound::SynthKind::kSc55);
+    engine.Toggle(sound::AudioChannel::kMusic);
+    engine.Music(w2::cues::kTitle, /*has_active_human=*/true);
+    engine.Update();
+    engine.StopMusic();
+
     engine.Shutdown();
+}
+
+TEST(SoundFontSynthTest, DirectSc55AndMt32SequencePlaybackAndSampleRendering) {
+    sound::SoundFontSynth synth;
+    ASSERT_TRUE(synth.Load("original/SOUND/warlords2.sf2", 44100));
+    EXPECT_TRUE(synth.Loaded());
+    EXPECT_TRUE(synth.Idle());
+
+    // Test SC-55 song playback
+    auto sc55_bytes = w2::ReadBytes("original/SOUND/RSTARTUP.XMI");
+    ASSERT_TRUE(sc55_bytes.ok()) << sc55_bytes.status();
+    auto sc55_seq = w2::xmi::Parse(absl::MakeConstSpan(*sc55_bytes));
+    ASSERT_TRUE(sc55_seq.has_value());
+
+    synth.Play(&*sc55_seq, /*is_mt32=*/false, /*loop=*/false);
+    EXPECT_TRUE(synth.Playing());
+    EXPECT_FALSE(synth.Idle());
+
+    std::vector<float> pcm(44100 * 2, 0.0F);
+    synth.Render(pcm.data(), 44100);
+
+    float max_sample = 0.0F;
+    for (float s : pcm) {
+        max_sample = std::max(max_sample, std::abs(s));
+    }
+    EXPECT_GT(max_sample, 0.01F);
+
+    synth.Stop();
+    EXPECT_FALSE(synth.Playing());
+    EXPECT_TRUE(synth.Idle());
+
+    // Test MT-32 song playback
+    auto mt32_bytes = w2::ReadBytes("original/SOUND/MSTARTUP.XMI");
+    ASSERT_TRUE(mt32_bytes.ok()) << mt32_bytes.status();
+    auto mt32_seq = w2::xmi::Parse(absl::MakeConstSpan(*mt32_bytes));
+    ASSERT_TRUE(mt32_seq.has_value());
+
+    synth.Play(&*mt32_seq, /*is_mt32=*/true, /*loop=*/false);
+    EXPECT_TRUE(synth.Playing());
+    EXPECT_FALSE(synth.Idle());
+
+    std::fill(pcm.begin(), pcm.end(), 0.0F);
+    synth.Render(pcm.data(), 44100);
+
+    max_sample = 0.0F;
+    for (float s : pcm) {
+        max_sample = std::max(max_sample, std::abs(s));
+    }
+    EXPECT_GT(max_sample, 0.01F);
+
+    synth.Stop();
+    EXPECT_FALSE(synth.Playing());
+    EXPECT_TRUE(synth.Idle());
 }
 
 TEST_F(DummySdlTest, KeyboardAndGamepadInputRaiiState) {

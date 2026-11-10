@@ -7,15 +7,12 @@
 
 #include <SDL.h>
 
+#include "platform/soundfont.hpp"
 #include "util/util.hpp"
 #include "warlords/ailfm.hpp"
 #include "warlords/cues.hpp"
 #include "warlords/types.hpp"
 #include "warlords/xmi.hpp"
-
-#ifdef W2_VORBIS
-#include <vorbis/vorbisfile.h>
-#endif
 
 namespace sound {
 
@@ -75,92 +72,20 @@ class ScopedDeviceLock {
 
 }  // namespace
 
-struct AudioEngine::VorbisStream {
-#ifdef W2_VORBIS
-    OggVorbis_File vorbis{};
-    bool open = false, eof = false;
-    int channels = 1;
-    double step = 1.0, pos = 0.0, played = 0.0;
-    std::vector<float> buf;
-    size_t frames = 0;
-
-    ~VorbisStream() {
-        if (open) ov_clear(&vorbis);
-    }
-
-    static std::unique_ptr<VorbisStream> Open(const std::filesystem::path& path, int mixer_rate) {
-        auto stream = std::make_unique<VorbisStream>();
-        std::string resolved = w2::ResolvePath(path).string();
-        if (resolved.empty() || ov_fopen(resolved.c_str(), &stream->vorbis) != 0) return nullptr;
-        stream->open = true;
-        vorbis_info* info = ov_info(&stream->vorbis, -1);
-        stream->channels = info->channels;
-        stream->step = static_cast<double>(info->rate) / mixer_rate;
-        return stream;
-    }
-
-    void Fill(size_t need) {
-        size_t consumed = static_cast<size_t>(pos);
-        if (consumed > 0) {
-            buf.erase(buf.begin(), buf.begin() + std::min(buf.size(), consumed * 2UZ));
-            frames -= std::min(frames, consumed);
-            pos -= static_cast<double>(consumed);
-        }
-        while (!eof && frames < need + 2UZ) {
-            float** pcm = nullptr;
-            int section = 0;
-            long count = ov_read_float(&vorbis, &pcm, 4096, &section);
-            if (count <= 0) {
-                eof = true;
-                break;
-            }
-            for (long i = 0; i < count; i++) {
-                buf.push_back(pcm[0][i]);
-                buf.push_back(channels > 1 ? pcm[1][i] : pcm[0][i]);
-            }
-            frames += static_cast<size_t>(count);
-        }
-    }
-
-    bool Done() const { return eof && pos + 1.0 >= static_cast<double>(frames); }
-
-    void MixInto(float* out, int out_frames, int rate) {
-        if (Done()) return;
-        Fill(static_cast<size_t>(std::ceil(out_frames * step)) + 2UZ);
-        for (int i = 0; i < out_frames; i++) {
-            size_t idx = static_cast<size_t>(pos);
-            if (idx + 1UZ >= frames) {
-                if (eof) break;
-                Fill(static_cast<size_t>(std::ceil((out_frames - i) * step)) + 2UZ);
-                idx = static_cast<size_t>(pos);
-                if (idx + 1UZ >= frames) break;
-            }
-            double frac = pos - static_cast<double>(idx);
-            out[static_cast<std::ptrdiff_t>(i) * 2] +=
-                    static_cast<float>(buf[idx * 2] * (1.0 - frac) + buf[idx * 2 + 2] * frac);
-            out[i * 2 + 1] +=
-                    static_cast<float>(buf[idx * 2 + 1] * (1.0 - frac) + buf[idx * 2 + 3] * frac);
-            pos += step;
-        }
-        played += static_cast<double>(out_frames) / rate;
-    }
-#endif
-};
-
 struct AudioEngine::MixerState {
-    using StreamPtr = std::unique_ptr<VorbisStream>;
-    using TailList = std::vector<StreamPtr>;
     using SharedSequence = std::shared_ptr<w2::xmi::Sequence>;
 
     int rate = 44100;
     SharedPcm sample;
     double sample_pos = 0.0, fm_pos = 0.0;
     bool sample_ended = true, fm_was_playing = false, fm_ended = false;
+    bool sf_was_playing = false, sf_ended = false;
     std::unique_ptr<w2::AilFm> fm_synth;
     SharedSequence fm_seq;
     std::vector<int16_t> fm_buf;
-    StreamPtr rec;
-    TailList tails;
+
+    std::unique_ptr<SoundFontSynth> sf_synth;
+    SharedSequence sf_seq;
 
     void MixSample(float* out, int frames) {
         if (!sample || sample_ended) return;
@@ -214,6 +139,18 @@ struct AudioEngine::MixerState {
         if (fm_was_playing && !playing_now) fm_ended = true;
         fm_was_playing = playing_now;
     }
+
+    void MixSoundFont(float* out, int frames) {
+        if (!sf_synth || sf_synth->Idle()) {
+            if (sf_was_playing) sf_ended = true;
+            sf_was_playing = false;
+            return;
+        }
+        sf_synth->Render(out, frames);
+        bool playing_now = sf_synth->Playing();
+        if (sf_was_playing && !playing_now) sf_ended = true;
+        sf_was_playing = playing_now;
+    }
 };
 
 std::string_view SynthName(SynthKind synth) {
@@ -249,10 +186,7 @@ void AudioEngine::AudioCallback(void* userdata, uint8_t* stream, int byte_len) {
 void AudioEngine::MixOutput(float* out, int frames) {
     std::fill(out, out + static_cast<std::ptrdiff_t>(frames) * 2, 0.0F);
     mixer_->MixFm(out, frames);
-#ifdef W2_VORBIS
-    if (mixer_->rec) mixer_->rec->MixInto(out, frames, mixer_->rate);
-    for (auto& tail : mixer_->tails) tail->MixInto(out, frames, mixer_->rate);
-#endif
+    mixer_->MixSoundFont(out, frames);
     mixer_->MixSample(out, frames);
     for (int i = 0; i < frames * 2; i++) out[i] = std::clamp(out[i], -1.0F, 1.0F);
 }
@@ -267,10 +201,30 @@ std::filesystem::path AudioEngine::DataPath(std::string_view relative_name) cons
     return data_dir_ / rel;
 }
 
-std::filesystem::path AudioEngine::RecordingPath(SynthKind synth, std::string_view xmi_name) const {
-    std::string base = w2::Upper(xmi_name);
-    if (base.ends_with(".XMI")) base = base.substr(0, base.size() - 4);
-    return rec_dir_ / (std::string(1, SynthPrefix(synth)) + base + ".ogg");
+std::filesystem::path AudioEngine::ResolveSoundFontPath() const {
+    const std::array<std::filesystem::path, 7> candidates = {
+        data_dir_ / "SOUND/SC-55.sf2",
+        data_dir_ / "SOUND/soundfont.sf2",
+        data_dir_ / "SOUND/warlords2.sf2",
+        "original/SOUND/SC-55.sf2",
+        "original/SOUND/soundfont.sf2",
+        "original/SOUND/warlords2.sf2",
+        "warlords2.sf2",
+    };
+    for (const auto& candidate : candidates) {
+        if (w2::FileExists(candidate)) return candidate;
+    }
+    return {};
+}
+
+bool AudioEngine::EnsureSoundFontLoaded() {
+    if (mixer_->sf_synth && mixer_->sf_synth->Loaded()) return true;
+    auto sf_path = ResolveSoundFontPath();
+    if (sf_path.empty()) return false;
+    if (!mixer_->sf_synth) {
+        mixer_->sf_synth = std::make_unique<SoundFontSynth>();
+    }
+    return mixer_->sf_synth->Load(sf_path, mixer_->rate);
 }
 
 AudioEngine::SharedPcm AudioEngine::LoadSample(std::string_view relative_name) {
@@ -287,57 +241,40 @@ AudioEngine::SharedPcm AudioEngine::LoadSample(std::string_view relative_name) {
     return pcm;
 }
 
-void AudioEngine::StepRecording() {
-#ifdef W2_VORBIS
-    ScopedDeviceLock dev_lock(device_id_);
-    MixerState::StreamPtr& rec = mixer_->rec;
-    if (rec && (rec->played >= rec_loop_at_ || rec->Done())) {
-        mixer_->tails.push_back(std::move(rec));
-        if (rec_loop_ && song_.has_value()) {
-            rec = VorbisStream::Open(RecordingPath(synth_, song_->first), mixer_->rate);
-        } else {
-            song_playing_ = false;
-        }
-    }
-    auto& tails = mixer_->tails;
-    tails.erase(std::remove_if(tails.begin(), tails.end(),
-                               [](const auto& tail) { return tail->Done(); }),
-                tails.end());
-    if (tails.size() > 4UZ) tails.erase(tails.begin(), tails.end() - 4);
-#endif
-}
-
 void AudioEngine::StopStreams() {
-    MixerState::StreamPtr old_rec;
-    MixerState::TailList old_tails;
     ScopedDeviceLock dev_lock(device_id_);
     if (mixer_->fm_synth) mixer_->fm_synth->Stop();
     mixer_->fm_was_playing = mixer_->fm_ended = false;
-    old_rec = std::move(mixer_->rec);
-    old_tails = std::move(mixer_->tails);
-    mixer_->tails.clear();
+    if (mixer_->sf_synth) mixer_->sf_synth->Stop();
+    mixer_->sf_was_playing = mixer_->sf_ended = false;
 }
 
 bool AudioEngine::StartSong(const std::string& name, bool loop) {
     if (device_id_ == 0) return false;
-#ifdef W2_VORBIS
+
     if (synth_ != SynthKind::kFm) {
-        auto bytes = w2::ReadBytes(data_dir_ / "SOUND" /
-                                   (std::string(1, SynthPrefix(synth_)) + w2::Upper(name)));
+        bool is_mt32 = (synth_ == SynthKind::kMt32);
+        char prefix = SynthPrefix(synth_);
+        auto bytes = w2::ReadBytes(data_dir_ / "SOUND" / (std::string(1, prefix) + w2::Upper(name)));
         auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
-        auto stream = seq ? VorbisStream::Open(RecordingPath(synth_, name), mixer_->rate) : nullptr;
-        if (stream) {
+        if (seq && EnsureSoundFontLoaded()) {
             StopStreams();
-            ScopedDeviceLock dev_lock(device_id_);
-            mixer_->rec = std::move(stream);
-            rec_loop_at_ = (seq->length + 1.0) / w2::xmi::kTickRate;
-            rec_loop_ = loop;
+            auto shared_seq = std::make_shared<w2::xmi::Sequence>(std::move(*seq));
+            MixerState::SharedSequence prev_seq;
+            {
+                ScopedDeviceLock dev_lock(device_id_);
+                prev_seq = mixer_->sf_seq;
+                mixer_->sf_seq = shared_seq;
+                mixer_->sf_synth->Play(shared_seq.get(), is_mt32, loop);
+                mixer_->sf_was_playing = true;
+                mixer_->sf_ended = false;
+            }
             song_ = std::make_pair(name, loop);
             song_playing_ = true;
             return true;
         }
     }
-#endif
+
     if (adv_.empty() || ad_bank_.empty()) return false;
     auto bytes = w2::ReadBytes(data_dir_ / "SOUND" / ("S" + w2::Upper(name)));
     auto seq = bytes.ok() ? w2::xmi::Parse(*bytes) : std::nullopt;
@@ -375,8 +312,6 @@ void AudioEngine::Init(const std::filesystem::path& data_dir, const w2::uidata::
     Shutdown();
     data_dir_ = data_dir;
     files_ = files;
-    rec_dir_ = w2::FileExists("pre-rendered-sound") ? std::filesystem::path("pre-rendered-sound")
-                                                    : data_dir / "../pre-rendered-sound";
     std::string opts = w2::ReadFile(data_dir / "DATA/OPTIONS.SND").value_or("111");
     while (opts.size() < 3UZ) opts += '1';
     options_ = Options{opts[0] == '1', opts[1] == '1', opts[2] != '0'};
@@ -460,11 +395,7 @@ void AudioEngine::StopMusic() {
 
 bool AudioEngine::SynthAvailable(SynthKind synth) const {
     if (synth == SynthKind::kFm) return true;
-#ifdef W2_VORBIS
-    return w2::FileExists(RecordingPath(synth, "STARTUP.XMI"));
-#else
-    return false;
-#endif
+    return !ResolveSoundFontPath().empty();
 }
 
 void AudioEngine::SetSynth(SynthKind synth) {
@@ -530,8 +461,11 @@ void AudioEngine::Update() {
             mixer_->fm_ended = false;
             if (song_.has_value() && !song_->second) song_playing_ = false;
         }
+        if (mixer_->sf_ended) {
+            mixer_->sf_ended = false;
+            if (song_.has_value() && !song_->second) song_playing_ = false;
+        }
     }
-    StepRecording();
 }
 
 void AudioEngine::Music(int cue, SidePtrSpan sides) {

@@ -1,6 +1,6 @@
 #!/bin/sh
 # bazel run //cpp:play [-- game options]: the game, started in the
-# repository root, where it finds original/ and pre-rendered-sound/ and keeps
+# repository root, where it finds original/ and keeps
 # its generated worlds.
 set -eu
 game=$(pwd)/$1

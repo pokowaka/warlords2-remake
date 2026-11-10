@@ -1,18 +1,18 @@
 # Warlords II — in modern C++ on SDL2
 
 The standalone engine in modern C++23, drawing and playing sound through
-SDL2. The rules core, the computer player and the FM music read the original
-game files directly and define how the game behaves.
+SDL2. The rules core, the computer player, the FM music, and the SoundFont
+synthesizer read the original game files directly and define how the game behaves.
 
 Nothing is converted and no assets are checked in. The game reads the
-original files from `original/` as they are, and streams the MT-32 and Sound
-Canvas recordings from `pre-rendered-sound/` where they already lie.
+original files from `original/` as they are, and synthesizes AdLib FM, Roland MT-32,
+and Roland Sound Canvas SC-55 music in real-time.
 
 ## Building
 
 You need Bazel (best through bazelisk, which picks the version in
 `.bazelversion`) and a C++23 compiler: Xcode's on macOS, gcc or clang on
-Linux. Bazel fetches SDL2, Vorbis and GoogleTest itself, from the Bazel
+Linux. Bazel fetches SDL2 and GoogleTest itself, from the Bazel
 Central Registry (`MODULE.bazel`).
 
 ```sh
@@ -30,8 +30,7 @@ the game in the repository root. For clangd and clang-tidy,
 
 ## Running
 
-Run from the repository root, so that `original/` and `pre-rendered-sound/`
-are found:
+Run from the repository root, so that `original/` is found:
 
 ```sh
 bazel-bin/cpp/warlords2                          # the start screens
@@ -55,8 +54,8 @@ The controls:
 - The sound switches live in `original/DATA/OPTIONS.SND`, as they do for the
   original.
 - The AdLib music is synthesized live by the built-in OPL2 emulator and AIL driver.
-  The MT-32 and SC-55 music items in the Game menu stream recordings from
-  `pre-rendered-sound/` via libvorbisfile.
+  Roland MT-32 and Roland Sound Canvas SC-55 music are synthesized in real-time
+  via TinySoundFont (`original/SOUND/warlords2.sf2`).
 - A game controller plays as well: the right stick is the pointer, R2 or A
   and L2 or X are the left and right buttons, the left stick slides the map
   (the whole table is under Controller below, made for the Steam Deck). Text

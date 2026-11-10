@@ -166,6 +166,7 @@ def build(out_dir: Path, clean: bool = False, debug: bool = False) -> None:
         "-std=c++23",
         opt_flag,
         f"-I{ROOT / 'cpp' / 'src'}",
+        f"-I{ROOT / 'cpp' / 'src' / 'platform' / 'third_party'}",
         f"-I{absl_dir}",
         f"-I{json_dir}",
         "-sUSE_SDL=2",

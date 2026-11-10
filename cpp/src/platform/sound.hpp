@@ -1,7 +1,7 @@
 /**
  * @file
  * @brief Encapsulated game audio engine (`sound::AudioEngine`): `.8SN` digital effects,
- * advisor speech clips, and live OPL2 FM / streamed Ogg Vorbis background music.
+ * advisor speech clips, and live OPL2 FM / SoundFont background music.
  */
 #pragma once
 
@@ -31,8 +31,8 @@ namespace sound {
 /** @brief Music synthesizer backend selection. */
 enum class SynthKind {
     kFm,    ///< Live emulated AdLib OPL2 FM synthesis (`S*.XMI`).
-    kMt32,  ///< Pre-rendered Roland MT-32 Ogg Vorbis recordings (`M*.ogg`).
-    kSc55,  ///< Pre-rendered Roland Sound Canvas SC-55 Ogg Vorbis recordings (`R*.ogg`).
+    kMt32,  ///< Live Roland MT-32 SoundFont synthesis (`M*.XMI`).
+    kSc55,  ///< Live Roland Sound Canvas SC-55 SoundFont synthesis (`R*.XMI`).
 };
 
 /** @brief User-toggleable audio output channel persisted in `DATA/OPTIONS.SND`. */
@@ -74,8 +74,8 @@ OptionalSynthKind ParseSynthKind(std::string_view name);
  * sequential DIGPAK playback queue.
  *
  * Passes `this` via `SDL_AudioSpec::userdata` into `AudioCallback`, mixing live
- * AdLib OPL2 FM synthesis (`w2::AilFm`), looping Ogg Vorbis recordings with
- * overlapping reverb tails, and 11000 Hz `.8SN` digital clips per instance.
+ * AdLib OPL2 FM synthesis (`w2::AilFm`), live Roland Sound Canvas / MT-32 SoundFont
+ * synthesis (`sound::SoundFontSynth`), and 11000 Hz `.8SN` digital clips per instance.
  *
  * Invariants:
  * - When `device_id_ != 0`, mutations to `*mixer_` on the main thread are
@@ -186,22 +186,20 @@ class AudioEngine {
     using OptionalQueuedSample = std::optional<QueuedSample>;
 
     struct MixerState;
-    struct VorbisStream;
 
     static void AudioCallback(void* userdata, uint8_t* stream, int byte_len);
     void MixOutput(float* out, int frames);
 
     int RollDie(int sides);
     std::filesystem::path DataPath(std::string_view relative_name) const;
-    std::filesystem::path RecordingPath(SynthKind synth, std::string_view xmi_name) const;
+    std::filesystem::path ResolveSoundFontPath() const;
+    bool EnsureSoundFontLoaded();
     SharedPcm LoadSample(std::string_view relative_name);
-    void StepRecording();
     void StopStreams();
     bool StartSong(const std::string& name, bool loop);
     double EnqueueSample(std::string_view relative_name, CompletionCallback done);
 
     std::filesystem::path data_dir_;            ///< Root game data directory (`original/`).
-    std::filesystem::path rec_dir_;             ///< Pre-rendered Ogg directory.
     w2::uidata::Strings files_;                 ///< `DATA/FILE.DAT` string table.
     Options options_{false, false, false};      ///< Active Music / Effects / Speech toggles.
     uint32_t device_id_ = 0;                    ///< Open `SDL_AudioDeviceID` (`0` when closed).
@@ -215,8 +213,6 @@ class AudioEngine {
     SynthKind synth_ = SynthKind::kFm;          ///< Selected music synthesizer backend.
     ByteData adv_;                              ///< Raw `ADLIB.ADV` driver image.
     ByteData ad_bank_;                          ///< Raw `MIDPAK.AD` timbre bank.
-    double rec_loop_at_ = 0.0;                  ///< Loop boundary in seconds for Vorbis music.
-    bool rec_loop_ = false;                     ///< True when active Vorbis song loops.
     std::mt19937 rng_{std::random_device{}()};  ///< Non-gameplay PRNG for clip/song variety.
 };
 

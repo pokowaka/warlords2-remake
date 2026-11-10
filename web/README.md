@@ -5,7 +5,7 @@ The modern C++23 remake of Warlords II compiled directly to WebAssembly (`warlor
 All game subsystems run natively inside the browser via WebAssembly:
 - Pure C++23 game model, rules, combat, and scenario loaders (`.SCN`, `.PCK`, `.XMI`).
 - Both classic 1993 AI and modern neural policy ML computer players.
-- Real-time live AdLib / OPL2 FM synthesizer (`AilFm`) running in Web Audio at 11,000 Hz, eliminating 160+ MB of pre-rendered songs.
+- Real-time live synthesizers: AdLib / OPL2 FM synthesis (`AilFm`) and Roland MT-32 / Roland Sound Canvas SC-55 SoundFont synthesis (`SoundFontSynth`), eliminating 160+ MB of pre-rendered songs.
 - SDL2 immediate-mode 2D graphics rendering to HTML5 Canvas via WebGL.
 - Persistent saved games and user preferences via browser IndexedDB (`IDBFS`).
 

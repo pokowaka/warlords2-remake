@@ -286,17 +286,24 @@ cc_library(
     visibility = ["//cpp:__subpackages__"],
 )
 
-# Layer 7: Platform RAII abstractions over SDL2, OpenGL, Vorbis audio, and AI turn monitor.
+# TinySoundFont header-only library.
+cc_library(
+    name = "tsf",
+    hdrs = ["src/platform/third_party/tsf.h"],
+    includes = ["src/platform/third_party"],
+)
+
+# Layer 7: Platform RAII abstractions over SDL2, OpenGL, SoundFont/FM audio, and AI turn monitor.
 cc_library(
     name = "platform",
     copts = W2_COPTS,
     srcs = glob(["src/platform/*.cpp"]),
     hdrs = glob(["src/platform/*.hpp"]),
-    defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
         ":formats",
         ":model",
+        ":tsf",
         ":util",
         "@abseil-cpp//absl/base:core_headers",
         "@abseil-cpp//absl/base:no_destructor",
@@ -309,7 +316,6 @@ cc_library(
         "@abseil-cpp//absl/synchronization",
         "@sdl2",
         "@sdl2//:sdl2_headers_flat",
-        "@vorbis//:vorbisfile",
     ],
     visibility = ["//cpp:__subpackages__"],
 )
@@ -348,7 +354,6 @@ cc_library(
     copts = W2_COPTS,
     srcs = UI_CORE_SRCS,
     hdrs = UI_CORE_HDRS,
-    defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
         ":config",
@@ -380,7 +385,6 @@ cc_library(
         ["src/ui/*.hpp"],
         exclude = UI_CORE_HDRS,
     ),
-    defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
         ":ai",
@@ -413,7 +417,6 @@ cc_library(
         ["src/front/*.hpp"],
         exclude = UI_CORE_HDRS,
     ),
-    defines = ["W2_VORBIS=1"],
     includes = ["src"],
     deps = [
         ":ai",
@@ -442,7 +445,6 @@ cc_binary(
     name = "warlords2",
     copts = W2_COPTS,
     srcs = ["src/main.cpp"],
-    defines = ["W2_VORBIS=1"],
     data = ["//:original_data"],
     includes = ["src"],
     visibility = ["//visibility:public"],
