@@ -57,7 +57,11 @@ The Modern AI is trained entirely in C++ (no external ML framework) using PPO se
 bazel run //:warlords2
 
 # Build and serve the WebAssembly browser release at http://localhost:8765/
-./tools/build_web.sh --serve --port 8765
+bazel run //:web
+
+# Or build WebAssembly artifacts via Bazel without serving
+bazel run //:web_build       # outputs to build/web/
+bazel build //web:bundle     # outputs to bazel-bin/web/
 
 # Run all unit tests, golden game traces, UI checks, and clang-tidy
 sh tools/check.sh

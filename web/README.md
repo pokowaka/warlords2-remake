@@ -9,12 +9,33 @@ All game subsystems run natively inside the browser via WebAssembly:
 - SDL2 immediate-mode 2D graphics rendering to HTML5 Canvas via WebGL.
 - Persistent saved games and user preferences via browser IndexedDB (`IDBFS`).
 
-## Building
+## Building & Running with Bazel
 
-To build the web distribution into `build/web/`:
+You can build and serve the WebAssembly version directly through Bazel:
+
+```sh
+# Build and serve locally at http://localhost:8765/
+bazel run //:web
+# or: bazel run //web
+
+# Pass custom options to the runner (e.g. custom port or clean build)
+bazel run //:web -- --port 9000
+
+# Build WebAssembly artifacts into build/web/ without serving
+bazel run //:web_build
+# or: bazel run //web:build
+
+# Compile hermetic distribution bundle into bazel-bin/web/
+bazel build //web:bundle
+```
+
+## Building with the CLI Tool
+
+To build the web distribution directly using the shell wrapper:
 
 ```sh
 ./tools/build_web.sh
+./tools/build_web.sh --serve --port 8765
 ```
 
 Flags:
@@ -45,5 +66,5 @@ The static build package consists of:
 - `index.html`: Web wrapper and canvas host.
 - `warlords2.js`: Emscripten runtime loader (~190 KB).
 - `warlords2.wasm`: Compiled C++ engine (~2.7 MB).
-- `warlords2.data`: Preloaded original game assets (~4.5 MB).
+- `warlords2.data`: Preloaded original game assets and SoundFont (~18.7 MB).
 - `_headers`: Caching headers for Netlify / Cloudflare.

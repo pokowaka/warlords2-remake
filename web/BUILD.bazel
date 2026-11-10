@@ -1,0 +1,70 @@
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+
+package(default_visibility = ["//visibility:public"])
+
+# bazel run //web (or //web:serve): builds and serves the WebAssembly version locally on http://localhost:8765/
+sh_binary(
+    name = "web",
+    srcs = ["serve.sh"],
+    data = [
+        "//:original_data",
+        "index.html",
+        "_headers",
+    ],
+)
+
+alias(
+    name = "serve",
+    actual = ":web",
+)
+
+# bazel run //web:build: builds the WebAssembly artifacts into build/web/.
+sh_binary(
+    name = "build",
+    srcs = ["build.sh"],
+    data = [
+        "//:original_data",
+        "index.html",
+        "_headers",
+    ],
+)
+
+# bazel build //web:artifacts: compiles the WebAssembly bundle as hermetic Bazel build outputs.
+genrule(
+    name = "artifacts",
+    srcs = [
+        "//:original_data",
+        "index.html",
+        "_headers",
+    ],
+    outs = [
+        "warlords2.js",
+        "warlords2.wasm",
+        "warlords2.data",
+    ],
+    cmd = """
+        export PATH="/opt/homebrew/bin:/usr/local/bin:$$PATH"
+        export HOME="$$(eval echo ~)"
+        OUT_TMP="$$(mktemp -d)"
+        ./tools/build_web.sh --out "$$OUT_TMP"
+        cp "$$OUT_TMP/warlords2.js" "$(location warlords2.js)"
+        cp "$$OUT_TMP/warlords2.wasm" "$(location warlords2.wasm)"
+        cp "$$OUT_TMP/warlords2.data" "$(location warlords2.data)"
+        rm -rf "$$OUT_TMP"
+    """,
+    local = 1,
+    tags = [
+        "local",
+        "no-sandbox",
+    ],
+)
+
+# Complete distribution bundle including HTML shell, headers, and compiled WASM
+filegroup(
+    name = "bundle",
+    srcs = [
+        ":artifacts",
+        "index.html",
+        "_headers",
+    ],
+)

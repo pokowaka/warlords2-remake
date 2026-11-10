@@ -12,11 +12,23 @@ filegroup(
             "original/DATA/OPTIONS.DAT",
         ],
     ),
-    visibility = ["//cpp:__subpackages__"],
+    visibility = ["//visibility:public"],
 )
 
 alias(
     name = "warlords2",
     actual = "//cpp:warlords2",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "web",
+    actual = "//web:serve",
+    visibility = ["//visibility:public"],
+)
+
+alias(
+    name = "web_build",
+    actual = "//web:build",
     visibility = ["//visibility:public"],
 )

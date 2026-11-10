@@ -47,23 +47,38 @@ def resolve_dependencies() -> tuple[Path, Path]:
     absl_dir = None
     json_dir = None
 
-    # Check Bazel cache
-    try:
-        res = subprocess.run(
-            ["bazel", "info", "output_base"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        base = Path(res.stdout.strip())
-        candidate_absl = base / "external" / "abseil-cpp+"
-        candidate_json = base / "external" / "nlohmann_json+" / "include"
-        if candidate_absl.exists() and candidate_json.exists():
-            absl_dir = candidate_absl
-            json_dir = candidate_json
-    except Exception:
-        pass
+    # Check Bazel cache via symlink first (fast, avoids invoking bazel subprocess)
+    for symlink in ROOT.glob("bazel-*"):
+        if symlink.is_symlink():
+            try:
+                base = symlink.resolve().parent.parent
+                candidate_absl = base / "external" / "abseil-cpp+"
+                candidate_json = base / "external" / "nlohmann_json+" / "include"
+                if candidate_absl.exists() and candidate_json.exists():
+                    absl_dir = candidate_absl
+                    json_dir = candidate_json
+                    break
+            except Exception:
+                pass
+
+    if not absl_dir or not json_dir:
+        # Check Bazel cache via bazel info
+        try:
+            res = subprocess.run(
+                ["bazel", "info", "output_base"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            base = Path(res.stdout.strip())
+            candidate_absl = base / "external" / "abseil-cpp+"
+            candidate_json = base / "external" / "nlohmann_json+" / "include"
+            if candidate_absl.exists() and candidate_json.exists():
+                absl_dir = candidate_absl
+                json_dir = candidate_json
+        except Exception:
+            pass
 
     if not absl_dir or not json_dir:
         # Fall back to running bazel fetch
