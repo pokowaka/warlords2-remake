@@ -46,10 +46,23 @@ int main(int argc, char** argv) {
                       "[--script FILE]");
 
     w2::ApplicationConfig config;
-    config.data_dir = absl::GetFlag(FLAGS_data);
+    std::filesystem::path data_dir = absl::GetFlag(FLAGS_data);
+    std::filesystem::path weights_file = absl::GetFlag(FLAGS_weights);
+    std::filesystem::path script_file = absl::GetFlag(FLAGS_script);
+    if (const char* workspace = std::getenv("BUILD_WORKSPACE_DIRECTORY");
+        workspace != nullptr && *workspace != '\0') {
+        if (data_dir.is_relative()) data_dir = std::filesystem::path(workspace) / data_dir;
+        if (!weights_file.empty() && weights_file.is_relative()) {
+            weights_file = std::filesystem::path(workspace) / weights_file;
+        }
+        if (!script_file.empty() && script_file.is_relative()) {
+            script_file = std::filesystem::path(workspace) / script_file;
+        }
+    }
+    config.data_dir = data_dir;
+    config.weights_file = weights_file;
+    config.script_file = script_file;
     config.scenario = w2::Upper(absl::GetFlag(FLAGS_scenario));
-    config.script_file = absl::GetFlag(FLAGS_script);
-    config.weights_file = absl::GetFlag(FLAGS_weights);
     config.seed = absl::GetFlag(FLAGS_seed);
     config.window_size = absl::GetFlag(FLAGS_size);
     config.force_window = absl::GetFlag(FLAGS_window);

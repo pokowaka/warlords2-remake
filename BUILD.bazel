@@ -3,13 +3,15 @@
 filegroup(
     name = "original_data",
     srcs = glob(
-        ["original/**"],
+        [
+            "original/**",
+            "reference/original/**",
+        ],
         exclude = [
-            "original/GEN*/**",
-            "original/DATA/SCENGEN.LST",
             # the setup screen rewrites it whenever a game starts; nothing
             # headless reads it
             "original/DATA/OPTIONS.DAT",
+            "reference/original/DATA/OPTIONS.DAT",
         ],
     ),
     visibility = ["//visibility:public"],
