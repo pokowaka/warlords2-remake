@@ -22,6 +22,12 @@ alias(
 )
 
 alias(
+    name = "scengen",
+    actual = "//cpp:w2scengen",
+    visibility = ["//visibility:public"],
+)
+
+alias(
     name = "web",
     actual = "//web:serve",
     visibility = ["//visibility:public"],

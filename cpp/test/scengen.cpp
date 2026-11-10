@@ -123,9 +123,16 @@ int main(int argc, char** argv) {
     }
 
     std::filesystem::path data = absl::GetFlag(FLAGS_data);
+    std::filesystem::path dump_dir = absl::GetFlag(FLAGS_dump);
+    if (const char* workspace = std::getenv("BUILD_WORKSPACE_DIRECTORY");
+        workspace != nullptr && *workspace != '\0') {
+        if (data.is_relative()) data = std::filesystem::path(workspace) / data;
+        if (!dump_dir.empty() && dump_dir.is_relative()) {
+            dump_dir = std::filesystem::path(workspace) / dump_dir;
+        }
+    }
     std::string name = Upper(absl::GetFlag(FLAGS_name));
     std::string preview_only = Upper(absl::GetFlag(FLAGS_preview));
-    std::filesystem::path dump_dir = absl::GetFlag(FLAGS_dump);
     long seed = static_cast<long>(absl::GetFlag(FLAGS_seed));
     int tries = std::max(1, absl::GetFlag(FLAGS_tries));
     int count = std::max(1, absl::GetFlag(FLAGS_count));

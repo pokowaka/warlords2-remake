@@ -803,6 +803,7 @@ cc_binary(
     name = "w2scengen",
     copts = W2_COPTS,
     srcs = ["test/scengen.cpp"],
+    visibility = ["//visibility:public"],
     deps = [
         ":w2core",
         "@abseil-cpp//absl/flags:flag",

@@ -71,6 +71,30 @@ Run from the repository root so that `original/` is found. See [`cpp/README.md`]
 
 ---
 
+## Generating Scenarios
+
+You can generate fair, balanced custom scenarios with relief, river systems, cities, ruins, and start-menu preview pictures using the scenario generator (`w2scengen`):
+
+```sh
+# Generate a new scenario (writes to original/GEN<seed>/ and registers in New Scenario)
+bazel run //:scengen
+
+# Generate multiple scenarios with specific land shapes (continents, pangaea, islands)
+bazel run //:scengen -- --shape continents --count 4 --seed 101
+bazel run //:scengen -- --shape pangaea    --seed 102
+bazel run //:scengen -- --shape islands    --seed 103
+
+# Generate a named scenario with a custom city count (8 to 100)
+bazel run //:scengen -- --name MYLAND --shape continents --cities 60
+
+# Launch directly into a generated scenario
+bazel run //:warlords2 -- --scenario GEN101
+```
+
+Generated scenarios are registered in `original/DATA/SCENGEN.LST` and appear automatically after the 7 standard scenarios in the **New Scenario** list with full crystal ball metadata and menu artwork. See [`docs/scengen.md`](docs/scengen.md) for complete details on generator parameters, fairness metrics, and preview PNG generation.
+
+---
+
 ## Beyond the original
 
 On a 640 × 480 screen the game looks as the original does, pixel for pixel.
