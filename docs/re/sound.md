@@ -2,8 +2,8 @@
 
 What `WARLORD2.EXE` plays and when. The files are described in
 [`../formats/sound.md`](../formats/sound.md); the engine's side is
-`love2d/warlords/cues.lua` (the choices), `love2d/sound.lua` (playback) and
-`love2d/ui/advisor.lua`. Addresses are Ghidra's (segment + 0x1000) unless
+`cpp/src/warlords/cues.cpp` (the choices), `cpp/src/platform/audio_manager.cpp` (playback) and
+`cpp/src/ui/advisor.cpp`. Addresses are Ghidra's (segment + 0x1000) unless
 they are labels in `tools/ghidra/war2_labels.txt`, which use the file's.
 
 ## Layers

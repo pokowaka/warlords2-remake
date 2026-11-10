@@ -1,5 +1,4 @@
-// Render a song through the FM driver and print a checksum per second, to
-// compare with the Lua remake's (test/fmrender.lua).
+// Render a song through the FM driver and print a checksum per second.
 //     w2fm original/SOUND/SINT12.XMI 10
 #include <algorithm>
 #include <cstdint>

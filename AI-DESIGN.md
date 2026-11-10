@@ -29,7 +29,7 @@ Two computer players coexist, selected per side by `Side::classicAi`:
 | | Classic AI | Modern AI |
 |---|---|---|
 | Code | `cpp/src/warlords/ai.cpp` and `ai/{cities,groups,moves,heroes,diplomacy}.cpp` | `cpp/src/warlords/ai/modern_ai.cpp`, `ml_policy.cpp`, `belief.cpp` |
-| Origin | Reverse-engineered 1993 expert system (bit-compatible with the Lua remake) | Learned policy (PPO self-play & `1 vs K−1` Classic curriculum) |
+| Origin | Reverse-engineered 1993 expert system (faithful to original DOS WARLORD2.EXE) | Learned policy (PPO self-play & `1 vs K−1` Classic curriculum) |
 | Information | Reads the whole map (ignores Hidden Map for itself) | Fair information: sees only what a human would (§3) |
 | Selected by | `--classic-ai`, Game › Classic AI | default; `--modern-ai`, Game › Modern AI |
 
@@ -892,8 +892,8 @@ higher `--army-weight`, pre-wave `GuardCity` defender locks (`−9.4 %` T40 /
 - `Side::classicAi` doubles as the diplomacy rule-variant flag, and it is set on
   human sides too. With Modern AI + the classic UI, a human pays hidden trust
   penalties.
-- Run `sh cpp/test/compare.sh` (needs luajit) to re-confirm Classic-AI parity
-  with the Lua reference after the shared `diplomacy.cpp` / `game.cpp` changes.
+- Run `bazel test //cpp:golden_test` to re-confirm Classic-AI parity
+  against golden traces after shared `diplomacy.cpp` / `game.cpp` changes.
 
 ## 10. File map
 

@@ -1,5 +1,5 @@
-// An all-computer game, one line per side's turn: the C++ half of the
-// Lua-vs-C++ comparison (web/test/trace.lua prints the same lines).
+// An all-computer game, one line per side's turn: used for golden trace
+// regression testing (//cpp:golden_test).
 //
 //     bazel-bin/cpp/w2trace ERYTHEA 1 10 [hidden] [diplo] [save]
 //
@@ -28,8 +28,7 @@ using namespace w2;
  *        gold, army count, random state, a hash of every army and each
  *        city's owner.
  *
- * The format must stay byte-identical to trace.lua's: compare.sh and the
- * golden traces compare the lines verbatim.
+ * The format must stay consistent: golden traces compare the lines verbatim.
  */
 static void Trace(const Game& game, const Side& side) {
     long long hash = 0;

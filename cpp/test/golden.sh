@@ -7,8 +7,7 @@
 #   bazel run //cpp:golden_update                  # record anew, on purpose
 #
 # What it records:
-#   trace/*.txt       w2trace's turn-by-turn log of each game compare.sh plays
-#                     against the Lua remake
+#   trace/*.txt       w2trace's turn-by-turn log of each regression game
 #   scengen.sha256    every file of the scenario generator's worlds
 #   classic.sha256    every file of the 1993 random-map generator's maps, plain
 #                     and with fair capitals
@@ -27,7 +26,7 @@ out=${TEST_TMPDIR:-${TMPDIR:-/tmp}}/w2golden.$$
 mkdir -p "$out/trace"
 trap 'rm -rf "$out"' EXIT
 
-# The games compare.sh plays, one per line: scenario seed turns [options].
+# The benchmark regression games, one per line: scenario seed turns [options].
 while read -r spec; do
   [ -z "$spec" ] && continue
   name=$(echo "$spec" | tr ' ' '_')

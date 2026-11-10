@@ -3,8 +3,8 @@
 How "A Random World" is made in `WARLORD2.EXE`, decoded in full: the start
 menu's settings, every phase of the generator, and the files it writes. The
 web port follows it phase for phase (`web/src/warlords/randommap.js`, which
-cites the addresses below), and the Lua and C++ remakes port that line for
-line (`love2d/warlords/randommap.lua`, `cpp/src/warlords/randommap.cpp`): the
+cites the addresses below), and the C++ remake ports that line for
+line (`cpp/src/warlords/randommap.cpp`): the
 same seed makes byte-identical worlds in all three. Addresses are Ghidra addresses.
 
 Where Ghidra's decompiler is wrong here it is wrong quietly: it drops

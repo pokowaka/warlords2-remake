@@ -720,7 +720,7 @@ So while the cloud and the window are up, the **map still shows the fight
 as it began**. The remake keeps to that order: `game.decideAttack` only
 decides the fight, the assault is shown over the untouched map, and
 `game.applyAttack` does what `after_battle` does when the window closes —
-for a computer's battle too (`ai/core.lua`'s `fight`).
+for a computer's battle too (`cpp/src/warlords/ai/classic_ai_player.cpp`).
 `game.resolveAttack` does both at once, for a fight nobody watches.
 
 **The lines.** The defender's is on top and may wrap to four rows —
@@ -1068,7 +1068,7 @@ and that input does nothing else.
 The name comes from `0x3c04:(side * 0x14)`. Segment `0x3c04` is the scenario
 file loaded verbatim, which is how `.SCN` offsets and code offsets agree:
 `0xc0` is the level table and `0xd0` the human/computer table, exactly as
-`scn.lua` already had them. The eight 20-byte names therefore end at `0xa0`,
+`scn.cpp` already had them. The eight 20-byte names therefore end at `0xa0`,
 where the **side colour table** begins — one palette index a side, the same
 eight in every scenario:
 
@@ -1908,7 +1908,7 @@ of the game* / *you wish to save*, at most 15 characters and 160 pixels —
 and is written to `SAVE\SAVEn.DAT`. **Load** (`7721:026b`) lists only the
 slots in use, titled *Load Game* (group 47); once loaded, *%s, thy turn
 continues!*. The remake keeps its slots beside its own save file
-(`warlords-save<n>.lua`, `warlords-saveinfo.txt` in the same form).
+(`warlords-save<n>.json`, `warlords-saveinfo.txt` in the same form).
 
 ## SSG › About, and "?"
 
@@ -1979,7 +1979,7 @@ a colour-3 bar (336, 166) 248 × 28 with its name centred on (460, 172)
 (`7f77:05f5`) swaps the picture for the random world's settings — four
 sliders, a "?" for each, the terrain set and the allies option — and Begin
 then makes the world first: see [`random_map.md`](random_map.md) › The start
-menu. The web port, the Lua remake and the C++ port all have it.
+menu. Both the C++ desktop build and the WebAssembly web release have it.
 
 The menu bar stays up over the start screens, and live: `7f77:0200` greys
 every menu (`2372:0eab(0, 0)` — a menu's enabled items are a bit mask at

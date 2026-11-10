@@ -352,7 +352,7 @@ nearest unexplored ruin, and home to a city when there is none.
 
 ## Found while porting it
 
-The engine's port is `love2d/warlords/ai.lua` and `love2d/warlords/ai/`.
+The engine's port is in `cpp/src/warlords/ai/` (`classic_ai_player.cpp` and helpers).
 Writing it turned up the following, most of it read from the disassembly
 where the decompile had lost arguments.
 

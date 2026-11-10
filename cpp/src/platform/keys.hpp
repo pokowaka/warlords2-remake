@@ -16,10 +16,9 @@ namespace keys {
 using KeyNameList = std::initializer_list<const char*>;
 
 /**
- * @brief Tracks currently depressed keys by LÖVE key identifier (`"lshift"`, `"return"`, `"kp+"`).
+ * @brief Tracks currently depressed keys by key identifier (`"lshift"`, `"return"`, `"kp+"`).
  *
- * Mirrors `love.keyboard.isDown` in the Lua reference and clears cleanly on
- * window focus loss so modifier keys never stick across focus transitions.
+ * Clears cleanly on window focus loss so modifier keys never stick across focus transitions.
  *
  * Not thread-safe; mutated and queried on the main UI event thread.
  */

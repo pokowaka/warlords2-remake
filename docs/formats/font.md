@@ -4,7 +4,7 @@ Three fonts ship in the game's root and are loaded together at startup by
 `78a8:0000`: `TEXT`, `CHANCE17` and `CHANCE36`. Each is a pair.
 
 **The `.FNT` is a `.PCK` image** — an ordinary glyph sheet, no new codec. It
-decodes with `tools/pck.py` and `love2d/warlords/pck.lua` unchanged.
+decodes with `tools/pck.py` and `cpp/src/warlords/pck.cpp` unchanged.
 
 | font | sheet | line height | baseline | rows | copies |
 |---|---|---|---|---|---|

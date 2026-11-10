@@ -98,10 +98,9 @@ and passes every structural check on all six. See `docs/gamestate.md`.
 The former gaps (starting garrisons, city defence, the real tile-to-terrain
 table) are all resolved from the executable; see `docs/rules.md`.
 
-### Phase 2.6 — Playable slice — **DONE**
+### Phase 2.6 — Prototyping & Reference Extraction — **DONE**
 
-`love2d/` is a LOVE 11 project that reads the original data files at runtime
-(no bundled assets) and draws a scenario at 100% scale. See `love2d/README.md`.
+All original formats and data tables reverse-engineered, validated against runtime memory, and extracted into Python/C++ tooling.
 
 ### Phase 3 — Engine — **DONE**
 
@@ -197,30 +196,28 @@ original's four operations on the slots (`89e0:157d`/`0963` toggle,
 `166f`/`0910` pick a group, `16c5`/`0a55` group, `1704`/`0a99` ungroup),
 and a group that moves leaves the rest standing.
 
-Engine notes found on the way: the long ERYTHEA run of `test/ui.lua`
+Engine notes found on the way: the long ERYTHEA run of `//cpp:ui_test`
 (150 rounds) now takes seconds; medals
 (`67cc:2274`, army +0x0a) are not modelled, so View › Stack shows none; the
 Stack view sums every hero's bonus where the battle takes the strongest —
-check which the battle really does; `quest.lua` sets a revealed site's mask
+check which the battle really does; revealed site's mask
 to 0, which reads as "shown to nobody" — check against the original.
 
-### Phase 4 — Audio — **mostly done**
+### Phase 4 — Audio — **DONE**
 
 What plays when is decoded (`docs/re/sound.md`) and the files are
 (`docs/formats/sound.md`). The engine plays the Sound Blaster FM version: the
-`S` songs through a port of `ADLIB.ADV` (`warlords/ailfm.lua`) into an
-emulated OPL2 (`warlords/opl.lua`, after Nuked-OPL3) on a thread; the `.8SN`
-samples at 11 000 Hz, one after another as DIGPAK plays them; the advisor's
-helmet and voice (`ui/advisor.lua`). `luajit tools/xmi2wav.lua SINT12 out.wav`
-renders a song to listen to.
+`S` songs through a C++ port of `ADLIB.ADV` (`cpp/src/warlords/ailfm.cpp`) into an
+emulated OPL2 (`cpp/src/warlords/opl.cpp`, after Nuked-OPL3); the `.8SN`
+samples at 11 000 Hz, one after another as DIGPAK plays them; and the advisor's
+helmet and voice (`cpp/src/ui/advisor.cpp`).
 
 Still open:
 - the cues whose moment the engine does not have yet: the quest-done dialog
   (cue 3), the promotion screen (7), medals (8), the random map's "One
   moment...", `SPLASH` for armies sunk and a dead hero's items, most `CHORD`s,
   and the subtitles shown when there is no digital sound;
-- the MT-32 (`M`) and Sound Canvas (`R`) songs, which would need a synth;
-- a check of the OPL emulation against a recording of the original.
+- the MT-32 (`M`) and Sound Canvas (`R`) songs, which stream pre-rendered recordings.
 
 ### Phase 5 — Modernisation (post-parity)
 Window scaling/fullscreen, save-anywhere, hotseat/network, undo, larger maps, scenario editor. Don't touch any of this before parity.
@@ -263,17 +260,11 @@ python3 -m pip install --user pillow numpy construct
 - **The Warlords II fan/scenario-design community** — decades of forum posts documenting exact combat odds and AI quirks. Often cheaper than disassembly.
 - **ScummVM / DevilutionX / OpenTTD** — models for "reimplement a 90s engine, load original assets."
 
-## 5. Engine language — **decided: Lua on LÖVE 11**
+## 5. Engine language & Platform — **Modern C++23 with SDL2 & Emscripten WebAssembly**
 
-Chosen for Phase 2.6 and kept: the rules core is plain Lua 5.1 (runs under
-both `lua` and LuaJIT), the front end is LÖVE. The options weighed before that
-are kept below for the record.
-
-- **C++ / C with SDL2** — you already have SDL2 installed; closest to the original's model; largest body of reference code (ScummVM, DevilutionX).
-- **Rust** (`macroquad` / `bevy`) — memory safety and a genuinely pleasant build story for a from-scratch turn-based game.
-- **TypeScript + Canvas/WebGL** — makes it playable in a browser instantly, which is a large distribution win for a 1993 strategy game; but "natively runnable" was the stated goal.
-
-(Original recommendation was Rust + macroquad or C++/SDL2; superseded.)
+The single source of truth for all game rules, AI, data formats, and UI is the modern C++23 codebase:
+- **Desktop**: Native C++23 on SDL2 built via Bazel (`bazel build //cpp/...`).
+- **Web**: Compiled directly to WebAssembly (`warlords2.wasm` + `warlords2.js`) via Emscripten (`tools/build_web.sh`), running identically in the browser with live Web Audio synthesis.
 
 ## 6. Legal
 

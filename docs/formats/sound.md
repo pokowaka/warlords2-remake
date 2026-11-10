@@ -3,7 +3,7 @@
 What the game plays is described in [`../re/sound.md`](../re/sound.md). This
 is the files it plays them from, and the AdLib driver whose behaviour decides
 what the music sounds like. The engine's side is
-`love2d/warlords/{xmi,ailfm,opl}.lua`.
+`cpp/src/warlords/{xmi,ailfm,opl}.*` and `cpp/src/platform/audio_manager.cpp`.
 
 ## `SOUND.DAT` — which drivers
 
@@ -120,7 +120,7 @@ plays at note 38; keys below 35 all play at 51).
 
 Miles Design's AIL 2.0 AdLib driver, "Copyright (C) 1991,1992". It contains
 the XMIDI sequencer as well as the FM code. It loads at offset 0 of its
-segment, so the addresses here are file offsets. `ailfm.lua` reads the tables
+segment, so the addresses here are file offsets. `ailfm.cpp` reads the tables
 straight out of the file.
 
 | offset | table |
@@ -170,7 +170,7 @@ TL' = 63 - level                     -- only when connection is additive
 
 ## The OPL2
 
-The Yamaha YM3812, at 3.579545 MHz / 72 = 49 716 samples a second. `opl.lua`
+The Yamaha YM3812, at 3.579545 MHz / 72 = 49 716 samples a second. `opl.cpp`
 follows Nuked-OPL3's model of the chip — the log-sine and exponent ROMs, the
 envelope generator's rate counter, the tremolo and vibrato counters — cut
 down to what the driver uses: nine two-operator channels, four waveforms, no

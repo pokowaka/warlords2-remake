@@ -66,7 +66,7 @@ struct State {
  * @brief RAII owner of the `SDL_Window*`, offscreen supersampling/CRT canvas, and coordinate
  * transforms between physical window points, logical UI pixels, and map pixels.
  *
- * Supports three coordinate spaces matching the Lua reference:
+ * Supports three coordinate spaces:
  * - **Device:** physical window or offscreen canvas pixels (HiDPI-aware).
  * - **UI:** logical interface pixels (`640x480` minimum, `1` UI pixel = `scale` device pixels).
  * - **Map:** map pixels (`40` per tile), drawn at `zoom` device pixels per map pixel.

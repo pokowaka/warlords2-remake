@@ -22,27 +22,26 @@ cpp/
 ### Decisions
 
 - **Assets:** none are converted or checked in. The game reads the original
-  formats from `original/` at runtime, as the Lua does: `.PCK`/`.FNT` (planar
+  formats from `original/` at runtime: `.PCK`/`.FNT` (planar
   LZ77), `.8SN`, `.XMI`, and the text and record files. The MT-32 and SC-55
   recordings are streamed from `pre-rendered-sound/*.ogg` where they lie,
   through libvorbisfile (optional at build time). The AdLib music is
-  synthesized live by a C++ port of the remake's OPL2 and AIL driver.
-- **SDL layer:** `gfx` mirrors the parts of `love.graphics` the Lua uses:
-  setColor, rectangle, draw image or quad, a scissor, push/pop/translate/scale.
+  synthesized live by the built-in OPL2 and AIL driver.
+- **SDL layer:** `gfx` provides clean immediate-mode 2D drawing primitives:
+  setColor, rectangle, draw image or quad, scissor, push/pop/translate/scale.
   It draws through SDL_Renderer with nearest-neighbour textures. An image
-  keeps its colour indices, so palettes and colour remaps still work as they
-  do in the Lua.
-- **The computer's turn:** Lua's coroutines become one AI thread with a
-  strict handoff. The main thread waits while the AI runs. At each hook
-  (walk, fight, spoils) the AI hands control back and waits. Only one of the
-  two ever runs at a time, so nothing is shared concurrently, and the AI code
-  stays ordinary functions.
+  keeps its colour indices, so palettes and colour remaps work dynamically.
+- **The computer's turn:** AI turns run cooperatively via `AiTurnRunner`.
+  On desktop, background execution runs on a worker thread with explicit handoffs
+  to the main thread for visual hooks (walk, fight, spoils). Under WebAssembly,
+  a cooperative single-threaded event queue allows the UI to pump frames and
+  show animations without requiring browser worker threads.
 - **Objects:** armies, cities, sides, sites and items are structs. A game owns
   every army it ever made, so pointers held by quests, groups and selections
   stay valid. Lua's nil becomes `std::optional` or an explicit sentinel.
-- **Determinism:** the RNG, Lua 5.1's unstable sort and floating-point
-  division all follow the Lua. `test/compare.sh` plays the same all-computer
-  games in LuaJIT and in C++ and compares them turn by turn.
+- **Determinism:** the RNG, deterministic unstable sorting and floating-point
+  division preserve exact replayability across platforms. Golden regression tests
+  (`bazel test //cpp:golden_test`) verify turn-by-turn simulation matches across builds.
 - **Files:** saves are JSON in the C++ port's own format (not the Lua's).
   Saves, prefs and shortcuts sit in SDL's per-user folder for the game
   (SDL_GetPrefPath), as `w2-*.json`.
@@ -53,7 +52,7 @@ cpp/
 - [x] 2. Core plumbing: util (fmt, luaSort, json), rng, bytes, pal, pck, armytype, scn, rules
 - [x] 3. Rules: move, combat, game, hero, site, quest, diplomacy, slots, history, report, save
 - [x] 4. Computer player: aicard, ai, ai/* (with the AI thread handoff)
-- [x] 5. Tests: trace + compare.sh against the Lua; the rules suite (run.lua) ported
+- [x] 5. Tests: headless unit tests, rules suite, and golden trace regressions
 - [x] 6. Screen plumbing: font, uidata, layout, stonetile, menu, screen, display
 - [x] 7. Front end: main — map, strategic map, bars, banner, hero offer, assault, input
 - [x] 8. Dialogs: kit, then every ui/*

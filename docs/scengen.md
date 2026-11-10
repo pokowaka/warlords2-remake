@@ -58,17 +58,17 @@ players=8
 The start menu's picture is `NAME/PICS/SCENARIO.PCK`, as the shipped
 scenarios have it: the map at 264 × 225 in the game's 16 colours, centred on
 the sea (`preview::menuPicture`, written with `pck::encode`). To take a world
-out of the list, delete its folder. The web game sees the worlds that were in
-`original/` when `tools/web_assets.py` last ran.
+out of the list, delete its folder. The web game sees the scenarios bundled in
+the virtual filesystem (`warlords2.data`).
 
-## The same in all three games
+## Deterministic cross-platform generation
 
-The C++, JavaScript and Lua games make the same world from the same seed and
+The native C++ and WebAssembly browser builds make the same world from the same seed and
 shape, byte for byte, as the classic random map generator does (`scengen`
 keeps to arithmetic IEEE doubles give alike everywhere: no `pow`, `hypot` or
-`lerp`, sorts without ties, queues ordered by cost then tile). All three list
-generated worlds in New Scenario the same way. `sh cpp/test/scengen_compare.sh`
-checks the three against each other.
+`lerp`, sorts without ties, queues ordered by cost then tile). Both list
+generated worlds in New Scenario the same way. `bazel test //cpp:worldgen_test`
+verifies world generation across seeds and presets.
 
 ## Names
 

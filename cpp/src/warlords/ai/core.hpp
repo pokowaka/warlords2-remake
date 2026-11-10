@@ -6,8 +6,8 @@
  * "selected", the flood fill they measure distances with, the battles they
  * simulate, and the walk that moves a stack and fights what it meets.
  *
- * A port of the original game's computer player, by way of the reference
- * (the Lua remake); docs/re/ai.md describes what is known of it.
+ * A port of the original DOS game's computer player; docs/re/ai.md describes
+ * what is known of it.
  */
 #pragma once
 

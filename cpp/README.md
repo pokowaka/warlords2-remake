@@ -47,17 +47,16 @@ Begin makes a new world (`src/warlords/randommap.cpp`,
 `RANDOM/`, which holds the last world the original made; a random game's
 save carries its map.
 
-The controls are the Lua remake's (`love2d/README.md`). The differences:
+The controls:
 
 - Saves, the quick save (F5 and F9), preferences and the button shortcuts are
   `w2-*.json` files in SDL's per-user folder for the game. On macOS that is
-  `~/Library/Application Support/Warlords II Remake/`. The format is this
-  port's own, so saves from the Lua or the browser version do not load here.
+  `~/Library/Application Support/Warlords II Remake/`.
 - The sound switches live in `original/DATA/OPTIONS.SND`, as they do for the
-  original and the Lua remake.
-- The AdLib music is synthesized live by the port of the remake's OPL2
-  emulator and AIL driver. The MT-32 and SC-55 music items in the Game menu need
-  libvorbisfile and the recordings.
+  original.
+- The AdLib music is synthesized live by the built-in OPL2 emulator and AIL driver.
+  The MT-32 and SC-55 music items in the Game menu stream recordings from
+  `pre-rendered-sound/` via libvorbisfile.
 - A game controller plays as well: the right stick is the pointer, R2 or A
   and L2 or X are the left and right buttons, the left stick slides the map
   (the whole table is under Controller below, made for the Steam Deck). Text
@@ -67,29 +66,23 @@ The controls are the Lua remake's (`love2d/README.md`). The differences:
 ## Layout
 
 ```
-src/util/         printf-style formatting, Lua 5.1's sort, JSON, files found ignoring case
-src/warlords/     the rules core, plus XMI, the OPL2 and the AIL driver (no SDL)
-src/warlords/ai/  the computer player
-src/platform/     the slim layer over SDL2: gfx (a love.graphics-alike over
-                  SDL_Renderer), display, keys, pads, the coroutine, the sound mixer
-src/front/        fonts, images, the screen layout, the menus, prefs, shared state
-src/ui/           one file per dialog (love2d/ui/)
-src/main.cpp      the front end (love2d/main.lua): map, bars, input, menus, the computer's turn
-test/             the rules suite, and the Lua comparisons
+src/util/         printf-style formatting, deterministic sorting, JSON, filesystem helpers
+src/warlords/     the rules core, domain models, XMI, OPL2 synth, and AIL driver (no SDL)
+src/warlords/ai/  Classic 1993 expert AI and Modern neural policy AI
+src/platform/     the slim layer over SDL2: window, renderer, input, audio mixer, threads
+src/front/        fonts, images, screen layout, menus, prefs, and application lifecycle
+src/ui/           one file per dialog
+src/main.cpp      the CLI entry point and application initialization
+test/             rules suite, golden regression traces, and UI tests
 ```
 
-Notes for anyone porting more of the Lua:
+### Architecture Highlights
 
-- `w2::NONE` (-1) stands for Lua's nil in ids and indices. Functions that
-  return several values in Lua return a struct or a pair here.
-- A game owns every army it ever made, so pointers held by quests, groups and
-  selections stay valid. An army is alive while it is in `Game::armies`.
-- The computer's turn runs on a `Coroutine`, a thread with a strict handoff,
-  so only one side runs at a time. The AI's hooks yield to the screen after a
-  walk or a battle worth showing.
-- Dialogs are `kit::Modal`s on `G.modals`. A handler copies what it needs
-  before it calls `kit::pop(this)`.
-- `PLAN.md` lists where the port deliberately differs from the Lua.
+- `w2::NONE` (-1) represents empty sentinel IDs and indices in the domain model.
+- Strong entity identifiers (`SideId`, `CityId`, `ArmyId`, `ArmyTypeId`) prevent mixing index spaces.
+- A game owns every army it ever created (`ArmyRegistry`), preserving pointer stability across selections and quests.
+- The computer's turn runs cooperatively via `AiTurnRunner`, supporting background threads on desktop and synchronous queues in WebAssembly.
+- Dialogs are `kit::Modal` instances managed by `ModalStack`. Handler callbacks operate over `UiContext&`.
 
 ## Tests
 
@@ -115,7 +108,7 @@ A script has one command per line: `wait N` (frames), `key NAME`,
 `select TX TY`, `attack TX TY`, `near`, `shot FILE.bmp`, `glass FILE.bmp`,
 `eval` and `quit`. `shot` writes the frame as drawn; `glass` writes the
 window as shown, through the CRT screen's tube when that is on.
-Keys go by LÖVE's names for them, a controller's buttons by SDL's (`a`,
+Keys go by SDL key names, a controller's buttons by SDL's (`a`,
 `dpup`, `leftshoulder`, and `lefttrigger`, `righttrigger`); the sticks are
 held where `stick` puts them, -1 to 1, until it sets them all to 0. Points
 are in the 640x480 interface's pixels, and tiles in map coordinates. With `SDL_AUDIODRIVER=disk` the mix is

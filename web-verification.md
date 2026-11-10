@@ -37,14 +37,12 @@ routine. What differs:
 
 ## Status: fixed
 
-Every finding below is now fixed, in the web, C++ and Lua ports alike,
+Every finding below is now fixed in the engine,
 except two that need no change: **A4** (kept as documented, since the
-original's loop can run for ever) and **C12** (the ports already match).
+original's loop can run for ever) and **C12** (the implementation already matches).
 **C9** is fixed too: a non-flying stack attacking onto water or shore now
-puts its boats to sea as well. All three ports still play identical games
-(`sh web/test/compare.sh`, `sh cpp/test/compare.sh`: every game the same).
-Each port's test suite has a new `testVerified` section that checks these
-rules one by one.
+puts its boats to sea as well. The C++ engine and WebAssembly release play
+identically, validated by unit and golden regression tests (`bazel test //cpp:...`).
 
 Found while fixing, and fixed with the rest:
 
