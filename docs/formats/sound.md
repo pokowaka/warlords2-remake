@@ -1,9 +1,11 @@
 # Sound files, and the music driver
 
-What the game plays is described in [`../re/sound.md`](../re/sound.md). This
-is the files it plays them from, and the AdLib driver whose behaviour decides
-what the music sounds like. The engine's side is
-`cpp/src/warlords/{xmi,ailfm,opl}.*` and `cpp/src/platform/audio_manager.cpp`.
+What the game plays is described in [`../re/sound.md`](../re/sound.md). For
+the modern real-time SoundFont synthesis engine (Roland MT-32 and SC-55) and sample
+choices, see [`../soundfonts.md`](../soundfonts.md). This
+document describes the original sound files, and the AdLib driver whose behaviour decides
+what the FM music sounds like. The engine's side is
+`cpp/src/warlords/{xmi,ailfm,opl}.*`, `cpp/src/platform/soundfont.*`, and `cpp/src/platform/audio_manager.cpp`.
 
 ## `SOUND.DAT` — which drivers
 

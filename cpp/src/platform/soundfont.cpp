@@ -40,6 +40,33 @@ constexpr std::array<uint8_t, 128> kMt32ToGm = {
      47, 117, 127, 118, 118, 116, 115, 119, 115, 112,  55, 124, 123,   0,  14, 117
 };
 
+/**
+ * @brief Remaps Roland MT-32 percussion keys to General MIDI standard drum notes.
+ *
+ * In particular, Warlords II's Latin percussion groove in MINT2 maps:
+ *   39 -> 82 (Shaker)
+ *   60 -> 76 (Hi Wood Block)
+ *   61 -> 77 (Low Wood Block)
+ *   62 -> 80 (Mute Triangle)
+ *   73 -> 58 (Vibraslap / Quijada)
+ */
+uint8_t RemapMt32Drum(uint8_t note) {
+    switch (note) {
+    case 39:
+        return 82;  // Shaker
+    case 60:
+        return 76;  // Hi Wood Block
+    case 61:
+        return 77;  // Low Wood Block
+    case 62:
+        return 80;  // Mute Triangle
+    case 73:
+        return 58;  // Vibraslap
+    default:
+        return note;
+    }
+}
+
 }  // namespace
 
 SoundFontSynth::SoundFontSynth() = default;
@@ -134,6 +161,11 @@ void SoundFontSynth::Play(const w2::xmi::Sequence* seq, bool is_mt32, bool loop)
     pos_ = 0;
     tick_ = 0;
     until_tick_ = 0.0;
+    if (soundfont_ != nullptr) {
+        for (int ch = 0; ch < 16; ++ch) {
+            tsf_channel_set_presetnumber(soundfont_, ch, 0, ch == 9 ? 1 : 0);
+        }
+    }
     playing_ = (seq != nullptr && soundfont_ != nullptr);
 }
 
@@ -160,13 +192,21 @@ void SoundFontSynth::Interval() {
         uint8_t st = ev.st & 0xF0;
         int ch = ev.st & 0x0F;
         if (st == 0x90) {
+            uint8_t note = ev.a;
+            if (is_mt32_ && ch == 9) {
+                note = RemapMt32Drum(note);
+            }
             if (ev.b > 0) {
-                tsf_channel_note_on(soundfont_, ch, ev.a, static_cast<float>(ev.b) / 127.0F);
+                tsf_channel_note_on(soundfont_, ch, note, static_cast<float>(ev.b) / 127.0F);
             } else {
-                tsf_channel_note_off(soundfont_, ch, ev.a);
+                tsf_channel_note_off(soundfont_, ch, note);
             }
         } else if (st == 0x80) {
-            tsf_channel_note_off(soundfont_, ch, ev.a);
+            uint8_t note = ev.a;
+            if (is_mt32_ && ch == 9) {
+                note = RemapMt32Drum(note);
+            }
+            tsf_channel_note_off(soundfont_, ch, note);
         } else if (st == 0xC0) {
             int preset = ev.a;
             if (is_mt32_ && ch != 9 && preset >= 0 && preset < static_cast<int>(kMt32ToGm.size())) {

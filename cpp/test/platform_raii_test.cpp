@@ -431,6 +431,40 @@ TEST(SoundFontSynthTest, DirectSc55AndMt32SequencePlaybackAndSampleRendering) {
     synth.Stop();
     EXPECT_FALSE(synth.Playing());
     EXPECT_TRUE(synth.Idle());
+
+    // Test MT-32 percussion remapping with MINT2.XMI
+    auto mint2_bytes = w2::ReadBytes("original/SOUND/MINT2.XMI");
+    ASSERT_TRUE(mint2_bytes.ok()) << mint2_bytes.status();
+    auto mint2_seq = w2::xmi::Parse(absl::MakeConstSpan(*mint2_bytes));
+    ASSERT_TRUE(mint2_seq.has_value());
+
+    synth.Play(&*mint2_seq, /*is_mt32=*/true, /*loop=*/false);
+    EXPECT_TRUE(synth.Playing());
+    std::fill(pcm.begin(), pcm.end(), 0.0F);
+    synth.Render(pcm.data(), 44100);
+    max_sample = 0.0F;
+    for (float s : pcm) {
+        max_sample = std::max(max_sample, std::abs(s));
+    }
+    EXPECT_GT(max_sample, 0.01F);
+    synth.Stop();
+
+    // Test drum channel persistence without 0xC9 (RINT21.XMI)
+    auto rint21_bytes = w2::ReadBytes("original/SOUND/RINT21.XMI");
+    ASSERT_TRUE(rint21_bytes.ok()) << rint21_bytes.status();
+    auto rint21_seq = w2::xmi::Parse(absl::MakeConstSpan(*rint21_bytes));
+    ASSERT_TRUE(rint21_seq.has_value());
+
+    synth.Play(&*rint21_seq, /*is_mt32=*/false, /*loop=*/false);
+    EXPECT_TRUE(synth.Playing());
+    std::fill(pcm.begin(), pcm.end(), 0.0F);
+    synth.Render(pcm.data(), 44100 * 2);
+    max_sample = 0.0F;
+    for (float s : pcm) {
+        max_sample = std::max(max_sample, std::abs(s));
+    }
+    EXPECT_GT(max_sample, 0.01F);
+    synth.Stop();
 }
 
 TEST_F(DummySdlTest, KeyboardAndGamepadInputRaiiState) {

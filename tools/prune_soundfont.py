@@ -23,6 +23,14 @@ MT32_TO_GM = [
      47, 117, 127, 118, 118, 116, 115, 119, 115, 112,  55, 124, 123,   0,  14, 117
 ]
 
+MT32_DRUM_TO_GM = {
+    39: 82,  # Shaker
+    60: 76,  # Hi Wood Block
+    61: 77,  # Low Wood Block
+    62: 80,  # Mute Triangle
+    73: 58,  # Vibraslap
+}
+
 
 def scan_xmi(fpath):
     with open(fpath, "rb") as f:
@@ -82,6 +90,8 @@ def scan_xmi(fpath):
                 if not (nb & 0x80):
                     break
             if ch == 9:
+                if is_mt32:
+                    note = MT32_DRUM_TO_GM.get(note, note)
                 drums.add(note)
 
     return programs, drums

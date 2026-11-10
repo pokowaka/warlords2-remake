@@ -722,6 +722,17 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "w2sfrender",
+    copts = W2_COPTS,
+    srcs = ["test/sfrender.cpp"],
+    deps = [
+        ":platform",
+        ":w2core",
+        "@abseil-cpp//absl/flags:flag",
+    ],
+)
+
 cc_library(
     name = "opponents",
     copts = W2_COPTS,
