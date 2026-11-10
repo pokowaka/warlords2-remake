@@ -445,7 +445,10 @@ cc_binary(
     name = "warlords2",
     copts = W2_COPTS,
     srcs = ["src/main.cpp"],
-    data = ["//:original_data"],
+    data = [
+        "//:original_data",
+        "ai_weights.json",
+    ],
     includes = ["src"],
     visibility = ["//visibility:public"],
     deps = [

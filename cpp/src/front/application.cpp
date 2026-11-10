@@ -91,11 +91,22 @@ int Application::Execute(const ApplicationConfig& config) {
     assets_.SetDataDir(config.data_dir);
 
     ai::SetDefaultClassicAi(use_classic_ai);
-    std::string weights_path = !config.weights_file.empty() ? config.weights_file
-                               : FileExists("cpp/ai_weights.json")
-                                       ? std::string("cpp/ai_weights.json")
-                               : FileExists("ai_weights.json") ? std::string("ai_weights.json")
-                                                               : std::string();
+    std::string weights_path = config.weights_file;
+    if (weights_path.empty()) {
+        if (const char* workspace = std::getenv("BUILD_WORKSPACE_DIRECTORY");
+            workspace != nullptr && *workspace != '\0') {
+            std::filesystem::path ws_weights =
+                    std::filesystem::path(workspace) / "cpp/ai_weights.json";
+            if (FileExists(ws_weights)) weights_path = ws_weights.string();
+        }
+    }
+    if (weights_path.empty()) {
+        if (FileExists("cpp/ai_weights.json")) {
+            weights_path = "cpp/ai_weights.json";
+        } else if (FileExists("ai_weights.json")) {
+            weights_path = "ai_weights.json";
+        }
+    }
     if (weights_path.empty() || !ai::ml::ActivePolicy().LoadJson(weights_path).ok()) {
         fprintf(stderr,
                 "warning: Modern AI weights %s%s%s could not be loaded (missing, or trained for a "
