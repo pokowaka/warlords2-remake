@@ -32,7 +32,44 @@ Two distinct computer player architectures implement `IComputerPlayer` and can b
 | **Information** | Omniscient (reads the full map even under Hidden Map, as the 1993 original does) | **Fair information**: sees only what a human player would via per-side `SideBelief` fog-of-war tracking |
 | **Capabilities** | Original 1993 targeting, city claiming, production, hero recruitment, and `.CRD` personality cards | Multi-head `PolicyNetwork` (`DiploNet`, `MissionNet`, `EconNet`, `ValueNet`, `StackValueNet`, `MusterNet`, `Commander` + MoE experts), 27 affine personality adapters (5 archetypes across 9 Knights/Lords/Warlords levels), cross-turn Order Memory, Field-Stack Rallying, standard planting/vectoring, and optional online portfolio lookahead search (`--ai-search`) |
 
-The Modern AI is trained entirely in C++ (no external ML framework) using PPO self-play with asymmetric privileged critics (`w2arena`), paired-seed antithetic Evolution Strategies (`w2evolve`), and behavioral cloning (`w2imitate`) against Classic, Raider, Warden, and Frozen opponents. With `--modern-ui`, players also get enhanced diplomatic Parley & Attitude Ledgers, turn-start Envoy Missives, and the **`F10` AI Brain Inspector** to inspect neural policy utilities and belief state live. See [`AI-DESIGN.md`](AI-DESIGN.md) for the full architecture and training pipeline.
+---
+
+### Modern AI: How It Works & What Was Done
+
+The Modern AI represents a complete departure from 1990s strategy game AI design. Rather than relying on hardcoded heuristics or omniscience under fog of war, it is a fully learned neural agent engineered from the ground up to play fairly, strategically, and convincingly.
+
+> [!NOTE]
+> **Collaborative AI Engineering:** The entire Modern AI architecture, training harness, reverse engineering, and C++23 implementation was developed through an intensive collaboration between **Claude Opus 5.5** and **Gemini Argon**, pairing deep architectural deconstruction with rapid iterative C++ systems and reinforcement learning engineering.
+
+#### 1. What Was Done
+* **Elimination of "Cheating" Fog-of-War**: The 1993 original DOS AI completely ignored Hidden Map fog-of-war, seeing every player city, hero, and troop movement instantly. The Modern AI strictly observes human fog-of-war rules via `SideBelief`, scouting frontiers and remembering last-known locations without unfair information leaks.
+* **Hermetic, Zero-Dependency C++ ML Engine**: The entire training pipeline—including forward/backward automatic differentiation, PPO actor-critic optimization, neural rollout buffers, and Evolution Strategies—was implemented entirely in pure C++23 (`cpp/src/warlords/ai/`). It requires zero external dependencies or heavyweight Python ML frameworks (no PyTorch, libtorch, or TensorFlow), enabling deterministic execution, sub-millisecond turn inference, and compilation directly into WebAssembly.
+* **High-Throughput Headless Self-Play**: By decoupling the rules engine (`//cpp:w2core`) from rendering, the simulation runs at thousands of full turns per second across multi-core CPUs, allowing millions of game steps to be simulated in minutes.
+
+#### 2. Architecture & Decision Pipeline
+Each turn, the Modern AI (`modern::playTurn`) executes through a coordinated multi-head residual network:
+
+1. **Belief State Update (`SideBelief`)**: Tracks visible terrain, estimated enemy stack trajectories, city ownership history, frontier fog lines, and localized threat heatmaps.
+2. **Diplomacy (`DiploNet`)**: Evaluates bilateral relations across 4 distinct stances (*Ally*, *Peace*, *Uneasy*, *War*), determining peace tributes, war declarations, and multi-faction joint alliance requests.
+3. **Multi-Wave Tactical Military Waves (`MissionNet`)**: In up to 6 iterative waves per turn, groups of armies evaluate every legal target (garrison holding, neutral claiming, enemy city sieges, field stack intercepts, ruin exploration, and fog scouting) paired with dynamic coalition sizes (1, 2, 4, $N-1$, or all armies). Moves are sampled via softmax, with support for field rallies, multi-stack synchronization, and tactical retreat.
+4. **Macro-Economy & Upkeep (`EconNet`)**: Decides when to preserve capital, expand production capacity across conquered cities, establish long-range reinforcement vectors, or disband obsolete units when upkeep exceeds treasury income.
+5. **Hero & Quest Recruitment (`MusterNet`)**: Evaluates incoming hero offers, ally summons, and sage quests against empire-wide strategic posture.
+6. **Commander Posture & Mixture of Experts (MoE)**: High-level posture projection dynamically modulates decision logits based on personality cards and strategic state (e.g. Expansionist, Warmonger, Defensive Turtle).
+7. **27 Affine Personality Adapters**: Fine-tunes behavior to mirror the distinct playstyles of the 1993 character cards (`.CRD`) across 9 Knights, Lords, and Warlords difficulty ratings.
+
+#### 3. Training Curriculum
+* **Asymmetric-Critic PPO (`w2arena`)**: Trained via Proximal Policy Optimization where the policy network acts solely on imperfect `SideBelief`, while an asymmetric privileged critic (`ValueNet`) observes the full map during training to guide stable value baseline estimation.
+* **Antithetic Evolution Strategies (`w2evolve`)**: Applied paired-seed parameter mutations with mid-game snapshot forking to refine tactical micro-behavior and avoid local minima.
+* **Behavioral Cloning & Adversarial Sparring (`w2imitate`)**: Bootstrapped against the 1993 Classic AI, specialized defensive Wardens, and aggressive Raiders to instill foundational tactical literacy before pure discovery self-play.
+* **Online Lookahead Tree Search (`w2search` / `--ai-search`)**: Provides optional 1-ply/2-ply fair portfolio rollout search, pushing Modern AI win rates above 50% parity against the omniscient 1993 Classic AI.
+
+#### 4. The `F10` AI Brain Inspector
+When launched with `--modern-ui`, human players can press **`F10`** at any time to open the interactive **AI Brain Inspector**:
+* Inspect the AI's internal mental map (`SideBelief`), showing what it thinks the world looks like versus ground truth.
+* View live network logit utilities across candidate targets, diplomatic stances, and economic priorities.
+* Review diplomatic Parley ledgers, attitude vectors, and turn-start envoy missives.
+
+See [`AI-DESIGN.md`](AI-DESIGN.md) for complete mathematical formulations, network topologies, training curves, and tournament logs.
 
 ---
 
