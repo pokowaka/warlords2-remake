@@ -15,13 +15,19 @@ PreferencesStore::PreferencesStore(std::filesystem::path file_path)
         : file_path_(std::move(file_path)) {}
 
 std::filesystem::path PreferencesStore::UserDirectory() {
+    std::filesystem::path dir_path;
     if (const char* override_dir = std::getenv("W2_USER_DIR");
         override_dir != nullptr && override_dir[0] != '\0') {
-        return std::filesystem::path(override_dir);
+        dir_path = std::filesystem::path(override_dir);
+    } else {
+        char* pref_path = SDL_GetPrefPath("", "Warlords II Remake");
+        dir_path = pref_path != nullptr ? pref_path : "";
+        SDL_free(pref_path);
     }
-    char* pref_path = SDL_GetPrefPath("", "Warlords II Remake");
-    std::filesystem::path dir_path = pref_path != nullptr ? pref_path : "";
-    SDL_free(pref_path);
+    if (!dir_path.empty()) {
+        std::error_code error;
+        std::filesystem::create_directories(dir_path, error);
+    }
     return dir_path;
 }
 

@@ -669,6 +669,7 @@ cc_test(
         ":config",
         ":platform",
         ":test_helpers",
+        ":ui_dialogs",
         ":w2core",
         "@googletest//:gtest_main",
         "@sdl2",

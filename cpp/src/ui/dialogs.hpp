@@ -280,11 +280,15 @@ using LoadedGameCallback = std::function<void(std::unique_ptr<w2::Game>)>;
 void Save(w2::UiContext& ctx);
 /** @brief Opens the Load Game dialog and passes the loaded game to `after`. */
 void Load(w2::UiContext& ctx, LoadedGameCallback after);
-/** @brief Returns the count of save slots currently holding a game (`0..10`). */
+/** @brief Returns the count of save slots currently holding a game (`0..10`, plus auto/quick if present). */
 int Used();
+/** @brief Returns true if save slot `key` exists and is non-empty. */
+bool HasSlot(const std::string& key);
 /** @brief Writes `game` to save slot `key`. */
 bool WriteSlot(const std::string& key, const w2::Game& game);
 /** @brief Reads a saved game from slot `key`, or returns `nullptr` on failure. */
+std::unique_ptr<w2::Game> ReadSlot(const std::filesystem::path& data_dir, const std::string& key);
+/** @brief Reads a saved game from slot `key` using `ctx.Assets().DataDir()`, or returns `nullptr` on failure. */
 std::unique_ptr<w2::Game> ReadSlot(const w2::UiContext& ctx, const std::string& key);
 }  // namespace savegame
 

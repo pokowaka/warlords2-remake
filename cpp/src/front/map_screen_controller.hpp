@@ -117,6 +117,7 @@ class MapScreenController final : public IScreenActions {
     void PlayComputers(Side* first_side);
     void EndTurn();
     void FinishRound(Side* next_side);
+    void AutoSave();
 
     // --- State Transitions for Walk / Assault / Drag ---
     void EnterWalk(WalkSpec spec);

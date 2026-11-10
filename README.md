@@ -146,7 +146,7 @@ panel, and the bottom bar move to the edges. A few things are new:
 | **Scale the interface** | View › Interface 1x, 2x… picks a whole-number scale so the pixel art stays sharp; the biggest that fits is the default |
 | **Zoom & pan the map** | Mouse wheel, `PageUp` / `PageDown`, keypad `+` / `-`, or View › Map 1x, 2x…; drag the map with the pointer for smooth pixel panning |
 | **Switch display & CRT** | View › Full screen / Window, View › 4:3 aspect lock, and optional OpenGL CRT shader (curvature, scanlines, aperture grille, and halation glow) |
-| **Save quickly** | `F5` quick-saves, `F9` quick-loads (persisted as JSON on desktop or IndexedDB in the browser) |
+| **Save quickly & auto-save** | `F5` quick-saves, `F9` quick-loads, and `F8` loads the auto-save (game automatically saves at the start of each human turn; both `[Auto Save]` and `[Quick Save]` appear at the top of Game › Load game) |
 | **Change the music** | Game › AdLib music (live OPL2 & AIL synth), MT-32 music, or SC-55 music (live TinySoundFont synthesis) |
 
 The View menu's choices and the music settings are remembered for next time.

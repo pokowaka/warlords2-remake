@@ -110,6 +110,12 @@ void MapScreenController::EndTurn() {
     FinishRound(next_side);
 }
 
+void MapScreenController::AutoSave() {
+    UiContext& ctx = Ctx();
+    if (!ctx.GamePtr() || ctx.ActiveGame().IsWon()) return;
+    savegame::WriteSlot("auto", ctx.ActiveGame());
+}
+
 void MapScreenController::FinishRound(Side* next_side) {
     UiContext& ctx = Ctx();
     if (!next_side) {
@@ -117,6 +123,7 @@ void MapScreenController::FinishRound(Side* next_side) {
         ending::Over(ctx, ctx.ActiveGame().MutableEndingState());
         return;
     }
+    AutoSave();
     SetState(std::make_unique<HumanTurnState>());
     ctx.SetPlayer(next_side);
     ctx.GetViewport().StratDirty();
@@ -171,6 +178,7 @@ void MapScreenController::BeginGame() {
     auto cap = CapOf(player);
     ctx.CentreOn(cap.first, cap.second);
     if (!first->IsComputerControlled()) {
+        AutoSave();
         map_after_banner_ = HotseatHidden();
         ShowBanner(player);
     }

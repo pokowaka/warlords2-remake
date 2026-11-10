@@ -101,16 +101,27 @@ bool WriteSlot(const std::string& key, const w2::Game& game) {
 }
 
 /** @brief The game in slot `key`, or null when there is none or it won't read. */
-std::unique_ptr<w2::Game> ReadSlot(const w2::UiContext& ctx, const std::string& key) {
+std::unique_ptr<w2::Game> ReadSlot(const std::filesystem::path& data_dir, const std::string& key) {
     auto text = w2::ReadFile(SlotFile(key));
     if (!text.ok()) return nullptr;
-    auto decoded = w2::save::Decode(*text, ctx.Assets().DataDir());
+    auto decoded = w2::save::Decode(*text, data_dir);
     return decoded.ok() ? std::move(*decoded) : nullptr;
+}
+
+std::unique_ptr<w2::Game> ReadSlot(const w2::UiContext& ctx, const std::string& key) {
+    return ReadSlot(ctx.Assets().DataDir(), key);
+}
+
+/** @brief Checks whether a save slot `key` exists and is non-empty. */
+bool HasSlot(const std::string& key) {
+    return w2::FileExists(SlotFile(key));
 }
 
 /** @brief How many slots hold a game. */
 int Used() {
     int count = 0;
+    if (HasSlot("auto")) count++;
+    if (HasSlot("quick")) count++;
     for (const auto& name : ReadInfo()) {
         if (name != kUnusedName) count++;
     }
@@ -142,24 +153,39 @@ void Save(w2::UiContext& ctx) {
 void Load(w2::UiContext& ctx, LoadedGameCallback after) {
     SlotNameList names = ReadInfo();
     SlotNameList list;
-    SlotIndexList slots;
+    std::vector<std::string> keys;
+    if (HasSlot("auto")) {
+        list.push_back("[Auto Save]");
+        keys.push_back("auto");
+    }
+    if (HasSlot("quick")) {
+        list.push_back("[Quick Save]");
+        keys.push_back("quick");
+    }
     for (int i = 0; i < kSlots; i++) {
         if (names[i] != kUnusedName) {
             list.push_back(names[i]);
-            slots.push_back(i);
+            keys.push_back(SlotKey(i));
         }
     }
     if (list.empty()) return;
     int start = 0;
-    for (size_t i = 0; i < slots.size(); i++) {
-        if (slots[i] == ctx.LastSaveSlot()) start = static_cast<int>(i);
+    for (size_t i = 0; i < keys.size(); i++) {
+        if (keys[i] == SlotKey(ctx.LastSaveSlot())) start = static_cast<int>(i);
     }
     choose::Open(ctx, kit::Text(ctx, 0x2f, 0), list, start,
-                 [&ctx, slots, after = std::move(after)](int chosen) {
-                     if (chosen == w2::kNone) return;
-                     auto game = ReadSlot(ctx, SlotKey(slots[chosen]));
+                 [&ctx, keys, after = std::move(after)](int chosen) {
+                     if (chosen == w2::kNone || chosen < 0 ||
+                         chosen >= static_cast<int>(keys.size())) {
+                         return;
+                     }
+                     const std::string& key = keys[chosen];
+                     auto game = ReadSlot(ctx, key);
                      if (!game) return;
-                     ctx.SetLastSaveSlot(slots[chosen]);
+                     if (key.starts_with("save")) {
+                         auto slot_idx = w2::ToInt(key.substr(4));
+                         if (slot_idx) ctx.SetLastSaveSlot(*slot_idx);
+                     }
                      std::string name = game->CurrentSide() ? game->CurrentSide()->Name() : "";
                      after(std::move(game));
                      search::Say(ctx, w2::Format(kit::Text(ctx, 0x2f, 1), name));

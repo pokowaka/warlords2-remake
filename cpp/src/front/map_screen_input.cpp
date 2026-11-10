@@ -332,6 +332,13 @@ void MapScreenController::Keypressed(const std::string& key) {
         } else {
             Say("Could not save.");
         }
+    } else if (key == "f8") {
+        if (auto loaded = savegame::ReadSlot(ctx, "auto")) {
+            TakeLoaded(std::move(loaded));
+            Say("Auto-save loaded.");
+        } else {
+            Say("No auto-save found.");
+        }
     } else if (key == "f9") {
         if (auto loaded = savegame::ReadSlot(ctx, "quick")) TakeLoaded(std::move(loaded));
     } else if (ctx.ModernUi() && key == "f10") {

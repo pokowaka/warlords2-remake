@@ -21,6 +21,7 @@
 #include "platform/sound.hpp"
 #include "platform/soundfont.hpp"
 #include "test/test_helpers.hpp"
+#include "ui/dialogs.hpp"
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
 #include "warlords/cues.hpp"
@@ -115,6 +116,29 @@ TEST(PreferencesStoreTest, UserDirectoryHonoursEnvironmentOverride) {
     w2::PreferencesStore app_store = w2::PreferencesStore::ForUserApp();
     EXPECT_EQ(app_store.FilePath(),
               temp_user_dir.Path() / std::string(w2::PreferencesStore::kDefaultFileName));
+}
+
+TEST(SaveGameTest, AutoSaveSlotRoundTripsAndIncrementsUsedCount) {
+    w2::test::ScopedTempPath temp_user_dir("w2_autosave_test");
+    std::filesystem::create_directories(temp_user_dir.Path());
+    setenv("W2_USER_DIR", temp_user_dir.Path().string().c_str(), 1);
+
+    EXPECT_FALSE(savegame::HasSlot("auto"));
+    EXPECT_EQ(savegame::Used(), 0);
+
+    auto game_ptr = w2::test::SetupGame("ERYTHEA", w2::test::SeedWith(42, {}));
+    ASSERT_NE(game_ptr, nullptr);
+    ASSERT_TRUE(savegame::WriteSlot("auto", *game_ptr));
+
+    EXPECT_TRUE(savegame::HasSlot("auto"));
+    EXPECT_GE(savegame::Used(), 1);
+
+    auto loaded = savegame::ReadSlot(w2::test::kData, "auto");
+    ASSERT_NE(loaded, nullptr);
+    EXPECT_EQ(loaded->Turn(), game_ptr->Turn());
+    EXPECT_EQ(loaded->CurrentSideIndex(), game_ptr->CurrentSideIndex());
+    EXPECT_EQ(loaded->Armies().size(), game_ptr->Armies().size());
+    EXPECT_EQ(loaded->GetMap().Cities().size(), game_ptr->GetMap().Cities().size());
 }
 
 TEST(AiTurnRunnerTest, MultiStepEventHandoffAndNormalCompletion) {
