@@ -84,6 +84,8 @@ ABSL_FLAG(double, eval_temp, -1.0,
           "Deployment softmax temperature during ES playouts (negative keeps default).");
 ABSL_FLAG(double, warden_frac, 0.25, "Probability an opponent seat uses Warden.");
 ABSL_FLAG(double, raider_frac, 0.10, "Probability an opponent seat uses Raider.");
+ABSL_FLAG(double, warband_frac, 0.0, "Probability an opponent seat uses fair-fog Warband.");
+ABSL_FLAG(bool, fair_classic, false, "Mask hidden-map fog omniscience on Classic opponents.");
 ABSL_FLAG(double, totalwar_frac, 0.50, "Share of training games played on Total War presets.");
 ABSL_FLAG(std::string, frozen_opponent, "",
           "Optional checkpoint path for Frozen league opponents.");
@@ -159,6 +161,8 @@ struct Config {
     float eval_temp = 0.02F;
     float warden_frac = 0.25F;
     float raider_frac = 0.10F;
+    float warband_frac = 0.0F;
+    bool fair_classic = false;
     float total_war_frac = 0.50F;
     std::string frozen_path;
     float frozen_frac = 0.0F;
@@ -216,6 +220,9 @@ Config LoadConfigFromFlags() {
                             : ml::DeployTemperature();
     cfg.warden_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_warden_frac)), 0.0F, 1.0F);
     cfg.raider_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_raider_frac)), 0.0F, 1.0F);
+    cfg.warband_frac =
+            std::clamp(static_cast<float>(absl::GetFlag(FLAGS_warband_frac)), 0.0F, 1.0F);
+    cfg.fair_classic = absl::GetFlag(FLAGS_fair_classic);
     cfg.total_war_frac =
             std::clamp(static_cast<float>(absl::GetFlag(FLAGS_totalwar_frac)), 0.0F, 1.0F);
     cfg.frozen_path = absl::GetFlag(FLAGS_frozen_opponent);
@@ -489,18 +496,24 @@ SeatPlan AssignSeats(Game& game, const Config& cfg, uint32_t seed, int parity, b
         active_pos++;
         seat_plan.is_candidate[side_idx] = cand;
         ai::SetSideClassicAi(game, *side, !cand);
-        seat_plan.opp_kind[side_idx] = opponents::Kind::kClassic;
+        seat_plan.opp_kind[side_idx] =
+                cfg.fair_classic ? opponents::Kind::kFairClassic : opponents::Kind::kClassic;
         if (!cand && !pure_classic_eval) {
             uint32_t salt1 = static_cast<uint32_t>((side_idx + 1) * 2891336453U);
             uint32_t salt2 = static_cast<uint32_t>((side_idx + 1) * 2654435761U);
             uint32_t salt3 = static_cast<uint32_t>((side_idx + 1) * 3266489917U);
+            uint32_t salt4 = static_cast<uint32_t>((side_idx + 1) * 1597334677U);
             float roll1 = static_cast<float>(((seed * 747796405U) ^ salt1) >> 8) /
                           static_cast<float>(1U << 24);
             float roll2 = static_cast<float>(((seed * 1103515245U) ^ salt2) >> 8) /
                           static_cast<float>(1U << 24);
             float roll3 = static_cast<float>(((seed * 2654435769U) ^ salt3) >> 8) /
                           static_cast<float>(1U << 24);
-            if (roll1 < cfg.raider_frac) {
+            float roll4 = static_cast<float>(((seed * 2246822519U) ^ salt4) >> 8) /
+                          static_cast<float>(1U << 24);
+            if (roll4 < cfg.warband_frac) {
+                seat_plan.opp_kind[side_idx] = opponents::Kind::kWarband;
+            } else if (roll1 < cfg.raider_frac) {
                 seat_plan.opp_kind[side_idx] = opponents::Kind::kRaider;
             } else if (roll2 < cfg.warden_frac) {
                 seat_plan.opp_kind[side_idx] = opponents::Kind::kWarden;

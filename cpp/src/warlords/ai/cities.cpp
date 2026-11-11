@@ -38,10 +38,12 @@ std::vector<City*> Own(const Game& game, const Side& side) {
 
 std::vector<NeutralNeighbour> NeutralNeighbours(Game& game, Side& side, const City& city) {
     AIData& data = Data(game, side);
+    const bool fair_fog = IsFairClassicActive(game, side.Index());
     auto [neighbours, neighbour_dists] = FindNeighbours(game, city);
     std::vector<NeutralNeighbour> neutrals;
     for (size_t j = 0; j < neighbours.size(); j++) {
         City* neighbour = neighbours[j];
+        if (fair_fog && Cflag(data, *neighbour, kCfUnseen)) continue;
         if (neighbour->Index() != data.quest_city && Standing(*neighbour) &&
             neighbour->IsNeutral() && (neutrals.empty() || j < 2 || neighbour_dists[j] < 20)) {
             neutrals.push_back(

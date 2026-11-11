@@ -152,6 +152,9 @@ void ClassicAiPlayer::PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
         return events->OnPhase(name) && !events->IsAborted();
     };
     bool hidden = game.GetMap().GameOptions().hidden_map != 0;
+    if (fair_fog_ && hidden) {
+        ai::belief::Update(game, side);
+    }
 
     ResetMovedFlags();
     TurnSetup(game, side, data_);

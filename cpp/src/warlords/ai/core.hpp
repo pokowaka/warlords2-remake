@@ -200,6 +200,8 @@ inline bool Standing(const City& city) {
 bool InPlay(const Game& game, int index);
 /** @brief Is a side played by the computer? */
 bool IsComputer(const Game& game, int index);
+/** @brief True when Hidden Map is active and `side_index` runs a fair-fog `ClassicAiPlayer`. */
+bool IsFairClassicActive(const Game& game, int side_index);
 /**
  * @brief The diplomatic state between two sides.
  *

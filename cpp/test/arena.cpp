@@ -106,6 +106,15 @@ ABSL_FLAG(double, mixed_frac, 0.0, "Fraction of solo-learner games played 4v4 in
 ABSL_FLAG(int, save_every, 0, "Write <out>.iterN.json snapshots every N iterations.");
 ABSL_FLAG(double, raider_frac, 0.0, "Share of Classic training seats played by Raider.");
 ABSL_FLAG(double, warden_frac, 0.0, "Share of Classic training seats played by Warden.");
+ABSL_FLAG(double, warband_frac, 0.0,
+          "Share of Classic training seats played by fair-fog WarbandPlayer.");
+ABSL_FLAG(bool, fair_classic, false,
+          "Mask hidden-map fog omniscience on Classic training and evaluation seats.");
+ABSL_FLAG(bool, pfsp, false,
+          "Weight presets, adversary types, and Hall-of-Fame snapshots by (1 - score)^p.");
+ABSL_FLAG(double, pfsp_exp, 2.0, "Difficulty exponent p in PFSP (1 - score)^p weighting.");
+ABSL_FLAG(double, scengen_frac, 0.0,
+          "Share of random training maps built with modern scengen Continents/Pangaea/Islands.");
 ABSL_FLAG(int, eval_preset, -1, "Evaluate on one preset only (0..3, -1 = all).");
 ABSL_FLAG(double, departure_weight, 0.0, "Credit a city loss to the move that vacated it.");
 ABSL_FLAG(double, lr_end, 3.0e-4, "Final Adam learning rate (linear decay).");
@@ -156,7 +165,8 @@ ABSL_FLAG(int, search_k, 0, "Candidate turns per learner turn (0 = no search tra
 ABSL_FLAG(int, search_r, 2, "Rollout copies per candidate turn.");
 ABSL_FLAG(int, search_h, 2, "Rounds played forward after a candidate turn.");
 ABSL_FLAG(std::string, eval_opponent, "classic",
-          "Evaluation opponent personality: classic, raider, warden, or frozen.");
+          "Evaluation opponent personality: classic, fair-classic, raider, warden, warband, or "
+          "frozen.");
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
@@ -286,6 +296,11 @@ struct Config {
     int save_every = 0;        ///< --save-every: also write <out>.iterN.json snapshots
     float raider_frac = 0.0F;  ///< --raider-frac: share of Classic training seats played by Raider
     float warden_frac = 0.0F;  ///< --warden-frac: share of Classic training seats played by Warden
+    float warband_frac = 0.0F;   ///< --warband-frac: share of Classic seats played by Warband
+    bool fair_classic = false;   ///< --fair-classic: mask Classic fog omniscience
+    bool pfsp = false;           ///< --pfsp: adaptive difficulty weighting over presets/opponents
+    float pfsp_exp = 2.0F;       ///< --pfsp-exp: PFSP exponent p in (1 - score)^p
+    float scengen_frac = 0.0F;   ///< --scengen-frac: share of random maps using scengen topologies
     int eval_preset = -1;      ///< --eval-preset: evaluate on one preset only (0..3, -1 = all)
     float departure_weight =
             0.0F;  ///< --departure-weight: credit a city loss to the move that emptied it
@@ -349,6 +364,20 @@ std::unique_ptr<Game> MakeArenaGame(const Config& cfg, const std::string& scenar
         map_options.sliders = {3, 3, 2, 3};
         map_options.allies = preset.diplomacy != 0;
         map_options.terrain_set = 0;
+        float scengen_roll = static_cast<float>(((seed * 3266489917U) ^ 0x27d4eb2fU) >> 8) /
+                             static_cast<float>(1U << 24);
+        if (scengen_roll < cfg.scengen_frac) {
+            std::array<int, 4> sliders = {2 + static_cast<int>(seed % 4U),
+                                          2 + static_cast<int>((seed >> 3U) % 4U),
+                                          2 + static_cast<int>((seed >> 6U) % 3U),
+                                          2 + static_cast<int>((seed >> 9U) % 4U)};
+            static constexpr scengen::Shape kShapes[3] = {
+                scengen::Shape::kContinents, scengen::Shape::kPangaea, scengen::Shape::kIslands};
+            map_options.sliders = sliders;
+            map_options.scenario = true;
+            map_options.world =
+                    randommap::SettingsFromSliders(sliders, kShapes[(seed >> 12U) % 3U]);
+        }
         auto files = randommap::GenerateNow(map_options);
         ABSL_CHECK_OK(files);
         opts.memory_files = &*files;
@@ -377,10 +406,117 @@ struct SideEpisode {
 
 /** @brief What one rollout game produced: its episodes and a few totals for the log. */
 struct RolloutSummary {
-    std::vector<SideEpisode> episodes;  ///< One per recorded side that played a turn.
-    int recorded_cities = 0;            ///< Cities the recorded sides held at the end, summed.
-    int recorded_sides = 0;             ///< Number of recorded sides.
-    int neutrals_left = 0;              ///< Cities still neutral at the end.
+    std::vector<SideEpisode> episodes;   ///< One per recorded side that played a turn.
+    int recorded_cities = 0;             ///< Cities the recorded sides held at the end, summed.
+    int total_owned_cities = 0;          ///< Non-neutral standing cities held by any side.
+    int recorded_sides = 0;              ///< Number of recorded sides.
+    int active_sides = 0;                ///< Active sides in play.
+    int neutrals_left = 0;               ///< Cities still neutral at the end.
+    int preset_idx = 0;                  ///< Preset index played (0..3).
+    size_t hof_idx = 0;                  ///< Hall-of-Fame snapshot index when `Opponent::kLeague`.
+    bool used_league = false;            ///< True when non-learner seats played `hof_idx`.
+    std::array<int, 6> opp_seats{};      ///< Opponent seat counts per `opponents::Kind` index.
+};
+
+/** @brief Prioritized Fictitious Self-Play (PFSP) adaptive difficulty state. */
+struct PfspScheduler {
+    static constexpr size_t kNumOppKinds = 6;
+    std::array<float, 4> preset_ema{0.5F, 0.5F, 0.5F, 0.5F};
+    std::array<float, kNumOppKinds> opp_ema{0.5F, 0.5F, 0.5F, 0.5F, 0.5F, 0.5F};
+    std::vector<float> hof_ema{0.5F};
+
+    int SamplePreset(uint32_t seed, float exp_p) const {
+        std::array<float, 4> weights{};
+        float sum_hard = 0.0F;
+        for (size_t idx = 0; idx < 4; ++idx) {
+            weights[idx] = std::pow(std::clamp(1.0F - preset_ema[idx], 0.05F, 0.95F), exp_p);
+            sum_hard += weights[idx];
+        }
+        float u_roll = static_cast<float>(((seed * 2246822519U) ^ 0x9e3779b9U) >> 8) /
+                       static_cast<float>(1U << 24);
+        float csum = 0.0F;
+        for (int idx = 0; idx < 4; ++idx) {
+            float prob = 0.04F + 0.84F * (weights[static_cast<size_t>(idx)] /
+                                          std::max(1e-6F, sum_hard));
+            csum += prob;
+            if (u_roll <= csum || idx == 3) return idx;
+        }
+        return 0;
+    }
+
+    size_t SampleHof(uint32_t seed, size_t hof_size, float exp_p) const {
+        if (hof_size <= 1) return 0;
+        float sum_hard = 0.0F;
+        std::vector<float> weights(hof_size, 1.0F);
+        for (size_t idx = 0; idx < hof_size; ++idx) {
+            float ema = idx < hof_ema.size() ? hof_ema[idx] : 0.5F;
+            weights[idx] = std::pow(std::clamp(1.0F - ema, 0.05F, 0.95F), exp_p);
+            sum_hard += weights[idx];
+        }
+        float u_roll = static_cast<float>(((seed * 3266489917U) ^ 0x85ebca6bU) >> 8) /
+                       static_cast<float>(1U << 24);
+        float unif = 0.15F / static_cast<float>(hof_size);
+        float csum = 0.0F;
+        for (size_t idx = 0; idx < hof_size; ++idx) {
+            csum += unif + 0.85F * (weights[idx] / std::max(1e-6F, sum_hard));
+            if (u_roll <= csum || idx + 1 == hof_size) return idx;
+        }
+        return 0;
+    }
+
+    void Update(const std::vector<RolloutSummary>& summaries) {
+        constexpr float kAlpha = 0.20F;
+        std::array<double, 4> p_sum{};
+        std::array<int, 4> p_cnt{};
+        std::array<double, kNumOppKinds> o_sum{};
+        std::array<int, kNumOppKinds> o_cnt{};
+        std::vector<double> h_sum(hof_ema.size(), 0.0);
+        std::vector<int> h_cnt(hof_ema.size(), 0);
+
+        for (const auto& summary : summaries) {
+            if (summary.recorded_sides <= 0 || summary.active_sides <= 0) continue;
+            float expected = static_cast<float>(summary.recorded_sides) /
+                             static_cast<float>(summary.active_sides);
+            float actual = summary.total_owned_cities > 0
+                                   ? (static_cast<float>(summary.recorded_cities) /
+                                      static_cast<float>(summary.total_owned_cities))
+                                   : expected;
+            float rel_score =
+                    std::clamp(actual / std::max(1e-4F, actual + expected), 0.05F, 0.95F);
+            if (summary.preset_idx >= 0 && summary.preset_idx < 4) {
+                p_sum[static_cast<size_t>(summary.preset_idx)] += rel_score;
+                p_cnt[static_cast<size_t>(summary.preset_idx)]++;
+            }
+            for (size_t k_idx = 0; k_idx < kNumOppKinds; ++k_idx) {
+                if (summary.opp_seats[k_idx] > 0) {
+                    o_sum[k_idx] += rel_score * summary.opp_seats[k_idx];
+                    o_cnt[k_idx] += summary.opp_seats[k_idx];
+                }
+            }
+            if (summary.used_league && summary.hof_idx < h_sum.size()) {
+                h_sum[summary.hof_idx] += rel_score;
+                h_cnt[summary.hof_idx]++;
+            }
+        }
+        for (size_t idx = 0; idx < 4; ++idx) {
+            if (p_cnt[idx] > 0) {
+                float batch_mean = static_cast<float>(p_sum[idx] / p_cnt[idx]);
+                preset_ema[idx] = (1.0F - kAlpha) * preset_ema[idx] + kAlpha * batch_mean;
+            }
+        }
+        for (size_t k_idx = 0; k_idx < kNumOppKinds; ++k_idx) {
+            if (o_cnt[k_idx] > 0) {
+                float batch_mean = static_cast<float>(o_sum[k_idx] / o_cnt[k_idx]);
+                opp_ema[k_idx] = (1.0F - kAlpha) * opp_ema[k_idx] + kAlpha * batch_mean;
+            }
+        }
+        for (size_t h_idx = 0; h_idx < hof_ema.size(); ++h_idx) {
+            if (h_cnt[h_idx] > 0) {
+                float batch_mean = static_cast<float>(h_sum[h_idx] / h_cnt[h_idx]);
+                hof_ema[h_idx] = (1.0F - kAlpha) * hof_ema[h_idx] + kAlpha * batch_mean;
+            }
+        }
+    }
 };
 
 /** @brief Who the non-recorded sides of a training game are. */
@@ -425,22 +561,65 @@ void MarkDepartures(const Game& game, int side, ml::TurnStepRecord& turn) {
 }
 
 opponents::Kind PickTrainingOpponent(const Config& cfg, uint32_t seed, int side_index,
-                                     bool allow_frozen, Game& game, Side& side) {
+                                     bool allow_frozen, Game& game, Side& side,
+                                     const PfspScheduler* pfsp = nullptr) {
     auto hash_unit = [&](uint32_t mult1, uint32_t mult2) {
         return static_cast<float>(
                        ((seed * mult1) ^ (static_cast<uint32_t>(side_index + 1) * mult2)) >> 8) /
                static_cast<float>(1U << 24);
     };
-    float raid_roll = hash_unit(747796405U, 2891336453U);
-    float frozen_roll = hash_unit(2654435769U, 3266489917U);
-    float warden_roll = hash_unit(1103515245U, 2654435761U);
-    opponents::Kind selected =
-            raid_roll < cfg.raider_frac ? opponents::Kind::kRaider : opponents::Kind::kClassic;
-    if (selected == opponents::Kind::kClassic && warden_roll < cfg.warden_frac) {
-        selected = opponents::Kind::kWarden;
+    const opponents::Kind base_classic =
+            cfg.fair_classic ? opponents::Kind::kFairClassic : opponents::Kind::kClassic;
+    opponents::Kind selected = base_classic;
+
+    if (cfg.pfsp && pfsp != nullptr) {
+        const float frozen_w = (allow_frozen && cfg.frozen_policy) ? cfg.frozen_frac : 0.0F;
+        const float used_frac =
+                cfg.raider_frac + cfg.warden_frac + cfg.warband_frac + frozen_w;
+        const float base_classic_w = std::max(0.05F, 1.0F - used_frac);
+        std::array<float, PfspScheduler::kNumOppKinds> prior{};
+        prior[static_cast<size_t>(base_classic)] = base_classic_w;
+        prior[static_cast<size_t>(opponents::Kind::kRaider)] = cfg.raider_frac;
+        prior[static_cast<size_t>(opponents::Kind::kWarden)] = cfg.warden_frac;
+        prior[static_cast<size_t>(opponents::Kind::kWarband)] = cfg.warband_frac;
+        prior[static_cast<size_t>(opponents::Kind::kFrozen)] = frozen_w;
+
+        std::array<float, PfspScheduler::kNumOppKinds> weights{};
+        float w_sum = 0.0F;
+        for (size_t k_idx = 0; k_idx < PfspScheduler::kNumOppKinds; ++k_idx) {
+            if (prior[k_idx] <= 0.0F) continue;
+            float hard = std::pow(std::clamp(1.0F - pfsp->opp_ema[k_idx], 0.05F, 0.95F),
+                                  cfg.pfsp_exp);
+            weights[k_idx] = prior[k_idx] * (0.20F + 0.80F * hard);
+            w_sum += weights[k_idx];
+        }
+        float pick_roll = hash_unit(1597334677U, 2891336453U) * w_sum;
+        float csum = 0.0F;
+        for (size_t k_idx = 0; k_idx < PfspScheduler::kNumOppKinds; ++k_idx) {
+            if (weights[k_idx] <= 0.0F) continue;
+            csum += weights[k_idx];
+            if (pick_roll <= csum) {
+                selected = static_cast<opponents::Kind>(k_idx);
+                break;
+            }
+        }
+    } else {
+        float warband_roll = hash_unit(1597334677U, 2246822519U);
+        float raid_roll = hash_unit(747796405U, 2891336453U);
+        float frozen_roll = hash_unit(2654435769U, 3266489917U);
+        float warden_roll = hash_unit(1103515245U, 2654435761U);
+        if (warband_roll < cfg.warband_frac) {
+            selected = opponents::Kind::kWarband;
+        } else if (raid_roll < cfg.raider_frac) {
+            selected = opponents::Kind::kRaider;
+        } else if (warden_roll < cfg.warden_frac) {
+            selected = opponents::Kind::kWarden;
+        }
+        if (allow_frozen && cfg.frozen_policy && frozen_roll < cfg.frozen_frac) {
+            selected = opponents::Kind::kFrozen;
+        }
     }
-    if (allow_frozen && cfg.frozen_policy && frozen_roll < cfg.frozen_frac) {
-        selected = opponents::Kind::kFrozen;
+    if (selected == opponents::Kind::kFrozen) {
         ai::SetSideClassicAi(game, side, false);  // a Modern AI seat, just not a learning one
     }
     if (allow_frozen) {
@@ -458,9 +637,10 @@ opponents::Kind PickTrainingOpponent(const Config& cfg, uint32_t seed, int side_
  * each living recorded side's critic value is kept for bootstrapping.
  */
 RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
-                          const TrainingPreset& preset, uint32_t seed, float temperature,
-                          const ml::PolicyNetwork& learner, const ml::PolicyNetwork& snapshot,
-                          Opponent mode) {
+                          const TrainingPreset& preset, int preset_idx, uint32_t seed,
+                          float temperature, const ml::PolicyNetwork& learner,
+                          const ml::PolicyNetwork& snapshot, size_t hof_idx, Opponent mode,
+                          const PfspScheduler* pfsp = nullptr) {
     auto owned_game = MakeArenaGame(cfg, scenario, preset, seed, true);
     Game& game = *owned_game;
 
@@ -482,6 +662,8 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     const bool solo = cfg.solo_learner && !(mix_roll < cfg.mixed_frac);
     const bool mixed_vs_classic = cfg.solo_learner && !solo;
     int seat = 0;
+    std::array<int, PfspScheduler::kNumOppKinds> opp_seats{};
+    bool used_league = false;
     for (int side_index = 0; side_index < 8; side_index++) {
         Side& side = game.GetMap().Sides()[side_index];
         if (!side.InUse()) continue;
@@ -496,7 +678,15 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
                                       : ((mode == Opponent::kClassic) && !learner_side);
         ai::SetSideClassicAi(game, side, classic[side_index]);
         classic_kind[side_index] =
-                PickTrainingOpponent(cfg, seed, side_index, classic[side_index], game, side);
+                PickTrainingOpponent(cfg, seed, side_index, classic[side_index], game, side, pfsp);
+        if (!learner_side) {
+            if (classic[side_index]) {
+                const size_t k_idx = static_cast<size_t>(classic_kind[side_index]);
+                if (k_idx < opp_seats.size()) opp_seats[k_idx]++;
+            } else {
+                used_league = true;
+            }
+        }
         episodes[side_index].side_index = side_index;
         samplers[side_index].rng_state =
                 (seed * 2654435761U) ^ static_cast<uint32_t>((side_index + 1) * 2246822519U);
@@ -541,14 +731,21 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     }
 
     RolloutSummary summary;
+    summary.active_sides = active_count;
+    summary.preset_idx = preset_idx;
+    summary.hof_idx = hof_idx;
+    summary.used_league = used_league;
+    summary.opp_seats = opp_seats;
     std::array<int, 8> cities{};
     for (const auto& city : game.GetMap().Cities()) {
         if (city.IsRazed()) continue;
         int owner_index = city.OwnerIndex();
-        if (owner_index == kNone)
+        if (owner_index == kNone) {
             summary.neutrals_left++;
-        else if (owner_index >= 0 && owner_index < 8)
+        } else if (owner_index >= 0 && owner_index < 8) {
             cities[owner_index]++;
+            summary.total_owned_cities++;
+        }
     }
     for (int side_index = 0; side_index < 8; side_index++) {
         if (!recorded[side_index] || episodes[side_index].turns.empty()) continue;
@@ -1609,6 +1806,13 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
     cfg.save_every = std::max(0, absl::GetFlag(FLAGS_save_every));
     cfg.raider_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_raider_frac)), 0.0F, 1.0F);
     cfg.warden_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_warden_frac)), 0.0F, 1.0F);
+    cfg.warband_frac =
+            std::clamp(static_cast<float>(absl::GetFlag(FLAGS_warband_frac)), 0.0F, 1.0F);
+    cfg.fair_classic = absl::GetFlag(FLAGS_fair_classic);
+    cfg.pfsp = absl::GetFlag(FLAGS_pfsp);
+    cfg.pfsp_exp = std::max(0.25F, static_cast<float>(absl::GetFlag(FLAGS_pfsp_exp)));
+    cfg.scengen_frac =
+            std::clamp(static_cast<float>(absl::GetFlag(FLAGS_scengen_frac)), 0.0F, 1.0F);
     cfg.eval_preset = std::clamp(absl::GetFlag(FLAGS_eval_preset), -1, 3);
     cfg.departure_weight =
             std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_departure_weight)));
@@ -1658,12 +1862,16 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
         cfg.eval_opponent = opponents::Kind::kFrozen;
     } else if (opponent == "warden") {
         cfg.eval_opponent = opponents::Kind::kWarden;
+    } else if (opponent == "warband") {
+        cfg.eval_opponent = opponents::Kind::kWarband;
+    } else if (opponent == "fair-classic" || opponent == "fair_classic") {
+        cfg.eval_opponent = opponents::Kind::kFairClassic;
     } else if (opponent == "classic") {
         cfg.eval_opponent = opponents::Kind::kClassic;
     } else {
         std::fprintf(stderr,
-                     "Unknown --eval-opponent '%s'; expected 'classic', 'raider', 'warden' or "
-                     "'frozen'.\n",
+                     "Unknown --eval-opponent '%s'; expected 'classic', 'fair-classic', "
+                     "'raider', 'warden', 'warband', or 'frozen'.\n",
                      opponent.c_str());
         return false;
     }
@@ -1893,6 +2101,7 @@ int main(int argc, char** argv) {
     }
     int adam_step = 0;
     std::mt19937 shuffle_rng(12345);
+    PfspScheduler pfsp_state;
 
     for (int iter = 1; iter <= cfg.iterations; iter++) {
         auto start_time = std::chrono::steady_clock::now();
@@ -1906,10 +2115,18 @@ int main(int argc, char** argv) {
         std::vector<RolloutSummary> games(cfg.games_per_iter);
         std::vector<int> game_order(cfg.games_per_iter);
         std::vector<int> game_cost(cfg.games_per_iter);
+        std::vector<int> game_presets(cfg.games_per_iter);
+        std::vector<size_t> game_hof(cfg.games_per_iter);
         for (int gi = 0; gi < cfg.games_per_iter; ++gi) {
             game_order[gi] = gi;
             uint32_t seed = cfg.seed_offset + static_cast<uint32_t>(iter * 1009 + gi * 97 + 17);
             const std::string& scen = kScenarios[(iter * 7 + gi) % kScenarios.size()];
+            int p_idx = cfg.pfsp ? pfsp_state.SamplePreset(seed, cfg.pfsp_exp)
+                                 : ((iter + gi) % 4);
+            size_t h_idx = cfg.pfsp ? pfsp_state.SampleHof(seed, hall_of_fame.size(), cfg.pfsp_exp)
+                                    : (static_cast<size_t>(iter + gi) % hall_of_fame.size());
+            game_presets[gi] = p_idx;
+            game_hof[gi] = h_idx;
             float map_roll = static_cast<float>(((seed * 1597334677U) ^ 0x9e3779b9U) >> 8) /
                              static_cast<float>(1U << 24);
             bool uses_random_map = (cfg.search_k == 0) && (map_roll < cfg.random_map_frac);
@@ -1917,7 +2134,7 @@ int main(int argc, char** argv) {
             float roll =
                     static_cast<float>((seed * 2654435761U) >> 8) / static_cast<float>(1U << 24);
             if (!cfg.solo_learner && !(roll < cfg.classic_frac)) cost *= 2;
-            if ((kPresets[(iter + gi) % 4].hidden_map) != 0) cost += 1;
+            if ((kPresets[p_idx].hidden_map) != 0) cost += 1;
             game_cost[gi] = cost;
         }
         std::stable_sort(game_order.begin(), game_order.end(),
@@ -1933,22 +2150,26 @@ int main(int argc, char** argv) {
                     uint32_t seed = cfg.seed_offset +
                                     static_cast<uint32_t>(iter * 1009 + game_idx * 97 + 17);
                     const std::string& scen = kScenarios[(iter * 7 + game_idx) % kScenarios.size()];
-                    const TrainingPreset& preset = kPresets[(iter + game_idx) % 4];
+                    int p_idx = game_presets[game_idx];
+                    size_t h_idx = game_hof[game_idx];
+                    const TrainingPreset& preset = kPresets[p_idx];
                     float roll = static_cast<float>((seed * 2654435761U) >> 8) /
                                  static_cast<float>(1U << 24);
                     Opponent mode = roll < cfg.classic_frac ? Opponent::kClassic
                                     : (game_idx % 2 == 0)   ? Opponent::kMirror
                                                             : Opponent::kLeague;
-                    const auto& snap = hall_of_fame[(iter + game_idx) % hall_of_fame.size()];
-                    games[game_idx] = cfg.search_k > 0 ? RunSearchRollout(cfg, scen, preset, seed,
-                                                                          temperature, learner)
-                                                       : RunRollout(cfg, scen, preset, seed,
-                                                                    temperature, learner, snap,
-                                                                    mode);
+                    const auto& snap = hall_of_fame[h_idx];
+                    games[game_idx] = cfg.search_k > 0
+                                              ? RunSearchRollout(cfg, scen, preset, seed,
+                                                                 temperature, learner)
+                                              : RunRollout(cfg, scen, preset, p_idx, seed,
+                                                           temperature, learner, snap, h_idx, mode,
+                                                           cfg.pfsp ? &pfsp_state : nullptr);
                 }
             });
         }
         for (auto& thread : pool) thread.join();
+        if (cfg.pfsp) pfsp_state.Update(games);
 
         std::vector<SideEpisode> episodes;
         int cities = 0, sides = 0, neutrals = 0;
@@ -2191,10 +2412,14 @@ int main(int argc, char** argv) {
             learner.SaveJson(snap, iter, 0.0F).IgnoreError();
         }
         if (iter % 10 == 0) {
-            if (hall_of_fame.size() < 12)
+            if (hall_of_fame.size() < 12) {
                 hall_of_fame.push_back(learner);
-            else
-                hall_of_fame[(iter / 10) % hall_of_fame.size()] = learner;
+                pfsp_state.hof_ema.push_back(0.5F);
+            } else {
+                size_t replace_idx = static_cast<size_t>(iter / 10) % hall_of_fame.size();
+                hall_of_fame[replace_idx] = learner;
+                if (replace_idx < pfsp_state.hof_ema.size()) pfsp_state.hof_ema[replace_idx] = 0.5F;
+            }
         }
 
         float sel_share = NAN, sel_ci = NAN;

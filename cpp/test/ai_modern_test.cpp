@@ -29,6 +29,7 @@
 #include "warlords/randommap.hpp"
 #include "warlords/rng.hpp"
 #include "warlords/rules.hpp"
+#include "warlords/site.hpp"
 #include "warlords/save.hpp"
 #include "warlords/scn.hpp"
 
@@ -1444,6 +1445,145 @@ TEST(ModernAiTest, EconomyFamiliesUnitLineageAndStackConcentrationShaping) {
         EXPECT_NEAR(synthetic_turns[0].econ_steps[0].lineage_return, 0.20F * 0.81F, 1e-5F);
         EXPECT_NEAR(synthetic_turns[0].econ_steps[1].lineage_return, 0.20F * 0.81F, 1e-5F);
         EXPECT_NEAR(synthetic_turns[1].econ_steps[0].lineage_return, 0.20F * 0.90F, 1e-5F);
+    }
+}
+
+TEST(ModernAiTest, FairClassicFogMaskingAndWarbandPlayerConcentratedPlay) {
+    // Fair-fog masking prevents raiding unexplored empty enemy cities under Hidden Map
+    {
+        auto game_ptr = SetupGame("ERYTHEA", SeedWith(45, {{"hiddenMap", 1}, {"diplomacy", 0}}));
+        Game& game = *game_ptr;
+        Side& side0 = game.GetMap().Sides()[0];
+        Side& side1 = game.GetMap().Sides()[1];
+        side0.SetComputerControlled(true);
+        side1.SetComputerControlled(true);
+        City* cap0 = side0.CapitalCity(game.GetMap());
+        ASSERT_NE(cap0, nullptr);
+
+        // Pick a nearby non-owned city, make it undefended Side 1, and ensure it is unrevealed
+        City* target_city = nullptr;
+        int best_dist = 9999;
+        for (auto& city : game.GetMap().Cities()) {
+            if (&city == cap0) continue;
+            int dist = move::Distance(cap0->X(), cap0->Y(), city.X(), city.Y());
+            if (dist >= 4 && dist < best_dist && !game::Seen(game, 0, city.X(), city.Y())) {
+                best_dist = dist;
+                target_city = &city;
+            }
+        }
+        ASSERT_NE(target_city, nullptr);
+        target_city->SetOwner(SideId(1));
+        for (int dy = 0; dy <= 1; ++dy) {
+            for (int dx = 0; dx <= 1; ++dx) {
+                for (Army* occ : game::ArmiesAt(game, target_city->X() + dx, target_city->Y() + dy)) {
+                    game.Armies().Remove(occ);
+                }
+            }
+        }
+
+        // Place a fast flyer for Side 0 at cap0 (+ extra defender so it is not LastDefender)
+        Army guard_proto;
+        guard_proto.SetOwner(SideId(0));
+        guard_proto.PlaceAt(cap0->Position());
+        guard_proto.SetType(ArmyTypeId(0));
+        guard_proto.SetStrength(3);
+        guard_proto.SetMaxMoves(10);
+        guard_proto.SetMoves(10);
+        game.Armies().Add(guard_proto);
+
+        int fly_type = 0;
+        for (int tid = 0; tid < 28; ++tid) {
+            const ArmyType* atype = game.ArmyTypes().ById(tid);
+            if (atype && atype->flies) {
+                fly_type = tid;
+                break;
+            }
+        }
+        Army flyer_proto;
+        flyer_proto.SetOwner(SideId(0));
+        flyer_proto.PlaceAt(cap0->Position());
+        flyer_proto.SetType(ArmyTypeId(fly_type));
+        flyer_proto.SetStrength(5);
+        flyer_proto.SetMaxMoves(40);
+        flyer_proto.SetMoves(40);
+        game.Armies().Add(flyer_proto);
+
+        // Fair-fog RaidEmptyCities must ignore the unexplored target_city
+        EXPECT_EQ(opponents::RaidEmptyCities(game, side0, /*fair_fog=*/true), 0);
+        EXPECT_EQ(target_city->OwnerIndex(), 1);
+
+        // Omniscient RaidEmptyCities captures it immediately
+        EXPECT_GE(opponents::RaidEmptyCities(game, side0, /*fair_fog=*/false), 1);
+
+        opponents::InstallOpponent(game, side1, opponents::Kind::kFairClassic);
+        const ClassicAiPlayer* fair_classic = ClassicAiPlayer::FindOn(side1);
+        ASSERT_NE(fair_classic, nullptr);
+        EXPECT_TRUE(fair_classic->IsFairFog());
+        opponents::PlayTurn(game, side1, opponents::Kind::kFairClassic);
+    }
+
+    // WarbandPlayer buys an elite citadel slot, rallies/blesses its Hero stack, and garrisons cities
+    {
+        auto game_ptr = SetupGame("ERYTHEA", SeedWith(52, {{"hiddenMap", 1}, {"diplomacy", 0}}));
+        Game& game = *game_ptr;
+        Side& wb_side = game.GetMap().Sides()[0];
+        wb_side.SetComputerControlled(true);
+        wb_side.SetGold(1800);
+
+        City* cap = wb_side.CapitalCity(game.GetMap());
+        ASSERT_NE(cap, nullptr);
+        int extra_cities = 0;
+        for (auto& city : game.GetMap().Cities()) {
+            if (city.IsNeutral() &&
+                move::Distance(cap->X(), cap->Y(), city.X(), city.Y()) <= 18 && extra_cities < 2) {
+                city.SetOwner(SideId(0));
+                extra_cities++;
+            }
+        }
+        game::RevealStart(game, wb_side);
+
+        // Place a Hero at cap and 4 spare units 1-2 tiles away so Warband rallies & garrisons
+        Army hero_proto;
+        hero_proto.SetOwner(SideId(0));
+        hero_proto.PlaceAt(cap->Position());
+        hero_proto.SetType(ArmyTypeId(armytype::kHero));
+        hero_proto.SetStrength(6);
+        hero_proto.SetMaxMoves(16);
+        hero_proto.SetMoves(16);
+        hero_proto.SetLevel(1);
+        game.Armies().Add(hero_proto);
+
+        for (int idx = 0; idx < 5; ++idx) {
+            Army unit_proto;
+            unit_proto.SetOwner(SideId(0));
+            unit_proto.PlaceAt(TilePos(cap->X() + (idx % 2), cap->Y() + ((idx / 2) % 2)));
+            unit_proto.SetType(ArmyTypeId(2));
+            unit_proto.SetStrength(5);
+            unit_proto.SetMaxMoves(36);
+            unit_proto.SetMoves(36);
+            game.Armies().Add(unit_proto);
+        }
+
+        opponents::PlayTurn(game, wb_side, opponents::Kind::kWarband);
+        EXPECT_NE(dynamic_cast<const WarbandPlayer*>(wb_side.ComputerPlayer()), nullptr);
+        ASSERT_NE(ClassicAiPlayer::FindOn(wb_side), nullptr);
+        EXPECT_TRUE(ClassicAiPlayer::FindOn(wb_side)->IsFairFog());
+        EXPECT_LT(wb_side.Gold(), 1800);
+
+        int undefended_owned = 0;
+        for (const auto& city : game.GetMap().Cities()) {
+            if (city.IsRazed() || !city.OwnedBy(0)) continue;
+            int def_cnt = 0;
+            for (int dy = 0; dy <= 1; ++dy) {
+                for (int dx = 0; dx <= 1; ++dx) {
+                    for (Army* occ : game::ArmiesAt(game, city.X() + dx, city.Y() + dy)) {
+                        if (occ->OwnedBy(0)) def_cnt++;
+                    }
+                }
+            }
+            if (def_cnt == 0) undefended_owned++;
+        }
+        EXPECT_EQ(undefended_owned, 0);
     }
 }
 

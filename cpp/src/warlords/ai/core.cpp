@@ -38,6 +38,13 @@ bool IsComputer(const Game& game, int index) {
     return game.GetMap().Sides()[index].IsComputerControlled();
 }
 
+bool IsFairClassicActive(const Game& game, int side_index) {
+    if (!game.HasMap() || game.GetMap().GameOptions().hidden_map == 0) return false;
+    if (side_index < 0 || side_index >= 8) return false;
+    const ClassicAiPlayer* classic = ClassicAiPlayer::FindOn(game.GetMap().Sides()[side_index]);
+    return classic != nullptr && classic->IsFairFog();
+}
+
 int State(const Game& game, int side_index, int other_index) {
     if (side_index == kNeutral || other_index == kNeutral || side_index == kNone ||
         other_index == kNone)
@@ -497,6 +504,12 @@ std::tuple<int, int, int> CityDistance(const Game& game, const Flood& flood, con
 int Odds(Game& game, const Sel& sel, int x, int y) {
     if (sel.armies.empty()) return 0;
     int owner = sel.armies[0]->OwnerIndex();
+    if (IsFairClassicActive(game, owner) && game.GetMap().GameOptions().view_enemies == 0) {
+        if (Side* viewer = game.GetMap().SideAt(owner)) {
+            float prob = belief::EstimateCombat(game, *viewer, sel.armies, x, y).win_prob;
+            return static_cast<int>(std::lround(100.0F * prob));
+        }
+    }
     int rounds = owner != kNone ? Data(game, owner).sims : 10;
     if (rounds < 1) rounds = 1;
     combat::Lines lines = combat::BattleLines(game, sel.armies, x, y);

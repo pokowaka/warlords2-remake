@@ -93,6 +93,8 @@ class ClassicAiPlayer final : public IClassicBackedPlayer {
     SharedNeighbours NeighbourTable() const { return neighbours_; }
     void SetNeighbourTable(SharedNeighbours neighbours) { neighbours_ = std::move(neighbours); }
     void BindRegistry(const ArmyRegistry* registry) { registry_ = registry; }
+    void SetFairFog(bool enabled) { fair_fog_ = enabled; }
+    bool IsFairFog() const { return fair_fog_; }
 
     /** @brief Returns (installing if absent) the `ClassicAiPlayer` on `side`. */
     static ClassicAiPlayer& EnsureOn(Game& game, Side& side);
@@ -108,6 +110,7 @@ class ClassicAiPlayer final : public IClassicBackedPlayer {
     std::optional<SideBelief> inspection_belief_;  ///< Optional belief for F10 Brain Inspector.
     SharedNeighbours neighbours_;                  ///< Shared initial 6-nearest-city table.
     const ArmyRegistry* registry_ = nullptr;  ///< Non-owning active army registry for save slots.
+    bool fair_fog_ = false;                   ///< Masks hidden-map fog omniscience when true.
 };
 
 }  // namespace w2

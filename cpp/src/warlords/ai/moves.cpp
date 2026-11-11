@@ -306,9 +306,35 @@ ScanResult Scan(Game& game, Side& side, Army* explorer, const Sel& sel) {
  */
 std::pair<int, int> UnseenCity(Game& game, Side& side, Army* flier) {
     AIData& data = Data(game, side);
+    Map& map = game.GetMap();
+    if (IsFairClassicActive(game, side.Index())) {
+        int best_x = kNone;
+        int best_y = kNone;
+        int best_dist = kNone;
+        const int min_x = std::max(1, map.ActiveX0());
+        const int max_x = std::min(map.Width() - 2, map.ActiveX1());
+        const int min_y = std::max(1, map.ActiveY0());
+        const int max_y = std::min(map.Height() - 2, map.ActiveY1());
+        for (int ty = min_y; ty <= max_y; ty += 3) {
+            for (int tx = min_x; tx <= max_x; tx += 3) {
+                if (game::Seen(game, side.Index(), tx, ty)) continue;
+                bool touches_seen = game::Seen(game, side.Index(), tx - 1, ty) ||
+                                    game::Seen(game, side.Index(), tx + 1, ty) ||
+                                    game::Seen(game, side.Index(), tx, ty - 1) ||
+                                    game::Seen(game, side.Index(), tx, ty + 1);
+                if (!touches_seen) continue;
+                int dist = Dist(tx, ty, flier->X(), flier->Y()) + game.GetRng().Dice(1, 10, 0);
+                if (best_dist == kNone || dist < best_dist) {
+                    best_dist = dist;
+                    best_x = tx;
+                    best_y = ty;
+                }
+            }
+        }
+        return {best_x, best_y};
+    }
     City* best = nullptr;
     int best_distance = kNone;
-    Map& map = game.GetMap();
     for (int i = map.CityCount() - 1; i >= 0; i--) {
         City& city = map.Cities()[i];
         if (Standing(city) && Cflag(data, city, kCfUnseen)) {

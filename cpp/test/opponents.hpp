@@ -95,6 +95,21 @@ class WardenPlayer final : public ClassicDecoratorPlayer {
 };
 
 /**
+ * @brief Fair-fog human-style sparring `IComputerPlayer` that buys elite citadel slots, rallies
+ * blessed Hero-led multi-unit warbands, and holds `>= 1` garrison defender in every owned city.
+ *
+ * Not thread-safe without external synchronization.
+ */
+class WarbandPlayer final : public ClassicDecoratorPlayer {
+  public:
+    explicit WarbandPlayer(SharedClassicPlayer base);
+    WarbandPlayer(Game& game, Side& side);
+
+    void PlayTurn(Game& game, Side& side, IAiTurnEvents* events = nullptr) override;
+    nlohmann::ordered_json SaveState() const override;
+};
+
+/**
  * @brief Modern-backed `IComputerPlayer` pinned to an immutable `PolicyNetwork` checkpoint.
  *
  * Maintains its own `ModernMlPlayer` belief and grudge memory while always evaluating decisions
@@ -135,10 +150,12 @@ namespace opponents {
 
 /** @brief Opponent personality selector used by training and evaluation harnesses. */
 enum class Kind {
-    kClassic,  ///< Unmodified 1993 `ClassicAiPlayer`.
-    kRaider,   ///< `RaiderPlayer` pre-phase over `ClassicAiPlayer`.
-    kFrozen,   ///< `FrozenPlayer` running a fixed `PolicyNetwork` checkpoint.
-    kWarden,   ///< `WardenPlayer` post-phase garrisoning cities after `ClassicAiPlayer`.
+    kClassic,      ///< Unmodified 1993 `ClassicAiPlayer`.
+    kFairClassic,  ///< `ClassicAiPlayer` with hidden-map fog omniscience masked.
+    kRaider,       ///< `RaiderPlayer` pre-phase over `ClassicAiPlayer`.
+    kFrozen,       ///< `FrozenPlayer` running a fixed `PolicyNetwork` checkpoint.
+    kWarden,       ///< `WardenPlayer` post-phase garrisoning cities after `ClassicAiPlayer`.
+    kWarband,      ///< Fair-fog `WarbandPlayer` (citadel slots + Hero warband + city garrisons).
 };
 
 /**
@@ -157,16 +174,25 @@ void PlayTurn(Game& game, Side& side, Kind kind, const ai::ml::PolicyNetwork* fr
 /**
  * @brief Executes only the Raider's pre-phase, marching cheap units into reachable undefended
  * enemy cities.
+ * @param fair_fog When true under Hidden Map, ignores unexplored cities.
  * @return Number of enemy cities captured during the raid pass.
  */
-int RaidEmptyCities(Game& game, Side& side);
+int RaidEmptyCities(Game& game, Side& side, bool fair_fog = false);
 
 /**
  * @brief Executes only the Warden's post-phase, garrisoning owned cities (1 defender, or 2 when
  * an enemy army is within 8 tiles).
+ * @param fair_fog When true under Hidden Map, counts only visible enemy threats.
  * @return Number of armies moved into cities.
  */
-int GarrisonCities(Game& game, Side& side);
+int GarrisonCities(Game& game, Side& side, bool fair_fog = false);
+
+/**
+ * @brief Executes the Warband pre-phase: elite citadel slot purchase, rear city vectoring,
+ * Hero warband rally, nearby temple blessing, and fair-odds concentrated siege.
+ * @return Number of armies rallied or marched in Hero warbands.
+ */
+int RunWarbandPrePhase(Game& game, Side& side);
 
 }  // namespace opponents
 }  // namespace w2

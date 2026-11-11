@@ -182,9 +182,13 @@ int main(int argc, char** argv) {
                                         : absl::GetFlag(FLAGS_modern_level);
     int modern_card = args.size() > 11 ? static_cast<int>(ToInt(args[11]).value_or(-1))
                                        : absl::GetFlag(FLAGS_modern_card);
-    opponents::Kind opponent = opponent_name == "raider"   ? opponents::Kind::kRaider
-                               : opponent_name == "warden" ? opponents::Kind::kWarden
-                                                           : opponents::Kind::kClassic;
+    opponents::Kind opponent = opponent_name == "raider"         ? opponents::Kind::kRaider
+                               : opponent_name == "warden"       ? opponents::Kind::kWarden
+                               : opponent_name == "warband"      ? opponents::Kind::kWarband
+                               : (opponent_name == "fair-classic" ||
+                                  opponent_name == "fair_classic")
+                                       ? opponents::Kind::kFairClassic
+                                       : opponents::Kind::kClassic;
     ai::ml::PolicyNetwork net;
     if (absl::Status status = net.LoadJson(weights); !status.ok()) {
         std::fprintf(stderr, "w2aidiag: %s\n", std::string(status.message()).c_str());
