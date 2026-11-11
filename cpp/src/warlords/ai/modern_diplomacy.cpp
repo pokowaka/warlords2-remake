@@ -347,6 +347,8 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         int grudge = 0;
         int truces_broken_by_rival = 0;
         int cities_razed_by_rival = 0;
+        int cities_lost_to_rival = 0;
+        int heroes_slain_by_rival = 0;
         float vendetta_score = 0.0F;
         if (const ModernMlPlayer* modern_player = ModernMlPlayer::FindOn(side)) {
             const ai::BattleGrudge& battle_grudge = modern_player->Grudge();
@@ -357,6 +359,9 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                      battle_grudge.lost[other_idx] * 2;
             truces_broken_by_rival = battle_grudge.truces_broken_by[other_idx];
             cities_razed_by_rival = battle_grudge.cities_razed_by[other_idx];
+            cities_lost_to_rival =
+                    battle_grudge.cities_lost[other_idx] + battle_grudge.cities_razed_by[other_idx];
+            heroes_slain_by_rival = battle_grudge.heroes_killed[other_idx];
             vendetta_score = ai::ComputeVendettaScore(battle_grudge, other_idx, game.Turn());
         } else if (const ClassicAiPlayer* classic_player = ClassicAiPlayer::FindOn(side)) {
             const AIData& data = classic_player->Data();
@@ -502,15 +507,43 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             missive.to_side = other_idx;
             missive.reason_summary = att.what_it_takes;
 
+            personality::CharacterDispatchContext dctx{};
+            dctx.actor_faction = side.Name();
+            dctx.target_faction = other.Name();
+            dctx.cities_lost = cities_lost_to_rival;
+            dctx.heroes_slain = heroes_slain_by_rival;
+
             if (best_choice == 0 && !cur_allied) {
                 send_missive = true;
                 missive.proposed_state = diplomacy::kPeace;
                 missive.propose_alliance = true;
                 missive.joint_war_target = diplomacy::WarTarget(game, our_side, other_idx);
-                missive.headline = absl::StrFormat("Envoy from %s (%s)", side.Name(), prof.name);
-                missive.body = absl::StrFormat(
-                        "\"%s\" We propose a full Military Alliance with shared vision!",
-                        prof.motto);
+                if (missive.joint_war_target >= 0 && missive.joint_war_target < 8) {
+                    dctx.third_faction = map.Sides()[missive.joint_war_target].Name();
+                    missive.headline = absl::StrFormat("Coalition Envoy from %s (%s)", side.Name(),
+                                                       prof.name);
+                    missive.body = personality::FormatCharacterDispatch(
+                            prof, personality::CharacterEvent::kCoalitionAlliance, dctx);
+                } else {
+                    missive.headline = absl::StrFormat("Envoy from %s (%s)", side.Name(),
+                                                       prof.name);
+                    missive.body = personality::FormatCharacterDispatch(
+                            prof, personality::CharacterEvent::kAllianceOffer, dctx);
+                }
+            } else if (best_choice == 3 && cur_st != diplomacy::kWar && use_doctrine) {
+                send_missive = true;
+                missive.proposed_state = diplomacy::kWar;
+                const bool is_vendetta =
+                        (vendetta_score >= 0.35F || truces_broken_by_rival > 0 ||
+                         cities_razed_by_rival > 0 || heroes_slain_by_rival > 0);
+                missive.headline = absl::StrFormat("%s from %s (%s)",
+                                                   is_vendetta ? "Blood Feud" : "War Herald",
+                                                   side.Name(), prof.name);
+                missive.body = personality::FormatCharacterDispatch(
+                        prof,
+                        is_vendetta ? personality::CharacterEvent::kVendettaWar
+                                    : personality::CharacterEvent::kBetrayalWar,
+                        dctx);
             } else if (best_choice == 2 && cur_st == diplomacy::kPeace &&
                        belief.their_border_strength[other_idx] > 6.0F) {
                 send_missive = true;
@@ -527,26 +560,37 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 missive.proposed_state = diplomacy::kPeace;
                 missive.gold_demand =
                         std::max(75, att.peace_gold_needed > 0 ? att.peace_gold_needed : 100);
+                dctx.gold_amount = missive.gold_demand;
                 missive.headline =
                         absl::StrFormat("Tribute Demand from %s (%s)", side.Name(), prof.name);
-                missive.body = absl::StrFormat(
-                        "\"%s\" Pay %d gold in tribute to preserve the peace between us!",
-                        prof.motto, missive.gold_demand);
+                missive.body = personality::FormatCharacterDispatch(
+                        prof, personality::CharacterEvent::kTributeDemand, dctx);
             } else if (best_choice == 1 && cur_st == diplomacy::kWar) {
                 send_missive = true;
                 missive.proposed_state = diplomacy::kPeace;
                 int offered = diplomacy::GoldOffer(game, our_side, other_idx);
                 missive.gold_demand = -offered;
+                dctx.gold_amount = offered;
                 missive.headline =
                         absl::StrFormat("Peace Envoy from %s (%s)", side.Name(), prof.name);
-                missive.body = offered > 0 ? absl::StrFormat(
-                                                     "We offer %d gold and a 10-turn truce to end "
-                                                     "this war.",
-                                                     offered)
-                                           : "Let us lay down arms and sign a 10-turn truce.";
+                missive.body = personality::FormatCharacterDispatch(
+                        prof, personality::CharacterEvent::kPeacePlea, dctx);
             }
 
             if (send_missive) {
+                if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                    if (game.Turn() - modern_player->LastHeraldTurn() >= 3) {
+                        game.AppendLog("[Herald] " + missive.headline + ": " + missive.body);
+                        modern_player->SetLastHeraldTurn(game.Turn());
+                    }
+                    if (ml::RecordThoughts()) {
+                        TilePos side_cap = side.OriginCapitalPos();
+                        TilePos other_cap = other.OriginCapitalPos();
+                        modern_player->PushThought(AIThought{
+                            "Character", prof.name, other.Name(), side_cap.x, side_cap.y,
+                            other_cap.x, other_cap.y, best_logit, 1.0F, false, missive.body});
+                    }
+                }
                 other.AddMissive(std::move(missive));
                 other.SetLastMissiveTurn(SideId(our_side), game.Turn());
             }

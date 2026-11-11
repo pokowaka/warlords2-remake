@@ -13,6 +13,7 @@
 #include "warlords/ai/core.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/modern_internal.hpp"
+#include "warlords/ai/modern_ml_player.hpp"
 #include "warlords/ai/personality.hpp"
 #include "warlords/combat.hpp"
 #include "warlords/diplomacy.hpp"
@@ -108,18 +109,65 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
     }
 
     int best_mode = modes[pick];
+    auto emit_spoil_herald = [&](personality::CharacterEvent ev_kind, int gold_val) {
+        if (!policy.PersonaActive() || (sampler && sampler->current_turn)) return;
+        const bool has_human = game::HasActiveHuman(game);
+        const bool want_thoughts = ml::RecordThoughts();
+        if (!has_human && !want_thoughts) return;
+        ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side);
+        if (!modern_player) return;
+        const auto& prof = personality::ForSide(side);
+        personality::CharacterDispatchContext dctx{};
+        dctx.actor_faction = side.Name();
+        dctx.city_name = city.Name();
+        dctx.gold_amount = gold_val;
+        std::string msg = personality::FormatCharacterDispatch(prof, ev_kind, dctx);
+        if (has_human && game.Turn() - modern_player->LastHeraldTurn() >= 3) {
+            game.AppendLog("[Herald] " + msg);
+            modern_player->SetLastHeraldTurn(game.Turn());
+        }
+        if (want_thoughts) {
+            modern_player->PushThought(AIThought{"Character", prof.name, city.Name(), city.X(),
+                                                 city.Y(), city.X(), city.Y(), scores[pick], 1.0F,
+                                                 false, msg});
+        }
+    };
     if (best_mode == 1) {
-        game::Pillage(game, side, city, attackers);
+        game::Spoils spoils = game::Pillage(game, side, city, attackers);
+        emit_spoil_herald(personality::CharacterEvent::kCityPillaged, spoils.gold);
         if (IAiTurnEvents* events = game.ActiveAiEvents()) {
             (void)events->OnSpoils(game, side, city, "pillaged");
         }
     } else if (best_mode == 2) {
-        game::Sack(game, side, city, attackers);
+        game::Spoils spoils = game::Sack(game, side, city, attackers);
+        emit_spoil_herald(personality::CharacterEvent::kCityPillaged, spoils.gold);
         if (IAiTurnEvents* events = game.ActiveAiEvents()) {
             (void)events->OnSpoils(game, side, city, "sacked");
         }
     } else if (best_mode == 3) {
+        std::string razed_name = city.Name();
         game::Raze(game, side, city, attackers);
+        if (policy.PersonaActive() && !(sampler && sampler->current_turn) &&
+            (game::HasActiveHuman(game) || ml::RecordThoughts())) {
+            if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                const auto& prof = personality::ForSide(side);
+                personality::CharacterDispatchContext dctx{};
+                dctx.actor_faction = side.Name();
+                dctx.city_name = razed_name;
+                std::string msg = personality::FormatCharacterDispatch(
+                        prof, personality::CharacterEvent::kCityRazed, dctx);
+                if (game::HasActiveHuman(game) &&
+                    game.Turn() - modern_player->LastHeraldTurn() >= 3) {
+                    game.AppendLog("[Herald] " + msg);
+                    modern_player->SetLastHeraldTurn(game.Turn());
+                }
+                if (ml::RecordThoughts()) {
+                    modern_player->PushThought(AIThought{"Character", prof.name, razed_name,
+                                                         city.X(), city.Y(), city.X(), city.Y(),
+                                                         scores[pick], 1.0F, false, msg});
+                }
+            }
+        }
         if (IAiTurnEvents* events = game.ActiveAiEvents()) {
             (void)events->OnSpoils(game, side, city, "razed");
         }
@@ -428,6 +476,31 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             belief::RecordBattleObservation(game, our_side, attack_x, attack_y);
             if (att_city && att_city->OwnerIndex() == our_side && prev_owner != our_side &&
                 !comb_sel.armies.empty()) {
+                if (prev_owner >= 0 && prev_owner < 8 &&
+                    map.Sides()[prev_owner].CapitalCity(map) == att_city &&
+                    policy.PersonaActive() && !(sampler && sampler->current_turn) &&
+                    (game::HasActiveHuman(game) || ml::RecordThoughts())) {
+                    if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                        const auto& prof = personality::ForSide(side);
+                        personality::CharacterDispatchContext dctx{};
+                        dctx.actor_faction = side.Name();
+                        dctx.target_faction = map.Sides()[prev_owner].Name();
+                        dctx.city_name = att_city->Name();
+                        std::string msg = personality::FormatCharacterDispatch(
+                                prof, personality::CharacterEvent::kCapitalCaptured, dctx);
+                        if (game::HasActiveHuman(game) &&
+                            game.Turn() - modern_player->LastHeraldTurn() >= 3) {
+                            game.AppendLog("[Herald] " + msg);
+                            modern_player->SetLastHeraldTurn(game.Turn());
+                        }
+                        if (ml::RecordThoughts()) {
+                            modern_player->PushThought(AIThought{
+                                "Character", prof.name, att_city->Name(), att_city->X(),
+                                att_city->Y(), att_city->X(), att_city->Y(), 1.0F, 1.0F, false,
+                                msg});
+                        }
+                    }
+                }
                 DecideCaptureSpoils(game, side, *att_city, comb_sel.armies, policy, ctx, sampler);
             }
             sel = comb_sel;

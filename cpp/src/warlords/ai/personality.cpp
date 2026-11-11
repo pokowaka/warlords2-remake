@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "absl/strings/str_format.h"
+
 namespace w2::ai::personality {
 
 namespace {
@@ -450,6 +452,83 @@ void ApplySpoilsCharacterPrior(const Profile& profile, float local_threat, int c
             }
         }
     }
+}
+
+std::string FormatCharacterDispatch(const Profile& profile, CharacterEvent event,
+                                    const CharacterDispatchContext& ctx) {
+    const std::string actor = ctx.actor_faction.empty() ? profile.name : ctx.actor_faction;
+    const std::string target = ctx.target_faction.empty() ? "your realm" : ctx.target_faction;
+    const std::string third = ctx.third_faction.empty() ? "the hegemon" : ctx.third_faction;
+    const std::string city = ctx.city_name.empty() ? "this stronghold" : ctx.city_name;
+    const float hon = profile.traits[kHonour];
+
+    switch (event) {
+    case CharacterEvent::kVendettaWar:
+        if (ctx.heroes_slain > 0 && ctx.cities_lost > 0) {
+            return absl::StrFormat(
+                    "\"%s\" %s slew %d of our champions and seized %d of our cities—%s answers "
+                    "with war without quarter!",
+                    profile.motto, target, ctx.heroes_slain, ctx.cities_lost, profile.name);
+        }
+        if (ctx.heroes_slain > 0) {
+            return absl::StrFormat(
+                    "\"%s\" %s cut down our Hero in battle—%s marches for vengeance!",
+                    profile.motto, target, profile.name);
+        }
+        if (hon > 0.35F) {
+            return absl::StrFormat(
+                    "\"%s\" %s wronged our realm (%d cities lost); %s draws the sword in "
+                    "righteous retribution!",
+                    profile.motto, target, std::max(1, ctx.cities_lost), profile.name);
+        }
+        return absl::StrFormat("\"%s\" %s shall pay in steel for wronging %s!", profile.motto,
+                               target, actor);
+
+    case CharacterEvent::kBetrayalWar:
+        return absl::StrFormat(
+                "\"%s\" Parchment truces bind only the weak, %s—your frontier lies open to %s!",
+                profile.motto, target, profile.name);
+
+    case CharacterEvent::kCoalitionAlliance:
+        return absl::StrFormat(
+                "\"%s\" %s grows too mighty! Forge a Military Alliance with %s and join our war "
+                "against %s!",
+                profile.motto, third, actor, third);
+
+    case CharacterEvent::kAllianceOffer:
+        return absl::StrFormat(
+                "\"%s\" %s (%s) proposes a full Military Alliance with %s and shared vision.",
+                profile.motto, actor, profile.name, target);
+
+    case CharacterEvent::kTributeDemand:
+        return absl::StrFormat(
+                "\"%s\" Yield %d gold in tribute to %s, %s, lest our hosts collect it from your "
+                "walls!",
+                profile.motto, std::max(50, ctx.gold_amount), profile.name, target);
+
+    case CharacterEvent::kPeacePlea:
+        if (ctx.gold_amount > 0) {
+            return absl::StrFormat(
+                    "\"%s\" %s offers %d gold and a 10-turn truce to end this war with %s.",
+                    profile.motto, profile.name, ctx.gold_amount, target);
+        }
+        return absl::StrFormat(
+                "\"%s\" Let %s and %s lay down arms and sign a 10-turn truce.", profile.motto,
+                actor, target);
+
+    case CharacterEvent::kCityRazed:
+        return absl::StrFormat("%s (%s) burns %s to ashes! \"%s\"", actor, profile.name, city,
+                               profile.motto);
+
+    case CharacterEvent::kCityPillaged:
+        return absl::StrFormat("%s (%s) plunders %d gold from %s! \"%s\"", actor, profile.name,
+                               std::max(1, ctx.gold_amount), city, profile.motto);
+
+    case CharacterEvent::kCapitalCaptured:
+        return absl::StrFormat("%s (%s) storms the capital of %s at %s! \"%s\"", actor,
+                               profile.name, target, city, profile.motto);
+    }
+    return profile.motto;
 }
 
 }  // namespace w2::ai::personality

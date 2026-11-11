@@ -1784,5 +1784,78 @@ TEST(ModernAiTest, CharacterSignatureUnitRostersSpoilsAndHeroQuestPriors) {
     EXPECT_GT(pers::ScoreMissionCharacterPrior(roger, ruin_ctx), 0.10F);
 }
 
+TEST(ModernAiTest, CharacterHeraldVoiceDispatchesMissivesAndLogsEvents) {
+    namespace pers = ai::personality;
+
+    const pers::Profile& raymond = pers::ProfileFor(1, 3);  // Raymond Ratsbane
+    const pers::Profile& nikolas = pers::ProfileFor(2, 4);  // Nikolas the Nefarious
+    const pers::Profile& william = pers::ProfileFor(2, 8);  // William the Wily
+    const pers::Profile& roland = pers::ProfileFor(1, 2);   // Roland the Rabid
+
+    pers::CharacterDispatchContext feud_ctx{};
+    feud_ctx.actor_faction = "Lord Bane";
+    feud_ctx.target_faction = "Sirians";
+    feud_ctx.cities_lost = 2;
+    feud_ctx.heroes_slain = 1;
+    std::string feud_msg =
+            pers::FormatCharacterDispatch(raymond, pers::CharacterEvent::kVendettaWar, feud_ctx);
+    EXPECT_NE(feud_msg.find("Sirians"), std::string::npos);
+    EXPECT_NE(feud_msg.find("hunt your throne"), std::string::npos);
+
+    pers::CharacterDispatchContext stab_ctx{};
+    stab_ctx.actor_faction = "Darkness";
+    stab_ctx.target_faction = "Elvallie";
+    std::string stab_msg =
+            pers::FormatCharacterDispatch(nikolas, pers::CharacterEvent::kBetrayalWar, stab_ctx);
+    EXPECT_NE(stab_msg.find("Elvallie"), std::string::npos);
+    EXPECT_NE(stab_msg.find("masks"), std::string::npos);
+
+    pers::CharacterDispatchContext coal_ctx{};
+    coal_ctx.actor_faction = "Grey";
+    coal_ctx.target_faction = "Sirians";
+    coal_ctx.third_faction = "Storm Giants";
+    std::string coal_msg = pers::FormatCharacterDispatch(
+            william, pers::CharacterEvent::kCoalitionAlliance, coal_ctx);
+    EXPECT_NE(coal_msg.find("Storm Giants"), std::string::npos);
+
+    pers::CharacterDispatchContext raze_ctx{};
+    raze_ctx.actor_faction = "Orcs of Kor";
+    raze_ctx.city_name = "Marthos";
+    std::string raze_msg =
+            pers::FormatCharacterDispatch(roland, pers::CharacterEvent::kCityRazed, raze_ctx);
+    EXPECT_NE(raze_msg.find("Marthos"), std::string::npos);
+    EXPECT_NE(raze_msg.find("Ashes"), std::string::npos);
+
+    // Live human-player game: Raymond Ratsbane sends a Vendetta War missive & herald log entry
+    auto game_ptr = SetupGame("ERYTHEA", SeedWith(777, {{"hiddenMap", 0}, {"diplomacy", 1}}));
+    Game& game = *game_ptr;
+    game.SetTurn(6);
+    Side& ai_side = game.GetMap().Sides()[0];
+    Side& human_side = game.GetMap().Sides()[1];
+    ai_side.SetComputerControlled(true);
+    ai_side.SetLevel(1);
+    ai_side.SetCard(3);  // Raymond Ratsbane
+    ai::SetSideClassicAi(game, ai_side, false);
+    human_side.SetComputerControlled(false);
+
+    ModernMlPlayer& ai_player = ModernMlPlayer::EnsureOn(ai_side);
+    ai_player.MutableGrudge().heroes_killed[1] = 1;
+    ai_player.MutableGrudge().cities_razed_by[1] = 1;
+    ai_player.MutableGrudge().last_grudge_turn[1] = 5;
+
+    ai::ml::PolicyNetwork net;
+    net.Zero();
+    net.SetUsePersonalities(true);
+    human_side.ClearMissives();
+    game.ClearLog();
+    ai::modern::PlayTurn(game, ai_side, nullptr, &net, nullptr);
+
+    ASSERT_FALSE(human_side.Missives().empty());
+    const DiplomaticMissive& missive = human_side.Missives().front();
+    EXPECT_EQ(missive.proposed_state, diplomacy::kWar);
+    EXPECT_NE(missive.headline.find("Raymond Ratsbane"), std::string::npos);
+    EXPECT_FALSE(game.Log().empty());
+}
+
 }  // namespace
 }  // namespace w2

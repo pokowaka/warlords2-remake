@@ -92,6 +92,8 @@ class ModernMlPlayer final : public IModernBackedPlayer {
     }
     const ai::BattleGrudge& Grudge() const { return grudge_; }
     ai::BattleGrudge& MutableGrudge() { return grudge_; }
+    int LastHeraldTurn() const { return last_herald_turn_; }
+    void SetLastHeraldTurn(int turn) { last_herald_turn_ = turn; }
 
     /** @brief Returns (installing if absent) the `ModernMlPlayer` on `side`. */
     static ModernMlPlayer& EnsureOn(Side& side);
@@ -112,6 +114,7 @@ class ModernMlPlayer final : public IModernBackedPlayer {
     ai::ml::RolloutSampler* sampler_ = nullptr;             ///< Optional rollout sampler.
     ai::ml::TurnStepRecord* pending_off_turn_ = nullptr;    ///< Off-turn RL credit sink.
     float off_turn_repel_weight_ = 0.5F;                    ///< Saved-city siege repel weight.
+    int last_herald_turn_ = 0;                              ///< Last round a herald log fired.
 };
 
 }  // namespace w2

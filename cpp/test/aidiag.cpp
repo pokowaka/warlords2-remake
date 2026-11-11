@@ -13,11 +13,15 @@
 // Run from the repository root, so that original/ is found.
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <string>
+#include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -27,8 +31,11 @@
 #include "opponents.hpp"
 #include "util/util.hpp"
 #include "warlords/ai.hpp"
+#include "warlords/ai/attitude.hpp"
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/ai/modern_ai.hpp"
+#include "warlords/ai/modern_ml_player.hpp"
+#include "warlords/ai/personality.hpp"
 #include "warlords/combat.hpp"
 #include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
@@ -47,6 +54,10 @@ ABSL_FLAG(int, diplomacy, 0, "Diplomacy option (0 or 1).");
 ABSL_FLAG(std::string, opponent, "classic", "Opponent personality: classic, raider, or warden.");
 ABSL_FLAG(int, modern_level, -1, "Modern AI difficulty level override (-1 = default).");
 ABSL_FLAG(int, modern_card, -1, "Modern AI ruler personality card override (-1 = default).");
+ABSL_FLAG(bool, card_matrix, false,
+          "Run parallel 27-card behavioral fingerprint matrix across Knights, Lords, and Warlords.");
+ABSL_FLAG(int, matrix_seeds, 8, "Number of games per card in --card-matrix mode.");
+ABSL_FLAG(int, threads, 0, "Worker thread count for --card-matrix (0 = hardware_concurrency).");
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
@@ -111,6 +122,299 @@ class DiagTurnEvents final : public IAiTurnEvents {
     std::array<std::array<long, 3>, 2>& battle_wins_;
     float& last_true_odds_;
 };
+
+struct CardStats {
+    double city_share_sum = 0.0;
+    long games = 0;
+    long prod_total = 0;
+    long prod_cav = 0;
+    long prod_fly = 0;
+    long prod_heavy = 0;
+    long captures = 0;
+    long pillage_or_sack = 0;
+    long razed = 0;
+    long city_turns = 0;
+    long garrisoned_turns = 0;
+    long battles_total = 0;
+    long battles_4plus = 0;
+    long side_turns = 0;
+    long gold_sum = 0;
+    long diplo_pairs = 0;
+    long ally_pairs = 0;
+    long war_pairs = 0;
+    long vendetta_wars = 0;
+    long blessed_and_items = 0;
+
+    void MergeFrom(const CardStats& other) {
+        city_share_sum += other.city_share_sum;
+        games += other.games;
+        prod_total += other.prod_total;
+        prod_cav += other.prod_cav;
+        prod_fly += other.prod_fly;
+        prod_heavy += other.prod_heavy;
+        captures += other.captures;
+        pillage_or_sack += other.pillage_or_sack;
+        razed += other.razed;
+        city_turns += other.city_turns;
+        garrisoned_turns += other.garrisoned_turns;
+        battles_total += other.battles_total;
+        battles_4plus += other.battles_4plus;
+        side_turns += other.side_turns;
+        gold_sum += other.gold_sum;
+        diplo_pairs += other.diplo_pairs;
+        ally_pairs += other.ally_pairs;
+        war_pairs += other.war_pairs;
+        vendetta_wars += other.vendetta_wars;
+        blessed_and_items += other.blessed_and_items;
+    }
+};
+
+class MatrixTurnEvents final : public IAiTurnEvents {
+  public:
+    MatrixTurnEvents(const std::array<bool, 8>& is_modern, CardStats& stats)
+            : is_modern_(is_modern), stats_(stats) {}
+
+    bool OnFight(Game& /*game*/, const ArmyStack& /*attackers*/, int /*pos_x*/, int /*pos_y*/,
+                 Battle& result) override {
+        size_t atk_count = result.attackers.size() + result.dead_attackers.size();
+        const Army* lead = !result.attackers.empty()
+                                   ? result.attackers[0]
+                                   : (!result.dead_attackers.empty() ? result.dead_attackers[0]
+                                                                     : nullptr);
+        if (lead && lead->OwnerIndex() >= 0 && lead->OwnerIndex() < 8 &&
+            is_modern_[static_cast<size_t>(lead->OwnerIndex())]) {
+            stats_.battles_total++;
+            if (atk_count >= 4) stats_.battles_4plus++;
+        }
+        return true;
+    }
+
+    bool OnSpoils(Game& /*game*/, Side& side, City& /*city*/, std::string_view action) override {
+        if (side.Index() >= 0 && side.Index() < 8 &&
+            is_modern_[static_cast<size_t>(side.Index())]) {
+            if (action == "pillaged" || action == "sacked") stats_.pillage_or_sack++;
+            if (action == "razed") stats_.razed++;
+        }
+        return true;
+    }
+
+  private:
+    const std::array<bool, 8>& is_modern_;
+    CardStats& stats_;
+};
+
+int RunCardMatrix(const std::string& data_dir, const ai::ml::PolicyNetwork& net, int turns,
+                  int games_per_card, opponents::Kind opponent, unsigned int num_threads) {
+    ai::ml::SetRecordThoughts(false);
+    constexpr std::array<std::string_view, 2> kMatrixScenarios{"ERYTHEA", "HADESHA"};
+    struct MatrixJob {
+        int card_flat = 0;
+        int level = 0;
+        int card = 0;
+        int game_idx = 0;
+        CardStats result{};
+    };
+    std::vector<MatrixJob> jobs;
+    jobs.reserve(static_cast<size_t>(27 * games_per_card));
+    for (int level = 0; level < 3; ++level) {
+        for (int card = 0; card < 9; ++card) {
+            for (int game_idx = 0; game_idx < games_per_card; ++game_idx) {
+                jobs.push_back(MatrixJob{level * 9 + card, level, card, game_idx, {}});
+            }
+        }
+    }
+
+    std::atomic<size_t> next_job{0};
+    std::vector<std::thread> workers;
+    workers.reserve(num_threads);
+    for (unsigned int tid = 0; tid < num_threads; ++tid) {
+        workers.emplace_back([&]() {
+            while (true) {
+                size_t job_idx = next_job.fetch_add(1);
+                if (job_idx >= jobs.size()) break;
+                MatrixJob& job = jobs[job_idx];
+                std::string scen(kMatrixScenarios[static_cast<size_t>(job.game_idx % 2)]);
+                int diplo_opt = (job.game_idx % 4 < 2) ? 1 : 0;
+                int hidden_opt = (job.game_idx % 4 >= 1 && job.game_idx % 4 <= 2) ? 1 : 0;
+                int parity = (job.game_idx / 4) % 2;
+                int seed_val = 750101 + (job.game_idx / 2) * 17;
+
+                game::NewGameOptions gopts;
+                gopts.seed = seed_val;
+                gopts.active_sides = 8;
+                gopts.options = {{"hiddenMap", hidden_opt},
+                                 {"viewEnemies", 0},
+                                 {"diplomacy", diplo_opt},
+                                 {"neutralCities", 1},
+                                 {"quests", 1}};
+                for (int side_i = 0; side_i < 8; ++side_i) {
+                    gopts.sides[side_i].computer = true;
+                    gopts.sides[side_i].level = 2;
+                    gopts.sides[side_i].card = (seed_val + side_i * 5) % 9;
+                }
+                auto created = game::NewGame(data_dir, scen, gopts);
+                if (!created.ok()) continue;
+                Game& game = **created;
+
+                std::array<bool, 8> is_mod{};
+                int seat = 0;
+                for (int side_i = 0; side_i < 8; ++side_i) {
+                    Side& side_ref = game.GetMap().Sides()[side_i];
+                    if (!side_ref.InUse()) continue;
+                    is_mod[static_cast<size_t>(side_i)] = ((seat + parity) % 2 == 0);
+                    seat++;
+                    if (is_mod[static_cast<size_t>(side_i)]) {
+                        side_ref.SetLevel(job.level);
+                        side_ref.SetCard(job.card);
+                        ai::SetSideClassicAi(game, side_ref, false);
+                    } else {
+                        opponents::InstallOpponent(game, side_ref, opponent);
+                    }
+                }
+
+                CardStats& stats = job.result;
+                MatrixTurnEvents turn_events(is_mod, stats);
+                Side* cur = game::Begin(game);
+                int safety = 0;
+                while (cur && !game.IsOver() && !game.IsWon() && game.Turn() <= turns &&
+                       safety++ < turns * 12) {
+                    std::vector<int> prev_owners(game.GetMap().Cities().size(), kNone);
+                    for (size_t ci = 0; ci < game.GetMap().Cities().size(); ++ci) {
+                        prev_owners[ci] = game.GetMap().Cities()[ci].OwnerIndex();
+                    }
+                    const int mover = cur->Index();
+                    if (cur->IsAlive()) {
+                        if (is_mod[static_cast<size_t>(mover)]) {
+                            ai::modern::PlayTurn(game, *cur, &turn_events, &net, nullptr);
+                            stats.side_turns++;
+                            stats.gold_sum += cur->Gold();
+                            if (diplo_opt != 0) {
+                                const ModernMlPlayer* mod_player = ModernMlPlayer::FindOn(*cur);
+                                for (int oth = 0; oth < 8; ++oth) {
+                                    const Side& oth_side = game.GetMap().Sides()[oth];
+                                    if (oth == mover || !oth_side.InUse() || !oth_side.IsAlive()) {
+                                        continue;
+                                    }
+                                    stats.diplo_pairs++;
+                                    if (diplomacy::IsAllied(game, mover, oth)) stats.ally_pairs++;
+                                    if (diplomacy::State(game, mover, oth) == diplomacy::kWar) {
+                                        stats.war_pairs++;
+                                        if (mod_player &&
+                                            ai::ComputeVendettaScore(mod_player->Grudge(), oth,
+                                                                     game.Turn()) >= 0.30F) {
+                                            stats.vendetta_wars++;
+                                        }
+                                    }
+                                }
+                            }
+                            for (const City& city : game.GetMap().Cities()) {
+                                if (city.IsRazed() || !city.OwnedBy(cur->Id())) continue;
+                                stats.city_turns++;
+                                int defs = 0;
+                                for (int dy = 0; dy <= 1; ++dy) {
+                                    for (int dx = 0; dx <= 1; ++dx) {
+                                        for (Army* occ :
+                                             game::ArmiesOnTileSpan(game, city.X() + dx,
+                                                                    city.Y() + dy)) {
+                                            if (occ->OwnedBy(cur->Id())) defs++;
+                                        }
+                                    }
+                                }
+                                if (defs > 0) stats.garrisoned_turns++;
+                                if (city.ProducingSlot() >= 0 &&
+                                    city.ProducingSlot() < city.SlotCount()) {
+                                    const Slot& slot =
+                                            city.SlotAt(static_cast<size_t>(city.ProducingSlot()));
+                                    const ArmyType* atype = game.ArmyTypes().ById(slot.type);
+                                    bool flies = atype && atype->flies;
+                                    bool heavy = (atype && (atype->siege || atype->IsMagical())) ||
+                                                 slot.strength >= 7;
+                                    bool cav = (slot.move >= 14 && !flies);
+                                    stats.prod_total++;
+                                    if (cav) stats.prod_cav++;
+                                    if (flies) stats.prod_fly++;
+                                    if (heavy) stats.prod_heavy++;
+                                }
+                            }
+                        } else {
+                            opponents::PlayTurn(game, *cur, opponent, nullptr, &turn_events);
+                        }
+                    }
+                    if (mover >= 0 && mover < 8 && is_mod[static_cast<size_t>(mover)]) {
+                        for (size_t ci = 0; ci < game.GetMap().Cities().size(); ++ci) {
+                            const City& city = game.GetMap().Cities()[ci];
+                            if (!city.IsRazed() && city.OwnerIndex() == mover &&
+                                prev_owners[ci] != mover) {
+                                stats.captures++;
+                            }
+                        }
+                    }
+                    cur = game::EndTurn(game);
+                }
+
+                int mod_cities = 0;
+                int all_cities = 0;
+                for (const City& city : game.GetMap().Cities()) {
+                    if (city.IsRazed() || city.IsNeutral()) continue;
+                    int own = city.OwnerIndex();
+                    if (own >= 0 && own < 8) {
+                        all_cities++;
+                        if (is_mod[static_cast<size_t>(own)]) mod_cities++;
+                    }
+                }
+                stats.city_share_sum +=
+                        all_cities > 0 ? static_cast<double>(mod_cities) / all_cities : 0.5;
+                stats.games = 1;
+                for (const Army* army : game.Armies()) {
+                    int own = army->OwnerIndex();
+                    if (own < 0 || own >= 8 || !is_mod[static_cast<size_t>(own)] ||
+                        army->IsDisbanded()) {
+                        continue;
+                    }
+                    if (!army->Blessings().empty()) stats.blessed_and_items++;
+                    stats.blessed_and_items += static_cast<long>(army->Items().size());
+                }
+            }
+        });
+    }
+    for (auto& worker : workers) worker.join();
+
+    std::array<CardStats, 27> agg{};
+    for (const MatrixJob& job : jobs) {
+        agg[static_cast<size_t>(job.card_flat)].MergeFrom(job.result);
+    }
+
+    const char* tier_names[3] = {"Knight", "Lord", "Warlord"};
+    std::printf(
+            "| Tier | Card | Archetype | Share%% | Cav%% | Fly%% | Heavy%% | Plunder/Raze | "
+            "Garr%% | 4+Atk%% | Gold | Ally/War%% | QuestPts |\n");
+    std::printf(
+            "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n");
+
+    auto pct = [](long num, long den) {
+        return 100.0 * static_cast<double>(num) / static_cast<double>(std::max(1L, den));
+    };
+    for (int level = 0; level < 3; ++level) {
+        for (int card = 0; card < 9; ++card) {
+            const CardStats& row = agg[static_cast<size_t>(level * 9 + card)];
+            const auto& prof = ai::personality::ProfileFor(level, card);
+            double share = 100.0 * row.city_share_sum / static_cast<double>(std::max(1L, row.games));
+            std::printf(
+                    "| %s | %s | %s | %.1f%% | %.1f%% | %.1f%% | %.1f%% | %ld/%ld | %.1f%% | "
+                    "%.1f%% | %ld | %.1f/%.1f%% | %.1f |\n",
+                    tier_names[level], prof.name.c_str(), prof.archetype.c_str(), share,
+                    pct(row.prod_cav, row.prod_total), pct(row.prod_fly, row.prod_total),
+                    pct(row.prod_heavy, row.prod_total), row.pillage_or_sack, row.razed,
+                    pct(row.garrisoned_turns, row.city_turns),
+                    pct(row.battles_4plus, row.battles_total),
+                    row.gold_sum / std::max(1L, row.side_turns),
+                    pct(row.ally_pairs, row.diplo_pairs), pct(row.war_pairs, row.diplo_pairs),
+                    static_cast<double>(row.blessed_and_items) /
+                            static_cast<double>(std::max(1L, row.games)));
+        }
+    }
+    return 0;
+}
 
 }  // namespace
 
@@ -193,6 +497,14 @@ int main(int argc, char** argv) {
     if (absl::Status status = net.LoadJson(weights); !status.ok()) {
         std::fprintf(stderr, "w2aidiag: %s\n", std::string(status.message()).c_str());
         return 1;
+    }
+    if (absl::GetFlag(FLAGS_card_matrix)) {
+        int req_threads = absl::GetFlag(FLAGS_threads);
+        unsigned int num_threads =
+                req_threads > 0 ? static_cast<unsigned int>(req_threads)
+                                : std::max(2U, std::thread::hardware_concurrency());
+        int matrix_seeds = std::max(2, absl::GetFlag(FLAGS_matrix_seeds));
+        return RunCardMatrix(data_dir, net, turns, matrix_seeds, opponent, num_threads);
     }
     game::NewGameOptions game_options;
     game_options.seed = seed;

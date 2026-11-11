@@ -159,4 +159,35 @@ void ApplySpoilsCharacterPrior(const Profile& profile, float local_threat, int c
                                int pillage_gold, int sack_gold, const std::vector<int>& modes,
                                std::vector<float>& scores);
 
+/** @brief Dramatic in-game trigger for an in-character herald or parley dispatch. */
+enum class CharacterEvent : int {
+    kVendettaWar = 0,        ///< Declaring war over slain Heroes or stolen/razed cities.
+    kBetrayalWar = 1,        ///< Breaking peace or alliance for opportunistic conquest.
+    kCoalitionAlliance = 2,  ///< Proposing alliance + joint war against a runaway leader.
+    kAllianceOffer = 3,      ///< Proposing a formal military alliance in character voice.
+    kTributeDemand = 4,      ///< Demanding gold tribute from a weaker neighbor.
+    kPeacePlea = 5,          ///< Offering gold or suing for peace when hard-pressed.
+    kCityRazed = 6,          ///< Burning a captured city to permanent ruins.
+    kCityPillaged = 7,       ///< Pillaging or sacking a captured city for gold.
+    kCapitalCaptured = 8,    ///< Storming and seizing an enemy faction's home capital.
+};
+
+/** @brief Concrete relational facts interpolated into `FormatCharacterDispatch`. */
+struct CharacterDispatchContext {
+    std::string actor_faction;   ///< Acting AI faction name.
+    std::string target_faction;  ///< Rival or conquered faction name.
+    std::string third_faction;   ///< Runaway leader / joint-war target faction name, if any.
+    std::string city_name;       ///< Relevant captured or razed city name, if any.
+    int gold_amount = 0;         ///< Tribute demanded/offered or gold plundered.
+    int cities_lost = 0;         ///< Cities this rival took or razed from us.
+    int heroes_slain = 0;        ///< Our Heroes slain by this rival.
+};
+
+/**
+ * @brief Formats a trait- and card-authentic herald/parley message grounded in the concrete
+ * relational facts in `ctx`.
+ */
+std::string FormatCharacterDispatch(const Profile& profile, CharacterEvent event,
+                                    const CharacterDispatchContext& ctx);
+
 }  // namespace w2::ai::personality
