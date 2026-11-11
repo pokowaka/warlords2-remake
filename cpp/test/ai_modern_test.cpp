@@ -1629,7 +1629,7 @@ TEST(ModernAiTest, CharacterRelationalMemoryVendettasHonourAndCoalitions) {
         diplomacy::AttackAnyway(game, 1, 0);
         Battle cap_res = game::ResolveAttack(game, {raider}, victim_city->X(), victim_city->Y());
         EXPECT_TRUE(cap_res.won);
-        EXPECT_GE(victim_ai.Grudge().cities_lost[1], 1);
+        EXPECT_GE(victim_ai.Grudge().cities_stolen[1], 1);
         EXPECT_GE(victim_ai.Grudge().truces_broken_by[1], 1);
 
         game::Raze(game, razer, *victim_city, cap_res.attackers);
@@ -1649,7 +1649,7 @@ TEST(ModernAiTest, CharacterRelationalMemoryVendettasHonourAndCoalitions) {
         nlohmann::ordered_json saved = victim_ai.SaveState();
         ModernMlPlayer loaded_ai;
         ASSERT_TRUE(loaded_ai.LoadState(saved, game).ok());
-        EXPECT_EQ(loaded_ai.Grudge().cities_lost[1], victim_ai.Grudge().cities_lost[1]);
+        EXPECT_EQ(loaded_ai.Grudge().cities_stolen[1], victim_ai.Grudge().cities_stolen[1]);
         EXPECT_EQ(loaded_ai.Grudge().cities_razed_by[1], victim_ai.Grudge().cities_razed_by[1]);
         EXPECT_EQ(loaded_ai.Grudge().truces_broken_by[1], victim_ai.Grudge().truces_broken_by[1]);
         EXPECT_EQ(loaded_ai.Grudge().tribute_received[2], 150);

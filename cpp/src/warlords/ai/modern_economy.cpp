@@ -275,15 +275,24 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         std::vector<float> log_mult(buy_opts.size(), 0.0F);
         for (size_t i = 0; i < buy_opts.size(); i++) {
             logits[i] = policy.ForwardEcon(buy_opts[i].in_vec)[0];
-            if (use_doctrine) {
-                if (i == 0) {
-                    logits[i] += personality::ScoreHoldGoldCharacterPrior(prof, side.Gold());
-                } else {
-                    logits[i] += personality::ScoreUnitCharacterPrior(prof, buy_opts[i].unit_ctx);
-                }
-            }
             if (i > 0 && buy_opts.size() > 2)
                 log_mult[i] = std::log(static_cast<float>(buy_opts.size() - 1));
+        }
+        if (use_doctrine) {
+            logits[0] += personality::ScoreHoldGoldCharacterPrior(prof, side.Gold());
+            if (buy_opts.size() > 1) {
+                std::vector<float> unit_priors(buy_opts.size(), 0.0F);
+                float prior_sum = 0.0F;
+                for (size_t i = 1; i < buy_opts.size(); i++) {
+                    unit_priors[i] = personality::ScoreUnitCharacterPrior(prof, buy_opts[i].unit_ctx);
+                    prior_sum += unit_priors[i];
+                }
+                const float mean_prior =
+                        prior_sum / static_cast<float>(buy_opts.size() - 1);
+                for (size_t i = 1; i < buy_opts.size(); i++) {
+                    logits[i] += unit_priors[i] - mean_prior;
+                }
+            }
         }
         float log_prob = 0.0F;
         int pick = ml::SelectFromLogits(logits, sampler, &log_prob, &log_mult);
@@ -399,11 +408,20 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         std::vector<float> log_mult(cands.size(), 0.0F);
         for (size_t i = 0; i < cands.size(); i++) {
             logits[i] = policy.ForwardEcon(cands[i])[0];
-            if (use_doctrine && i > 0) {
-                logits[i] += personality::ScoreUnitCharacterPrior(prof, slot_unit_ctx[i]);
-            }
             if (i > 0 && cands.size() > 2)
                 log_mult[i] = std::log(static_cast<float>(cands.size() - 1));
+        }
+        if (use_doctrine && cands.size() > 1 && side.Level() < 2) {
+            std::vector<float> slot_priors(cands.size(), 0.0F);
+            float prior_sum = 0.0F;
+            for (size_t i = 1; i < cands.size(); i++) {
+                slot_priors[i] = personality::ScoreUnitCharacterPrior(prof, slot_unit_ctx[i]);
+                prior_sum += slot_priors[i];
+            }
+            const float mean_prior = prior_sum / static_cast<float>(cands.size() - 1);
+            for (size_t i = 1; i < cands.size(); i++) {
+                logits[i] += slot_priors[i] - mean_prior;
+            }
         }
         float log_prob = 0.0F;
         int pick = ml::SelectFromLogits(logits, sampler, &log_prob, &log_mult);

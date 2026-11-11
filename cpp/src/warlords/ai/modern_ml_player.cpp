@@ -187,7 +187,7 @@ void ModernMlPlayer::RecordBattleObservation(Game& game, SideId observer, TilePo
 void ModernMlPlayer::RecordCityStolen(SideId attacker, int turn) {
     int atk = attacker.Value();
     if (atk < 0 || atk >= 8) return;
-    grudge_.cities_lost[atk]++;
+    grudge_.cities_stolen[atk]++;
     grudge_.last_grudge_turn[atk] = turn;
 }
 
@@ -221,6 +221,7 @@ nlohmann::ordered_json ModernMlPlayer::SaveState() const {
     obj["lost"] = IntArray(grudge_.lost);
     obj["cityBattles"] = IntArray(city_battles_);
     obj["citiesLost"] = IntArray(grudge_.cities_lost);
+    obj["citiesStolen"] = IntArray(grudge_.cities_stolen);
     obj["citiesRazedBy"] = IntArray(grudge_.cities_razed_by);
     obj["trucesBrokenBy"] = IntArray(grudge_.truces_broken_by);
     obj["tributeReceived"] = IntArray(grudge_.tribute_received);
@@ -243,6 +244,7 @@ absl::Status ModernMlPlayer::LoadState(const nlohmann::ordered_json& state, cons
     ReadIntArray(field("lost"), grudge_.lost);
     ReadIntArray(field("cityBattles"), city_battles_);
     ReadIntArray(field("citiesLost"), grudge_.cities_lost);
+    ReadIntArray(field("citiesStolen"), grudge_.cities_stolen);
     ReadIntArray(field("citiesRazedBy"), grudge_.cities_razed_by);
     ReadIntArray(field("trucesBrokenBy"), grudge_.truces_broken_by);
     ReadIntArray(field("tributeReceived"), grudge_.tribute_received);

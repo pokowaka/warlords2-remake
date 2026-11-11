@@ -266,7 +266,7 @@ float DifficultyTemperature(int level, float warlord_temp) {
 float DoctrineScale(int level) {
     if (level <= 0) return 0.80F;
     if (level == 1) return 0.45F;
-    return 0.16F;
+    return 0.13F;
 }
 
 float ScoreMissionCharacterPrior(const Profile& profile, const MissionDoctrineContext& doc_ctx) {
@@ -278,31 +278,37 @@ float ScoreMissionCharacterPrior(const Profile& profile, const MissionDoctrineCo
     const float fly = traits[kFlierAffinity];
 
     float bonus = 0.0F;
-    if (doc_ctx.is_enemy_target && doc_ctx.vendetta_score > 0.05F &&
-        doc_ctx.win_converged >= 0.45F) {
+    if (doc_ctx.is_enemy_target && doc_ctx.vendetta_score > 0.25F &&
+        doc_ctx.win_converged >= (profile.level >= 2 ? 0.65F : 0.45F)) {
         const float vendetta_drive = std::clamp(
                 0.45F + 0.55F * std::max(0.0F, aggr) + 0.45F * std::max(0.0F, -hon) +
                         ((profile.level == 1 && profile.card == 3) ? 0.35F : 0.0F),
                 0.25F, 1.50F);
         const float odds_gate = std::min(1.0F, (doc_ctx.win_converged - 0.35F) * 2.5F);
-        bonus += scale * vendetta_drive * doc_ctx.vendetta_score * odds_gate;
+        const float tier_damp = profile.level >= 2 ? 0.35F : 1.0F;
+        bonus += scale * tier_damp * vendetta_drive * doc_ctx.vendetta_score * odds_gate;
     }
 
-    if (doc_ctx.is_enemy_capital && doc_ctx.win_converged >= 0.48F) {
+    if (doc_ctx.is_enemy_capital &&
+        doc_ctx.win_converged >= (profile.level >= 2 ? 0.68F : 0.52F) &&
+        (profile.level < 2 || aggr >= 0.85F)) {
         const float decap_drive = std::max(
                 0.0F, 0.55F * aggr + 0.25F * fly - 0.30F * caut +
                               ((profile.level == 2 && profile.card == 6) ? 0.30F : 0.0F));
         bonus += scale * decap_drive;
     }
 
-    if (doc_ctx.is_enemy_target && doc_ctx.win_converged < 0.62F && caut > 0.15F) {
+    if (profile.level < 2 && doc_ctx.is_enemy_target && doc_ctx.win_converged < 0.62F &&
+        caut > 0.15F) {
         bonus -= scale * caut * (0.62F - doc_ctx.win_converged) * 1.40F;
     }
-    if (doc_ctx.is_hold_garrison && doc_ctx.leaves_city_sparse && caut > 0.25F) {
+    if (profile.level < 2 && doc_ctx.is_hold_garrison && doc_ctx.leaves_city_sparse &&
+        caut > 0.25F) {
         bonus += scale * caut * 0.22F;
     }
-    if (doc_ctx.is_ruin_or_temple && traits[kHeroFocus] > 0.15F) {
-        bonus += scale * traits[kHeroFocus] * (doc_ctx.stack_has_hero ? 0.90F : 0.55F);
+    if (doc_ctx.is_ruin_or_temple && doc_ctx.stack_has_hero &&
+        traits[kHeroFocus] >= (profile.level >= 2 ? 0.80F : 0.25F)) {
+        bonus += scale * traits[kHeroFocus] * 0.95F;
     }
     return std::clamp(bonus, -0.65F, 0.65F);
 }
@@ -311,7 +317,7 @@ void ApplyDiplomacyCharacterPrior(const Profile& profile, const DiplomacyDoctrin
                                   std::array<float, 4>& stance_logits, float& tribute_logit,
                                   float& joint_war_logit) {
     const float diplo_scale =
-            profile.level <= 0 ? 1.15F : (profile.level == 1 ? 0.95F : 0.65F);
+            profile.level <= 0 ? 1.15F : (profile.level == 1 ? 0.90F : 0.50F);
     const auto& traits = profile.traits;
     const float aggr = traits[kAggression];
     const float hon = traits[kHonour];
@@ -321,63 +327,73 @@ void ApplyDiplomacyCharacterPrior(const Profile& profile, const DiplomacyDoctrin
 
     const bool unprovoked = (doc_ctx.truces_broken_by_rival == 0 &&
                              doc_ctx.cities_razed_by_rival == 0 && doc_ctx.vendetta_score < 0.40F);
-    if (hon > 0.20F && (doc_ctx.cur_allied || (doc_ctx.cur_at_peace && doc_ctx.truce_turns > 0)) &&
-        unprovoked) {
-        const float keep = diplo_scale * hon * (doc_ctx.cur_allied ? 1.50F : 1.10F);
-        stance_logits[0] += doc_ctx.cur_allied ? keep : 0.35F * keep;
+    const bool keep_ally = doc_ctx.cur_allied && profile.level <= 1;
+    const bool keep_truce = doc_ctx.cur_at_peace && doc_ctx.truce_turns > 0;
+    if (hon > 0.20F && (keep_ally || keep_truce) && unprovoked) {
+        const float tier_damp = profile.level >= 2 ? 0.25F : 1.0F;
+        const float keep = diplo_scale * tier_damp * hon * (keep_ally ? 1.50F : 1.10F);
+        stance_logits[0] += keep_ally ? keep : 0.35F * keep;
         stance_logits[1] += keep;
         stance_logits[2] -= 0.85F * keep;
         stance_logits[3] -= 1.25F * keep;
     }
 
-    if (doc_ctx.truces_broken_by_rival > 0 || doc_ctx.cities_razed_by_rival > 0 ||
-        doc_ctx.vendetta_score > 0.35F) {
+    if (doc_ctx.vendetta_score >= 0.45F &&
+        !(doc_ctx.active_wars >= 2 && doc_ctx.border_advantage < 0.10F)) {
         const float atrocity = static_cast<float>(
                 std::min(2, doc_ctx.truces_broken_by_rival + doc_ctx.cities_razed_by_rival));
-        const float wrath = diplo_scale * (0.55F * doc_ctx.vendetta_score + 0.35F * atrocity) *
+        const float tier_damp = profile.level >= 2 ? 0.20F : 1.0F;
+        const float wrath = diplo_scale * tier_damp *
+                            (0.55F * doc_ctx.vendetta_score + 0.35F * atrocity) *
                             (0.75F + 0.45F * std::max(0.0F, aggr) + 0.35F * std::max(0.0F, hon));
         stance_logits[3] += wrath;
         stance_logits[0] -= wrath;
         stance_logits[1] -= 0.70F * wrath;
     }
 
-    if (hon < -0.30F) {
-        if (doc_ctx.cur_at_peace && doc_ctx.truce_turns <= 2 && doc_ctx.border_advantage > 0.30F &&
-            doc_ctx.active_wars <= 1) {
+    if (hon <= (profile.level >= 2 ? -0.75F : -0.35F)) {
+        if (doc_ctx.cur_at_peace && doc_ctx.truce_turns <= (profile.level >= 2 ? 0 : 2) &&
+            doc_ctx.border_advantage > (profile.level >= 2 ? 0.60F : 0.40F) &&
+            doc_ctx.active_wars == 0) {
             const float stab = diplo_scale * (-hon) * doc_ctx.border_advantage * 1.15F;
             stance_logits[3] += stab;
             stance_logits[1] -= 0.55F * stab;
             stance_logits[0] -= 0.75F * stab;
-        } else if (doc_ctx.border_advantage < -0.30F && doc_ctx.active_wars >= 1) {
-            const float mask_peace = diplo_scale * (-hon) * 0.55F;
-            stance_logits[0] += 0.65F * mask_peace;
+        } else if (profile.level <= 1 && doc_ctx.border_advantage < -0.25F &&
+                   doc_ctx.active_wars >= 1) {
+            const float mask_peace = diplo_scale * (-hon) * 0.65F;
+            stance_logits[0] += 0.75F * mask_peace;
             stance_logits[1] += mask_peace;
-            stance_logits[3] -= 0.70F * mask_peace;
+            stance_logits[3] -= 0.80F * mask_peace;
         }
     }
 
-    if (coal > 0.30F) {
+    if (coal >= (profile.level >= 2 ? 0.80F : 0.50F)) {
         const bool honour_bound =
                 hon > 0.45F && (doc_ctx.cur_allied || doc_ctx.truce_turns > 2) && unprovoked;
-        if (doc_ctx.rival_is_runaway && !honour_bound) {
+        if (profile.level <= 1 && doc_ctx.rival_is_runaway && !honour_bound) {
             const float contain =
                     diplo_scale * coal *
-                    std::clamp((doc_ctx.runaway_share - 0.22F) * 3.0F, 0.25F, 1.10F);
+                    std::clamp((doc_ctx.runaway_share - 0.25F) * 3.0F, 0.25F, 1.10F);
             stance_logits[2] += 0.65F * contain;
-            stance_logits[3] += contain;
+            if (doc_ctx.active_wars == 0) {
+                stance_logits[3] += contain;
+            }
             stance_logits[0] -= contain;
-        } else if (doc_ctx.third_party_runaway) {
+        } else if (doc_ctx.third_party_runaway && doc_ctx.runaway_share >= 0.38F &&
+                   doc_ctx.border_advantage < 0.20F && !doc_ctx.cur_at_war) {
             const float rally =
                     diplo_scale * coal *
                     std::clamp((doc_ctx.runaway_share - 0.22F) * 2.8F, 0.30F, 1.10F);
-            stance_logits[0] += 1.15F * rally;
+            stance_logits[0] += 1.35F * rally;
             stance_logits[1] += 0.55F * rally;
-            stance_logits[3] -= 0.80F * rally;
-            joint_war_logit += 1.65F * rally;
+            stance_logits[3] -= 0.65F * rally;
+            joint_war_logit += 1.80F * rally;
         }
     }
 
-    if (doc_ctx.cur_at_war && doc_ctx.border_advantage < -0.15F && (caut > 0.40F || avar > 0.60F)) {
+    if (profile.level <= 1 && doc_ctx.cur_at_war && doc_ctx.border_advantage < -0.15F &&
+        (caut > 0.40F || avar > 0.60F)) {
         const float plea = diplo_scale *
                            (0.55F * std::max(0.0F, caut) + 0.45F * std::max(0.0F, avar)) *
                            (-doc_ctx.border_advantage);
@@ -388,19 +404,19 @@ void ApplyDiplomacyCharacterPrior(const Profile& profile, const DiplomacyDoctrin
 
 float ScoreUnitCharacterPrior(const Profile& profile, const UnitDoctrineContext& unit_ctx) {
     const float econ_scale =
-            profile.level <= 0 ? 0.65F : (profile.level == 1 ? 0.40F : 0.18F);
+            profile.level <= 0 ? 0.75F : (profile.level == 1 ? 0.55F : 0.12F);
     const auto& traits = profile.traits;
     float bonus = 0.0F;
     if (unit_ctx.is_cavalry) {
-        bonus += econ_scale * traits[kCavalryAffinity] * 0.85F;
+        bonus += econ_scale * traits[kCavalryAffinity] * 0.90F;
     }
     if (unit_ctx.is_flier) {
-        bonus += econ_scale * traits[kFlierAffinity] * 0.85F;
+        bonus += econ_scale * traits[kFlierAffinity] * 0.95F;
     }
     if (unit_ctx.is_heavy_or_siege) {
-        bonus += econ_scale * traits[kSiegeAffinity] * 0.85F;
+        bonus += econ_scale * traits[kSiegeAffinity] * 1.05F;
     }
-    return std::clamp(bonus, -0.55F, 0.55F);
+    return std::clamp(bonus, -0.75F, 0.75F);
 }
 
 float ScoreHoldGoldCharacterPrior(const Profile& profile, int gold) {
@@ -415,7 +431,7 @@ void ApplySpoilsCharacterPrior(const Profile& profile, float local_threat, int c
                                int pillage_gold, int sack_gold, const std::vector<int>& modes,
                                std::vector<float>& scores) {
     const float spoil_scale =
-            profile.level <= 0 ? 1.00F : (profile.level == 1 ? 0.80F : 0.35F);
+            profile.level <= 0 ? 1.10F : (profile.level == 1 ? 0.90F : 0.45F);
     const auto& traits = profile.traits;
     const float scor = traits[kScorchedEarth];
     const float avar = traits[kAvarice];
@@ -424,31 +440,39 @@ void ApplySpoilsCharacterPrior(const Profile& profile, float local_threat, int c
 
     for (size_t idx = 0; idx < count; ++idx) {
         const int mode = modes[idx];
-        if (scor < -0.30F || hon > 0.45F) {
+        if (scor <= -0.20F || hon >= 0.45F) {
             const float preserve =
-                    spoil_scale * (std::max(0.0F, -scor) + 0.35F * std::max(0.0F, hon));
-            if (mode == 0) scores[idx] += 0.55F * preserve;
-            if (mode == 2) scores[idx] -= 0.70F * preserve;
-            if (mode == 3) scores[idx] -= 1.40F * preserve;
+                    spoil_scale * (1.35F * std::max(0.0F, -scor) + 0.60F * std::max(0.0F, hon));
+            if (profile.level <= 1) {
+                if (mode == 0) scores[idx] += 0.95F * preserve;
+                if (mode == 1 && local_threat < 8.0F && avar < 0.40F) {
+                    scores[idx] -= 0.75F * preserve;
+                }
+            } else if (scor <= -0.45F && mode == 0) {
+                scores[idx] += 0.35F * preserve;
+            }
+            if (mode == 2) scores[idx] -= 1.10F * preserve;
+            if (mode == 3) scores[idx] -= 2.20F * preserve;
         }
-        if (scor > 0.35F) {
-            if (profile.level <= 1 && (local_threat > 5.0F || city_income <= 16)) {
-                const float burn = spoil_scale * scor * (local_threat > 5.0F ? 0.85F : 0.55F);
+        if (scor >= 0.45F) {
+            if (profile.level <= 1 && (local_threat > 4.0F || city_income <= 15)) {
+                const float burn = spoil_scale * scor * (local_threat > 6.0F ? 3.55F : 2.75F);
                 if (mode == 3) scores[idx] += burn;
-                if (mode == 0) scores[idx] -= 0.35F * burn;
-            } else if (profile.level >= 2 && local_threat > 15.0F && city_income <= 14) {
-                if (mode == 3) scores[idx] += spoil_scale * scor * 0.65F;
+                if (mode == 1) scores[idx] -= 0.40F * burn;
+                if (mode == 0) scores[idx] -= 0.50F * burn;
+            } else if (profile.level >= 2 && local_threat > 16.0F && city_income <= 12) {
+                if (mode == 3) scores[idx] += 2.60F * scor;
             }
         }
-        if (avar > 0.45F) {
-            if (mode == 1 && pillage_gold >= 120) {
+        if (avar >= 0.50F) {
+            if (mode == 1 && pillage_gold >= 100) {
                 const float pillage_fac =
-                        std::min(1.0F, static_cast<float>(pillage_gold) / 250.0F);
-                scores[idx] += spoil_scale * avar * pillage_fac * 0.75F;
+                        std::min(1.0F, static_cast<float>(pillage_gold) / 220.0F);
+                scores[idx] += spoil_scale * avar * pillage_fac * 0.90F;
             }
-            if (mode == 2 && sack_gold >= 280 && (local_threat > 6.0F || profile.level <= 1)) {
-                const float sack_fac = std::min(1.0F, static_cast<float>(sack_gold) / 450.0F);
-                scores[idx] += spoil_scale * avar * sack_fac * 0.65F;
+            if (mode == 2 && sack_gold >= 260 && (local_threat > 5.0F || profile.level <= 1)) {
+                const float sack_fac = std::min(1.0F, static_cast<float>(sack_gold) / 400.0F);
+                scores[idx] += spoil_scale * avar * sack_fac * 0.85F;
             }
         }
     }

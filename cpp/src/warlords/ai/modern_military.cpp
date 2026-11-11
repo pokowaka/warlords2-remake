@@ -46,7 +46,11 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
     const bool use_doctrine = policy.PersonaActive() && !(sampler && sampler->current_turn);
     const personality::Profile& prof = personality::ForSide(side);
     game::SeenMasks seen = game::BuildSeenMasks(game, our_side);
-    float caution = use_doctrine ? (1.4F * prof.traits[personality::kCaution]) : 0.0F;
+    float caution = 0.0F;
+    if (use_doctrine) {
+        const float raw_caut = prof.traits[personality::kCaution];
+        caution = side.Level() >= 2 ? 0.0F : ((side.Level() == 1 ? 0.7F : 1.4F) * raw_caut);
+    }
     std::array<float, 8> vendetta_by_side{};
     if (use_doctrine) {
         if (const ModernMlPlayer* modern_player = ModernMlPlayer::FindOn(side)) {

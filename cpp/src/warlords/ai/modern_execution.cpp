@@ -303,8 +303,11 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             (tgt.kind == TargetKind::kNeutralCity || tgt.kind == TargetKind::kEnemyCity ||
              tgt.kind == TargetKind::kEnemyStack);
     const bool use_doctrine = policy.PersonaActive() && !(sampler && sampler->current_turn);
+    const float raw_caut = personality::ForSide(side).traits[personality::kCaution];
     const float caution_bias =
-            use_doctrine ? (1.4F * personality::ForSide(side).traits[personality::kCaution]) : 0.0F;
+            use_doctrine
+                    ? (side.Level() >= 2 ? 0.0F : ((side.Level() == 1 ? 0.7F : 1.4F) * raw_caut))
+                    : 0.0F;
     MissionFight cur_plan = plan;
     bool made_progress = false;
     bool completed_objective = false;

@@ -19,7 +19,8 @@ namespace w2::ai {
 
 float ComputeVendettaScore(const BattleGrudge& grudge, int rival_idx, int current_turn) {
     if (rival_idx < 0 || rival_idx >= 8) return 0.0F;
-    float raw = static_cast<float>(grudge.cities_lost[rival_idx] * 10 +
+    float raw = static_cast<float>((grudge.cities_lost[rival_idx] + grudge.cities_stolen[rival_idx]) *
+                                           10 +
                                    grudge.cities_razed_by[rival_idx] * 18 +
                                    grudge.heroes_killed[rival_idx] * 14 +
                                    grudge.truces_broken_by[rival_idx] * 16 +
@@ -133,8 +134,8 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
     }
 
     if (grudge) {
-        int feud = grudge->cities_lost[target_side] * 10 + grudge->heroes_killed[target_side] * 8 +
-                   grudge->lost[target_side] * 3;
+        int feud = (grudge->cities_lost[target_side] + grudge->cities_stolen[target_side]) * 10 +
+                   grudge->heroes_killed[target_side] * 8 + grudge->lost[target_side] * 3;
         if (feud > 0) {
             push_factor("Blood feud (cities and heroes lost)", -std::min(50, feud));
         }

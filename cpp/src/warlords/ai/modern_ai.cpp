@@ -172,10 +172,10 @@ void PlayTurn(Game& game, Side& side, IAiTurnEvents* events, const ml::PolicyNet
             personality::ArchetypeWeightArray imp_w{1.0F, 0.0F, 0.0F, 0.0F, 0.0F};
             ml::PolicyNetwork imperial_pol = base_policy.MaterializeForWeights(imp_w);
             imperial_pol.SetWarlordLookahead(false);
+            imperial_pol.SetPersonaActive(false);
             if (ShouldSwitchToImperialLookahead(game, side, materialized, imperial_pol,
                                                 base_policy)) {
                 materialized = std::move(imperial_pol);
-                materialized.SetPersonaActive(false);
                 lookahead_switched = true;
             }
         }

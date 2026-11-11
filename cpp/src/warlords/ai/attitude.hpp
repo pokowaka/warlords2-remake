@@ -12,7 +12,8 @@ namespace w2::ai {
 
 /** @brief Per-opponent battle and treaty counters contributing to relational grudges. */
 struct BattleGrudge {
-    std::array<int, 8> cities_lost{};       ///< Standing cities lost to each side.
+    std::array<int, 8> cities_lost{};       ///< Garrisoned cities lost in battle to each side.
+    std::array<int, 8> cities_stolen{};     ///< Ungarrisoned cities seized by each side.
     std::array<int, 8> heroes_killed{};     ///< Defending heroes slain by each side.
     std::array<int, 8> lost{};              ///< Defending stacks wiped out by each side.
     std::array<int, 8> cities_razed_by{};   ///< Claimed/owned cities razed to ruins by each side.

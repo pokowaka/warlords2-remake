@@ -353,14 +353,16 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         if (const ModernMlPlayer* modern_player = ModernMlPlayer::FindOn(side)) {
             const ai::BattleGrudge& battle_grudge = modern_player->Grudge();
             grudge = battle_grudge.cities_lost[other_idx] * 8 +
-                     battle_grudge.cities_razed_by[other_idx] * 14 +
-                     battle_grudge.heroes_killed[other_idx] * 6 +
-                     battle_grudge.truces_broken_by[other_idx] * 12 +
-                     battle_grudge.lost[other_idx] * 2;
+                     battle_grudge.heroes_killed[other_idx] * 6 + battle_grudge.lost[other_idx] * 2;
+            if (side.Level() < 2) {
+                grudge += battle_grudge.cities_razed_by[other_idx] * 14 +
+                          battle_grudge.truces_broken_by[other_idx] * 12;
+            }
             truces_broken_by_rival = battle_grudge.truces_broken_by[other_idx];
             cities_razed_by_rival = battle_grudge.cities_razed_by[other_idx];
-            cities_lost_to_rival =
-                    battle_grudge.cities_lost[other_idx] + battle_grudge.cities_razed_by[other_idx];
+            cities_lost_to_rival = battle_grudge.cities_lost[other_idx] +
+                                   battle_grudge.cities_stolen[other_idx] +
+                                   battle_grudge.cities_razed_by[other_idx];
             heroes_slain_by_rival = battle_grudge.heroes_killed[other_idx];
             vendetta_score = ai::ComputeVendettaScore(battle_grudge, other_idx, game.Turn());
         } else if (const ClassicAiPlayer* classic_player = ClassicAiPlayer::FindOn(side)) {
