@@ -62,6 +62,7 @@
 #include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
 #include "warlords/ai/modern_ai.hpp"
+#include "warlords/ai/modern_ml_player.hpp"
 #include "warlords/diplomacy.hpp"
 #include "warlords/game.hpp"
 #include "warlords/randommap.hpp"
@@ -88,6 +89,8 @@ ABSL_FLAG(int, active_sides, 8, "Active sides in play (2 to 8).");
 ABSL_FLAG(int, crop_margin, 0, "Crop margin around active capitals (0 = full map).");
 ABSL_FLAG(double, lambda, 0.95, "GAE lambda.");
 ABSL_FLAG(double, local_weight, 1.0, "Weight of per-stack local advantage.");
+ABSL_FLAG(std::string, in, "",
+          "Optional initial checkpoint path to warm-start from without overwriting it.");
 ABSL_FLAG(std::string, out, "cpp/ai_weights.json", "Checkpoint path read and written.");
 ABSL_FLAG(std::string, log, "", "CSV file path with one line per iteration.");
 ABSL_FLAG(std::string, data, "original", "Path to the Warlords II game data directory.");
@@ -114,11 +117,30 @@ ABSL_FLAG(bool, a_legacy_blockers, false, "Disable obstacle detouring on A for p
 ABSL_FLAG(std::string, b_detour_bias, "",
           "Override detour bias on --compare B (empty = keep checkpoint value).");
 ABSL_FLAG(int, eval_level, -1, "Override Modern difficulty tier in eval games (-1 = default).");
+ABSL_FLAG(bool, a_no_personalities, false, "Disable 27-card personalities on --out (A) in eval.");
 ABSL_FLAG(bool, b_no_personalities, false, "Disable 27-card personalities on --compare B.");
 ABSL_FLAG(bool, b_warlord_lookahead, false,
           "Enable fair 1-round Warlord lookahead on --compare B.");
 ABSL_FLAG(double, army_weight, 0.25, "Army-power share weight in the empire score.");
 ABSL_FLAG(bool, upgrade_v7, false, "Upgrade a loaded legacy (< v7) checkpoint to v7.");
+ABSL_FLAG(bool, upgrade_v8, false, "Upgrade a loaded checkpoint to v8.");
+ABSL_FLAG(bool, use_commander, false, "Enable and train the v7/v8 Commander posture projection.");
+ABSL_FLAG(bool, use_muster, false, "Enable and train v8 MusterNet castle hub selection.");
+ABSL_FLAG(bool, use_standard, false, "Enable and train v8 MusterNet Side Standard planting.");
+ABSL_FLAG(bool, avoid_blockers, false,
+          "Enable obstacle detouring and train detourBias + MissionNet detour choices.");
+ABSL_FLAG(bool, causal_offturn, false,
+          "Attribute off-turn defensive battle and vacated-city outcomes to per-stack G_pool.");
+ABSL_FLAG(double, offturn_repel_weight, 0.5,
+          "Saved-city weight credited to garrisons that actively repel an enemy siege.");
+ABSL_FLAG(double, offturn_vacate_weight, 0.5,
+          "Lost-city weight subtracted from G_pool when a move vacates a city that falls.");
+ABSL_FLAG(double, explore_eps, 0.0,
+          "Fraction of rollout decisions sampled at --explore-temp instead of sharp temperature.");
+ABSL_FLAG(double, explore_temp, 0.65,
+          "Exploration temperature used on --explore-eps rollout decisions.");
+ABSL_FLAG(bool, temp_rescale, false,
+          "Rescale per-decision policy gradients by T_step / 0.50 for temperature-invariant steps.");
 ABSL_FLAG(std::string, frozen_opponent, "", "Fixed Modern checkpoint path for opponent seats.");
 ABSL_FLAG(double, frozen_frac, 0.0, "Share of non-learner seats played by --frozen-opponent.");
 ABSL_FLAG(int, search_k, 0, "Candidate turns per learner turn (0 = no search training).");
@@ -181,6 +203,7 @@ enum class EvalMode {
 /** @brief Training and evaluation settings, filled from the command line. */
 struct Config {
     std::string data_dir = "original";             ///< --data: game data directory.
+    std::string in_path;                           ///< --in: optional starting checkpoint.
     std::string out_path = "cpp/ai_weights.json";  ///< --out: checkpoint read and written.
     std::string log_path;      ///< --log: CSV file with one line per iteration (none if empty).
     int iterations = 300;      ///< --iterations: training iterations to run.
@@ -224,10 +247,23 @@ struct Config {
     bool has_b_detour_bias = false;
     float b_detour_bias = -0.05F;
     int eval_level = -1;               ///< --eval-level: override Modern difficulty tier in eval.
+    bool a_no_personalities = false;   ///< --a-no-personalities: disable 27-card personas on A.
     bool b_no_personalities = false;   ///< --b-no-personalities: disable 27-card personas on B.
     bool b_warlord_lookahead = false;  ///< --b-warlord-lookahead: enable Warlord lookahead on B.
     float army_weight = 0.25F;         ///< --army-weight: army-power share weight in empire score.
     bool upgrade_v7 = false;           ///< --upgrade-v7: upgrade a loaded (< v7) checkpoint to v7.
+    bool upgrade_v8 = false;           ///< --upgrade-v8: upgrade a loaded checkpoint to v8.
+    bool use_commander = false;        ///< --use-commander: train Commander posture projection.
+    bool use_muster = false;           ///< --use-muster: train MusterNet hub selection.
+    bool use_standard = false;         ///< --use-standard: train MusterNet Standard planting.
+    bool avoid_blockers = false;       ///< --avoid-blockers: train detour choices + detourBias.
+    bool causal_offturn = false;       ///< --causal-offturn: off-turn causal per-stack G_pool.
+    float offturn_repel_weight = 0.5F;   ///< --offturn-repel-weight: siege repel city credit.
+    float offturn_vacate_weight = 0.5F;  ///< --offturn-vacate-weight: vacated city loss penalty.
+    float explore_eps = 0.0F;            ///< --explore-eps: sparse exploration decision fraction.
+    float explore_temp = 0.65F;          ///< --explore-temp: temperature on exploration draws.
+    bool temp_rescale = false;           ///< --temp-rescale: temperature-invariant grad scaling.
+    float grad_ref_temp = 0.5F;          ///< Reference temperature for --temp-rescale.
     int dev_seeds = 0;                 ///< --dev-seeds: benchmark/compare on the development set
     bool breakdown = false;            ///< --breakdown: print shares per preset and scenario.
     int critic_warmup = 0;             ///< --critic-warmup: iterations where only the critics learn
@@ -451,6 +487,8 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
         samplers[side_index].rng_state =
                 (seed * 2654435761U) ^ static_cast<uint32_t>((side_index + 1) * 2246822519U);
         samplers[side_index].temperature = temperature;
+        samplers[side_index].explore_eps = cfg.explore_eps;
+        samplers[side_index].explore_temp = cfg.explore_temp;
     }
 
     Side* current = game::Begin(game);
@@ -461,12 +499,18 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
         int side_index = current->Index();
         if (current->IsComputerControlled() && current->IsAlive()) {
             if (recorded[side_index]) {
+                ModernMlPlayer& mod_player = ModernMlPlayer::EnsureOn(*current);
+                mod_player.SetPendingOffTurn(nullptr);
                 if (!episodes[side_index].turns.empty())
                     MarkDepartures(game, side_index, episodes[side_index].turns.back());
                 episodes[side_index].turns.emplace_back();
                 samplers[side_index].current_turn = &episodes[side_index].turns.back();
                 ai::modern::PlayTurn(game, *current, nullptr, &learner, &samplers[side_index]);
                 samplers[side_index].current_turn = nullptr;
+                if (cfg.causal_offturn) {
+                    mod_player.SetPendingOffTurn(&episodes[side_index].turns.back(),
+                                                 cfg.offturn_repel_weight);
+                }
             } else if (classic[side_index]) {
                 opponents::PlayTurn(game, *current, classic_kind[side_index], cfg.frozen_policy);
             } else {
@@ -474,6 +518,8 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
                 opponent_sampler.rng_state = samplers[side_index].rng_state ^
                                              static_cast<uint32_t>(game.Turn() * 374761393U);
                 opponent_sampler.temperature = temperature;
+                opponent_sampler.explore_eps = cfg.explore_eps;
+                opponent_sampler.explore_temp = cfg.explore_temp;
                 ai::modern::PlayTurn(game, *current, nullptr, &snapshot, &opponent_sampler);
             }
         }
@@ -493,6 +539,9 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
     for (int side_index = 0; side_index < 8; side_index++) {
         if (!recorded[side_index] || episodes[side_index].turns.empty()) continue;
         Side& side = game.GetMap().Sides()[side_index];
+        if (ModernMlPlayer* mod_player = ModernMlPlayer::FindMutableOn(side)) {
+            mod_player->SetPendingOffTurn(nullptr);
+        }
         SideEpisode& episode = episodes[side_index];
         MarkDepartures(game, side_index, episode.turns.back());
         episode.final_cities = cities[side_index];
@@ -507,7 +556,7 @@ RolloutSummary RunRollout(const Config& cfg, const std::string& scenario,
             episode.terminal_reward = won_game ? cfg.win_reward : 0.0F;
         } else {
             ai::belief::Update(game, side);
-            episode.bootstrap_value = learner.EvaluateValue(ml::BuildContext(game, side),
+            episode.bootstrap_value = learner.EvaluateValue(ml::BuildContext(game, side, &learner),
                                                             ml::BuildCriticFeatures(game, side));
         }
         summary.recorded_cities += cities[side_index];
@@ -663,8 +712,11 @@ RolloutSummary RunSearchRollout(const Config& cfg, const std::string& scenario,
  * credit tracked over non-recycled Game::pool Army* identities. Episodes from
  * search training already carry their advantages and are skipped.
  */
-void ComputeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float lambda,
-                       float local_weight, float departure_weight) {
+void ComputeAdvantages(std::vector<SideEpisode>& episodes, const Config& cfg) {
+    const float gamma = cfg.gamma;
+    const float lambda = cfg.gae_lambda;
+    const float local_weight = cfg.local_weight;
+    const float departure_weight = cfg.departure_weight;
     constexpr float kStackGamma = 0.90F;
     // Departure credit is centred over all moves that emptied a city: emptying
     // one that then fell scores below average, emptying one that held scores
@@ -707,6 +759,11 @@ void ComputeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
             turn.return_target = gae + turn.value_pred;
 
             for (auto& [unit_id, future_local] : unit_future_local) future_local *= kStackGamma;
+            if (cfg.causal_offturn) {
+                for (const auto& off_ev : turn.off_turn_unit_deltas) {
+                    unit_future_local[off_ev.unit_id] += off_ev.delta_score;
+                }
+            }
             for (int step_index = static_cast<int>(turn.mission_steps.size()) - 1; step_index >= 0;
                  step_index--) {
                 auto& step = turn.mission_steps[step_index];
@@ -724,6 +781,9 @@ void ComputeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
                     auto found = unit_future_local.find(unit_id);
                     if (found != unit_future_local.end()) group_return += found->second;
                 }
+                if (cfg.causal_offturn && step.vacated_city != kNone && step.vacated_loss > 0.0F) {
+                    group_return -= cfg.offturn_vacate_weight * step.vacated_loss;
+                }
                 step.stack_return_target = group_return;
                 float local_adv = step.stack_return_target - step.stack_value_pred;
                 step.advantage = turn.advantage + local_weight * local_adv;
@@ -735,6 +795,9 @@ void ComputeAdvantages(std::vector<SideEpisode>& episodes, float gamma, float la
                 if (econ_step.guard_city != kNone) {
                     econ_step.advantage -= departure_weight * (econ_step.guard_loss - guard_mean);
                 }
+            }
+            for (auto& muster_step : turn.muster_steps) {
+                muster_step.advantage = turn.advantage;
             }
         }
     }
@@ -771,9 +834,11 @@ struct Normalizer {
 
 /** @brief Decision counts and loss sums of one or more PPO gradient passes. */
 struct HeadStats {
-    int mission = 0;           ///< Mission-head decisions (move choices and stage choices).
+    int mission = 0;           ///< Mission-head decisions (move choices, stage, and detour).
     int econ = 0;              ///< Economy-head decisions.
     int diplo = 0;             ///< Diplomacy-head decisions (stance, tribute, joint war).
+    int muster = 0;            ///< Muster-head decisions (castle hubs and Standard).
+    int detour = 0;            ///< Detour-bias binary decisions.
     int turns = 0;             ///< Turns with a critic target.
     int stack_values = 0;      ///< Moves with a stack-critic target.
     double policy_loss = 0.0;  ///< Sum of the clipped surrogate losses.
@@ -787,6 +852,8 @@ struct HeadStats {
         mission += other.mission;
         econ += other.econ;
         diplo += other.diplo;
+        muster += other.muster;
+        detour += other.detour;
         turns += other.turns;
         stack_values += other.stack_values;
         policy_loss += other.policy_loss;
@@ -807,9 +874,10 @@ struct HeadStats {
  * families). Writes dLoss/du_i into `d_scores`.
  */
 void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* log_mult,
-                    int chosen, float old_log_prob, float adv, float inv_t, const Config& cfg,
-                    std::vector<float>& d_scores, HeadStats& stats, std::vector<float>& logits,
-                    std::vector<float>& probs, std::vector<float>& log_probs) {
+                    int chosen, float old_log_prob, float adv, float step_inv_t, float grad_inv_t,
+                    const Config& cfg, std::vector<float>& d_scores, HeadStats& stats,
+                    std::vector<float>& logits, std::vector<float>& probs,
+                    std::vector<float>& log_probs) {
     const size_t candidate_count = scores.size();
     d_scores.assign(candidate_count, 0.0F);
     if (candidate_count <= 1) return;
@@ -819,7 +887,7 @@ void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* 
     float max_logit = -1e30F;
     logits.resize(candidate_count);
     for (size_t i = 0; i < candidate_count; i++) {
-        logits[i] = scores[i] * inv_t - lm_of(i);
+        logits[i] = scores[i] * step_inv_t - lm_of(i);
         max_logit = std::max(max_logit, logits[i]);
     }
     probs.resize(candidate_count);
@@ -856,8 +924,8 @@ void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* 
     float kl_coef = cfg.ent_coef / norm_log_k;
     for (size_t j = 0; j < candidate_count; j++) {
         float indicator = (static_cast<int>(j) == chosen) ? 1.0F : 0.0F;
-        d_scores[j] = d_loss_d_log_p * (indicator - probs[j]) * inv_t +
-                      kl_coef * probs[j] * ((log_probs[j] + lm_of(j)) - mean_adj) * inv_t;
+        d_scores[j] = d_loss_d_log_p * (indicator - probs[j]) * grad_inv_t +
+                      kl_coef * probs[j] * ((log_probs[j] + lm_of(j)) - mean_adj) * grad_inv_t;
     }
 }
 
@@ -867,9 +935,9 @@ void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* 
  * Clipped-surrogate gradient for a yes/no choice with logit `logit`
  * (P(yes) = sigmoid(logit / T)), plus an entropy bonus. Returns dLoss/dlogit.
  */
-float BinaryPpo(float logit, bool chosen, float old_log_prob, float adv, float inv_t,
-                const Config& cfg, HeadStats& stats) {
-    float scaled_logit = std::clamp(logit * inv_t, -15.0F, 15.0F);
+float BinaryPpo(float logit, bool chosen, float old_log_prob, float adv, float step_inv_t,
+                float grad_inv_t, const Config& cfg, HeadStats& stats) {
+    float scaled_logit = std::clamp(logit * step_inv_t, -15.0F, 15.0F);
     float prob_yes = 1.0F / (1.0F + std::exp(-scaled_logit));
     float new_log_prob = std::log(std::max(1e-12F, chosen ? prob_yes : 1.0F - prob_yes));
     float log_ratio = std::clamp(new_log_prob - old_log_prob, -10.0F, 10.0F);
@@ -884,8 +952,8 @@ float BinaryPpo(float logit, bool chosen, float old_log_prob, float adv, float i
     float chosen_value = chosen ? 1.0F : 0.0F;
     // d(-H)/dz = p (1 - p) z for the Bernoulli entropy H, with z the scaled
     // logit and p = P(yes)
-    return d_loss_d_log_p * (chosen_value - prob_yes) * inv_t +
-           cfg.ent_coef * prob_yes * (1.0F - prob_yes) * scaled_logit * inv_t;
+    return d_loss_d_log_p * (chosen_value - prob_yes) * grad_inv_t +
+           cfg.ent_coef * prob_yes * (1.0F - prob_yes) * scaled_logit * grad_inv_t;
 }
 
 /** @brief One advantage normalizer per policy head. */
@@ -893,6 +961,7 @@ struct Normalizers {
     Normalizer mission;  ///< For the mission head's per-move advantages.
     Normalizer econ;     ///< For the economy head's per-turn advantages.
     Normalizer diplo;    ///< For the diplomacy head's per-turn advantages.
+    Normalizer muster;   ///< For the muster head's per-turn advantages.
 };
 
 /**
@@ -907,11 +976,22 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
                     std::vector<float>& d_scores, std::vector<float>& logits_buf,
                     std::vector<float>& probs_buf, std::vector<float>& log_probs_buf,
                     std::vector<ml::PolicyNetwork::MissionNet::Activations>& mission_acts,
-                    std::vector<ml::PolicyNetwork::EconNet::Activations>& econ_acts) {
+                    std::vector<ml::PolicyNetwork::EconNet::Activations>& econ_acts,
+                    std::vector<ml::PolicyNetwork::MusterNet::Activations>& muster_acts,
+                    std::vector<ml::MissionInVec>& mission_in_buf,
+                    std::vector<ml::EconInVec>& econ_in_buf,
+                    std::vector<ml::MusterInVec>& muster_in_buf) {
+    const bool use_cmd = net.UseCommander();
+    auto step_rates = [&](float sample_temp, float& out_step_inv_t, float& out_grad_inv_t) {
+        out_step_inv_t = (sample_temp > 0.0F) ? (1.0F / sample_temp) : inv_t;
+        out_grad_inv_t = cfg.temp_rescale ? (1.0F / cfg.grad_ref_temp) : out_step_inv_t;
+    };
+
     // Critic: 0.5 (V - G)^2 on a linear head (search-trained turns have no return target)
     const bool has_critic_target = !std::isnan(turn.return_target);
     if (has_critic_target) {
-        const ml::ValueInVec value_in = ml::PackValueInput(turn.start_ctx, turn.start_critic);
+        ml::ValueInVec value_in = ml::PackValueInput(turn.start_ctx, turn.start_critic);
+        if (use_cmd) ml::RefreshCommanderPosture(value_in.data(), net);
         ml::PolicyNetwork::ValueNet::Activations val_act;
         float predicted_value = net.ValueHead().ForwardWithActivations(value_in, val_act)[0];
         float value_error = predicted_value - turn.return_target;
@@ -922,13 +1002,15 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
 
     for (const auto& step : turn.mission_steps) {
         if (has_critic_target) {
+            ml::StackValueInVec stack_in = step.stack_value_in;
+            if (use_cmd) ml::RefreshCommanderPosture(stack_in.data(), net);
             ml::PolicyNetwork::StackValueNet::Activations stack_val_act;
             float predicted_stack_value =
-                    net.StackValueHead().ForwardWithActivations(step.stack_value_in, stack_val_act)[0];
+                    net.StackValueHead().ForwardWithActivations(stack_in, stack_val_act)[0];
             float stack_value_error = predicted_stack_value - step.stack_return_target;
             stats.value_loss += 0.25 * stack_value_error * stack_value_error;
             stats.stack_values++;
-            net.StackValueHead().BackwardWithActivations(step.stack_value_in, stack_val_act,
+            net.StackValueHead().BackwardWithActivations(stack_in, stack_val_act,
                                                         {stack_value_error}, grad.StackValueHead());
         }
 
@@ -937,30 +1019,77 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
         if (candidate_count > 1) {
             scores.resize(candidate_count);
             mission_acts.resize(candidate_count);
+            const ml::MissionInVec* cands_ptr = step.candidates.data();
+            if (use_cmd) {
+                mission_in_buf = step.candidates;
+                for (auto& cand_in : mission_in_buf) {
+                    ml::RefreshCommanderPosture(cand_in.data(), net);
+                }
+                cands_ptr = mission_in_buf.data();
+            }
             for (size_t candidate = 0; candidate < candidate_count; candidate++) {
                 scores[candidate] = net.MissionHead().ForwardWithActivations(
-                        step.candidates[candidate], mission_acts[candidate])[0];
+                        cands_ptr[candidate], mission_acts[candidate])[0];
             }
-            CategoricalPpo(scores, &step.log_mult, step.chosen_idx, step.old_log_prob, adv, inv_t,
-                           cfg, d_scores, stats, logits_buf, probs_buf, log_probs_buf);
+            float step_inv_t = inv_t, grad_inv_t = inv_t;
+            step_rates(step.sample_temp, step_inv_t, grad_inv_t);
+            CategoricalPpo(scores, &step.log_mult, step.chosen_idx, step.old_log_prob, adv,
+                           step_inv_t, grad_inv_t, cfg, d_scores, stats, logits_buf, probs_buf,
+                           log_probs_buf);
+            std::array<float, 5> d_posture{};
             for (size_t candidate = 0; candidate < candidate_count; candidate++) {
                 if (d_scores[candidate] != 0.0F) {
                     net.MissionHead().BackwardWithActivations(
-                            step.candidates[candidate], mission_acts[candidate],
-                            {d_scores[candidate], 0.0F}, grad.MissionHead());
+                            cands_ptr[candidate], mission_acts[candidate],
+                            {d_scores[candidate], 0.0F}, grad.MissionHead(),
+                            use_cmd ? &d_posture : nullptr);
                 }
             }
+            if (use_cmd) ml::AccumulateCommanderGrad(cands_ptr[0].data(), d_posture, grad);
             stats.mission++;
         }
         if (step.has_stage_choice && step.chosen_idx < static_cast<int>(candidate_count)) {
+            ml::MissionInVec chosen_in = step.candidates[step.chosen_idx];
+            if (use_cmd) ml::RefreshCommanderPosture(chosen_in.data(), net);
             ml::PolicyNetwork::MissionNet::Activations stage_act;
-            float stage_logit = net.MissionHead().ForwardWithActivations(
-                    step.candidates[step.chosen_idx], stage_act)[1];
+            float stage_logit = net.MissionHead().ForwardWithActivations(chosen_in, stage_act)[1];
+            float step_inv_t = inv_t, grad_inv_t = inv_t;
+            step_rates(step.stage_sample_temp, step_inv_t, grad_inv_t);
             float d_stage_logit = BinaryPpo(stage_logit, step.stage_chosen, step.old_stage_log_prob,
-                                            adv, inv_t, cfg, stats);
-            net.MissionHead().BackwardWithActivations(step.candidates[step.chosen_idx], stage_act,
-                                                     {0.0F, d_stage_logit}, grad.MissionHead());
+                                            adv, step_inv_t, grad_inv_t, cfg, stats);
+            std::array<float, 5> d_posture{};
+            net.MissionHead().BackwardWithActivations(chosen_in, stage_act, {0.0F, d_stage_logit},
+                                                      grad.MissionHead(),
+                                                      use_cmd ? &d_posture : nullptr);
+            if (use_cmd) ml::AccumulateCommanderGrad(chosen_in.data(), d_posture, grad);
             stats.mission++;
+        }
+        for (const auto& detour : step.detour_steps) {
+            ml::MissionInVec det_in = detour.detour_in;
+            ml::MissionInVec thr_in = detour.through_in;
+            if (use_cmd) {
+                ml::RefreshCommanderPosture(det_in.data(), net);
+                ml::RefreshCommanderPosture(thr_in.data(), net);
+            }
+            ml::PolicyNetwork::MissionNet::Activations det_act, thr_act;
+            float u_det = net.MissionHead().ForwardWithActivations(det_in, det_act)[0];
+            float u_thr = net.MissionHead().ForwardWithActivations(thr_in, thr_act)[0];
+            float det_logit = (u_det + net.DetourBias()) - u_thr;
+            float step_inv_t = inv_t, grad_inv_t = inv_t;
+            step_rates(detour.sample_temp, step_inv_t, grad_inv_t);
+            float d_logit = BinaryPpo(det_logit, detour.detour_chosen, detour.old_log_prob, adv,
+                                      step_inv_t, grad_inv_t, cfg, stats);
+            grad.SetDetourBias(grad.DetourBias() + d_logit);
+            std::array<float, 5> d_posture{};
+            net.MissionHead().BackwardWithActivations(det_in, det_act, {d_logit, 0.0F},
+                                                      grad.MissionHead(),
+                                                      use_cmd ? &d_posture : nullptr);
+            net.MissionHead().BackwardWithActivations(thr_in, thr_act, {-d_logit, 0.0F},
+                                                      grad.MissionHead(),
+                                                      use_cmd ? &d_posture : nullptr);
+            if (use_cmd) ml::AccumulateCommanderGrad(det_in.data(), d_posture, grad);
+            stats.mission++;
+            stats.detour++;
         }
     }
 
@@ -970,49 +1099,108 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
         float econ_adv = normalizers.econ(econ_step.advantage);
         scores.resize(candidate_count);
         econ_acts.resize(candidate_count);
+        const ml::EconInVec* cands_ptr = econ_step.candidates.data();
+        if (use_cmd) {
+            econ_in_buf = econ_step.candidates;
+            for (auto& cand_in : econ_in_buf) {
+                ml::RefreshCommanderPosture(cand_in.data(), net);
+            }
+            cands_ptr = econ_in_buf.data();
+        }
         for (size_t candidate = 0; candidate < candidate_count; candidate++) {
             scores[candidate] = net.EconHead().ForwardWithActivations(
-                    econ_step.candidates[candidate], econ_acts[candidate])[0];
+                    cands_ptr[candidate], econ_acts[candidate])[0];
         }
+        float step_inv_t = inv_t, grad_inv_t = inv_t;
+        step_rates(econ_step.sample_temp, step_inv_t, grad_inv_t);
         CategoricalPpo(scores, &econ_step.log_mult, econ_step.chosen_idx, econ_step.old_log_prob,
-                       econ_adv, inv_t, cfg, d_scores, stats, logits_buf, probs_buf,
-                       log_probs_buf);
+                       econ_adv, step_inv_t, grad_inv_t, cfg, d_scores, stats, logits_buf,
+                       probs_buf, log_probs_buf);
+        std::array<float, 5> d_posture{};
         for (size_t candidate = 0; candidate < candidate_count; candidate++) {
             if (d_scores[candidate] != 0.0F) {
                 net.EconHead().BackwardWithActivations(
-                        econ_step.candidates[candidate], econ_acts[candidate],
-                        {d_scores[candidate]}, grad.EconHead());
+                        cands_ptr[candidate], econ_acts[candidate], {d_scores[candidate]},
+                        grad.EconHead(), use_cmd ? &d_posture : nullptr);
             }
         }
+        if (use_cmd) ml::AccumulateCommanderGrad(cands_ptr[0].data(), d_posture, grad);
         stats.econ++;
+    }
+
+    for (const auto& muster_step : turn.muster_steps) {
+        const size_t candidate_count = muster_step.candidates.size();
+        if (candidate_count <= 1) continue;
+        float muster_adv = normalizers.muster(muster_step.advantage);
+        scores.resize(candidate_count);
+        muster_acts.resize(candidate_count);
+        const ml::MusterInVec* cands_ptr = muster_step.candidates.data();
+        if (use_cmd) {
+            muster_in_buf = muster_step.candidates;
+            for (auto& cand_in : muster_in_buf) {
+                ml::RefreshCommanderPosture(cand_in.data(), net);
+            }
+            cands_ptr = muster_in_buf.data();
+        }
+        for (size_t candidate = 0; candidate < candidate_count; candidate++) {
+            scores[candidate] = net.MusterHead().ForwardWithActivations(
+                    cands_ptr[candidate], muster_acts[candidate])[0];
+        }
+        float step_inv_t = inv_t, grad_inv_t = inv_t;
+        step_rates(muster_step.sample_temp, step_inv_t, grad_inv_t);
+        CategoricalPpo(scores, &muster_step.log_mult, muster_step.chosen_idx,
+                       muster_step.old_log_prob, muster_adv, step_inv_t, grad_inv_t, cfg, d_scores,
+                       stats, logits_buf, probs_buf, log_probs_buf);
+        std::array<float, 5> d_posture{};
+        for (size_t candidate = 0; candidate < candidate_count; candidate++) {
+            if (d_scores[candidate] != 0.0F) {
+                net.MusterHead().BackwardWithActivations(
+                        cands_ptr[candidate], muster_acts[candidate], {d_scores[candidate]},
+                        grad.MusterHead(), use_cmd ? &d_posture : nullptr);
+            }
+        }
+        if (use_cmd) ml::AccumulateCommanderGrad(cands_ptr[0].data(), d_posture, grad);
+        stats.muster++;
     }
 
     float diplo_adv = normalizers.diplo(turn.advantage);
     for (const auto& diplo_step : turn.diplo_steps) {
+        ml::DiploInVec diplo_in = diplo_step.input;
+        if (use_cmd) ml::RefreshCommanderPosture(diplo_in.data(), net);
         ml::PolicyNetwork::DiploNet::Activations diplo_act;
-        auto raw = net.DiploHead().ForwardWithActivations(diplo_step.input, diplo_act);
+        auto raw = net.DiploHead().ForwardWithActivations(diplo_in, diplo_act);
         std::array<float, ml::kDiploOutDim> d_out{};
         scores.resize(4);
         scores[0] = raw[0];
         scores[1] = raw[1];
         scores[2] = raw[2];
         scores[3] = raw[3];
+        float stance_inv_t = inv_t, stance_grad_inv_t = inv_t;
+        step_rates(diplo_step.stance_sample_temp, stance_inv_t, stance_grad_inv_t);
         CategoricalPpo(scores, nullptr, diplo_step.chosen_stance, diplo_step.old_stance_log_prob,
-                       diplo_adv, inv_t, cfg, d_scores, stats, logits_buf, probs_buf,
-                       log_probs_buf);
+                       diplo_adv, stance_inv_t, stance_grad_inv_t, cfg, d_scores, stats, logits_buf,
+                       probs_buf, log_probs_buf);
         for (int stance = 0; stance < 4; stance++) d_out[stance] = d_scores[stance];
         stats.diplo++;
         if (diplo_step.has_tribute) {
+            float trib_inv_t = inv_t, trib_grad_inv_t = inv_t;
+            step_rates(diplo_step.tribute_sample_temp, trib_inv_t, trib_grad_inv_t);
             d_out[4] = BinaryPpo(raw[4], diplo_step.tribute_chosen, diplo_step.old_tribute_log_prob,
-                                 diplo_adv, inv_t, cfg, stats);
+                                 diplo_adv, trib_inv_t, trib_grad_inv_t, cfg, stats);
             stats.diplo++;
         }
         if (diplo_step.has_joint_war) {
+            float jw_inv_t = inv_t, jw_grad_inv_t = inv_t;
+            step_rates(diplo_step.joint_war_sample_temp, jw_inv_t, jw_grad_inv_t);
             d_out[5] = BinaryPpo(raw[5], diplo_step.joint_war_chosen,
-                                 diplo_step.old_joint_war_log_prob, diplo_adv, inv_t, cfg, stats);
+                                 diplo_step.old_joint_war_log_prob, diplo_adv, jw_inv_t,
+                                 jw_grad_inv_t, cfg, stats);
             stats.diplo++;
         }
-        net.DiploHead().BackwardWithActivations(diplo_step.input, diplo_act, d_out, grad.DiploHead());
+        std::array<float, 5> d_posture{};
+        net.DiploHead().BackwardWithActivations(diplo_in, diplo_act, d_out, grad.DiploHead(),
+                                                use_cmd ? &d_posture : nullptr);
+        if (use_cmd) ml::AccumulateCommanderGrad(diplo_in.data(), d_posture, grad);
     }
 }
 
@@ -1335,8 +1523,8 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
     cfg.lr_end = std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_lr_end)));
     cfg.width_scaled_lr = absl::GetFlag(FLAGS_mup);
     cfg.clip_per_head = absl::GetFlag(FLAGS_clip_per_head);
-    cfg.temp_start = std::max(0.1F, static_cast<float>(absl::GetFlag(FLAGS_temp_start)));
-    cfg.temp_end = std::max(0.1F, static_cast<float>(absl::GetFlag(FLAGS_temp_end)));
+    cfg.temp_start = std::max(0.02F, static_cast<float>(absl::GetFlag(FLAGS_temp_start)));
+    cfg.temp_end = std::max(0.02F, static_cast<float>(absl::GetFlag(FLAGS_temp_end)));
     cfg.eval_temp = std::max(0.01F, static_cast<float>(absl::GetFlag(FLAGS_eval_temp)));
     cfg.seed_offset = std::min<uint32_t>(500000U, absl::GetFlag(FLAGS_seed_offset));
     cfg.classic_frac =
@@ -1347,6 +1535,7 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
     cfg.crop_margin = std::max(0, absl::GetFlag(FLAGS_crop_margin));
     cfg.gae_lambda = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_lambda)), 0.0F, 1.0F);
     cfg.local_weight = std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_local_weight)));
+    cfg.in_path = absl::GetFlag(FLAGS_in);
     cfg.out_path = absl::GetFlag(FLAGS_out);
     cfg.log_path = absl::GetFlag(FLAGS_log);
     cfg.data_dir = absl::GetFlag(FLAGS_data);
@@ -1383,10 +1572,25 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
         cfg.b_detour_bias = static_cast<float>(std::strtod(detour_str.c_str(), nullptr));
     }
     cfg.eval_level = std::clamp(absl::GetFlag(FLAGS_eval_level), -1, 3);
+    cfg.a_no_personalities = absl::GetFlag(FLAGS_a_no_personalities);
     cfg.b_no_personalities = absl::GetFlag(FLAGS_b_no_personalities);
     cfg.b_warlord_lookahead = absl::GetFlag(FLAGS_b_warlord_lookahead);
     cfg.army_weight = std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_army_weight)));
     cfg.upgrade_v7 = absl::GetFlag(FLAGS_upgrade_v7);
+    cfg.upgrade_v8 = absl::GetFlag(FLAGS_upgrade_v8);
+    cfg.use_commander = absl::GetFlag(FLAGS_use_commander);
+    cfg.use_muster = absl::GetFlag(FLAGS_use_muster);
+    cfg.use_standard = absl::GetFlag(FLAGS_use_standard);
+    cfg.avoid_blockers = absl::GetFlag(FLAGS_avoid_blockers);
+    cfg.causal_offturn = absl::GetFlag(FLAGS_causal_offturn);
+    cfg.offturn_repel_weight =
+            std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_offturn_repel_weight)));
+    cfg.offturn_vacate_weight =
+            std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_offturn_vacate_weight)));
+    cfg.explore_eps =
+            std::clamp(static_cast<float>(absl::GetFlag(FLAGS_explore_eps)), 0.0F, 0.99F);
+    cfg.explore_temp = std::max(0.05F, static_cast<float>(absl::GetFlag(FLAGS_explore_temp)));
+    cfg.temp_rescale = absl::GetFlag(FLAGS_temp_rescale);
     cfg.frozen_path = absl::GetFlag(FLAGS_frozen_opponent);
     cfg.frozen_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_frozen_frac)), 0.0F, 1.0F);
     cfg.search_k = std::max(0, absl::GetFlag(FLAGS_search_k));
@@ -1450,18 +1654,65 @@ int main(int argc, char** argv) {
 
     ml::PolicyNetwork learner;
     bool loaded = false;
-    if (!cfg.from_scratch && std::filesystem::exists(cfg.out_path))
-        loaded = learner.LoadJson(cfg.out_path).ok();
-    if (!loaded)
+    const std::string load_path = !cfg.in_path.empty() ? cfg.in_path : cfg.out_path;
+    if (!cfg.from_scratch && std::filesystem::exists(load_path)) {
+        loaded = learner.LoadJson(load_path).ok();
+    }
+    if (!loaded && !cfg.in_path.empty() && !cfg.from_scratch) {
+        std::fprintf(stderr, "Cannot load --in checkpoint '%s'; check the path and JSON format.\n",
+                     cfg.in_path.c_str());
+        return 1;
+    }
+    if (!loaded) {
         learner.InitRandomWeights(2026);
-    else if (cfg.upgrade_v7)
+    } else if (cfg.upgrade_v8) {
+        learner.UpgradeToV8();
+    } else if (cfg.upgrade_v7) {
         learner.UpgradeToV7();
+    }
+    if (cfg.use_commander) {
+        if (learner.Version() < 7) learner.UpgradeToV7();
+        if (!learner.UseCommander()) {
+            std::mt19937 cmd_rng(555U);
+            std::normal_distribution<float> cmd_norm(0.0F, 0.22F);
+            for (float& weight : learner.CommanderW()) weight = cmd_norm(cmd_rng);
+            learner.CommanderB().fill(0.0F);
+        }
+        learner.SetUseCommander(true);
+    }
+    if (cfg.use_muster || cfg.use_standard) {
+        learner.UpgradeToV8();
+        bool muster_uninit = true;
+        for (float weight : learner.MusterHead().w1) {
+            if (weight != 0.0F) {
+                muster_uninit = false;
+                break;
+            }
+        }
+        if (muster_uninit) {
+            learner.MusterHead().Zero();
+            std::mt19937 muster_rng(888U);
+            std::normal_distribution<float> muster_n1(
+                    0.0F, 1.0F / std::sqrt(static_cast<float>(ml::kMusterInDim)));
+            std::normal_distribution<float> muster_n2(0.0F, 1.0F / std::sqrt(12.0F));
+            for (float& weight : learner.MusterHead().w1) weight = muster_n1(muster_rng);
+            for (float& weight : learner.MusterHead().w2) weight = muster_n2(muster_rng);
+            learner.MusterHead().w_skip[ml::kContextDim + 0] = 0.04F;
+            learner.MusterHead().w_skip[22] = -0.04F;
+        }
+        if (cfg.use_muster) learner.SetUseMuster(true);
+        if (cfg.use_standard) learner.SetUseStandard(true);
+    }
+    if (cfg.avoid_blockers) {
+        learner.SetAvoidBlockers(true);
+    }
     learner.SetYieldToBlockers(cfg.yield_blockers);
     if (cfg.a_legacy_blockers) learner.SetAvoidBlockers(false);
+    if (cfg.a_no_personalities) learner.SetUsePersonalities(false);
     ml::SetArmyScoreWeight(cfg.army_weight);
-    std::printf("=== w2arena: PPO self-play | params %d | threads %u | %s ===\n",
-                ml::PolicyNetwork::kTotalParams, threads,
-                loaded ? ("loaded " + cfg.out_path).c_str() : "random init");
+    std::printf("=== w2arena: PPO self-play | params %zu | threads %u | %s ===\n",
+                ml::PolicyNetwork::kV8TrainableParams, threads,
+                loaded ? ("loaded " + load_path).c_str() : "random init");
 
     if (cfg.benchmark_only || cfg.iterations == 0 || !cfg.compare_path.empty()) {
         // Seed set: development (--dev-seeds) > held-out report (--report-seeds) > selection.
@@ -1476,7 +1727,7 @@ int main(int argc, char** argv) {
             std::fprintf(
                     stderr,
                     "Cannot load checkpoint '%s' for benchmarking; pass an existing --out file.\n",
-                    cfg.out_path.c_str());
+                    load_path.c_str());
             return 1;
         }
         if (cfg.compare_path.empty()) {
@@ -1507,9 +1758,26 @@ int main(int argc, char** argv) {
         if (cfg.breakdown) PrintBreakdown(result_a);
         PrintEval((std::string(label) + " B").c_str(), result_b);
         if (cfg.breakdown) PrintBreakdown(result_b);
-        PrintPaired(cfg.out_path.c_str(), result_a, cfg.compare_path.c_str(), result_b);
+        PrintPaired(load_path.c_str(), result_a, cfg.compare_path.c_str(), result_b);
         return 0;
     }
+
+    // Trunk PPO modifies hidden layers (w1, w2), invalidating frozen specialist ArchetypeHeads
+    // until re-evolved; evaluate and save the trained trunk directly without stale persona overrides.
+    learner.SetUsePersonalities(false);
+    learner.SetHasArchetypes(false);
+
+    if (std::filesystem::path out_parent = std::filesystem::path(cfg.out_path).parent_path();
+        !out_parent.empty()) {
+        std::filesystem::create_directories(out_parent);
+    }
+    if (!cfg.log_path.empty()) {
+        if (std::filesystem::path log_parent = std::filesystem::path(cfg.log_path).parent_path();
+            !log_parent.empty()) {
+            std::filesystem::create_directories(log_parent);
+        }
+    }
+
     std::string mode_label = cfg.solo_learner
                                      ? "solo-learner (1 vs K-1 Classic)"
                                      : absl::StrFormat("classic-frac %.2f", cfg.classic_frac);
@@ -1533,13 +1801,16 @@ int main(int argc, char** argv) {
     int best_iter = 0;
     float best_share = -1.0F;
 
-    const size_t param_count = ml::PolicyNetwork::kTotalParams;
+    const size_t param_count = ml::PolicyNetwork::kV8TrainableParams;
     const size_t off_diplo = 0;
     const size_t off_mission = off_diplo + ml::PolicyNetwork::DiploNet::kParamCount;
     const size_t off_econ = off_mission + ml::PolicyNetwork::MissionNet::kParamCount;
     const size_t off_value = off_econ + ml::PolicyNetwork::EconNet::kParamCount;
     const size_t off_stack_value = off_value + ml::PolicyNetwork::ValueNet::kParamCount;
-    std::vector<float> params = learner.Flatten(), adam_m(param_count, 0.0F),
+    const size_t off_muster = off_stack_value + ml::PolicyNetwork::StackValueNet::kParamCount;
+    const size_t off_commander = off_muster + ml::PolicyNetwork::MusterNet::kParamCount;
+    const size_t off_detour = off_commander + ml::PolicyNetwork::kCommanderWeights + 5U;
+    std::vector<float> params = learner.FlattenTrainable(), adam_m(param_count, 0.0F),
                        adam_v(param_count, 0.0F);
     std::vector<float> lr_mult(param_count, 1.0F);
     if (cfg.width_scaled_lr) {
@@ -1560,6 +1831,7 @@ int main(int argc, char** argv) {
         mark(ml::PolicyNetwork::EconNet{}, 24);
         mark(ml::PolicyNetwork::ValueNet{}, 24);
         mark(ml::PolicyNetwork::StackValueNet{}, 24);
+        mark(ml::PolicyNetwork::MusterNet{}, 12);
     }
     int adam_step = 0;
     std::mt19937 shuffle_rng(12345);
@@ -1628,22 +1900,23 @@ int main(int argc, char** argv) {
             neutrals += game_summary.neutrals_left;
             for (auto& episode : game_summary.episodes) episodes.push_back(std::move(episode));
         }
-        ComputeAdvantages(episodes, cfg.gamma, cfg.gae_lambda, cfg.local_weight,
-                          cfg.departure_weight);
+        ComputeAdvantages(episodes, cfg);
 
         std::vector<const ml::TurnStepRecord*> turns;
-        std::vector<float> m_adv, e_adv, d_adv;
+        std::vector<float> m_adv, e_adv, d_adv, mst_adv;
         for (const auto& episode : episodes) {
             for (const auto& turn : episode.turns) {
                 turns.push_back(&turn);
                 for (const auto& mission_step : turn.mission_steps)
                     m_adv.push_back(mission_step.advantage);
                 for (const auto& econ_step : turn.econ_steps) e_adv.push_back(econ_step.advantage);
+                for (const auto& muster_step : turn.muster_steps)
+                    mst_adv.push_back(muster_step.advantage);
                 if (!turn.diplo_steps.empty()) d_adv.push_back(turn.advantage);
             }
         }
         Normalizers normalizers{Normalizer::Fit(m_adv), Normalizer::Fit(e_adv),
-                                Normalizer::Fit(d_adv)};
+                                Normalizer::Fit(d_adv), Normalizer::Fit(mst_adv)};
 
         // Explained variance of the critics' rollout-time predictions:
         // 1 - Var(target - prediction) / Var(target); 1 is perfect, <= 0 is useless.
@@ -1711,11 +1984,16 @@ int main(int argc, char** argv) {
                         std::vector<float> scores, d_scores, logits_buf, probs_buf, log_probs_buf;
                         std::vector<ml::PolicyNetwork::MissionNet::Activations> mission_acts;
                         std::vector<ml::PolicyNetwork::EconNet::Activations> econ_acts;
+                        std::vector<ml::PolicyNetwork::MusterNet::Activations> muster_acts;
+                        std::vector<ml::MissionInVec> mission_in_buf;
+                        std::vector<ml::EconInVec> econ_in_buf;
+                        std::vector<ml::MusterInVec> muster_in_buf;
                         for (size_t ti; (ti = next_turn.fetch_add(1)) < mb1;) {
                             AccumulateTurn(learner, *turns[ti], normalizers, inv_t, cfg,
                                            grads[worker], stats[worker], scores, d_scores,
                                            logits_buf, probs_buf, log_probs_buf, mission_acts,
-                                           econ_acts);
+                                           econ_acts, muster_acts, mission_in_buf, econ_in_buf,
+                                           muster_in_buf);
                         }
                     });
                 }
@@ -1724,7 +2002,7 @@ int main(int argc, char** argv) {
                 HeadStats mb_stats;
                 std::vector<float> total_grad(param_count, 0.0F);
                 for (unsigned int worker = 0; worker < grad_workers; worker++) {
-                    auto flat_grad = grads[worker].Flatten();
+                    auto flat_grad = grads[worker].FlattenTrainable();
                     for (size_t param_idx = 0; param_idx < param_count; param_idx++)
                         total_grad[param_idx] += flat_grad[param_idx];
                     mb_stats.Add(stats[worker]);
@@ -1734,12 +2012,25 @@ int main(int argc, char** argv) {
                     for (size_t param_idx = begin_idx; param_idx < end_idx; param_idx++)
                         total_grad[param_idx] *= factor;
                 };
+                const int actor_decisions =
+                        mb_stats.diplo + mb_stats.mission + mb_stats.econ + mb_stats.muster;
                 scale(off_diplo, off_mission, warmup ? 0.0F : 1.0F / std::max(1, mb_stats.diplo));
                 scale(off_mission, off_econ, warmup ? 0.0F : 1.0F / std::max(1, mb_stats.mission));
                 scale(off_econ, off_value, warmup ? 0.0F : 1.0F / std::max(1, mb_stats.econ));
                 scale(off_value, off_stack_value, cfg.value_coef / std::max(1, mb_stats.turns));
-                scale(off_stack_value, param_count,
+                scale(off_stack_value, off_muster,
                       cfg.value_coef / std::max(1, mb_stats.stack_values));
+                scale(off_muster, off_commander,
+                      (warmup || mb_stats.muster == 0) ? 0.0F
+                                                       : (1.0F / static_cast<float>(mb_stats.muster)));
+                scale(off_commander, off_detour,
+                      (warmup || !learner.UseCommander() || actor_decisions == 0)
+                              ? 0.0F
+                              : (1.0F / static_cast<float>(actor_decisions)));
+                scale(off_detour, param_count,
+                      (warmup || !learner.AvoidBlockers() || mb_stats.detour == 0)
+                              ? 0.0F
+                              : (1.0F / static_cast<float>(mb_stats.detour)));
                 std::vector<float> clip_of(param_count, 1.0F);
                 auto clip_range = [&](size_t begin_idx, size_t end_idx) {
                     double norm = 0.0;
@@ -1757,7 +2048,10 @@ int main(int argc, char** argv) {
                     clip_range(off_mission, off_econ);
                     clip_range(off_econ, off_value);
                     clip_range(off_value, off_stack_value);
-                    clip_range(off_stack_value, param_count);
+                    clip_range(off_stack_value, off_muster);
+                    clip_range(off_muster, off_commander);
+                    clip_range(off_commander, off_detour);
+                    clip_range(off_detour, param_count);
                 } else {
                     clip_range(0, param_count);
                 }
@@ -1773,7 +2067,7 @@ int main(int argc, char** argv) {
                                          (adam_m[param_idx] / bc1) /
                                          (std::sqrt(adam_v[param_idx] / bc2) + 1e-8F);
                 }
-                learner.Unflatten(params);
+                learner.UnflattenTrainable(params);
                 epoch_stats.Add(mb_stats);
             }
             last_epoch = epoch_stats;
@@ -1790,7 +2084,7 @@ int main(int argc, char** argv) {
         double mean_kl = last_epoch.kl / std::max(1, last_epoch.kl_samples);
         float avg_cities = static_cast<float>(cities) / static_cast<float>(std::max(1, sides));
         float avg_neutrals = static_cast<float>(neutrals) / static_cast<float>(cfg.games_per_iter);
-        size_t decisions = m_adv.size() + e_adv.size() + d_adv.size();
+        size_t decisions = m_adv.size() + e_adv.size() + d_adv.size() + mst_adv.size();
         std::printf(
                 "[iter %3d] %.1fs T=%.2f lr=%.1e | cities/side %.2f | neutrals %.1f | ent %.3f | "
                 "vloss %.4f | "
