@@ -9,6 +9,7 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <functional>
 #include <optional>
 #include <string>
@@ -140,7 +141,11 @@ std::optional<Preview> PreviewRoute(Game& game, const Stack& stack, int x, int y
 int Direction(int from_x, int from_y, int to_x, int to_y);
 
 /** @brief The straight-line distance between two tiles, rounded down. */
-int Distance(int from_x, int from_y, int to_x, int to_y);
+inline int Distance(int from_x, int from_y, int to_x, int to_y) {
+    int dx = from_x - to_x;
+    int dy = from_y - to_y;
+    return static_cast<int>(std::sqrt(static_cast<double>(dx * dx + dy * dy)));
+}
 
 /**
  * @brief The search's distance grid before the search: nothing reached, and
@@ -364,6 +369,26 @@ class Pathfinder {
     using SideGridCache = absl::flat_hash_map<int, CostGrid>;
     using RouteSlotArray = std::array<OptionalRoute, move::kCacheSlots>;
 
+    struct FloodCacheKey {
+        int grid_side = 0;
+        int x = 0;
+        int y = 0;
+        int range = 0;
+        uint8_t mode = 0;
+        uint8_t flags = 0;
+        uint8_t allies_mask = 0;
+        int fog_side = 0;
+        uint64_t fog_version = 0;
+
+        bool operator==(const FloodCacheKey&) const = default;
+        template <typename H>
+        friend H AbslHashValue(H state, const FloodCacheKey& key) {
+            return H::combine(std::move(state), key.grid_side, key.x, key.y, key.range, key.mode,
+                              key.flags, key.allies_mask, key.fog_side, key.fog_version);
+        }
+    };
+    using FloodCache = absl::flat_hash_map<FloodCacheKey, CostGrid>;
+
     OptionalDirList FindMatchingCachedDirs(const Game& game, int start_x, int start_y, int dest_x,
                                            int dest_y, int mode, int flags, int distance) const;
     void StoreCachedRoute(int distance, int start_x, int start_y, int dest_x, int dest_y, int mode,
@@ -371,6 +396,8 @@ class Pathfinder {
 
     SideGridCache grids_;         ///< Per-side cached cost grids (`kNone` for unowned).
     RouteSlotArray route_slots_;  ///< Fixed 20-slot route cache mirroring the 1993 engine.
+    CostGrid scratch_dist_;       ///< Reusable distance buffer for non-returning path queries.
+    FloodCache flood_cache_;      ///< Exact memoized `Flood` grids invalidated on city/fog changes.
 };
 
 }  // namespace w2

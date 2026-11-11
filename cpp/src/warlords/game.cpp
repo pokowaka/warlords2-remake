@@ -45,6 +45,10 @@ std::vector<Army*> ArmiesAt(const Game& game, int x, int y) {
     return game.ArmiesOnTile(x, y);
 }
 
+absl::Span<Army* const> ArmiesOnTileSpan(const Game& game, int x, int y) {
+    return game.Armies().IndexedOnTile(TilePos(x, y));
+}
+
 City* CityAt(const Game& game, int x, int y) {
     return game.HasMap() ? const_cast<City*>(game.GetMap().CityAtFootprint(x, y)) : nullptr;
 }
@@ -151,6 +155,36 @@ int ViewerSide(const Game& game, const Side* player) {
     return player ? player->Index() : kNone;
 }
 
+SeenMasks BuildSeenMasks(const Game& game, int side) {
+    SeenMasks out;
+    const Map& map = game.GetMap();
+    out.width = map.Width();
+    out.height = map.Height();
+    out.total_tiles = static_cast<size_t>(std::max(0, out.width)) *
+                      static_cast<size_t>(std::max(0, out.height));
+    if (map.GameOptions().hidden_map == 0 || side == kNone) {
+        out.all_visible = true;
+        return out;
+    }
+    auto add_side_mask = [&](SideId mask_side) {
+        absl::Span<const uint8_t> span = game.Explored().MaskFor(mask_side);
+        if (span.size() >= out.total_tiles && out.total_tiles > 0 && out.count < 8) {
+            out.masks[static_cast<size_t>(out.count++)] = span.data();
+        }
+    };
+    SideId side_id(side);
+    add_side_mask(side_id);
+    if (side >= 0 && side < 8) {
+        const DiplomacyMatrix& diplo = game.Diplomacy();
+        for (int ally = 0; ally < 8; ally++) {
+            if (ally != side && diplo.AlliedFlag(side_id, SideId(ally))) {
+                add_side_mask(SideId(ally));
+            }
+        }
+    }
+    return out;
+}
+
 bool Seen(const Game& game, int side, int x, int y) {
     const Map& map = game.GetMap();
     if (map.GameOptions().hidden_map == 0) return true;
@@ -158,12 +192,14 @@ bool Seen(const Game& game, int side, int x, int y) {
     if (side == kNone) return true;
     int map_width = map.Width(), map_height = map.Height();
     SideId side_id(side);
-    if (game.Explored().IsExplored(side_id, map_width, map_height, x, y)) return true;
+    const FogOfWar& fog = game.Explored();
+    if (fog.IsExplored(side_id, map_width, map_height, x, y)) return true;
     if (side >= 0 && side < 8) {
+        const DiplomacyMatrix& diplo = game.Diplomacy();
         for (int ally = 0; ally < 8; ally++) {
             SideId ally_id(ally);
-            if (ally != side && game.Diplomacy().AlliedFlag(side_id, ally_id) &&
-                game.Explored().IsExplored(ally_id, map_width, map_height, x, y)) {
+            if (ally != side && diplo.AlliedFlag(side_id, ally_id) &&
+                fog.IsExplored(ally_id, map_width, map_height, x, y)) {
                 return true;
             }
         }
@@ -224,25 +260,39 @@ void TidyExplored(Game& game, int side) {
     const Map& map = game.GetMap();
     if (map.GameOptions().hidden_map == 0) return;
     int map_width = map.Width(), map_height = map.Height();
+    if (map_width <= 0 || map_height <= 0) return;
     SideId side_id(side);
     game.Explored().EnsureSide(side_id, map_width, map_height);
+    absl::Span<uint8_t> mask = game.Explored().MutableMaskFor(side_id);
+    uint8_t* raw = mask.data();
+    bool changed = false;
     for (int pass = 0; pass < 2; pass++) {
         for (int x = 0; x < map_width; x++) {
             for (int y = 0; y < map_height; y++) {
-                if (!game.Explored().IsExplored(side_id, map_width, map_height, x, y)) {
+                size_t tile_idx = static_cast<size_t>(y) * static_cast<size_t>(map_width) +
+                                  static_cast<size_t>(x);
+                if (raw[tile_idx] == 0) {
                     int bits = 0;
                     for (int i = 0; i < 8; i++) {
                         int nbr_x = x + kFogDx[i], nbr_y = y + kFogDy[i];
-                        if (!game.Explored().IsExplored(side_id, map_width, map_height, nbr_x,
-                                                        nbr_y))
-                            bits += 1 << i;
+                        bool nbr_seen = static_cast<unsigned int>(nbr_x) <
+                                                static_cast<unsigned int>(map_width) &&
+                                        static_cast<unsigned int>(nbr_y) <
+                                                static_cast<unsigned int>(map_height) &&
+                                        raw[static_cast<size_t>(nbr_y) *
+                                                    static_cast<size_t>(map_width) +
+                                            static_cast<size_t>(nbr_x)] != 0;
+                        if (!nbr_seen) bits += 1 << i;
                     }
-                    if (kFogCell[bits] == kFogNone)
-                        game.Explored().MarkExplored(side_id, map_width, map_height, x, y);
+                    if (kFogCell[bits] == kFogNone) {
+                        raw[tile_idx] = 1;
+                        changed = true;
+                    }
                 }
             }
         }
     }
+    if (changed) game.Explored().BumpVersion();
 }
 
 void RevealStart(Game& game, const Side& side) {

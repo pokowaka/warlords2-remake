@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -17,8 +19,10 @@ namespace w2 {
 /**
  * @brief Per-side tile exploration masks under the Hidden Map scenario option.
  *
- * Stores lazy row-major `uint8_t` (`0` = unseen, `1` = explored) masks keyed by
- * `SideId`. Unallocated masks treat every tile as unexplored until revealed.
+ * Stores lazy row-major `uint8_t` (`0` = unseen, `1` = explored) masks indexed
+ * in $O(1)$ for standard faction indices `0..7` (with a fallback map for any
+ * non-standard `SideId`). Unallocated masks treat every tile as unexplored
+ * until revealed.
  *
  * Invariants:
  * - Every stored mask has size `map_width * map_height` for the active map,
@@ -28,6 +32,9 @@ namespace w2 {
  */
 class FogOfWar {
   public:
+    /** @brief Number of inline faction slots stored without hashing (`0..7`). */
+    static constexpr size_t kInlineSides = 8;
+
     /** @brief Constructs an empty fog-of-war tracker with no allocated side masks. */
     FogOfWar() = default;
 
@@ -54,6 +61,9 @@ class FogOfWar {
     /** @brief Read-only view of `side`'s raw mask, or an empty span if none exists. */
     absl::Span<const uint8_t> MaskFor(SideId side) const;
 
+    /** @brief Mutable view of `side`'s raw mask, or an empty span if none exists. */
+    absl::Span<uint8_t> MutableMaskFor(SideId side);
+
     /** @brief Replaces `side`'s mask with `mask` (used when decoding saves). */
     void SetMask(SideId side, std::vector<uint8_t> mask);
 
@@ -75,11 +85,21 @@ class FogOfWar {
     /** @brief Lists all `SideId`s holding masks in ascending order for deterministic saves. */
     std::vector<SideId> SidesWithMasks() const;
 
+    /** @brief Monotonic mutation counter incremented whenever any exploration mask changes. */
+    uint64_t Version() const { return version_; }
+
+    /** @brief Advances the mutation counter after direct `MutableMaskFor` edits (`TidyExplored`).
+     */
+    void BumpVersion() { ++version_; }
+
   private:
     using TileMask = std::vector<uint8_t>;
     using SideMaskMap = absl::flat_hash_map<SideId, TileMask>;
 
-    SideMaskMap masks_;  ///< Row-major seen masks per side.
+    std::array<TileMask, kInlineSides> side_masks_{};  ///< Direct O(1) masks for sides 0..7.
+    std::array<bool, kInlineSides> has_mask_{};        ///< Active mask flags for sides 0..7.
+    SideMaskMap extra_masks_;                          ///< Fallback storage for non-standard IDs.
+    uint64_t version_ = 1;                             ///< Monotonic mask mutation counter.
 };
 
 }  // namespace w2

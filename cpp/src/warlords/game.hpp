@@ -5,6 +5,9 @@
  */
 #pragma once
 
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -14,6 +17,7 @@
 #include <vector>
 
 #include "absl/status/statusor.h"
+#include "absl/types/span.h"
 
 #include "warlords/city_economy.hpp"
 #include "warlords/combat.hpp"
@@ -63,6 +67,7 @@ constexpr int kSetupPlayer = 0;
 constexpr int kFallenLines = 5;
 
 std::vector<Army*> ArmiesAt(const Game& game, int x, int y);
+absl::Span<Army* const> ArmiesOnTileSpan(const Game& game, int x, int y);
 City* CityAt(const Game& game, int x, int y);
 void SetCityOwner(Game& game, City& city, int side_index);
 std::vector<City*> SideCities(const Game& game, const Side& side);
@@ -102,6 +107,41 @@ Spoils Sack(Game& game, Side& side, City& city, const std::vector<Army*>& stack)
 void Raze(Game& game, Side& side, City& city, const std::vector<Army*>& stack,
           bool own_city = false);
 void Resign(Game& game, Side& side);
+
+/**
+ * @brief Pre-resolved exploration mask pointers for `side` and its active allies, allowing tight
+ * full-map loops (`Prepare`, `belief::Update`, `ComputeEmpireScore`) to test tile visibility with
+ * direct byte loads instead of repeated diplomacy and container lookups.
+ */
+struct SeenMasks {
+    std::array<const uint8_t*, 8> masks{};  ///< Non-null mask pointers for `side` and allies.
+    int count = 0;                          ///< Number of active pointers in `masks`.
+    int width = 0;                          ///< Map width in tiles.
+    int height = 0;                         ///< Map height in tiles.
+    size_t total_tiles = 0;                 ///< `width * height`.
+    bool all_visible = false;               ///< True when Hidden Map is off or `side == kNone`.
+};
+
+SeenMasks BuildSeenMasks(const Game& game, int side);
+
+inline bool IsSeenIndex(const SeenMasks& seen, size_t tile_index) {
+    if (seen.all_visible) return true;
+    for (int i = 0; i < seen.count; ++i) {
+        if (seen.masks[static_cast<size_t>(i)][tile_index] != 0) return true;
+    }
+    return false;
+}
+
+inline bool IsSeenAt(const SeenMasks& seen, int x, int y) {
+    if (static_cast<unsigned int>(x) >= static_cast<unsigned int>(seen.width) ||
+        static_cast<unsigned int>(y) >= static_cast<unsigned int>(seen.height)) {
+        return false;
+    }
+    if (seen.all_visible) return true;
+    return IsSeenIndex(seen,
+                       static_cast<size_t>(y) * static_cast<size_t>(seen.width) +
+                               static_cast<size_t>(x));
+}
 
 bool Seen(const Game& game, int side, int x, int y);
 bool HasActiveHuman(const Game& game);

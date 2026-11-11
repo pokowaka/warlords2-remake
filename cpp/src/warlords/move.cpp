@@ -72,8 +72,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
     result.stopped = WalkStop::kArrived;
     for (Army* army : stack)
         if (army->IsAtSea()) result.sea_before = true;
-    int last_ok = 0, cumulative = 0;
-    std::map<int, int> cost_to;
+    int last_ok = 0, last_cost = 0, cumulative = 0;
 
     for (int i = 1; i <= static_cast<int>(path.size()); i++) {
         const Step& step = path[i - 1];
@@ -82,7 +81,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
             break;
         }
         City* city = game.GetMap().CityAtFootprint(step.x, step.y);
-        auto here = game::ArmiesAt(game, step.x, step.y);
+        absl::Span<Army* const> here = game::ArmiesOnTileSpan(game, step.x, step.y);
         if (city && !city->IsRazed() && !city->OwnedBy(side)) {
             if (!diplomacy::MayAttack(game, side, city->OwnerIndex())) {
                 result.stopped = WalkStop::kAtPeace;
@@ -102,7 +101,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
         cumulative += step.cost;
         if (!theirs && static_cast<int>(here.size() + stack.size()) <= rules::kMaxStack) {
             last_ok = i;
-            cost_to[i] = cumulative;
+            last_cost = cumulative;
         }
     }
 
@@ -112,7 +111,7 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
         return result;
     }
 
-    int cost = cost_to[last_ok];
+    int cost = last_cost;
     const Step& dest = path[last_ok - 1];
     Mode movement = StackMode(game, stack);
     for (Army* army : stack) {
@@ -130,13 +129,11 @@ WalkResult WalkPath(Game& game, const Stack& stack, const Path& path) {
 
     if (game.GetMap().GameOptions().hidden_map != 0 && side != kNone) {
         bool flying = ModeOf(game, stack) == kFlying;
-        int found = 0;
         for (int i = 0; i < static_cast<int>(path.size()); i++) {
             if (i == last_ok - 1) break;
-            found += game::Reveal(game, side, path[i].x, path[i].y, flying);
+            (void)game::Reveal(game, side, path[i].x, path[i].y, flying);
         }
-        found += game::Reveal(game, side, dest.x, dest.y, flying);
-        if (found > 0) game.GetPathfinder().Invalidate();
+        (void)game::Reveal(game, side, dest.x, dest.y, flying);
     }
 
     result.steps = last_ok;
@@ -221,11 +218,6 @@ int Direction(int from_x, int from_y, int to_x, int to_y) {
     if (from_y == to_y) return to_x < from_x ? 6 : 2;
     if (from_x <= to_x) return to_y < from_y ? 1 : 3;
     return to_y < from_y ? 7 : 5;
-}
-
-int Distance(int from_x, int from_y, int to_x, int to_y) {
-    double delta_x = from_x - to_x, delta_y = from_y - to_y;
-    return static_cast<int>(std::floor(std::sqrt(delta_x * delta_x + delta_y * delta_y)));
 }
 
 std::string SettleSea(Game& game, const Stack& stack, int x, int y, int mode, bool was_at_sea) {

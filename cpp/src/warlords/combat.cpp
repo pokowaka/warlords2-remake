@@ -35,18 +35,25 @@ const Army* HeroCarrier(const Game& game, const std::vector<Army*>& line, int x,
 }
 
 void SortLine(const Game& game, std::vector<Army*>& line, int owner_index, const Army* carrier) {
+    if (line.size() <= 1) return;
     const auto& row = game.GetMap().FightOrder()[owner_index == kNone ? 8 : owner_index];
-    std::map<const Army*, std::pair<int, int>> sort_keys;
+    struct KeyedArmy {
+        Army* army = nullptr;
+        int rank = 0;
+        int orig_idx = 0;
+    };
+    std::vector<KeyedArmy> keyed;
+    keyed.reserve(line.size());
     for (size_t i = 0; i < line.size(); i++) {
-        sort_keys[line[i]] = {row[line[i]->TypeIndex()] + (line[i] == carrier ? 80 : 0),
-                              static_cast<int>(i)};
+        keyed.push_back(KeyedArmy{line[i],
+                                  row[line[i]->TypeIndex()] + (line[i] == carrier ? 80 : 0),
+                                  static_cast<int>(i)});
     }
-    LuaSort(line, [&](Army* left, Army* right) {
-        const auto& left_key = sort_keys[left];
-        const auto& right_key = sort_keys[right];
-        if (left_key.first != right_key.first) return left_key.first < right_key.first;
-        return left_key.second < right_key.second;
+    std::sort(keyed.begin(), keyed.end(), [](const KeyedArmy& left, const KeyedArmy& right) {
+        if (left.rank != right.rank) return left.rank < right.rank;
+        return left.orig_idx < right.orig_idx;
     });
+    for (size_t i = 0; i < line.size(); i++) line[i] = keyed[i].army;
 }
 
 int ItemTotal(const Army& army, int item_type) {
@@ -708,14 +715,13 @@ Battle& CombatResolver::ApplyAttack(Battle& result) {
         }
         if (map.GameOptions().hidden_map != 0 && mine != kNone) {
             bool flying = move::ModeOf(game_, result.attackers) == move::kFlying;
-            int found = game::Reveal(game_, mine, x, y, flying);
+            (void)game::Reveal(game_, mine, x, y, flying);
             if (city) {
                 for (int dx = 0; dx <= 1; dx++) {
                     for (int dy = 0; dy <= 1; dy++)
-                        found += game::Reveal(game_, mine, city->X() + dx, city->Y() + dy, false);
+                        (void)game::Reveal(game_, mine, city->X() + dx, city->Y() + dy, false);
                 }
             }
-            if (found > 0) game_.GetPathfinder().Invalidate();
         }
     }
     result.medal = AwardMedal(result, mine);
