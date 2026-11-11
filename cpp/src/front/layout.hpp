@@ -54,17 +54,17 @@ struct Layout {
     int ey = 0;           ///< Rows beyond the original 480 (negative on a short screen).
     int cut = 0;          ///< Rows under 480, taken off the strategic map's foot.
     bool classic = true;  ///< Exactly the original's 640x480.
-    Offset strat;         ///< The strategic map's group, tied to the right edge.
-    Offset panel;         ///< The control panel's group, tied to the bottom right.
-    Offset bar;           ///< The bottom bar's group, centred along the bottom.
-    Offset map;           ///< The map's group, which stays put.
-    Offset dialog;        ///< The dialogs' 640x480 frame, centred.
-    Rect map_rect;        ///< The map, stretched over the room left over.
-    Rect panel_rect;      ///< The map's frame, stretched with it.
-    Rect strat_rect;      ///< The strategic map, cut short on a short screen.
-    Rect bar_rect;        ///< The bottom bar.
+    layout::Offset strat;   ///< The strategic map's group, tied to the right edge.
+    layout::Offset panel;   ///< The control panel's group, tied to the bottom right.
+    layout::Offset bar;     ///< The bottom bar's group, centred along the bottom.
+    layout::Offset map;     ///< The map's group, which stays put.
+    layout::Offset dialog;  ///< The dialogs' 640x480 frame, centred.
+    Rect map_rect;          ///< The map, stretched over the room left over.
+    Rect panel_rect;        ///< The map's frame, stretched with it.
+    Rect strat_rect;        ///< The strategic map, cut short on a short screen.
+    Rect bar_rect;          ///< The bottom bar.
     /** @brief The offset of the named group: "strat", "panel", "bar", else the map's. */
-    const Offset& Offset(const std::string& group) const;
+    const layout::Offset& Offset(const std::string& group) const;
 };
 
 /** @brief The layout of a screen `width` x `height` UI pixels. */
