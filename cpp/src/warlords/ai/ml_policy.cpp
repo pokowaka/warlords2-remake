@@ -48,9 +48,9 @@ inline float DotProduct(const float* lhs, const float* rhs, int n) {
     for (; idx + 7 < n; idx += 8) {
         acc = _mm256_fmadd_ps(_mm256_loadu_ps(lhs + idx), _mm256_loadu_ps(rhs + idx), acc);
     }
-    __m128 lo = _mm256_castps256_ps128(acc);
-    __m128 hi = _mm256_extractf128_ps(acc, 1);
-    __m128 sum128 = _mm_add_ps(lo, hi);
+    __m128 low = _mm256_castps256_ps128(acc);
+    __m128 high = _mm256_extractf128_ps(acc, 1);
+    __m128 sum128 = _mm_add_ps(low, high);
     sum128 = _mm_hadd_ps(sum128, sum128);
     sum128 = _mm_hadd_ps(sum128, sum128);
     float sum = _mm_cvtss_f32(sum128);
