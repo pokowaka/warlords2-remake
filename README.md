@@ -30,7 +30,7 @@ Two distinct computer player architectures implement `IComputerPlayer` and can b
 |---|---|---|
 | **Architecture** | Faithful 19-phase expert system reverse-engineered from 1993 `WARLORD2.EXE` (`ClassicAiPlayer`) | Learned neural policy (`ModernMlPlayer`) with `v8` multi-head residual MLPs (`cpp/ai_weights.json`) |
 | **Information** | Omniscient (reads the full map even under Hidden Map, as the 1993 original does) | **Fair information**: sees only what a human player would via per-side `SideBelief` fog-of-war tracking |
-| **Capabilities** | Original 1993 targeting, city claiming, production, hero recruitment, and `.CRD` personality cards | Multi-head `PolicyNetwork` (`DiploNet`, `MissionNet`, `EconNet`, `ValueNet`, `StackValueNet`, `MusterNet`, `Commander` + MoE experts), 27 affine personality adapters (5 archetypes across 9 Knights/Lords/Warlords levels), cross-turn Order Memory, Field-Stack Rallying, standard planting/vectoring, and optional fair lookahead (`--warlord-lookahead` / `w2search`) |
+| **Capabilities** | Original 1993 targeting, city claiming, production, hero recruitment, and `.CRD` personality cards | Multi-head `PolicyNetwork` (`DiploNet`, `MissionNet`, `EconNet`, `ValueNet`, `StackValueNet`, `MusterNet`, `Commander` + MoE experts), **27 Living AI Characters** (5 evolved `ArchetypeHead` specialists + persistent `BattleGrudge` relational memory, blood-feud vendettas, treaty honour/betrayal, anti-leader coalitions, signature unit rosters, occupy/pillage/raze spoils doctrines, and event-driven `[Herald]` / Parley dispatches), cross-turn Order Memory, Field-Stack Rallying, standard planting/vectoring, and optional fair lookahead (`--warlord-lookahead` / `w2search`) |
 
 ---
 
@@ -55,11 +55,11 @@ Each turn, the Modern AI (`modern::PlayTurn`) executes through a coordinated mul
 4. **Multi-Wave Tactical Military Waves (`MissionNet`)**: In up to 6 iterative waves per turn, groups of armies evaluate every legal target (garrison holding, neutral claiming, enemy city sieges, field stack intercepts, ruin/temple exploration, Muster/Standard rallies, and fog scouting) paired with dynamic coalition sizes (1, 2, 4, $N-1$, or all armies) and selective obstacle detouring.
 5. **Macro-Economy & Spoils (`EconNet`)**: Decides unit retention vs. disbanding when over budget, up to 3 empire-wide production-slot upgrades per turn, per-city unit production and vectoring, and city-capture spoils (occupy / pillage / sack / raze).
 6. **Commander Posture & Mixture of Experts (MoE)**: High-level posture projection (`ctx[25..29]`) modulates decision heads based on game rules, map scale, and empire state.
-7. **27 Affine Personality Adapters**: Exact affine Product-of-Experts (`ArchetypeHead`) blends 5 evolved specialists (`Imperial`, `Berserker`, `Guardian`, `Schemer`, `Questor`) across all 27 original character cards and `Knight` / `Lord` / `Warlord` difficulty tiers.
+7. **27 Living AI Characters (`personality.{hpp,cpp}`, `attitude.{hpp,cpp}`)**: Combines exact affine Product-of-Experts (`ArchetypeHead`: `Imperial`, `Berserker`, `Guardian`, `Schemer`, `Questor`) with persistent per-rival relational memory (`BattleGrudge`: garrisoned/ungarrisoned city losses, razed cities, broken truces/alliances, slain heroes, and paid tribute persisted across save/load), driving recency-decayed vendettas, treaty honour vs. opportunistic ambushes, anti-hegemon coalitions, zero-centered signature unit-roster affinities (`Cavalry` / `Flyer` / `Heavy-Siege`), distinct capture spoils (`Occupy` vs. `Pillage`/`Sack` vs. `Raze`), and event-driven in-character `[Herald]` & Parley missives across `Knight` (`37.4%`), `Lord` (`41.9%`), and `Warlord` (`51.8%`) tiers.
 
 #### 3. Training Curriculum
 * **Asymmetric-Critic Causal PPO (`w2arena`)**: Trained via end-to-end `v8` Proximal Policy Optimization (`10,897` parameters across `DiploNet`, `MissionNet`, `EconNet`, `ValueNet`, `StackValueNet`, `MusterNet`, `Commander`, and `detourBias`) where the policy acts solely on imperfect `SideBelief` while privileged critics observe full board state, augmented with causal off-turn per-stack defense credit (`RecordDefenseOutcome`), `EconNet` unit-lineage credit (`PropagateEconomyLineage`), per-family economy normalization, and Prioritized Fictitious Self-Play (`--pfsp`).
-* **Antithetic Evolution Strategies (`w2evolve`)**: Applies paired-seed parameter perturbations at deployment temperature (`T = 0.02`) with mid-game snapshot forking to refine consolidation, Muster Hubs, Standard vectoring, and specialist archetypes.
+* **Antithetic Evolution Strategies (`w2evolve`)**: Applies paired-seed parameter perturbations at deployment temperature (`T = 0.02`) with mid-game snapshot forking and closed-loop Quality-Diversity doctrine co-evolution (`--qd-doctrine`) to refine consolidation, Muster Hubs, Standard vectoring, and specialist archetypes.
 * **Adversarial Sparring & Imitation Probes (`opponents.cpp`, `w2imitate`)**: Evaluates and trains against the 1993 Classic AI (both omniscient and fair-fog `--fair-classic`), specialized defensive Wardens, empty-city Raiders, concentrated Hero-led `Warband` sparring partners, and frozen checkpoints across 4 disjoint seed splits.
 * **Online Lookahead Search (`w2search` / `--warlord-lookahead`)**: Provides optional 1-ply Warlord tactical lookahead and 2-ply fair specialist portfolio rollout search, pushing Modern AI city share above 50% parity against the omniscient 1993 Classic AI.
 
@@ -67,7 +67,7 @@ Each turn, the Modern AI (`modern::PlayTurn`) executes through a coordinated mul
 When launched with `--modern-ui`, human players can press **`F10`** at any time to open the interactive **AI Brain Inspector**:
 * Inspect the AI's internal mental map (`SideBelief`), showing what it thinks the world looks like versus ground truth.
 * View live network logit utilities across candidate targets, diplomatic stances, and economic priorities.
-* Review diplomatic Parley ledgers, attitude vectors, and turn-start envoy missives.
+* Review diplomatic Parley ledgers, relational grudge breakdowns, live `[Character]` / `[Herald]` dispatches, and turn-start envoy missives.
 
 See [`AI-DESIGN.md`](AI-DESIGN.md) for complete mathematical formulations, network topologies, training curves, and tournament logs.
 

@@ -12,16 +12,17 @@ have shown so far, and the roadmap for the next generation of training.
 > affine readout/skip parameters each] across all 27 Warlords II character cards,
 > `usePersonalities: 1`) combines the `damped_v7_soup` tournament champion trunk
 > (§6.4.3; `0.000000` difference under `--no-personalities`) with the 5-archetype
-> Product-of-Experts personality mixer and `Knight` (`38.5 %`) / `Lord` (`45.3 %`) /
-> `Warlord` (`49.8 %`) difficulty ladder (§6.4.7). Across `768` paired games (`512`
-> dev + `256` held-out report), the `v7` trunk improved over the `v6` curriculum
-> checkpoint by **`+1.22 % ± 1.99 %`** at Turn 40 (`48.5 %` dev, `44.9 %` report)
-> and **`+2.04 % ± 2.41 %`** at Turn 60 (`47.4 %` dev, **4 / 4 presets and 6 / 6
-> scenarios up**), while the damped 27-card release holds full Warlord parity on
-> Gate 2 (`48.4 %` vs `48.5 %`, **`234 / 512` #1 finishes vs `228 / 512`**,
-> `Interm-Diplo` **`+4.5 %`** to `65.9 %`). Adding fair online portfolio lookahead
-> (`w2search` `portfolio`, `Judge::kFair`) pushes Modern **above 50 % parity
-> (`50.8 % ± 5.8 %`)** against the omniscient 1993 Classic AI.
+> Product-of-Experts personality mixer, persistent `BattleGrudge` relational memory
+> & calibrated `CharacterDoctrine` priors (vendettas, treaty honour/betrayal,
+> anti-hegemon coalitions, zero-centered signature unit rosters, occupy/pillage/raze
+> spoils, and event-driven `[Herald]` / Parley dispatches), and a monotonic
+> `Knight` (`37.4 %`) → `Lord` (`41.9 %`) → `Warlord` (`51.8 %`) difficulty ladder
+> (§6.4.7, §6.4.9). On `512` paired Gate 2 dev games, the 27-card Living-Character
+> engine holds full statistical parity with the raw `--no-personalities` trunk at
+> both Turn 40 (`47.4 %` vs `48.1 %`, `202W / 199L`, **`233 / 512` #1 finishes vs
+> `223 / 512`**) and Turn 60 (`46.0 %` vs `46.3 %`, **`225 / 512` #1 finishes vs
+> `207 / 512`**), while adding fair online portfolio lookahead (`w2search`
+> `portfolio`, `Judge::kFair`) reaches `50.8 % ± 5.8 %` even across mixed seats.
 
 ---
 
@@ -832,6 +833,16 @@ three-tier seed hygiene (`< 700000` training, `700000+` in-run selection,
      - `ppo_s2_v8` (`48` + `32` iters × `288` games/iter with PFSP + `Warband` + off-turn credit + economy lineage, `detourBias = −0.01937`) beat the raw trunk (`--a-no-personalities`) by **`+1.77 %` at T40** and **`+1.01 %` at T60** on 192 selection games, and beat `cpp/ai_weights.json` (`usePersonalities = 1`) on `400` paired selection games (`700000..700199`) by **`+0.41 %` at T40 (`47.9 %` vs `47.5 %`)** and **`+0.55 %` at T60 (`46.2 %` vs `45.7 %`, `162/400` vs `159/400` #1s)**.
      - Seeding 4 coordinate-aligned `v8` specialists (`w_skip`-only transfer, keeping `useMuster = 1, useStandard = 1, avoidBlockers = 1` across all 5 heads) lifted `Berserker` `42.7 → 47.0 %`, `Guardian` **`46.4 → 50.9 %`**, `Schemer` `44.5 → 46.2 %`, and `Questor` `46.4 %`; packaging at `0.22×` damping (`pkg_d022`) beat `cpp/ai_weights.json` on `400` selection games (`+0.12 %` T40, **`+0.49 %` T60 with `177/400` vs `159/400` #1 finishes**).
      - **Dual Gate 2 (`512g` dev) & Untouched Holdout `report` (`256g`, `800000+`) Check:** `pkg_d022` **won both untouched Holdout `report` suites** (**`+0.81 % ± 3.75 %` T40 [`46.7 %` vs `45.8 %`, `107/256` #1s]** and **`+1.11 % ± 4.62 %` T60 [`44.4 %` vs `43.3 %`, `107/256` vs `95/256` #1s]**, `Beginner-Open` `+12.5 %` T60, `SORCERY` `+7.2 %`), won vs `Warband` (`+0.12 %`, `68.9 %` share, `54W / 47L`), and took **more #1 finishes on Gate 2 T40 (`232/512` vs `223/512`, `213W / 213L` exact tie in game wins)**, while trailing on Gate 2 `dev` mean city share (`46.1 %` vs `47.7 %` T40 [`−1.57 % ± 3.14 %`], `44.6 %` vs `46.5 %` T60 [`−1.89 % ± 3.64 %`]) due to island Muster/Standard pooling on `DRAGON` (`−5.3 %`) and `Fog-TotalWar`. Under the strict dual-gate policy (requiring gains on *both* Gate 2 `dev` and Holdout `report`), `cpp/ai_weights.json` remains the installed trunk.
+9. **Living Characters — Relational Memory, Calibrated Doctrines, Herald Voice, & 96-Core QD Evolution (`f32fe8b`..`d5476bb`):**
+   - **Per-Rival Relational Memory (`attitude.{hpp,cpp}`, `modern_ml_player.{hpp,cpp}`):** Extended `BattleGrudge` with `cities_stolen` (ungarrisoned captures kept separate from `cities_lost` so `DiploNet`'s `rival_vec` input never suffers covariate shift), `cities_razed_by`, `truces_broken_by`, `tribute_received`, and `last_grudge_turn`, wired polymorphically via `IComputerPlayer` (`combat.cpp`, `city_economy.cpp`, `diplomacy.cpp`), persisted across `SaveState`/`LoadState`, surfaced in Parley (`EvaluateSideProposal`), and aggregated into recency-decayed `ComputeVendettaScore`.
+   - **Temperature-Matched `CharacterDoctrine` Priors (`personality.{hpp,cpp}`):**
+     - *Targets & Questing (`ScoreMissionCharacterPrior`)*: Blood-feud vendetta target priority (`Raymond Ratsbane`), high-odds (`>= 68 %`) capital decapitation (`Hand the Hammer`), cautious fog-buffer / garrison defense (`Winston`, `Sir Robin`, `Morgan`, `Rodrik`), and Hero-stack Ruin/Temple questing (`Roger the Unrepentant`), gated to `T = 0.02` on `Warlord`.
+     - *Diplomacy (`ApplyDiplomacyCharacterPrior`)*: Unprovoked truce/alliance honour (`Winston`, `Margaret`) vs. single-front overwhelming-odds backstabs (`Nikolas`, `Rowan`), anti-hegemon (`>= 38 %` visible share) coalition rallies (`William the Wily`, `Sir Robin`), and war-chest tribute pleas (`Charles`, `Rebecca`).
+     - *Zero-Centered Rosters & Spoils (`ScoreUnitCharacterPrior`, `ApplySpoilsCharacterPrior`)*: Zero-centering unit priors across `BuySlot` and `Produce` candidates shifts `Cavalry` (`Timmy` `42.1 %` vs `Morgan` `26.1 %`), `Flyer` (`Sir Robin` `13.0 %`), and `Heavy/Siege` (`Rodney` `7.7 %` vs `Standard Lord` `3.7 %`) composition without biasing `HoldGold` saving; spoils priors separate chivalrous occupiers (`Sir Robin` `248g / 0` razes, `Winston` `253g / 0`), mercenary plunderers (`Rebecca` `1,314g`, `Charles` `1,189g` / `2,733g` gold), and pyromaniac razers (`Roland the Rabid`: **`18` razed cities** across 20 games in `w2aidiag --card-matrix --matrix-seeds 20`).
+   - **Event-Driven Herald & Parley Voice (`FormatCharacterDispatch`):** Ties `8` live diplomatic and battlefield events (`VendettaWar`, `BetrayalWar`, `CoalitionAlliance`, `TributeDemand`, `PeacePlea`, `CityRazed`, `CityPillaged`, `CapitalCaptured`) directly to real grudges, factions, and city names across human `DiplomaticMissive`s, rate-limited `[Herald]` game-log entries, and `F10` Brain Inspector `Character` thoughts.
+   - **96-Core Quality-Diversity Evolution (`w2evolve --qd-doctrine --heads archetype`) & Dual-Gate Audit:**
+     - Closed-loop `--qd-doctrine` evolution improved `Guardian` (`42.3 → 43.1 %`, `fit 0.483 → 0.496`), `Schemer` (`41.8 → 43.0 %`, `fit 0.386 → 0.400`), and `Questor` (`42.7 → 44.7 %`, `fit 0.488 → 0.512`). Packaged at `0.65×` (`pkg_d065_imp0`), it **statistically significantly beat** pre-QD `cpp/ai_weights.json` on `400` selection games (`+1.99 % ± 1.79 %` T40 [`185/400` vs `163/400` #1s], **`+2.87 % ± 2.46 %` T60 [`174/400` vs `149/400` #1s]**) and **won both untouched Holdout `report` suites** (`+1.70 % ± 2.68 %` T40 [`45.7 %` vs `44.0 %`, 4/4 presets up] and **`+1.88 % ± 3.30 %` T60 [`42.1 %` vs `40.2 %`, `97/256` vs `87/256` #1s, 4/4 presets up]**), while trailing pre-QD `cpp/ai_weights.json` on Gate 2 `dev` (`−1.09 %` T40, `−2.37 %` T60).
+     - Retaining `cpp/ai_weights.json` under the strict Gate 2 floor preserves **full tournament parity** against `--no-personalities` on `512` Gate 2 dev games (`47.4 %` vs `48.1 %` T40 [`−0.72 % ± 2.32 %`, **`202W / 199L`, `233/512` vs `223/512` #1s**] and `46.0 %` vs `46.3 %` T60 [`−0.38 % ± 2.87 %`, **`225/512` vs `207/512` #1s**]) alongside a crisp monotonic ladder (`Knight` **`37.4 %`**, `Lord` **`41.9 %`**, `Warlord` **`51.8 %`**).
 
 ## 7. Building, training, and evaluating (`Bazel`)
 
@@ -896,8 +907,9 @@ $B/w2arena --out cpp/ai_weights.json --compare runs/X/weights.json --dev-seeds 2
 $B/w2arena --out cpp/ai_weights.json --compare runs/X/weights.json --dev-seeds 128 --eval-preset 0 --eval-opponent warden
 $B/w2arena --benchmark-only --report-seeds 128 --eval-turns 40 --out runs/X/weights.json
 
-# Behaviour & battle-calibration audit (flags or positional args after WEIGHTS)
+# Behaviour & battle-calibration audit, or 96-thread 27-card behavioral diversity matrix:
 $B/w2aidiag runs/X/weights.json --scenario ERYTHEA --seed 750011 --turns 40 --opponent raider
+$B/w2aidiag cpp/ai_weights.json --card-matrix --matrix-seeds 20 --turns 40 --threads 96
 
 # Fair online specialist portfolio search (128 dev games: 64 seed pairs)
 $B/w2search cpp/ai_weights.json portfolio 64 3 3 2 40 fair 0.02 1.5 0 \
@@ -1135,7 +1147,8 @@ bootstrapping.
 | `26707e2`..`a10aeb7` | Unified OO C++23 & Bazel architecture (`IComputerPlayer`, `ModernMlPlayer`, `ClassicAiPlayer`, modular `modern_*.cpp` split, Abseil CLI flags, 4 generated scenarios + modern `scengen` presets). |
 | `8d94181`, `3af31c7` | Accelerated inference & PPO backprop via `NEON` / `AVX2` / `SSE2` SIMD dot-product/AXPY kernels, `ForwardWithActivations` caching, and faster fog-frontier sorting & tactical combat rollouts. |
 | `1ab0cf0`, `1452e25` | `~2.2–2.5×` rollout & trainer throughput (`BuildSeenMasks`, flat wavefront flood arrays, faster belief/policy hot loops). |
-| `8162989`..`936614e` | End-to-end `v8` backprop (`10,897` params: `MusterNet`, `Commander`, `detourBias`), causal off-turn defense credit (`RecordDefenseOutcome`), sparse $\epsilon$-exploration, `EconNet` unit-lineage (`PropagateEconomyLineage`) & per-family normalization, stack-concentration shaping, fair-fog Classic (`--fair-classic`), `WarbandPlayer` (`--warband-frac`), and PFSP league sampling (`--pfsp`, `--scengen-frac`); coordinate-aligned `v8` specialists beat holdout `report` (`+0.81 %` T40, `+1.11 %` T60) while keeping `cpp/ai_weights.json` under the strict dual Gate 2 + Holdout gate. |
+| `8162989`..`f11a247` | End-to-end `v8` backprop (`10,897` params: `MusterNet`, `Commander`, `detourBias`), causal off-turn defense credit (`RecordDefenseOutcome`), sparse $\epsilon$-exploration, `EconNet` unit-lineage (`PropagateEconomyLineage`) & per-family normalization, stack-concentration shaping, fair-fog Classic (`--fair-classic`), `WarbandPlayer` (`--warband-frac`), and PFSP league sampling (`--pfsp`, `--scengen-frac`); coordinate-aligned `v8` specialists beat holdout `report` (`+0.81 %` T40, `+1.11 %` T60) while keeping `cpp/ai_weights.json` under the strict dual Gate 2 + Holdout gate. |
+| `f32fe8b`..`d5476bb` | **27 Living AI Characters**: `BattleGrudge` relational memory (`cities_stolen`, `cities_razed_by`, `truces_broken_by`, `tribute_received`, `last_grudge_turn`), `ComputeVendettaScore`, `T = 0.02`-matched `CharacterDoctrine` priors (vendetta & capital targeting, truce honour vs. backstab, anti-hegemon coalitions, zero-centered unit-roster affinities, occupy/pillage/raze spoils), event-driven `[Herald]` & Parley voice (`FormatCharacterDispatch`), `w2evolve --qd-doctrine` Quality-Diversity specialist evolution (`+1.99 %` Sel T40, `+2.87 %` Sel T60, `+1.70 %` Holdout T40, `+1.88 %` Holdout T60), and `w2aidiag --card-matrix` 27-card behavioral benchmark (`Knight` `37.4 %` / `Lord` `41.9 %` / `Warlord` `51.8 %`; `233/512` #1s T40 & `225/512` #1s T60 on Gate 2). |
 
 **Review items deliberately left open** (they do not affect training):
 - `Side::IsClassicAi()` doubles as the diplomacy rule-variant flag, and it is set on
@@ -1157,13 +1170,13 @@ bootstrapping.
 | `cpp/src/warlords/ai/modern_ml_player.{hpp,cpp}` | `ModernMlPlayer` (`IComputerPlayer` adapter, `AIThought` inspector buffer, battle & off-turn defense hooks, save/load state) |
 | `cpp/src/warlords/ai/ml_policy.{hpp,cpp}` | 6-head residual MLP (`v8`, `10,097` core params + `669p` `MusterNet` + `130p` `Commander` + `1p` `detourBias` = `10,897` trainable params + 5 `ArchetypeHead` specialists + optional `GateNet` MoE; `PropagateEconomyLineage`; `NEON`/`AVX2`/`SSE2` SIMD) |
 | `cpp/src/warlords/ai/belief.{hpp,cpp}` | Fair-information `SideBelief`, fog frontiers, threat heatmaps, combat odds estimation (`EstimateCombat`) |
-| `cpp/src/warlords/ai/personality.{hpp,cpp}` | 27 character-card profiles (`kProfiles[3][9]`), 5-archetype simplex projection (`ArchetypeWeights`), and `Knight` / `Lord` / `Warlord` temperature scaling (`DifficultyTemperature`) |
+| `cpp/src/warlords/ai/personality.{hpp,cpp}` | 27 character-card profiles (`kProfiles[3][9]`), 5-archetype simplex projection (`ArchetypeWeights`), `DifficultyTemperature`, `CharacterDoctrine` target/diplomacy/unit-roster/spoils priors, and `FormatCharacterDispatch` `[Herald]` / Parley voice |
 | `cpp/src/warlords/move.{hpp,cpp}`, `pathfinder.cpp` | Dijkstra pathfinding, `PathCache`, and fair obstacle-aware `FindPathClear` / `FloodClear` |
 | `cpp/src/warlords/diplomacy.{hpp,cpp}` | Alliances, truces, tribute, trust, `ComputeAttitude` |
 | `cpp/src/warlords/randommap.{hpp,cpp}`, `scengen.{hpp,cpp}` | Thread-safe in-memory classic & modern procedural world generation |
 | `cpp/test/arena.cpp` | `//cpp:w2arena`: End-to-end `v8` Causal PPO & PFSP league trainer and paired Classic/Fair-Classic/Warden/Warband/difficulty benchmark |
-| `cpp/test/evolve.cpp` | `//cpp:w2evolve`: Paired-seed Antithetic OpenAI-ES trainer with mid-game snapshot fork bank, `Commander`, `MusterNet`, Standard/detour, 5-archetype (`--heads archetype --archetype`), & `GateNet` MoE evolution |
-| `cpp/test/aidiag.cpp` | `//cpp:w2aidiag`: Behaviour & battle-calibration diagnostic for checkpoints and character cards |
+| `cpp/test/evolve.cpp` | `//cpp:w2evolve`: Paired-seed Antithetic OpenAI-ES trainer with mid-game snapshot fork bank, `Commander`, `MusterNet`, Standard/detour, 5-archetype (`--heads archetype --archetype --qd-doctrine`), & `GateNet` MoE evolution |
+| `cpp/test/aidiag.cpp` | `//cpp:w2aidiag`: Behaviour, battle-calibration, and 96-thread 27-card behavioral matrix (`--card-matrix --matrix-seeds`) diagnostic |
 | `cpp/test/opponents.{hpp,cpp}` | `RaiderPlayer`, `WardenPlayer`, fair-fog `WarbandPlayer`, `FairClassic`, and `FrozenPlayer` training/eval opponents |
 | `cpp/test/search.cpp` | `//cpp:w2search`: Candidate-turn lookahead (`probe` / `play` / fair specialist `portfolio`) |
 | `cpp/test/imitate.cpp` | `//cpp:w2imitate`: Classic AI mission snapshot imitation & behaviour-cloning probes |
