@@ -11,6 +11,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 #include "warlords/types.hpp"
 
@@ -103,6 +104,8 @@ struct MissionDoctrineContext {
     bool is_enemy_capital = false;    ///< True when targeting an enemy faction's home capital.
     bool is_hold_garrison = false;    ///< True when holding garrison in an owned city.
     bool leaves_city_sparse = false;  ///< True when departing leaves `rem_guard < 5` strength.
+    bool is_ruin_or_temple = false;   ///< True when targeting an open ruin, sage, temple, or item.
+    bool stack_has_hero = false;      ///< True when the candidate coalition includes a Hero.
     float win_converged = 1.0F;       ///< Converged win probability in `[0, 1]`.
 };
 
@@ -132,5 +135,28 @@ struct DiplomacyDoctrineContext {
 void ApplyDiplomacyCharacterPrior(const Profile& profile, const DiplomacyDoctrineContext& doc_ctx,
                                   std::array<float, 4>& stance_logits, float& tribute_logit,
                                   float& joint_war_logit);
+
+/** @brief Unit-archetype attributes evaluated during slot purchase and city production. */
+struct UnitDoctrineContext {
+    bool is_cavalry = false;         ///< Fast land army (`move >= 14 && !flies`).
+    bool is_flier = false;           ///< Flying army (`flies == true`).
+    bool is_heavy_or_siege = false;  ///< Heavy monster, siege engine, magical, or `strength >= 7`.
+    int strength = 1;                ///< Unit fighting strength (`1..9`).
+    int build_time = 1;              ///< Turns required to produce (`1..6`).
+};
+
+/** @brief Computes a bounded logit adjustment for purchasing or producing a unit under `profile`. */
+float ScoreUnitCharacterPrior(const Profile& profile, const UnitDoctrineContext& unit_ctx);
+
+/** @brief Computes a bounded `HoldGold` logit adjustment when treasury `gold` is below reserve. */
+float ScoreHoldGoldCharacterPrior(const Profile& profile, int gold);
+
+/**
+ * @brief Adjusts capture-spoils candidate `scores` (`0` = Occupy, `1` = Pillage, `2` = Sack,
+ * `3` = Raze) in-place according to `profile`, local threat, city income, and plunder value.
+ */
+void ApplySpoilsCharacterPrior(const Profile& profile, float local_threat, int city_income,
+                               int pillage_gold, int sack_gold, const std::vector<int>& modes,
+                               std::vector<float>& scores);
 
 }  // namespace w2::ai::personality

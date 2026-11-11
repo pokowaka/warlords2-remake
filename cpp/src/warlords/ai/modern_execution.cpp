@@ -88,6 +88,11 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
     for (size_t i = 0; i < cand_inputs.size(); i++) {
         scores[i] = policy.ForwardEcon(cand_inputs[i])[0];
     }
+    if (policy.PersonaActive() && !(sampler && sampler->current_turn)) {
+        personality::ApplySpoilsCharacterPrior(personality::ForSide(side), local_threat,
+                                               city.Income(), pillage_gold, sack_gold, modes,
+                                               scores);
+    }
     float log_prob = 0.0F;
     int pick = ml::SelectFromLogits(scores, sampler, &log_prob);
     if (sampler && sampler->current_turn && cand_inputs.size() > 1) {

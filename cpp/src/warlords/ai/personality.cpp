@@ -299,6 +299,9 @@ float ScoreMissionCharacterPrior(const Profile& profile, const MissionDoctrineCo
     if (doc_ctx.is_hold_garrison && doc_ctx.leaves_city_sparse && caut > 0.25F) {
         bonus += scale * caut * 0.22F;
     }
+    if (doc_ctx.is_ruin_or_temple && traits[kHeroFocus] > 0.15F) {
+        bonus += scale * traits[kHeroFocus] * (doc_ctx.stack_has_hero ? 0.90F : 0.55F);
+    }
     return std::clamp(bonus, -0.65F, 0.65F);
 }
 
@@ -378,6 +381,74 @@ void ApplyDiplomacyCharacterPrior(const Profile& profile, const DiplomacyDoctrin
                            (-doc_ctx.border_advantage);
         stance_logits[1] += plea;
         tribute_logit += 1.25F * plea;
+    }
+}
+
+float ScoreUnitCharacterPrior(const Profile& profile, const UnitDoctrineContext& unit_ctx) {
+    const float econ_scale =
+            profile.level <= 0 ? 0.65F : (profile.level == 1 ? 0.40F : 0.18F);
+    const auto& traits = profile.traits;
+    float bonus = 0.0F;
+    if (unit_ctx.is_cavalry) {
+        bonus += econ_scale * traits[kCavalryAffinity] * 0.85F;
+    }
+    if (unit_ctx.is_flier) {
+        bonus += econ_scale * traits[kFlierAffinity] * 0.85F;
+    }
+    if (unit_ctx.is_heavy_or_siege) {
+        bonus += econ_scale * traits[kSiegeAffinity] * 0.85F;
+    }
+    return std::clamp(bonus, -0.55F, 0.55F);
+}
+
+float ScoreHoldGoldCharacterPrior(const Profile& profile, int gold) {
+    const float hoard =
+            std::max(0.0F, profile.traits[kAvarice]) * std::max(0.0F, profile.traits[kCaution]);
+    if (hoard <= 0.25F || gold >= 650) return 0.0F;
+    const float deficit = std::clamp(static_cast<float>(650 - gold) / 400.0F, 0.0F, 1.0F);
+    return DoctrineScale(profile.level) * hoard * deficit * 0.85F;
+}
+
+void ApplySpoilsCharacterPrior(const Profile& profile, float local_threat, int city_income,
+                               int pillage_gold, int sack_gold, const std::vector<int>& modes,
+                               std::vector<float>& scores) {
+    const float spoil_scale =
+            profile.level <= 0 ? 1.00F : (profile.level == 1 ? 0.80F : 0.35F);
+    const auto& traits = profile.traits;
+    const float scor = traits[kScorchedEarth];
+    const float avar = traits[kAvarice];
+    const float hon = traits[kHonour];
+    const size_t count = std::min(modes.size(), scores.size());
+
+    for (size_t idx = 0; idx < count; ++idx) {
+        const int mode = modes[idx];
+        if (scor < -0.30F || hon > 0.45F) {
+            const float preserve =
+                    spoil_scale * (std::max(0.0F, -scor) + 0.35F * std::max(0.0F, hon));
+            if (mode == 0) scores[idx] += 0.55F * preserve;
+            if (mode == 2) scores[idx] -= 0.70F * preserve;
+            if (mode == 3) scores[idx] -= 1.40F * preserve;
+        }
+        if (scor > 0.35F) {
+            if (profile.level <= 1 && (local_threat > 5.0F || city_income <= 16)) {
+                const float burn = spoil_scale * scor * (local_threat > 5.0F ? 0.85F : 0.55F);
+                if (mode == 3) scores[idx] += burn;
+                if (mode == 0) scores[idx] -= 0.35F * burn;
+            } else if (profile.level >= 2 && local_threat > 15.0F && city_income <= 14) {
+                if (mode == 3) scores[idx] += spoil_scale * scor * 0.65F;
+            }
+        }
+        if (avar > 0.45F) {
+            if (mode == 1 && pillage_gold >= 120) {
+                const float pillage_fac =
+                        std::min(1.0F, static_cast<float>(pillage_gold) / 250.0F);
+                scores[idx] += spoil_scale * avar * pillage_fac * 0.75F;
+            }
+            if (mode == 2 && sack_gold >= 280 && (local_threat > 6.0F || profile.level <= 1)) {
+                const float sack_fac = std::min(1.0F, static_cast<float>(sack_gold) / 450.0F);
+                scores[idx] += spoil_scale * avar * sack_fac * 0.65F;
+            }
+        }
     }
 }
 

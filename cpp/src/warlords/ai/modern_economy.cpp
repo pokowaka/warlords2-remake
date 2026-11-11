@@ -43,6 +43,8 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     (void)ctx;
     int our_side = side.Index();
     const SideBelief& belief = belief::Ensure(side);
+    const bool use_doctrine = policy.PersonaActive() && !(sampler && sampler->current_turn);
+    const personality::Profile& prof = personality::ForSide(side);
 
     auto make_hold_gold_in = [&](const ml::ContextVec& cur_ctx) {
         ml::EconVec econ_vec{};
@@ -201,13 +203,14 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         /** @brief A candidate production-slot upgrade in one city, or HoldGold when city is null.
          */
         struct BuyOption {
-            City* city = nullptr;    ///< City to buy the slot in, or nullptr for HoldGold.
-            int type_id = kNone;     ///< ArmyType ID to purchase, or kNone.
-            ml::EconInVec in_vec{};  ///< Packed EconNet input.
+            City* city = nullptr;                       ///< City to buy in, or nullptr for HoldGold.
+            int type_id = kNone;                        ///< ArmyType ID to purchase, or kNone.
+            ml::EconInVec in_vec{};                     ///< Packed EconNet input.
+            personality::UnitDoctrineContext unit_ctx{};  ///< Signature unit traits.
         };
         ml::ContextVec buy_ctx = ml::BuildContext(game, side, &policy);
         std::vector<BuyOption> buy_opts;
-        buy_opts.push_back(BuyOption{nullptr, kNone, make_hold_gold_in(buy_ctx)});
+        buy_opts.push_back(BuyOption{nullptr, kNone, make_hold_gold_in(buy_ctx), {}});
 
         for (City* city : own_cities) {
             bool full_slots = city->SlotCount() >= rules::kProductionSlots;
@@ -255,8 +258,15 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                             (8.0F - static_cast<float>(city_armies)) / 8.0F, -0.5F, 1.0F);
                     econ_vec[ml::kEconMusterFlow] = city_hero ? 1.0F : 0.0F;
                 }
-                buy_opts.push_back(
-                        BuyOption{city, army_type->id, ml::PackEconInput(buy_ctx, econ_vec)});
+                personality::UnitDoctrineContext unit_ctx{};
+                unit_ctx.is_flier = army_type->flies;
+                unit_ctx.is_cavalry = (army_type->move >= 14 && !army_type->flies);
+                unit_ctx.is_heavy_or_siege =
+                        (army_type->siege || army_type->IsMagical() || army_type->strength >= 7);
+                unit_ctx.strength = army_type->strength;
+                unit_ctx.build_time = army_type->time;
+                buy_opts.push_back(BuyOption{city, army_type->id,
+                                             ml::PackEconInput(buy_ctx, econ_vec), unit_ctx});
             }
         }
 
@@ -265,6 +275,13 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         std::vector<float> log_mult(buy_opts.size(), 0.0F);
         for (size_t i = 0; i < buy_opts.size(); i++) {
             logits[i] = policy.ForwardEcon(buy_opts[i].in_vec)[0];
+            if (use_doctrine) {
+                if (i == 0) {
+                    logits[i] += personality::ScoreHoldGoldCharacterPrior(prof, side.Gold());
+                } else {
+                    logits[i] += personality::ScoreUnitCharacterPrior(prof, buy_opts[i].unit_ctx);
+                }
+            }
             if (i > 0 && buy_opts.size() > 2)
                 log_mult[i] = std::log(static_cast<float>(buy_opts.size() - 1));
         }
@@ -338,6 +355,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
 
         std::vector<int> slot_indices = {kNone};
         std::vector<ml::EconInVec> cands = {ml::PackEconInput(prod_ctx, stop_vec)};
+        std::vector<personality::UnitDoctrineContext> slot_unit_ctx = {{}};
         for (size_t si = 0; si < city->Slots().size(); si++) {
             const Slot& slot = city->SlotAt(si);
             const ArmyType* army_type = game.ArmyTypes().ById(slot.type);
@@ -363,6 +381,13 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             econ_vec[ml::kEconCurrent] = (prod_slot == static_cast<int>(si)) ? 1.0F : 0.0F;
             slot_indices.push_back(static_cast<int>(si));
             cands.push_back(ml::PackEconInput(prod_ctx, econ_vec));
+            personality::UnitDoctrineContext unit_ctx{};
+            unit_ctx.is_flier = is_flier;
+            unit_ctx.is_cavalry = is_cav;
+            unit_ctx.is_heavy_or_siege = (is_siege_or_spec || slot.strength >= 7);
+            unit_ctx.strength = slot.strength;
+            unit_ctx.build_time = slot.time;
+            slot_unit_ctx.push_back(unit_ctx);
         }
 
         if (cands.size() == 1) {
@@ -374,6 +399,9 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         std::vector<float> log_mult(cands.size(), 0.0F);
         for (size_t i = 0; i < cands.size(); i++) {
             logits[i] = policy.ForwardEcon(cands[i])[0];
+            if (use_doctrine && i > 0) {
+                logits[i] += personality::ScoreUnitCharacterPrior(prof, slot_unit_ctx[i]);
+            }
             if (i > 0 && cands.size() > 2)
                 log_mult[i] = std::log(static_cast<float>(cands.size() - 1));
         }

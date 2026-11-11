@@ -1724,5 +1724,65 @@ TEST(ModernAiTest, CharacterRelationalMemoryVendettasHonourAndCoalitions) {
     }
 }
 
+TEST(ModernAiTest, CharacterSignatureUnitRostersSpoilsAndHeroQuestPriors) {
+    namespace pers = ai::personality;
+
+    const pers::Profile& attila = pers::ProfileFor(2, 1);   // Attila (+0.95 cavalry)
+    const pers::Profile& ian = pers::ProfileFor(2, 3);      // Ian (+0.95 siege/heavy)
+    const pers::Profile& roger = pers::ProfileFor(2, 7);    // Roger (+0.95 hero, +0.80 flier)
+    const pers::Profile& charles = pers::ProfileFor(0, 7);  // Charles (+0.80 avarice, +0.70 caut)
+    const pers::Profile& roland = pers::ProfileFor(1, 2);   // Roland (+0.95 scorched earth)
+    const pers::Profile& rebecca = pers::ProfileFor(1, 4);  // Rebecca (+0.95 avarice)
+    const pers::Profile& winston = pers::ProfileFor(0, 1);  // Winston (-0.90 scorched earth)
+
+    // Signature unit roster affinities: Cavalry vs Heavy/Siege vs Flier
+    pers::UnitDoctrineContext cav_unit{};
+    cav_unit.is_cavalry = true;
+    cav_unit.strength = 5;
+    cav_unit.build_time = 2;
+
+    pers::UnitDoctrineContext siege_unit{};
+    siege_unit.is_heavy_or_siege = true;
+    siege_unit.strength = 8;
+    siege_unit.build_time = 4;
+
+    pers::UnitDoctrineContext flier_unit{};
+    flier_unit.is_flier = true;
+    flier_unit.strength = 6;
+    flier_unit.build_time = 3;
+
+    EXPECT_GT(pers::ScoreUnitCharacterPrior(attila, cav_unit),
+              pers::ScoreUnitCharacterPrior(attila, siege_unit) + 0.08F);
+    EXPECT_GT(pers::ScoreUnitCharacterPrior(ian, siege_unit),
+              pers::ScoreUnitCharacterPrior(ian, cav_unit) + 0.08F);
+    EXPECT_GT(pers::ScoreUnitCharacterPrior(roger, flier_unit),
+              pers::ScoreUnitCharacterPrior(roger, cav_unit) + 0.04F);
+
+    // Treasury reserve hoarding for Charles the Craven when below war-chest reserve
+    EXPECT_GT(pers::ScoreHoldGoldCharacterPrior(charles, 320), 0.20F);
+    EXPECT_LE(pers::ScoreHoldGoldCharacterPrior(charles, 1400), 0.05F);
+
+    // Capture spoils doctrines: Roland razes vulnerable border town, Rebecca pillages/sacks,
+    // Winston strictly occupies
+    const std::vector<int> spoil_modes = {0, 1, 2, 3};
+    std::vector<float> roland_scores = {0.0F, 0.0F, 0.0F, 0.0F};
+    pers::ApplySpoilsCharacterPrior(roland, 12.0F, 12, 150, 300, spoil_modes, roland_scores);
+    EXPECT_GT(roland_scores[3], roland_scores[0] + 0.25F);
+
+    std::vector<float> rebecca_scores = {0.0F, 0.0F, 0.0F, 0.0F};
+    pers::ApplySpoilsCharacterPrior(rebecca, 8.0F, 18, 250, 500, spoil_modes, rebecca_scores);
+    EXPECT_GT(std::max(rebecca_scores[1], rebecca_scores[2]), rebecca_scores[0] + 0.20F);
+
+    std::vector<float> winston_scores = {0.0F, 0.0F, 0.0F, 0.0F};
+    pers::ApplySpoilsCharacterPrior(winston, 12.0F, 12, 150, 300, spoil_modes, winston_scores);
+    EXPECT_GT(winston_scores[0], winston_scores[3] + 1.00F);
+
+    // Hero / Ruin / Temple questing prior for Roger the Unrepentant
+    pers::MissionDoctrineContext ruin_ctx{};
+    ruin_ctx.is_ruin_or_temple = true;
+    ruin_ctx.stack_has_hero = true;
+    EXPECT_GT(pers::ScoreMissionCharacterPrior(roger, ruin_ctx), 0.10F);
+}
+
 }  // namespace
 }  // namespace w2

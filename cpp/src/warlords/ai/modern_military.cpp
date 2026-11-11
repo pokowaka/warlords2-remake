@@ -771,6 +771,10 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                             doc_ctx.leaves_city_sparse =
                                     (loc_group.city && loc_group.city->OwnerIndex() == our_side &&
                                      committed_city_guard_str < 5.0F);
+                            doc_ctx.is_ruin_or_temple =
+                                    (tgt.kind == TargetKind::kRuinOrSage ||
+                                     tgt.kind == TargetKind::kTempleOrItem);
+                            doc_ctx.stack_has_hero = (opt_sv[4] > 0.5F);
                             doc_ctx.win_converged = target_vec[11];
                             utility += personality::ScoreMissionCharacterPrior(prof, doc_ctx);
                         }

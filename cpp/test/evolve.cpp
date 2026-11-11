@@ -105,6 +105,8 @@ ABSL_FLAG(double, detour_bias, -999.0,
           "Initial detour utility bias (setting > -900 enables --avoid_blockers).");
 ABSL_FLAG(std::string, archetype, "imperial",
           "Fitness archetype: imperial, berserker, guardian, schemer, or questor.");
+ABSL_FLAG(bool, qd_doctrine, false,
+          "Enable CharacterDoctrine on candidate seats during Quality-Diversity evolution.");
 ABSL_FLAG(std::string, init_moe, "",
           "Comma-separated expert checkpoint paths to initialize MoE experts.");
 ABSL_FLAG(int, eval_every, 10, "Run selection evaluation every N generations.");
@@ -179,6 +181,7 @@ struct Config {
     bool avoid_blockers = false;
     float init_detour_bias = -0.05F;
     std::string archetype = "imperial";
+    bool qd_doctrine = false;
     std::string init_moe;
     int eval_every = 10;
     int eval_turns = 45;
@@ -245,6 +248,7 @@ Config LoadConfigFromFlags() {
         cfg.init_detour_bias = static_cast<float>(raw_detour);
     }
     cfg.archetype = absl::GetFlag(FLAGS_archetype);
+    cfg.qd_doctrine = absl::GetFlag(FLAGS_qd_doctrine);
     cfg.init_moe = absl::GetFlag(FLAGS_init_moe);
     cfg.eval_every = std::max(1, absl::GetFlag(FLAGS_eval_every));
     cfg.eval_turns = std::max(10, absl::GetFlag(FLAGS_eval_turns));
@@ -496,6 +500,15 @@ SeatPlan AssignSeats(Game& game, const Config& cfg, uint32_t seed, int parity, b
         active_pos++;
         seat_plan.is_candidate[side_idx] = cand;
         ai::SetSideClassicAi(game, *side, !cand);
+        if (cand && cfg.qd_doctrine) {
+            int rep_card = cfg.archetype == "berserker"  ? 1
+                           : cfg.archetype == "guardian" ? 2
+                           : cfg.archetype == "schemer"  ? 8
+                           : cfg.archetype == "questor"  ? 7
+                                                         : 0;
+            side->SetLevel(2);
+            side->SetCard(rep_card);
+        }
         seat_plan.opp_kind[side_idx] =
                 cfg.fair_classic ? opponents::Kind::kFairClassic : opponents::Kind::kClassic;
         if (!cand && !pure_classic_eval) {
@@ -936,11 +949,24 @@ int main(int argc, char** argv) {
     }
     if (!loaded) {
         center.InitRandomWeights(2026U);
-    } else if (cfg.upgrade_v8) {
-        center.UpgradeToV8();
-    } else if (cfg.upgrade_v7) {
-        center.UpgradeToV7();
+    } else {
+        if (cfg.heads == "archetype" && center.HasArchetypes()) {
+            int arch_idx = cfg.archetype == "berserker"  ? 1
+                           : cfg.archetype == "guardian" ? 2
+                           : cfg.archetype == "schemer"  ? 3
+                           : cfg.archetype == "questor"  ? 4
+                                                         : 0;
+            center.ApplyArchetypeHead(center.Archetypes()[static_cast<size_t>(arch_idx)]);
+        }
+        center.SetUsePersonalities(false);
+        center.SetHasArchetypes(false);
+        if (cfg.upgrade_v8) {
+            center.UpgradeToV8();
+        } else if (cfg.upgrade_v7) {
+            center.UpgradeToV7();
+        }
     }
+    center.SetPersonaActive(cfg.qd_doctrine);
 
     if (cfg.use_commander) {
         if (center.Version() < 7) center.UpgradeToV7();
@@ -1273,8 +1299,9 @@ int main(int argc, char** argv) {
                         gen, eval_res.games, eval_res.mean_share * 100.0F, eval_res.ci95 * 100.0F,
                         eval_res.mean_fitness);
             bool custom_arch = (!cfg.archetype.empty() && cfg.archetype != "imperial");
+            float share_tol = cfg.qd_doctrine ? 0.008F : 0.025F;
             bool better = custom_arch ? (eval_res.mean_fitness > best_fit &&
-                                         eval_res.mean_share >= init_share - 0.025F)
+                                         eval_res.mean_share >= init_share - share_tol)
                                       : (eval_res.mean_share > best_share);
             if (better) {
                 best_share = eval_res.mean_share;
