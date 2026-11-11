@@ -58,9 +58,9 @@ Each turn, the Modern AI (`modern::PlayTurn`) executes through a coordinated mul
 7. **27 Affine Personality Adapters**: Exact affine Product-of-Experts (`ArchetypeHead`) blends 5 evolved specialists (`Imperial`, `Berserker`, `Guardian`, `Schemer`, `Questor`) across all 27 original character cards and `Knight` / `Lord` / `Warlord` difficulty tiers.
 
 #### 3. Training Curriculum
-* **Asymmetric-Critic PPO (`w2arena`)**: Trained via Proximal Policy Optimization where the policy network acts solely on imperfect `SideBelief`, while privileged critics (`ValueNet`, `StackValueNet`) observe the full map during training to guide stable advantage estimation.
+* **Asymmetric-Critic Causal PPO (`w2arena`)**: Trained via end-to-end `v8` Proximal Policy Optimization (`10,897` parameters across `DiploNet`, `MissionNet`, `EconNet`, `ValueNet`, `StackValueNet`, `MusterNet`, `Commander`, and `detourBias`) where the policy acts solely on imperfect `SideBelief` while privileged critics observe full board state, augmented with causal off-turn per-stack defense credit (`RecordDefenseOutcome`), `EconNet` unit-lineage credit (`PropagateEconomyLineage`), per-family economy normalization, and Prioritized Fictitious Self-Play (`--pfsp`).
 * **Antithetic Evolution Strategies (`w2evolve`)**: Applies paired-seed parameter perturbations at deployment temperature (`T = 0.02`) with mid-game snapshot forking to refine consolidation, Muster Hubs, Standard vectoring, and specialist archetypes.
-* **Adversarial Sparring & Imitation Probes (`opponents.cpp`, `w2imitate`)**: Evaluates and trains against the 1993 Classic AI, specialized defensive Wardens, empty-city Raiders, and frozen checkpoints across 4 disjoint seed splits.
+* **Adversarial Sparring & Imitation Probes (`opponents.cpp`, `w2imitate`)**: Evaluates and trains against the 1993 Classic AI (both omniscient and fair-fog `--fair-classic`), specialized defensive Wardens, empty-city Raiders, concentrated Hero-led `Warband` sparring partners, and frozen checkpoints across 4 disjoint seed splits.
 * **Online Lookahead Search (`w2search` / `--warlord-lookahead`)**: Provides optional 1-ply Warlord tactical lookahead and 2-ply fair specialist portfolio rollout search, pushing Modern AI city share above 50% parity against the omniscient 1993 Classic AI.
 
 #### 4. The `F10` AI Brain Inspector

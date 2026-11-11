@@ -211,31 +211,46 @@ discounted growth of `S` with no fixed horizon (`γ = 0.97`, ~33 turns ahead).
 
 Two complementary C++ trainers operate on `PolicyNetwork`:
 
-### 5.1 `w2arena` — Asymmetric-Critic PPO & Curriculum Trainer (`cpp/test/arena.cpp`)
-Currently updates the `10,097` core parameters (`DiploNet`, `MissionNet`, `EconNet`,
-`ValueNet`, `StackValueNet`; see §8.2 for wiring `MusterNet` / `Commander` into PPO).
+### 5.1 `w2arena` — Asymmetric-Critic PPO, Causal Off-Turn Credit, & PFSP League Trainer (`cpp/test/arena.cpp`)
+Trains all `kV8TrainableParams = 10,897` parameters end-to-end (`DiploNet`,
+`MissionNet`, `EconNet`, `ValueNet`, `StackValueNet`, `MusterNet` [`669p`],
+`Commander` [`130p`], and `detourBias` [`1p`]).
 Each iteration:
-1. Play `--games-per-iter` games in parallel across hardware threads. Two opponent
-   modes are supported:
-   - **`--solo-learner` (`1 vs K − 1` Classic AI):** 1 active seat (rotated via
+1. Play `--games-per-iter` games in parallel across `--threads` worker threads
+   (defaulting to `hardware_concurrency()`). Two opponent modes are supported:
+   - **`--solo-learner` (`1 vs K − 1` opponents):** 1 active seat (rotated via
      `seed % K`) is the recorded Modern AI learner (`--mixed-frac` optionally plays a
-     fraction as 4v4); remaining seats run Classic AI (`level = 2`, Warlord) or
-     `--raider-frac` / `--warden-frac` / `--frozen-opponent` variants. Combined with
-     `--active-sides K --crop-margin M --random-map-frac F`, this drives the
+     fraction as 4v4); remaining seats run Classic AI (`level = 2`, Warlord, or fair
+     fog under `--fair-classic`), `--raider-frac`, `--warden-frac`, `--warband-frac`
+     (fair-fog Hero warband sparring), or `--frozen-opponent` variants. Combined with
+     `--active-sides K --crop-margin M --random-map-frac F --scengen-frac S` (modern
+     `Continents` / `Pangaea` / `Islands` procedural topologies), this drives the
      small-to-large curriculum (`1v1` cropped → `1v3` → `1v5` → `1v7` full 8-side
-     maps, plus thread-safe in-memory random maps via `randommap::GenerateNow`).
-   - **Self-play / league (`--classic-frac F`):** half mirror matches, half
-     hall-of-fame league matches, with fraction `F` against the Classic AI.
+     maps).
+   - **Self-play / PFSP league (`--classic-frac F`, `--pfsp`):** half mirror matches,
+     half hall-of-fame + sparring league matches. With `--pfsp` (`--pfsp-exp`, default
+     `2.0`), opponent seats and scenario presets are sampled proportionally to
+     $(1 - \text{EMA\_win\_rate})^p$ via `PfspScheduler`, automatically focusing
+     compute on tougher opponents and `Fog-TotalWar`.
+   - **Sharp Rollouts (`--explore-eps`, `--explore-temp`, `--temp-rescale`):**
+     decouples policy sharpness (`T_base`) from sparse $\epsilon$-exploration over the
+     multiplicity prior while rescaling categorical/binary gradients by `T_step` so
+     low-temperature rollouts keep invariant gradient norms.
 2. Compute GAE per side (`λ = --lambda`, default `0.95`). Mission decisions get the
    turn's advantage plus `--local-weight × (G_pool − V_stack(s))`, where `G_pool`
    sums multi-turn (`γ_stack = 0.90`) immediate on-turn score changes over the
-   pre-decision group's stable `ArmyRegistry` `Army*` addresses (`uintptr_t`). Early
-   curriculum stages (`1v1`, `1v3`) use `--local-weight 1.5` for sharp per-stack
-   offensive credit; full 8-side `1v7` polishing sets `--local-weight 0.0` so
-   rival-turn counter-captures are weighted via turn-level GAE (see §8.1 for why
-   making `G_pool` off-turn-aware is the highest-leverage next fix).
-3. Normalise advantages per head (`Mission`, `Econ`, `Diplo`), then run `4 epochs ×
-   8 minibatches` of turns with multithreaded activation-cached backprop. Each
+   pre-decision group's stable `ArmyRegistry` `Army*` addresses (`uintptr_t`). With
+   `--causal-offturn`, `ModernMlPlayer::RecordDefenseOutcome` and round-end city
+   diffs inject off-turn defensive battle deltas (`--offturn-repel-weight`) and
+   vacated-city losses (`--offturn-vacate-weight`) directly into `unit_future_local`,
+   and `--econ-lineage` (`PropagateEconomyLineage`) routes discounted `G_pool` credit
+   back to the `BuySlot`, `Produce`, and `Vector` economy decisions that built each
+   unit. Optional `--concentration-weight` rewards concentrated Hero/blessed stacks
+   in `ComputeEmpireScore`.
+3. Normalise advantages per head (`Mission`, `Econ` — or per `EconFamily` with
+   dampened inverse-sqrt weighting under `--econ-family-norm` — `Diplo`, and `Muster`),
+   then run `4 epochs × 8 minibatches` of turns with multithreaded activation-cached
+   backprop (propagating `d_posture` through `ctx[25..29]` into `Commander`). Each
    head's loss is a mean over its own decisions; `ValueNet` and `StackValueNet`
    squared-error gradient steps are scaled by `value_coef = 0.5`. Gradients are clipped
    to norm `0.5` (globally or `--clip-per-head`). Adam decays linearly from `--lr`
@@ -811,6 +826,12 @@ three-tier seed hygiene (`< 700000` training, `700000+` in-run selection,
      - **Gate 1 (`256g` T40 + `256g` T60 + `128g` Warden):** **`49.9 %` vs `48.6 %` (`+1.31 % ± 3.37 %`)** at T40 (`118/256` #1 finishes, `DRAGON` `52.3 %`, `Interm-Diplo` `66.9 %`), **`+0.19 % ± 4.39 %`** at T60 (`Fog-TotalWar` `+3.6 %` to `37.4 %`, `Interm-Diplo` `69.8 %`), and **`+0.70 % ± 5.25 %`** vs Wardens.
      - **Gate 2 (`512g` T40 + `512g` T60 + `256g` Warden):** **`48.4 %` vs `48.5 %` (`−0.10 % ± 2.55 %`)** at T40 (**`234/512` #1 finishes vs `228/512`**, 4/6 scenarios up, `Interm-Diplo` **`+4.5 %`** to `65.9 %`), **`47.0 %` vs `47.4 %` (`−0.43 % ± 3.12 %`, `182W / 182L` exact tie in game wins, `Interm-Diplo` `+3.6 %` to `69.0 %`, `Fog-TotalWar` `+2.8 %` to `35.4 %`)** at T60, and `−0.52 % ± 3.75 %` vs Wardens.
      - **Untouched Holdout `report` (`256g` T40 + `256g` T60, `800000+`):** `−0.51 % ± 2.95 %` T40 (pooled `768g`: **`−0.24 % ± 1.98 %`**) and `−0.95 % ± 3.49 %` T60 (`80W / 85L`; pooled `768g`: **`−0.60 % ± 2.38 %`**). Because the root weights inside `cpp/ai_weights.json` are the exact `damped_v7_soup` trunk (`0.000000` difference under `--no-personalities`), installing `ai_weights_personalities_damped.json` activates all 27 Warlords II character cards and the Knight/Lord/Warlord difficulty ladder by default while preserving full Warlord tournament parity.
+8. **Follow-up — End-to-End `v8` Causal League PPO, `EconNet` Lineage, `WarbandPlayer`, & PFSP (`8162989`..`936614e`):**
+   - Landed `~2.2–2.5×` engine/AI rollout speedups (`1ab0cf0`, `1452e25`), full `10,897`-param `v8` backprop (`MusterNet`, `Commander`, `detourBias`), causal off-turn defensive/vacated-city `G_pool` credit (`RecordDefenseOutcome`, `--causal-offturn`), temperature-invariant sharp rollouts (`--explore-eps`, `--temp-rescale`), `EconNet` unit-lineage credit (`PropagateEconomyLineage`, `--econ-lineage`, `--econ-family-norm`) + stack-concentration shaping (`--concentration-weight`), fair-fog Classic masking (`--fair-classic`), `WarbandPlayer` (`--warband-frac`, pre-turn garrison lock + elite slot purchase + blessed Hero warbands), and Prioritized Fictitious Self-Play (`PfspScheduler`, `--pfsp`).
+   - **80-Iteration 96-Core Causal League PPO + Coordinate-Aligned `v8` Specialist Evolution:**
+     - `ppo_s2_v8` (`48` + `32` iters × `288` games/iter with PFSP + `Warband` + off-turn credit + economy lineage, `detourBias = −0.01937`) beat the raw trunk (`--a-no-personalities`) by **`+1.77 %` at T40** and **`+1.01 %` at T60** on 192 selection games, and beat `cpp/ai_weights.json` (`usePersonalities = 1`) on `400` paired selection games (`700000..700199`) by **`+0.41 %` at T40 (`47.9 %` vs `47.5 %`)** and **`+0.55 %` at T60 (`46.2 %` vs `45.7 %`, `162/400` vs `159/400` #1s)**.
+     - Seeding 4 coordinate-aligned `v8` specialists (`w_skip`-only transfer, keeping `useMuster = 1, useStandard = 1, avoidBlockers = 1` across all 5 heads) lifted `Berserker` `42.7 → 47.0 %`, `Guardian` **`46.4 → 50.9 %`**, `Schemer` `44.5 → 46.2 %`, and `Questor` `46.4 %`; packaging at `0.22×` damping (`pkg_d022`) beat `cpp/ai_weights.json` on `400` selection games (`+0.12 %` T40, **`+0.49 %` T60 with `177/400` vs `159/400` #1 finishes**).
+     - **Dual Gate 2 (`512g` dev) & Untouched Holdout `report` (`256g`, `800000+`) Check:** `pkg_d022` **won both untouched Holdout `report` suites** (**`+0.81 % ± 3.75 %` T40 [`46.7 %` vs `45.8 %`, `107/256` #1s]** and **`+1.11 % ± 4.62 %` T60 [`44.4 %` vs `43.3 %`, `107/256` vs `95/256` #1s]**, `Beginner-Open` `+12.5 %` T60, `SORCERY` `+7.2 %`), won vs `Warband` (`+0.12 %`, `68.9 %` share, `54W / 47L`), and took **more #1 finishes on Gate 2 T40 (`232/512` vs `223/512`, `213W / 213L` exact tie in game wins)**, while trailing on Gate 2 `dev` mean city share (`46.1 %` vs `47.7 %` T40 [`−1.57 % ± 3.14 %`], `44.6 %` vs `46.5 %` T60 [`−1.89 % ± 3.64 %`]) due to island Muster/Standard pooling on `DRAGON` (`−5.3 %`) and `Fog-TotalWar`. Under the strict dual-gate policy (requiring gains on *both* Gate 2 `dev` and Holdout `report`), `cpp/ai_weights.json` remains the installed trunk.
 
 ## 7. Building, training, and evaluating (`Bazel`)
 
@@ -899,35 +920,41 @@ cp runs/X/weights.json cpp/ai_weights.json   # install & run `sh tools/check.sh`
 | `--mup` / `--clip-per-head` | off / off | scale hidden-layer LRs by `1/width`; clip gradient norm per head |
 | `--temp-start T` / `--temp-end T` | `1.0` / `0.5` | training temperature, annealed linearly |
 | `--eval-temp T` / `--eval-level L` | `0.02` / `-1` | evaluation temperature and optional difficulty tier override (`0..2`) |
-| `--b-no-personalities` | off | disable 27-card personality mixing on `--compare` B |
+| `--in PATH` / `--threads N` | — / `0` | distinct input checkpoint path; worker thread count (`0` = `hardware_concurrency`) |
+| `--a-no-personalities` / `--b-no-personalities` | off / off | disable 27-card personality mixing on `--out` A or `--compare` B |
 | `--b-warlord-lookahead` | off | enable fair 1-ply Warlord lookahead on `--compare` B |
 | `--a-legacy-blockers` / `--b-detour-bias X` | off / — | obstacle-detour A/B overrides in `--compare` |
 | `--seed-offset N` | `0` | offset (`<= 500000`) keeping stage training seeds disjoint from `700000+` |
 | `--lambda L` / `--local-weight W` | `0.95` / `1.0` | GAE `λ` and weight of `G_pool − V_stack(s)` in mission advantages |
-| `--departure-weight W` / `--army-weight A` | `0.0` / `0.25` | vacated-city loss credit (§6.3) and `army_share` weight in `ComputeEmpireScore` |
+| `--causal-offturn` | off | route off-turn defensive battle (`--offturn-repel-weight`) & vacated-city (`--offturn-vacate-weight`) credit into `G_pool` |
+| `--explore-eps E` / `--explore-temp T` / `--temp-rescale` | `0` / `0.60` / off | sparse $\epsilon$-exploration over multiplicity prior and temperature-invariant gradient rescaling |
+| `--econ-lineage` / `--econ-lineage-weight W` / `--econ-family-norm` | off / `0.50` / off | unit-lineage credit into `BuySlot`/`Produce`/`Vector` and per-family `EconNet` normalization |
+| `--departure-weight W` / `--army-weight A` / `--concentration-weight C` | `0.0` / `0.25` / `0.0` | vacated-city credit, `army_share` weight, and concentrated Hero/blessed stack bonus in `ComputeEmpireScore` |
 | `--solo-learner` / `--mixed-frac F` | off / `0` | `1` learner vs `K − 1` opponents (with optional `F` fraction played `4v4`) |
 | `--active-sides K` / `--crop-margin M` | `8` / `0` | keep `K` (`2..8`) nearest capitals and crop map `± M` tiles (`0` = full map) |
-| `--random-map-frac F` / `--classic-frac F` | `0` / `0` | share of random maps; share of non-solo games against Classic AI |
-| `--raider-frac F` / `--warden-frac F` | `0` / `0` | share of Classic training seats played by `RaiderPlayer` or `WardenPlayer` |
+| `--random-map-frac F` / `--scengen-frac S` / `--classic-frac F` | `0` / `0` / `0` | share of random maps, share of modern `scengen` topologies among random maps, and Classic opponent share |
+| `--raider-frac F` / `--warden-frac F` / `--warband-frac F` | `0` / `0` / `0` | share of opponent training seats played by `RaiderPlayer`, `WardenPlayer`, or fair-fog `WarbandPlayer` |
+| `--fair-classic` / `--pfsp` / `--pfsp-exp P` | off / off / `2.0` | mask Classic hidden-map omniscience; enable PFSP opponent & preset weighting |
 | `--frozen-opponent P` / `--frozen-frac F` | — / `0` | fixed Modern checkpoint path and share of opponent seats playing it |
 | `--eval-mode mixed\|solo` / `--eval-preset P` | `mixed` / `-1` | seat split and preset filter (`0..3`, `-1` = all) in evaluation |
-| `--eval-opponent classic\|raider\|warden\|frozen` | `classic` | opponent strategy in evaluation games |
+| `--eval-opponent classic\|fair-classic\|raider\|warden\|warband\|frozen` | `classic` | opponent strategy in evaluation games |
 | `--compare PATH` / `--breakdown` | — / off | paired A/B evaluation (`--out` vs `PATH`) and per-preset/scenario breakdown |
-| `--from-scratch` / `--upgrade-v7` / `--critic-warmup N` | off / off / `0` | random init, in-place `< v7` upgrade, and critic-only warm-up iterations |
+| `--from-scratch` / `--upgrade-v7` / `--upgrade-v8` / `--critic-warmup N` | off / off / off / `0` | random init, in-place `< v7` / `< v8` upgrade, and critic-only warm-up iterations |
+| `--use-commander` / `--use-muster` / `--use-standard` / `--avoid-blockers` | off | enable learned `Commander`, `MusterNet`, Side Standard, and blocker detour heads in PPO |
 | `--out PATH` / `--log CSV` / `--save-every N` | `cpp/ai_weights.json` / — / `0` | checkpoint output, per-iter CSV log, and `.iterN.json` snapshot cadence |
 | `--search-k K` / `--search-r R` / `--search-h H` | `0` / `2` / `2` | search-as-teacher rollouts (`K` candidates, `R` copies, `H` rounds) |
 
 ### `w2evolve` key flags
 | Flag | Default | Meaning |
 |---|---|---|
-| `--in PATH` / `--out PATH` | `cpp/ai_weights.json` / `runs/evolve/weights.json` | starting checkpoint and best-selection output path |
+| `--in PATH` / `--out PATH` / `--threads N` | `cpp/ai_weights.json` / `runs/evolve/weights.json` / `0` | starting checkpoint, best-selection output path, and worker thread count |
 | `--heads SLICE` | `actor` | `actor`, `mission`, `econ`, `diplo`, `mission+econ`, `muster`, `muster+commander`, `standard+mission`, `archetype`, `gate`, `commander`, `v7-focus`, `readout`, `mission-readout`, `actor-readout` |
 | `--archetype NAME` | `imperial` | multi-objective specialist target (`imperial`, `berserker`, `guardian`, `schemer`, `questor`) |
 | `--generations G` / `--dirs K` / `--seeds-per-dir M` | `60` / `72` / `2` | ES generations, antithetic directions per generation, paired seeds per direction |
 | `--turns T` / `--fork-turn F` / `--fork-frac P` | `50` / `22` / `0.0` | game horizon and fraction of pairs forked from cached mid-game snapshots |
 | `--sigma` / `--sigma-end` / `--lr` / `--lr-end` | `0.03` / `0.02` / `0.006` / `0.002` | Gaussian perturbation scale and Adam step size schedules |
 | `--l2` / `--anchor-l2` | `1e-4` / `0.0` | L2 decay toward zero and toward the initial `--in` checkpoint |
-| `--warden-frac` / `--raider-frac` / `--totalwar-frac` | `0.25` / `0.10` / `0.50` | opponent mix and share of Total War presets in ES rollouts |
+| `--warden-frac` / `--raider-frac` / `--warband-frac` / `--fair-classic` / `--totalwar-frac` | `0.25` / `0.10` / `0.0` / off / `0.50` | opponent mix (including fair-fog `WarbandPlayer` and fair-fog Classic) and share of Total War presets in ES rollouts |
 | `--use-commander` / `--use-muster` / `--use-standard` / `--avoid-blockers` | off | activate `v7`/`v8` posture, Muster Hub, Side Standard, and detour features |
 
 ---
@@ -1107,6 +1134,8 @@ bootstrapping.
 | (2026-11-09) | 5 Evolved Archetypes + 27-Card Personality Mixer (`personality::ArchetypeWeights`, `PolicyNetwork::ArchetypeHead`, exact affine Product-of-Experts `MaterializeForSide`) and `Knight` (`38.5 %`) / `Lord` (`45.3 %`) / `Warlord` (`49.8 %`) difficulty ladder; installed `ai_weights_personalities_damped.json` as `cpp/ai_weights.json` (`+1.31 %` on Gate 1, `234/512` #1 finishes on Gate 2 T40, `182W / 182L` at T60). |
 | `26707e2`..`a10aeb7` | Unified OO C++23 & Bazel architecture (`IComputerPlayer`, `ModernMlPlayer`, `ClassicAiPlayer`, modular `modern_*.cpp` split, Abseil CLI flags, 4 generated scenarios + modern `scengen` presets). |
 | `8d94181`, `3af31c7` | Accelerated inference & PPO backprop via `NEON` / `AVX2` / `SSE2` SIMD dot-product/AXPY kernels, `ForwardWithActivations` caching, and faster fog-frontier sorting & tactical combat rollouts. |
+| `1ab0cf0`, `1452e25` | `~2.2–2.5×` rollout & trainer throughput (`BuildSeenMasks`, flat wavefront flood arrays, faster belief/policy hot loops). |
+| `8162989`..`936614e` | End-to-end `v8` backprop (`10,897` params: `MusterNet`, `Commander`, `detourBias`), causal off-turn defense credit (`RecordDefenseOutcome`), sparse $\epsilon$-exploration, `EconNet` unit-lineage (`PropagateEconomyLineage`) & per-family normalization, stack-concentration shaping, fair-fog Classic (`--fair-classic`), `WarbandPlayer` (`--warband-frac`), and PFSP league sampling (`--pfsp`, `--scengen-frac`); coordinate-aligned `v8` specialists beat holdout `report` (`+0.81 %` T40, `+1.11 %` T60) while keeping `cpp/ai_weights.json` under the strict dual Gate 2 + Holdout gate. |
 
 **Review items deliberately left open** (they do not affect training):
 - `Side::IsClassicAi()` doubles as the diplomacy rule-variant flag, and it is set on
@@ -1125,17 +1154,17 @@ bootstrapping.
 | `cpp/src/warlords/ai/modern_execution.cpp` | Stack movement execution (`ExecuteStackMission`), selective blocker detouring, ruin/temple actions, and capture spoils (`DecideCaptureSpoils`) |
 | `cpp/src/warlords/ai/modern_economy.cpp` | `RunEconomyPhase` (retention, slot buying, production, vectoring), `RunMusterSelectionPhase`, `RunStandardPhase`, `RunCityGuardPhase`, and `SelectHeroCity` |
 | `cpp/src/warlords/ai/modern_diplomacy.cpp` | `RunDiplomacyPhase` (`DiploNet` stances, peace tribute, joint-war requests) and `EvaluateModernProposal` |
-| `cpp/src/warlords/ai/modern_ml_player.{hpp,cpp}` | `ModernMlPlayer` (`IComputerPlayer` adapter, `AIThought` inspector buffer, battle observation hooks, save/load state) |
-| `cpp/src/warlords/ai/ml_policy.{hpp,cpp}` | 6-head residual MLP (`v8`, `10,097` core params + `669p` `MusterNet` + `130p` `Commander` + 5 `ArchetypeHead` specialists + optional `GateNet` MoE; `NEON`/`AVX2`/`SSE2` SIMD; `v7..v3` function-preserving loader) |
+| `cpp/src/warlords/ai/modern_ml_player.{hpp,cpp}` | `ModernMlPlayer` (`IComputerPlayer` adapter, `AIThought` inspector buffer, battle & off-turn defense hooks, save/load state) |
+| `cpp/src/warlords/ai/ml_policy.{hpp,cpp}` | 6-head residual MLP (`v8`, `10,097` core params + `669p` `MusterNet` + `130p` `Commander` + `1p` `detourBias` = `10,897` trainable params + 5 `ArchetypeHead` specialists + optional `GateNet` MoE; `PropagateEconomyLineage`; `NEON`/`AVX2`/`SSE2` SIMD) |
 | `cpp/src/warlords/ai/belief.{hpp,cpp}` | Fair-information `SideBelief`, fog frontiers, threat heatmaps, combat odds estimation (`EstimateCombat`) |
 | `cpp/src/warlords/ai/personality.{hpp,cpp}` | 27 character-card profiles (`kProfiles[3][9]`), 5-archetype simplex projection (`ArchetypeWeights`), and `Knight` / `Lord` / `Warlord` temperature scaling (`DifficultyTemperature`) |
 | `cpp/src/warlords/move.{hpp,cpp}`, `pathfinder.cpp` | Dijkstra pathfinding, `PathCache`, and fair obstacle-aware `FindPathClear` / `FloodClear` |
 | `cpp/src/warlords/diplomacy.{hpp,cpp}` | Alliances, truces, tribute, trust, `ComputeAttitude` |
 | `cpp/src/warlords/randommap.{hpp,cpp}`, `scengen.{hpp,cpp}` | Thread-safe in-memory classic & modern procedural world generation |
-| `cpp/test/arena.cpp` | `//cpp:w2arena`: PPO self-play & `--solo-learner` curriculum trainer and paired Classic/Warden/difficulty benchmark |
+| `cpp/test/arena.cpp` | `//cpp:w2arena`: End-to-end `v8` Causal PPO & PFSP league trainer and paired Classic/Fair-Classic/Warden/Warband/difficulty benchmark |
 | `cpp/test/evolve.cpp` | `//cpp:w2evolve`: Paired-seed Antithetic OpenAI-ES trainer with mid-game snapshot fork bank, `Commander`, `MusterNet`, Standard/detour, 5-archetype (`--heads archetype --archetype`), & `GateNet` MoE evolution |
 | `cpp/test/aidiag.cpp` | `//cpp:w2aidiag`: Behaviour & battle-calibration diagnostic for checkpoints and character cards |
-| `cpp/test/opponents.{hpp,cpp}` | `RaiderPlayer`, `WardenPlayer` (Classic decorators), and `FrozenPlayer` training/eval opponents |
+| `cpp/test/opponents.{hpp,cpp}` | `RaiderPlayer`, `WardenPlayer`, fair-fog `WarbandPlayer`, `FairClassic`, and `FrozenPlayer` training/eval opponents |
 | `cpp/test/search.cpp` | `//cpp:w2search`: Candidate-turn lookahead (`probe` / `play` / fair specialist `portfolio`) |
 | `cpp/test/imitate.cpp` | `//cpp:w2imitate`: Classic AI mission snapshot imitation & behaviour-cloning probes |
 | `cpp/test/ai_modern_test.cpp`, `ai_benchmark.cpp` | `//cpp:ai_modern_test` GoogleTest suite (fog pathing, analytic gradients, multiplicity prior, `v3..v8` migration, `ArchetypeHead` PoE identity) and `//cpp:ai_benchmark` |
