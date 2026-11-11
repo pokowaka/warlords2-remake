@@ -1587,5 +1587,142 @@ TEST(ModernAiTest, FairClassicFogMaskingAndWarbandPlayerConcentratedPlay) {
     }
 }
 
+TEST(ModernAiTest, CharacterRelationalMemoryVendettasHonourAndCoalitions) {
+    namespace pers = ai::personality;
+
+    // Relational memory hooks & SaveState/LoadState persistence
+    {
+        auto game_ptr = SetupGame("ERYTHEA", SeedWith(701, {{"hiddenMap", 0}, {"diplomacy", 1}}));
+        Game& game = *game_ptr;
+        Side& victim = game.GetMap().Sides()[0];
+        Side& razer = game.GetMap().Sides()[1];
+        Side& payer = game.GetMap().Sides()[2];
+        victim.SetComputerControlled(true);
+        razer.SetComputerControlled(true);
+        payer.SetComputerControlled(true);
+        ai::SetSideClassicAi(game, victim, false);
+        ai::SetSideClassicAi(game, razer, false);
+        ai::SetSideClassicAi(game, payer, false);
+
+        ModernMlPlayer& victim_ai = ModernMlPlayer::EnsureOn(victim);
+        EXPECT_FLOAT_EQ(ai::ComputeVendettaScore(victim_ai.Grudge(), 1, game.Turn()), 0.0F);
+
+        // Undefended city stolen + razed by Side 1 records both cities_lost and cities_razed_by
+        City* victim_city = nullptr;
+        for (auto& city : game.GetMap().Cities()) {
+            if (city.IsNeutral() && !city.IsRazed()) {
+                city.SetOwner(SideId(0));
+                victim_city = &city;
+                break;
+            }
+        }
+        ASSERT_NE(victim_city, nullptr);
+        for (int dy = 0; dy <= 1; ++dy) {
+            for (int dx = 0; dx <= 1; ++dx) {
+                for (Army* occ : game::ArmiesAt(game, victim_city->X() + dx, victim_city->Y() + dy)) {
+                    game.Remove(occ);
+                }
+            }
+        }
+        Army* raider = test::AddArmy(game, victim_city->X() - 1, victim_city->Y(), 1, 2, 6, 12, 12);
+        diplomacy::Propose(game, 1, 0, diplomacy::kWar);
+        diplomacy::AttackAnyway(game, 1, 0);
+        Battle cap_res = game::ResolveAttack(game, {raider}, victim_city->X(), victim_city->Y());
+        EXPECT_TRUE(cap_res.won);
+        EXPECT_GE(victim_ai.Grudge().cities_lost[1], 1);
+        EXPECT_GE(victim_ai.Grudge().truces_broken_by[1], 1);
+
+        game::Raze(game, razer, *victim_city, cap_res.attackers);
+        EXPECT_GE(victim_ai.Grudge().cities_razed_by[1], 1);
+        EXPECT_GT(ai::ComputeVendettaScore(victim_ai.Grudge(), 1, game.Turn()), 0.65F);
+
+        // Tribute paid by Side 2 to Side 0 is recorded in tribute_received
+        game.Diplomacy().SetSymmetricState(SideId(0), SideId(2), diplomacy::kWar);
+        payer.SetGold(400);
+        diplomacy::Propose(game, 2, 0, diplomacy::kPeace);
+        diplomacy::SetGoldOffer(game, 2, 0, 150);
+        diplomacy::Propose(game, 0, 2, diplomacy::kPeace);
+        (void)diplomacy::Apply(game, victim);
+        EXPECT_EQ(victim_ai.Grudge().tribute_received[2], 150);
+
+        // SaveState / LoadState round-trips relational memory cleanly
+        nlohmann::ordered_json saved = victim_ai.SaveState();
+        ModernMlPlayer loaded_ai;
+        ASSERT_TRUE(loaded_ai.LoadState(saved, game).ok());
+        EXPECT_EQ(loaded_ai.Grudge().cities_lost[1], victim_ai.Grudge().cities_lost[1]);
+        EXPECT_EQ(loaded_ai.Grudge().cities_razed_by[1], victim_ai.Grudge().cities_razed_by[1]);
+        EXPECT_EQ(loaded_ai.Grudge().truces_broken_by[1], victim_ai.Grudge().truces_broken_by[1]);
+        EXPECT_EQ(loaded_ai.Grudge().tribute_received[2], 150);
+    }
+
+    // Raymond Ratsbane vendetta target selection & Hand the Hammer capital strike prior
+    {
+        const pers::Profile& raymond = pers::ProfileFor(1, 3);  // Raymond Ratsbane
+        const pers::Profile& hand = pers::ProfileFor(2, 6);     // Hand the Hammer
+        const pers::Profile& robin = pers::ProfileFor(0, 2);    // Brave Brave Sir Robin
+
+        pers::MissionDoctrineContext neutral_enemy{};
+        neutral_enemy.is_enemy_target = true;
+        neutral_enemy.win_converged = 0.72F;
+
+        pers::MissionDoctrineContext feud_enemy = neutral_enemy;
+        feud_enemy.vendetta_score = 0.90F;
+
+        EXPECT_GT(pers::ScoreMissionCharacterPrior(raymond, feud_enemy),
+                  pers::ScoreMissionCharacterPrior(raymond, neutral_enemy) + 0.20F);
+
+        pers::MissionDoctrineContext cap_target = neutral_enemy;
+        cap_target.is_enemy_capital = true;
+        EXPECT_GT(pers::ScoreMissionCharacterPrior(hand, cap_target),
+                  pers::ScoreMissionCharacterPrior(hand, neutral_enemy) + 0.08F);
+
+        pers::MissionDoctrineContext risky_fight{};
+        risky_fight.is_enemy_target = true;
+        risky_fight.win_converged = 0.35F;
+        EXPECT_LT(pers::ScoreMissionCharacterPrior(robin, risky_fight), -0.15F);
+    }
+
+    // Winston truce honour vs Nikolas opportunistic backstab vs William anti-leader coalition
+    {
+        const pers::Profile& winston = pers::ProfileFor(0, 1);  // Winston (+0.8 honour)
+        const pers::Profile& nikolas = pers::ProfileFor(2, 4);  // Nikolas (-0.9 honour)
+        const pers::Profile& william = pers::ProfileFor(2, 8);  // William (+0.95 coalition)
+
+        pers::DiplomacyDoctrineContext truce_ctx{};
+        truce_ctx.cur_at_peace = true;
+        truce_ctx.truce_turns = 8;
+        truce_ctx.border_advantage = 0.65F;
+
+        std::array<float, 4> win_stances{0.0F, 0.0F, 0.0F, 0.0F};
+        float win_trib = 0.0F;
+        float win_jwar = 0.0F;
+        pers::ApplyDiplomacyCharacterPrior(winston, truce_ctx, win_stances, win_trib, win_jwar);
+        EXPECT_GT(win_stances[1], win_stances[3] + 0.80F);
+
+        pers::DiplomacyDoctrineContext backstab_ctx{};
+        backstab_ctx.cur_at_peace = true;
+        backstab_ctx.truce_turns = 0;
+        backstab_ctx.border_advantage = 0.75F;
+        backstab_ctx.active_wars = 0;
+        std::array<float, 4> nik_stances{0.0F, 0.0F, 0.0F, 0.0F};
+        float nik_trib = 0.0F;
+        float nik_jwar = 0.0F;
+        pers::ApplyDiplomacyCharacterPrior(nikolas, backstab_ctx, nik_stances, nik_trib, nik_jwar);
+        EXPECT_GT(nik_stances[3], nik_stances[1] + 0.35F);
+
+        pers::DiplomacyDoctrineContext coal_partner_ctx{};
+        coal_partner_ctx.cur_at_peace = true;
+        coal_partner_ctx.third_party_runaway = true;
+        coal_partner_ctx.runaway_share = 0.40F;
+        std::array<float, 4> wil_stances{0.0F, 0.0F, 0.0F, 0.0F};
+        float wil_trib = 0.0F;
+        float wil_jwar = 0.0F;
+        pers::ApplyDiplomacyCharacterPrior(william, coal_partner_ctx, wil_stances, wil_trib,
+                                           wil_jwar);
+        EXPECT_GT(wil_stances[0], 0.30F);
+        EXPECT_GT(wil_jwar, 0.40F);
+    }
+}
+
 }  // namespace
 }  // namespace w2

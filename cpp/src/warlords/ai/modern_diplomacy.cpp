@@ -345,10 +345,19 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         }
 
         int grudge = 0;
+        int truces_broken_by_rival = 0;
+        int cities_razed_by_rival = 0;
+        float vendetta_score = 0.0F;
         if (const ModernMlPlayer* modern_player = ModernMlPlayer::FindOn(side)) {
             const ai::BattleGrudge& battle_grudge = modern_player->Grudge();
             grudge = battle_grudge.cities_lost[other_idx] * 8 +
-                     battle_grudge.heroes_killed[other_idx] * 6 + battle_grudge.lost[other_idx] * 2;
+                     battle_grudge.cities_razed_by[other_idx] * 14 +
+                     battle_grudge.heroes_killed[other_idx] * 6 +
+                     battle_grudge.truces_broken_by[other_idx] * 12 +
+                     battle_grudge.lost[other_idx] * 2;
+            truces_broken_by_rival = battle_grudge.truces_broken_by[other_idx];
+            cities_razed_by_rival = battle_grudge.cities_razed_by[other_idx];
+            vendetta_score = ai::ComputeVendettaScore(battle_grudge, other_idx, game.Turn());
         } else if (const ClassicAiPlayer* classic_player = ClassicAiPlayer::FindOn(side)) {
             const AIData& data = classic_player->Data();
             grudge = data.cities_lost[other_idx] * 8 + data.heroes_killed[other_idx] * 6 +
@@ -388,7 +397,32 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
 
         ml::DiploInVec d_in = ml::PackDiploInput(ctx, rival_vec);
         auto raw = policy.ForwardDiplo(d_in);
-        std::vector<float> stance_vec = {raw[0], raw[1], raw[2], raw[3]};
+        std::array<float, 4> stance_arr = {raw[0], raw[1], raw[2], raw[3]};
+        float trib_logit = raw[4];
+        float jwar_logit = raw[5];
+        const bool use_doctrine = policy.PersonaActive() && !(sampler && sampler->current_turn);
+        const float leader_share = static_cast<float>(max_vis_cities) /
+                                   static_cast<float>(std::max(1, total_vis_cities));
+        const bool has_runaway = (leader_side != kNone && leader_side != our_side &&
+                                  leader_share >= 0.28F);
+        if (use_doctrine) {
+            personality::DiplomacyDoctrineContext doc_ctx{};
+            doc_ctx.cur_allied = cur_allied;
+            doc_ctx.cur_at_peace = (cur_st == diplomacy::kPeace);
+            doc_ctx.cur_at_war = (cur_st == diplomacy::kWar);
+            doc_ctx.truce_turns = diplomacy::TruceTurns(game, our_side, other_idx);
+            doc_ctx.truces_broken_by_rival = truces_broken_by_rival;
+            doc_ctx.cities_razed_by_rival = cities_razed_by_rival;
+            doc_ctx.vendetta_score = vendetta_score;
+            doc_ctx.border_advantage = rival_vec[9];
+            doc_ctx.rival_is_runaway = (has_runaway && other_idx == leader_side);
+            doc_ctx.runaway_share = has_runaway ? leader_share : 0.0F;
+            doc_ctx.third_party_runaway = (has_runaway && other_idx != leader_side);
+            doc_ctx.active_wars = wars_committed;
+            personality::ApplyDiplomacyCharacterPrior(prof, doc_ctx, stance_arr, trib_logit,
+                                                      jwar_logit);
+        }
+        std::vector<float> stance_vec(stance_arr.begin(), stance_arr.end());
         ml::DiploStepRecord rec;
         rec.input = d_in;
         int best_choice = ml::SelectFromLogits(stance_vec, sampler, &rec.old_stance_log_prob);
@@ -416,7 +450,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         diplomacy::SetGoldOffer(game, our_side, other_idx, 0);
         if (friendly && cur_st == diplomacy::kWar && side.Gold() >= 100) {
             rec.has_tribute = true;
-            rec.tribute_chosen = ml::SelectBinary(raw[4], sampler, &rec.old_tribute_log_prob);
+            rec.tribute_chosen = ml::SelectBinary(trib_logit, sampler, &rec.old_tribute_log_prob);
             rec.tribute_sample_temp = sampler ? sampler->last_step_temp : 0.0F;
             if (rec.tribute_chosen) {
                 int offer =
@@ -425,14 +459,21 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             }
         }
 
-        // Binary sub-decision (output 5): ask a friendly side to join our war
+        // Binary sub-decision (output 5): ask a friendly side to join our war (or contain runaway)
+        int joint_enemy = primary_enemy;
+        if (joint_enemy == kNone && use_doctrine && has_runaway && leader_side != other_idx &&
+            prof.traits[personality::kCoalitionDrive] >= 0.45F &&
+            !diplomacy::IsAllied(game, our_side, leader_side)) {
+            joint_enemy = leader_side;
+        }
         diplomacy::SetWarTarget(game, our_side, other_idx, kNone);
-        if (friendly && primary_enemy != kNone && primary_enemy != other_idx) {
+        if (friendly && joint_enemy != kNone && joint_enemy != other_idx) {
             rec.has_joint_war = true;
-            rec.joint_war_chosen = ml::SelectBinary(raw[5], sampler, &rec.old_joint_war_log_prob);
+            rec.joint_war_chosen =
+                    ml::SelectBinary(jwar_logit, sampler, &rec.old_joint_war_log_prob);
             rec.joint_war_sample_temp = sampler ? sampler->last_step_temp : 0.0F;
             if (rec.joint_war_chosen)
-                diplomacy::SetWarTarget(game, our_side, other_idx, primary_enemy);
+                diplomacy::SetWarTarget(game, our_side, other_idx, joint_enemy);
         }
 
         if (sampler && sampler->current_turn) {

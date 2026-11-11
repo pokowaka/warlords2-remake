@@ -89,4 +89,48 @@ ArchetypeWeightArray ArchetypeWeights(const Profile& profile);
  */
 float DifficultyTemperature(int level, float warlord_temp);
 
+/**
+ * @brief Returns the bounded character-doctrine scaling factor for `level` (`Knight > Lord >
+ * Warlord`), calibrated against `DifficultyTemperature` so Warlords express distinct personas
+ * without overriding tactical soundness.
+ */
+float DoctrineScale(int level);
+
+/** @brief Input signals for trait-conditioned mission utility modulation. */
+struct MissionDoctrineContext {
+    float vendetta_score = 0.0F;      ///< Blood-feud intensity against target owner in `[0, 1]`.
+    bool is_enemy_target = false;     ///< True for enemy cities and enemy field stacks.
+    bool is_enemy_capital = false;    ///< True when targeting an enemy faction's home capital.
+    bool is_hold_garrison = false;    ///< True when holding garrison in an owned city.
+    bool leaves_city_sparse = false;  ///< True when departing leaves `rem_guard < 5` strength.
+    float win_converged = 1.0F;       ///< Converged win probability in `[0, 1]`.
+};
+
+/** @brief Computes a bounded logit utility adjustment for a mission candidate under `profile`. */
+float ScoreMissionCharacterPrior(const Profile& profile, const MissionDoctrineContext& doc_ctx);
+
+/** @brief Input signals for trait-conditioned diplomacy proposal modulation. */
+struct DiplomacyDoctrineContext {
+    bool cur_allied = false;           ///< Currently in a sworn alliance with this rival.
+    bool cur_at_peace = false;         ///< Currently at peace (`State == kPeace`).
+    bool cur_at_war = false;           ///< Currently at war (`State == kWar`).
+    int truce_turns = 0;               ///< Remaining turns on active truce.
+    int truces_broken_by_rival = 0;    ///< Betrayal count recorded against this rival.
+    int cities_razed_by_rival = 0;     ///< Our cities razed by this rival.
+    float vendetta_score = 0.0F;       ///< Blood-feud intensity in `[0, 1]`.
+    float border_advantage = 0.0F;     ///< `tanh((my_str - their_str) / 20)` in `[-1, 1]`.
+    bool rival_is_runaway = false;     ///< Rival is the `#1` leader with `>= 28%` city share.
+    float runaway_share = 0.0F;        ///< City share of the `#1` runaway leader (`0` if none).
+    bool third_party_runaway = false;  ///< Another faction (neither us nor rival) is runaway `#1`.
+    int active_wars = 0;               ///< Number of active wars we are already fighting.
+};
+
+/**
+ * @brief Adjusts diplomatic `stance_logits` (`Allied`, `Peace`, `Uneasy`, `War`), `tribute_logit`,
+ * and `joint_war_logit` in-place according to `profile` and relational memory.
+ */
+void ApplyDiplomacyCharacterPrior(const Profile& profile, const DiplomacyDoctrineContext& doc_ctx,
+                                  std::array<float, 4>& stance_logits, float& tribute_logit,
+                                  float& joint_war_logit);
+
 }  // namespace w2::ai::personality

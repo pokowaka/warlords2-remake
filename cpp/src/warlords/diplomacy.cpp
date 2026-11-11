@@ -50,6 +50,9 @@ void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::s
         side.AddGold(-paid);
         other.AddGold(paid);
         AddTrust(game, other_index, side_index, std::min(30, paid / 10 + 5));
+        if (other.ComputerPlayer()) {
+            other.ComputerPlayer()->RecordTributeReceived(side.Id(), paid);
+        }
         messages.push_back(absl::StrFormat("%s paid %d gold in tribute to %s.", side.Name(), paid,
                                            other.Name()));
     } else if (other_offer > 0 && other.Gold() > 0) {
@@ -57,6 +60,9 @@ void SettleDealTransfers(Game& game, Side& side, Side& other, std::vector<std::s
         other.AddGold(-paid);
         side.AddGold(paid);
         AddTrust(game, side_index, other_index, std::min(30, paid / 10 + 5));
+        if (side.ComputerPlayer()) {
+            side.ComputerPlayer()->RecordTributeReceived(other.Id(), paid);
+        }
         messages.push_back(absl::StrFormat("%s paid %d gold in tribute to %s.", other.Name(), paid,
                                            side.Name()));
     }
@@ -191,6 +197,10 @@ std::vector<std::string> Apply(Game& game, Side& side) {
                                                      wanted);
                     if (!classic && (was_allied || (truce_left > 0 && wanted == kWar))) {
                         AddTrust(game, other_index, side_index, -50);
+                        if (other->ComputerPlayer()) {
+                            other->ComputerPlayer()->RecordBetrayal(side.Id(), was_allied,
+                                                                    game.Turn());
+                        }
                         for (int bystander = 0; bystander < 8; bystander++) {
                             if (bystander != side_index && bystander != other_index)
                                 AddTrust(game, bystander, side_index, -20);
@@ -245,6 +255,7 @@ void AttackAnyway(Game& game, int from_side, int to_side) {
     Side* side = game.GetMap().SideAt(from_side);
     if (!side) return;
     int current_state = State(game, from_side, to_side);
+    bool was_allied = IsAllied(game, from_side, to_side);
     if (current_state == kPeace)
         game::AddDiploScore(game, *side, game.GetRng().Dice(1, 100, 100));
     else if (current_state == kIntermediate)
@@ -252,6 +263,11 @@ void AttackAnyway(Game& game, int from_side, int to_side) {
     SetAllied(game, from_side, to_side, false);
     SetTruce(game, from_side, to_side, 0);
     AddTrust(game, to_side, from_side, -60);
+    if (current_state == kPeace || current_state == kIntermediate) {
+        if (Side* victim = game.GetMap().SideAt(to_side); victim && victim->ComputerPlayer()) {
+            victim->ComputerPlayer()->RecordBetrayal(SideId(from_side), was_allied, game.Turn());
+        }
+    }
     for (int bystander = 0; bystander < 8; bystander++) {
         if (bystander != from_side && bystander != to_side)
             AddTrust(game, bystander, from_side, -25);

@@ -249,6 +249,9 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
     bool is_combat_mission =
             (tgt.kind == TargetKind::kNeutralCity || tgt.kind == TargetKind::kEnemyCity ||
              tgt.kind == TargetKind::kEnemyStack);
+    const bool use_doctrine = policy.PersonaActive() && !(sampler && sampler->current_turn);
+    const float caution_bias =
+            use_doctrine ? (1.4F * personality::ForSide(side).traits[personality::kCaution]) : 0.0F;
     MissionFight cur_plan = plan;
     bool made_progress = false;
     bool completed_objective = false;
@@ -301,15 +304,16 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                 int clear_cost = move::PathMoveCost(game, sel.armies, *clear_path);
                 if (clear_cost <= direct_cost + 8) {
                     ml::StackVec cur_sv = BuildStackFeatures(game, sel.armies, sel.min_moves);
-                    ml::TargetVec tv_detour = BuildTargetFeatures(
-                            game, side, sel.armies, tgt, 0.0F, 0.0F, clear_cost, policy.Version());
+                    ml::TargetVec tv_detour = BuildTargetFeatures(game, side, sel.armies, tgt, 0.0F,
+                                                                  caution_bias, clear_cost,
+                                                                  policy.Version());
                     ml::TargetVec tv_through{};
                     if (is_combat_mission && !stage_near) {
                         CandidateTarget tgt_plus_kill = tgt;
                         tgt_plus_kill.value += static_cast<float>(blocker_vis_count) * 8.0F;
                         tv_through = BuildTargetFeatures(game, side, sel.armies, tgt_plus_kill,
-                                                         0.0F, 0.0F, direct_cost, policy.Version(),
-                                                         blocker_x, blocker_y);
+                                                         0.0F, caution_bias, direct_cost,
+                                                         policy.Version(), blocker_x, blocker_y);
                     } else {
                         CandidateTarget blk_tgt;
                         blk_tgt.kind = TargetKind::kEnemyStack;
@@ -317,7 +321,8 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                         blk_tgt.y = blocker_y;
                         blk_tgt.value = static_cast<float>(blocker_vis_count) * 8.0F;
                         tv_through = BuildTargetFeatures(game, side, sel.armies, blk_tgt, 0.0F,
-                                                         0.0F, blocker_cum_cost, policy.Version());
+                                                         caution_bias, blocker_cum_cost,
+                                                         policy.Version());
                     }
                     ml::MissionInVec detour_in = ml::PackMissionInput(ctx, cur_sv, tv_detour);
                     ml::MissionInVec through_in = ml::PackMissionInput(ctx, cur_sv, tv_through);

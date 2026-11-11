@@ -43,8 +43,21 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
     Map& map = game.GetMap();
     SideBelief& belief = belief::Ensure(side);
     const bool want_thoughts = ml::RecordThoughts();
+    const bool use_doctrine = policy.PersonaActive() && !(sampler && sampler->current_turn);
+    const personality::Profile& prof = personality::ForSide(side);
     game::SeenMasks seen = game::BuildSeenMasks(game, our_side);
-    float caution = 0.0F;
+    float caution = use_doctrine ? (1.4F * prof.traits[personality::kCaution]) : 0.0F;
+    std::array<float, 8> vendetta_by_side{};
+    if (use_doctrine) {
+        if (const ModernMlPlayer* modern_player = ModernMlPlayer::FindOn(side)) {
+            for (int rival_idx = 0; rival_idx < 8; ++rival_idx) {
+                if (rival_idx != our_side) {
+                    vendetta_by_side[rival_idx] = ai::ComputeVendettaScore(
+                            modern_player->Grudge(), rival_idx, game.Turn());
+                }
+            }
+        }
+    }
     auto is_muster_city = [&](int city_idx) {
         return policy.Version() >= 8 && policy.UseMuster() && city_idx != kNone &&
                (belief.muster_cities[0] == city_idx || belief.muster_cities[1] == city_idx);
@@ -745,8 +758,24 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                         }
                         ml::MissionInVec m_in = ml::PackMissionInput(ctx, opt_sv, target_vec);
                         auto raw = policy.ForwardMission(m_in);
+                        float utility = raw[0];
+                        if (use_doctrine) {
+                            personality::MissionDoctrineContext doc_ctx{};
+                            doc_ctx.is_enemy_target = (tgt.kind == TargetKind::kEnemyCity ||
+                                                       tgt.kind == TargetKind::kEnemyStack);
+                            if (doc_ctx.is_enemy_target && tgt.owner >= 0 && tgt.owner < 8) {
+                                doc_ctx.vendetta_score = vendetta_by_side[tgt.owner];
+                            }
+                            doc_ctx.is_enemy_capital = tgt.is_enemy_capital;
+                            doc_ctx.is_hold_garrison = (tgt.kind == TargetKind::kHoldGarrison);
+                            doc_ctx.leaves_city_sparse =
+                                    (loc_group.city && loc_group.city->OwnerIndex() == our_side &&
+                                     committed_city_guard_str < 5.0F);
+                            doc_ctx.win_converged = target_vec[11];
+                            utility += personality::ScoreMissionCharacterPrior(prof, doc_ctx);
+                        }
                         options.push_back(JointOption{tgt_idx, stk_idx, m_in, target_vec,
-                                                      ml::MissionOutput{raw[0], raw[1]}});
+                                                      ml::MissionOutput{utility, raw[1]}});
                     }
                 }
             }  // scoringIndex

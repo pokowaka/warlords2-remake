@@ -231,6 +231,31 @@ class IComputerPlayer {
         (void)battle;
     }
 
+    /** @brief Records that `attacker` captured an undefended city belonging to this side. */
+    virtual void RecordCityStolen(SideId attacker, int turn) {
+        (void)attacker;
+        (void)turn;
+    }
+
+    /** @brief Records that `razer` burnt a city claimed or formerly owned by this side to ruins. */
+    virtual void RecordCityRazed(SideId razer, int turn) {
+        (void)razer;
+        (void)turn;
+    }
+
+    /** @brief Records that `betrayer` broke an active truce or sworn alliance with this side. */
+    virtual void RecordBetrayal(SideId betrayer, bool broke_alliance, int turn) {
+        (void)betrayer;
+        (void)broke_alliance;
+        (void)turn;
+    }
+
+    /** @brief Records that `payer` transferred `gold` in treaty tribute to this side. */
+    virtual void RecordTributeReceived(SideId payer, int gold) {
+        (void)payer;
+        (void)gold;
+    }
+
     /**
      * @brief Updates fair-information enemy stack observations for `observer` after a battle at
      * `pos`.

@@ -261,4 +261,124 @@ float DifficultyTemperature(int level, float warlord_temp) {
     return warlord_temp;
 }
 
+float DoctrineScale(int level) {
+    if (level <= 0) return 0.80F;
+    if (level == 1) return 0.45F;
+    return 0.16F;
+}
+
+float ScoreMissionCharacterPrior(const Profile& profile, const MissionDoctrineContext& doc_ctx) {
+    const float scale = DoctrineScale(profile.level);
+    const auto& traits = profile.traits;
+    const float aggr = traits[kAggression];
+    const float hon = traits[kHonour];
+    const float caut = traits[kCaution];
+    const float fly = traits[kFlierAffinity];
+
+    float bonus = 0.0F;
+    if (doc_ctx.is_enemy_target && doc_ctx.vendetta_score > 0.05F &&
+        doc_ctx.win_converged >= 0.45F) {
+        const float vendetta_drive = std::clamp(
+                0.45F + 0.55F * std::max(0.0F, aggr) + 0.45F * std::max(0.0F, -hon) +
+                        ((profile.level == 1 && profile.card == 3) ? 0.35F : 0.0F),
+                0.25F, 1.50F);
+        const float odds_gate = std::min(1.0F, (doc_ctx.win_converged - 0.35F) * 2.5F);
+        bonus += scale * vendetta_drive * doc_ctx.vendetta_score * odds_gate;
+    }
+
+    if (doc_ctx.is_enemy_capital && doc_ctx.win_converged >= 0.48F) {
+        const float decap_drive = std::max(
+                0.0F, 0.55F * aggr + 0.25F * fly - 0.30F * caut +
+                              ((profile.level == 2 && profile.card == 6) ? 0.30F : 0.0F));
+        bonus += scale * decap_drive;
+    }
+
+    if (doc_ctx.is_enemy_target && doc_ctx.win_converged < 0.62F && caut > 0.15F) {
+        bonus -= scale * caut * (0.62F - doc_ctx.win_converged) * 1.40F;
+    }
+    if (doc_ctx.is_hold_garrison && doc_ctx.leaves_city_sparse && caut > 0.25F) {
+        bonus += scale * caut * 0.22F;
+    }
+    return std::clamp(bonus, -0.65F, 0.65F);
+}
+
+void ApplyDiplomacyCharacterPrior(const Profile& profile, const DiplomacyDoctrineContext& doc_ctx,
+                                  std::array<float, 4>& stance_logits, float& tribute_logit,
+                                  float& joint_war_logit) {
+    const float diplo_scale =
+            profile.level <= 0 ? 1.15F : (profile.level == 1 ? 0.95F : 0.65F);
+    const auto& traits = profile.traits;
+    const float aggr = traits[kAggression];
+    const float hon = traits[kHonour];
+    const float avar = traits[kAvarice];
+    const float coal = traits[kCoalitionDrive];
+    const float caut = traits[kCaution];
+
+    const bool unprovoked = (doc_ctx.truces_broken_by_rival == 0 &&
+                             doc_ctx.cities_razed_by_rival == 0 && doc_ctx.vendetta_score < 0.40F);
+    if (hon > 0.20F && (doc_ctx.cur_allied || (doc_ctx.cur_at_peace && doc_ctx.truce_turns > 0)) &&
+        unprovoked) {
+        const float keep = diplo_scale * hon * (doc_ctx.cur_allied ? 1.50F : 1.10F);
+        stance_logits[0] += doc_ctx.cur_allied ? keep : 0.35F * keep;
+        stance_logits[1] += keep;
+        stance_logits[2] -= 0.85F * keep;
+        stance_logits[3] -= 1.25F * keep;
+    }
+
+    if (doc_ctx.truces_broken_by_rival > 0 || doc_ctx.cities_razed_by_rival > 0 ||
+        doc_ctx.vendetta_score > 0.35F) {
+        const float atrocity = static_cast<float>(
+                std::min(2, doc_ctx.truces_broken_by_rival + doc_ctx.cities_razed_by_rival));
+        const float wrath = diplo_scale * (0.55F * doc_ctx.vendetta_score + 0.35F * atrocity) *
+                            (0.75F + 0.45F * std::max(0.0F, aggr) + 0.35F * std::max(0.0F, hon));
+        stance_logits[3] += wrath;
+        stance_logits[0] -= wrath;
+        stance_logits[1] -= 0.70F * wrath;
+    }
+
+    if (hon < -0.30F) {
+        if (doc_ctx.cur_at_peace && doc_ctx.truce_turns <= 2 && doc_ctx.border_advantage > 0.30F &&
+            doc_ctx.active_wars <= 1) {
+            const float stab = diplo_scale * (-hon) * doc_ctx.border_advantage * 1.15F;
+            stance_logits[3] += stab;
+            stance_logits[1] -= 0.55F * stab;
+            stance_logits[0] -= 0.75F * stab;
+        } else if (doc_ctx.border_advantage < -0.30F && doc_ctx.active_wars >= 1) {
+            const float mask_peace = diplo_scale * (-hon) * 0.55F;
+            stance_logits[0] += 0.65F * mask_peace;
+            stance_logits[1] += mask_peace;
+            stance_logits[3] -= 0.70F * mask_peace;
+        }
+    }
+
+    if (coal > 0.30F) {
+        const bool honour_bound =
+                hon > 0.45F && (doc_ctx.cur_allied || doc_ctx.truce_turns > 2) && unprovoked;
+        if (doc_ctx.rival_is_runaway && !honour_bound) {
+            const float contain =
+                    diplo_scale * coal *
+                    std::clamp((doc_ctx.runaway_share - 0.22F) * 3.0F, 0.25F, 1.10F);
+            stance_logits[2] += 0.65F * contain;
+            stance_logits[3] += contain;
+            stance_logits[0] -= contain;
+        } else if (doc_ctx.third_party_runaway) {
+            const float rally =
+                    diplo_scale * coal *
+                    std::clamp((doc_ctx.runaway_share - 0.22F) * 2.8F, 0.30F, 1.10F);
+            stance_logits[0] += 1.15F * rally;
+            stance_logits[1] += 0.55F * rally;
+            stance_logits[3] -= 0.80F * rally;
+            joint_war_logit += 1.65F * rally;
+        }
+    }
+
+    if (doc_ctx.cur_at_war && doc_ctx.border_advantage < -0.15F && (caut > 0.40F || avar > 0.60F)) {
+        const float plea = diplo_scale *
+                           (0.55F * std::max(0.0F, caut) + 0.45F * std::max(0.0F, avar)) *
+                           (-doc_ctx.border_advantage);
+        stance_logits[1] += plea;
+        tribute_logit += 1.25F * plea;
+    }
+}
+
 }  // namespace w2::ai::personality

@@ -383,6 +383,12 @@ void CityEconomy::MakeRuins(City& city) {
 }
 
 void CityEconomy::Raze(Side& side, City& city, const ArmyStack& stack, bool own_city) {
+    SideId victim_id = own_city ? SideId::None() : city.Claim();
+    if (victim_id.IsValid() && victim_id != side.Id()) {
+        if (Side* victim = game_.GetMap().SideById(victim_id); victim && victim->ComputerPlayer()) {
+            victim->ComputerPlayer()->RecordCityRazed(side.Id(), game_.Turn());
+        }
+    }
     MakeRuins(city);
     if (own_city) {
         game::AddDiploScore(game_, side, game_.GetRng().Dice(1, 25, 25));

@@ -29,6 +29,11 @@ class IModernBackedPlayer : public IComputerPlayer {
   public:
     virtual ModernMlPlayer& ModernImpl() = 0;
     virtual const ModernMlPlayer& ModernImpl() const = 0;
+
+    void RecordCityStolen(SideId attacker, int turn) override;
+    void RecordCityRazed(SideId razer, int turn) override;
+    void RecordBetrayal(SideId betrayer, bool broke_alliance, int turn) override;
+    void RecordTributeReceived(SideId payer, int gold) override;
 };
 
 /**
@@ -62,6 +67,10 @@ class ModernMlPlayer final : public IModernBackedPlayer {
     void RecordBattle(Game& game, SideId defender, SideId attacker, TilePos pos, int heroes_lost,
                       int armies_lost, bool all_lost, bool city_tile) override;
     void RecordDefenseOutcome(const Game& game, SideId defender, const Battle& battle) override;
+    void RecordCityStolen(SideId attacker, int turn) override;
+    void RecordCityRazed(SideId razer, int turn) override;
+    void RecordBetrayal(SideId betrayer, bool broke_alliance, int turn) override;
+    void RecordTributeReceived(SideId payer, int gold) override;
     void RecordBattleObservation(Game& game, SideId observer, TilePos pos) override;
     nlohmann::ordered_json SaveState() const override;
     absl::Status LoadState(const nlohmann::ordered_json& state, const Game& game) override;
@@ -82,6 +91,7 @@ class ModernMlPlayer final : public IModernBackedPlayer {
         off_turn_repel_weight_ = repel_city_weight;
     }
     const ai::BattleGrudge& Grudge() const { return grudge_; }
+    ai::BattleGrudge& MutableGrudge() { return grudge_; }
 
     /** @brief Returns (installing if absent) the `ModernMlPlayer` on `side`. */
     static ModernMlPlayer& EnsureOn(Side& side);

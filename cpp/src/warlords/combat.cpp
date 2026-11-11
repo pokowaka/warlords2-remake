@@ -685,7 +685,13 @@ Battle& CombatResolver::ApplyAttack(Battle& result) {
             loser->AddGold(-2 * loot);
         }
         if (!city->IsNeutral()) {
-            city->SetClaim(city->Claim() == winner->Id() ? SideId::None() : city->Owner());
+            SideId prior_owner = city->Owner();
+            if (defenders.empty() && prior_owner.IsValid() && prior_owner != winner->Id()) {
+                if (Side* victim = map.SideById(prior_owner); victim && victim->ComputerPlayer()) {
+                    victim->ComputerPlayer()->RecordCityStolen(winner->Id(), game_.Turn());
+                }
+            }
+            city->SetClaim(city->Claim() == winner->Id() ? SideId::None() : prior_owner);
         }
         city->ClearAttackedMask();
         city->SetCountdown(0);

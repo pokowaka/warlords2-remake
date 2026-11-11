@@ -799,6 +799,7 @@ PolicyNetwork PolicyNetwork::MaterializeForWeights(
     PolicyNetwork out = *this;
     out.ApplyArchetypeHead(blended);
     out.use_personalities_ = false;
+    out.persona_active_ = persona_active_;
     return out;
 }
 
@@ -990,6 +991,7 @@ absl::Status PolicyNetwork::LoadJson(const std::filesystem::path& path) {
     avoid_blockers_ = int_field(root, "avoidBlockers", 0) != 0;
     detour_bias_ = float_field(root, "detourBias", -0.05F);
     use_personalities_ = false;
+    persona_active_ = false;
     has_archetypes_ = false;
     archetypes_ = {};
     auto arch_it = root.find("archetypes");
@@ -1018,6 +1020,7 @@ absl::Status PolicyNetwork::LoadJson(const std::filesystem::path& path) {
         if (ok_arch) {
             has_archetypes_ = true;
             use_personalities_ = int_field(root, "usePersonalities", 1) != 0;
+            persona_active_ = use_personalities_;
         }
     }
 

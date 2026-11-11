@@ -44,6 +44,22 @@ ModernMlPlayer::ModernMlPlayer(const ai::ml::PolicyNetwork* custom_policy,
                                ai::ml::RolloutSampler* sampler)
         : custom_policy_(custom_policy), sampler_(sampler) {}
 
+void IModernBackedPlayer::RecordCityStolen(SideId attacker, int turn) {
+    ModernImpl().RecordCityStolen(attacker, turn);
+}
+
+void IModernBackedPlayer::RecordCityRazed(SideId razer, int turn) {
+    ModernImpl().RecordCityRazed(razer, turn);
+}
+
+void IModernBackedPlayer::RecordBetrayal(SideId betrayer, bool broke_alliance, int turn) {
+    ModernImpl().RecordBetrayal(betrayer, broke_alliance, turn);
+}
+
+void IModernBackedPlayer::RecordTributeReceived(SideId payer, int gold) {
+    ModernImpl().RecordTributeReceived(payer, gold);
+}
+
 void ModernMlPlayer::PlayTurn(Game& game, Side& side, IAiTurnEvents* events) {
     ai::modern::PlayTurn(game, side, events, custom_policy_, sampler_);
 }
@@ -83,7 +99,7 @@ bool ModernMlPlayer::OnQuestCapture(Game& game, Side& side, City& city, const Ar
     return false;
 }
 
-void ModernMlPlayer::RecordBattle(Game&, SideId, SideId attacker, TilePos, int heroes_lost,
+void ModernMlPlayer::RecordBattle(Game& game, SideId, SideId attacker, TilePos, int heroes_lost,
                                   int armies_lost, bool all_lost, bool city_tile) {
     int atk = attacker.Value();
     if (atk < 0 || atk >= 8) return;
@@ -94,6 +110,9 @@ void ModernMlPlayer::RecordBattle(Game&, SideId, SideId attacker, TilePos, int h
     if (city_tile) {
         city_battles_[atk]++;
         if (all_lost) grudge_.cities_lost[atk]++;
+    }
+    if (heroes_lost > 0 || (city_tile && all_lost)) {
+        grudge_.last_grudge_turn[atk] = game.Turn();
     }
 }
 
@@ -165,6 +184,33 @@ void ModernMlPlayer::RecordBattleObservation(Game& game, SideId observer, TilePo
     ai::belief::RecordBattleObservation(game, observer.Value(), pos.x, pos.y);
 }
 
+void ModernMlPlayer::RecordCityStolen(SideId attacker, int turn) {
+    int atk = attacker.Value();
+    if (atk < 0 || atk >= 8) return;
+    grudge_.cities_lost[atk]++;
+    grudge_.last_grudge_turn[atk] = turn;
+}
+
+void ModernMlPlayer::RecordCityRazed(SideId razer, int turn) {
+    int atk = razer.Value();
+    if (atk < 0 || atk >= 8) return;
+    grudge_.cities_razed_by[atk]++;
+    grudge_.last_grudge_turn[atk] = turn;
+}
+
+void ModernMlPlayer::RecordBetrayal(SideId betrayer, bool broke_alliance, int turn) {
+    int atk = betrayer.Value();
+    if (atk < 0 || atk >= 8) return;
+    grudge_.truces_broken_by[atk] += broke_alliance ? 2 : 1;
+    grudge_.last_grudge_turn[atk] = turn;
+}
+
+void ModernMlPlayer::RecordTributeReceived(SideId payer, int gold) {
+    int pay_idx = payer.Value();
+    if (pay_idx < 0 || pay_idx >= 8 || gold <= 0) return;
+    grudge_.tribute_received[pay_idx] += gold;
+}
+
 nlohmann::ordered_json ModernMlPlayer::SaveState() const {
     Json obj = Json::object();
     obj["kind"] = "modern";
@@ -175,6 +221,10 @@ nlohmann::ordered_json ModernMlPlayer::SaveState() const {
     obj["lost"] = IntArray(grudge_.lost);
     obj["cityBattles"] = IntArray(city_battles_);
     obj["citiesLost"] = IntArray(grudge_.cities_lost);
+    obj["citiesRazedBy"] = IntArray(grudge_.cities_razed_by);
+    obj["trucesBrokenBy"] = IntArray(grudge_.truces_broken_by);
+    obj["tributeReceived"] = IntArray(grudge_.tribute_received);
+    obj["lastGrudgeTurn"] = IntArray(grudge_.last_grudge_turn);
     return obj;
 }
 
@@ -193,6 +243,10 @@ absl::Status ModernMlPlayer::LoadState(const nlohmann::ordered_json& state, cons
     ReadIntArray(field("lost"), grudge_.lost);
     ReadIntArray(field("cityBattles"), city_battles_);
     ReadIntArray(field("citiesLost"), grudge_.cities_lost);
+    ReadIntArray(field("citiesRazedBy"), grudge_.cities_razed_by);
+    ReadIntArray(field("trucesBrokenBy"), grudge_.truces_broken_by);
+    ReadIntArray(field("tributeReceived"), grudge_.tribute_received);
+    ReadIntArray(field("lastGrudgeTurn"), grudge_.last_grudge_turn);
     return absl::OkStatus();
 }
 

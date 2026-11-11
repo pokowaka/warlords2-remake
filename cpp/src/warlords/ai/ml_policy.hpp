@@ -502,8 +502,17 @@ class PolicyNetwork {
 
     /** @brief True when the 27-card evolved personality mixer is enabled. */
     bool UsePersonalities() const { return use_personalities_; }
-    /** @brief Sets whether the 27-card evolved personality mixer is enabled. */
-    void SetUsePersonalities(bool enabled) { use_personalities_ = enabled; }
+    /** @brief Sets whether the 27-card evolved personality mixer and character doctrine are active.
+     */
+    void SetUsePersonalities(bool enabled) {
+        use_personalities_ = enabled;
+        persona_active_ = enabled;
+    }
+
+    /** @brief True when per-card character doctrine priors are active during turn execution. */
+    bool PersonaActive() const { return persona_active_; }
+    /** @brief Directly sets whether per-card character doctrine priors are active. */
+    void SetPersonaActive(bool enabled) { persona_active_ = enabled; }
 
     /** @brief True when 5 evolved specialist `ArchetypeHead`s are loaded. */
     bool HasArchetypes() const { return has_archetypes_; }
@@ -548,6 +557,7 @@ class PolicyNetwork {
     float detour_bias_ = -0.05F;
 
     bool use_personalities_ = false;
+    bool persona_active_ = false;
     bool has_archetypes_ = false;
     bool warlord_lookahead_ = false;
     std::array<ArchetypeHead, personality::kNumArchetypes> archetypes_{};

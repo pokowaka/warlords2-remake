@@ -17,6 +17,24 @@
 
 namespace w2::ai {
 
+float ComputeVendettaScore(const BattleGrudge& grudge, int rival_idx, int current_turn) {
+    if (rival_idx < 0 || rival_idx >= 8) return 0.0F;
+    float raw = static_cast<float>(grudge.cities_lost[rival_idx] * 10 +
+                                   grudge.cities_razed_by[rival_idx] * 18 +
+                                   grudge.heroes_killed[rival_idx] * 14 +
+                                   grudge.truces_broken_by[rival_idx] * 16 +
+                                   grudge.lost[rival_idx] * 2) -
+                static_cast<float>(grudge.tribute_received[rival_idx]) / 25.0F;
+    if (raw <= 0.0F) return 0.0F;
+    int last_turn = grudge.last_grudge_turn[rival_idx];
+    float recency = 1.0F;
+    if (last_turn > 0 && current_turn >= last_turn) {
+        int age = current_turn - last_turn;
+        recency = age <= 8 ? 1.25F : std::max(0.75F, 1.25F - 0.02F * static_cast<float>(age - 8));
+    }
+    return std::clamp(std::tanh((raw * recency) / 28.0F), 0.0F, 1.0F);
+}
+
 AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, SideId target_side_id,
                                        const SideBelief* belief, const BattleGrudge* grudge) {
     int ai_side = ai_side_id.Value();
@@ -119,6 +137,18 @@ AttitudeBreakdown EvaluateSideProposal(const Game& game, SideId ai_side_id, Side
                    grudge->lost[target_side] * 3;
         if (feud > 0) {
             push_factor("Blood feud (cities and heroes lost)", -std::min(50, feud));
+        }
+        if (grudge->cities_razed_by[target_side] > 0) {
+            push_factor("Burned our cities to ruins",
+                        -std::min(48, grudge->cities_razed_by[target_side] * 16));
+        }
+        if (grudge->truces_broken_by[target_side] > 0) {
+            push_factor("Broken treaties and treachery",
+                        -std::min(45, grudge->truces_broken_by[target_side] * 15));
+        }
+        if (grudge->tribute_received[target_side] >= 40) {
+            push_factor("Paid tribute in good faith",
+                        std::min(20, grudge->tribute_received[target_side] / 20));
         }
     }
     if (cities_taken_from_me > 0) {
