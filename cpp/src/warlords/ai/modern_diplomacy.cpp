@@ -437,15 +437,17 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         }
 
         const char* stance_names[4] = {"ALLIED", "PEACE", "UNEASY", "WAR"};
-        if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
-            TilePos side_cap = side.OriginCapitalPos();
-            TilePos other_cap = other.OriginCapitalPos();
-            modern_player->PushThought(
-                    AIThought{"Diplomacy", side.Name(), other.Name(), side_cap.x, side_cap.y,
-                              other_cap.x, other_cap.y, best_logit, 0.0F, false,
-                              absl::StrFormat("Stance -> %s (Attitude %+d, Trust %+d): %s",
-                                              stance_names[best_choice], att.total_score,
-                                              att.trust_score, att.stance_summary)});
+        if (ml::RecordThoughts()) {
+            if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                TilePos side_cap = side.OriginCapitalPos();
+                TilePos other_cap = other.OriginCapitalPos();
+                modern_player->PushThought(
+                        AIThought{"Diplomacy", side.Name(), other.Name(), side_cap.x, side_cap.y,
+                                  other_cap.x, other_cap.y, best_logit, 0.0F, false,
+                                  absl::StrFormat("Stance -> %s (Attitude %+d, Trust %+d): %s",
+                                                  stance_names[best_choice], att.total_score,
+                                                  att.trust_score, att.stance_summary)});
+            }
         }
 
         if (!other.IsComputerControlled() && other.Missives().empty() && game.Turn() > 1 &&

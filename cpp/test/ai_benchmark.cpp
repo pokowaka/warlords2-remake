@@ -4,6 +4,7 @@
 
 #include "benchmark/benchmark.h"
 #include "test/test_helpers.hpp"
+#include "warlords/ai.hpp"
 #include "warlords/ai/belief.hpp"
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/combat.hpp"
@@ -425,6 +426,58 @@ static void BM_Combat_Advise_19Battles(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations() * 19);
 }
 BENCHMARK(BM_Combat_Advise_19Battles);
+
+void BM_Engine_Pathfinder_Flood72_HiddenMap(benchmark::State& state) {  // NOLINT(readability-identifier-naming)
+    auto opts = test::SeedWith(42, {{"hiddenMap", 1}, {"diplomacy", 1}});
+    opts.sides[0] = test::MakeSideSetup(true, 2);
+    auto game_ptr = test::SetupGame("ERYTHEA", opts);
+    Game& game = *game_ptr;
+    Side* side0 = game.GetMap().SideAt(0);
+    ai::SetSideClassicAi(game, *side0, false);
+    City* cap = side0->CapitalCity(game.GetMap());
+    const int cap_x = cap ? cap->X() : 20;
+    const int cap_y = cap ? cap->Y() : 20;
+
+    for ([[maybe_unused]] auto step : state) {
+        auto dist =
+                game.GetPathfinder().Flood(game, 0, cap_x, cap_y, 72, move::kLand, false, false, 0);
+        benchmark::DoNotOptimize(dist);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_Engine_Pathfinder_Flood72_HiddenMap);
+
+void BM_Engine_Belief_Update_HiddenMap(benchmark::State& state) {  // NOLINT(readability-identifier-naming)
+    auto opts = test::SeedWith(42, {{"hiddenMap", 1}, {"diplomacy", 1}});
+    opts.sides[0] = test::MakeSideSetup(true, 2);
+    auto game_ptr = test::SetupGame("ERYTHEA", opts);
+    Game& game = *game_ptr;
+    Side* side0 = game.GetMap().SideAt(0);
+    ai::SetSideClassicAi(game, *side0, false);
+
+    for ([[maybe_unused]] auto step : state) {
+        belief::Update(game, *side0);
+        benchmark::DoNotOptimize(side0->ComputerPlayer());
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_Engine_Belief_Update_HiddenMap);
+
+void BM_Evaluator_ComputeEmpireScore_HiddenMap(benchmark::State& state) {  // NOLINT(readability-identifier-naming)
+    auto opts = test::SeedWith(42, {{"hiddenMap", 1}, {"diplomacy", 1}});
+    opts.sides[0] = test::MakeSideSetup(true, 2);
+    auto game_ptr = test::SetupGame("ERYTHEA", opts);
+    Game& game = *game_ptr;
+    Side* side0 = game.GetMap().SideAt(0);
+    ai::SetSideClassicAi(game, *side0, false);
+
+    for ([[maybe_unused]] auto step : state) {
+        float score = ComputeEmpireScore(game, 0);
+        benchmark::DoNotOptimize(score);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_Evaluator_ComputeEmpireScore_HiddenMap);
 
 }  // namespace
 }  // namespace w2::ai::ml

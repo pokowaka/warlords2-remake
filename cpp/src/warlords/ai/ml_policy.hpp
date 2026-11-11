@@ -228,6 +228,7 @@ constexpr int MlpParamsWithInput(int in_dim) {
 class PolicyNetwork {
   public:
     static constexpr int kGateInDim = 25;
+    static constexpr size_t kCommanderWeights = 5U * static_cast<size_t>(kGateInDim);
     static constexpr int kMaxExperts = 4;
     using DiploNet = ResidualMLP<kDiploInDim, 24, 12, kDiploOutDim>;            ///< Head 1.
     using MissionNet = ResidualMLP<kMissionInDim, 32, 16, kMissionOutDim>;      ///< Head 2.
@@ -241,7 +242,7 @@ class PolicyNetwork {
     struct ExpertHeads {
         int version = 6;
         bool use_commander = false;
-        std::array<float, 5 * kGateInDim> commander_w{};
+        std::array<float, kCommanderWeights> commander_w{};
         std::array<float, 5> commander_b{};
         DiploNet diplo_net{};
         MissionNet mission_net{};
@@ -445,9 +446,9 @@ class PolicyNetwork {
     void SetUseCommander(bool enabled) { use_commander_ = enabled; }
 
     /** @brief Returns the learned Commander weight matrix (`5 x 25`). */
-    std::array<float, 5 * kGateInDim>& CommanderW() { return commander_w_; }
+    std::array<float, kCommanderWeights>& CommanderW() { return commander_w_; }
     /** @brief Returns the learned Commander weight matrix (`5 x 25`, const). */
-    const std::array<float, 5 * kGateInDim>& CommanderW() const { return commander_w_; }
+    const std::array<float, kCommanderWeights>& CommanderW() const { return commander_w_; }
 
     /** @brief Returns the learned Commander bias vector (`5`). */
     std::array<float, 5>& CommanderB() { return commander_b_; }
@@ -517,7 +518,7 @@ class PolicyNetwork {
     int version_ = 8;
     bool enable_city_guard_ = false;
     bool use_commander_ = false;
-    std::array<float, 5 * kGateInDim> commander_w_{};
+    std::array<float, kCommanderWeights> commander_w_{};
     std::array<float, 5> commander_b_{};
     std::array<float, 5> posture_{};
 
@@ -669,6 +670,13 @@ float ComputeEmpireScore(const Game& game, int side_index);
  * Set once before training starts.
  */
 void SetArmyScoreWeight(float weight);
+
+/** @brief Whether human-readable `AIThought` strings are constructed during AI turns (default
+ * `true`). */
+bool RecordThoughts();
+
+/** @brief Enables or disables `AIThought` string construction (disabled in headless trainers). */
+void SetRecordThoughts(bool enabled);
 
 /** @brief The global active PolicyNetwork used by computer players in the game. */
 PolicyNetwork& ActivePolicy();

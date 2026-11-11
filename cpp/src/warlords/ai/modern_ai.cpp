@@ -4,6 +4,7 @@
  */
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <map>
@@ -43,11 +44,14 @@ class MissionFightStore {
   public:
     void Set(MissionFightCallback callback) ABSL_LOCKS_EXCLUDED(mutex_) {
         absl::MutexLock lock(&mutex_);
+        const bool has_cb = static_cast<bool>(callback);
         callback_ = std::move(callback);
+        active_.store(has_cb, std::memory_order_release);
     }
 
     void Notify(Game& game, const MissionFight& fight, const Battle& battle) const
             ABSL_LOCKS_EXCLUDED(mutex_) {
+        if (!active_.load(std::memory_order_acquire)) return;
         MissionFightCallback cb_copy;
         {
             absl::MutexLock lock(&mutex_);
@@ -57,6 +61,7 @@ class MissionFightStore {
     }
 
   private:
+    std::atomic<bool> active_{false};
     mutable absl::Mutex mutex_;
     MissionFightCallback callback_ ABSL_GUARDED_BY(mutex_);
 };
@@ -208,7 +213,7 @@ void PlayTurn(Game& game, Side& side, IAiTurnEvents* events, const ml::PolicyNet
     }
     ModernMlPlayer& modern_player = ModernMlPlayer::EnsureOn(side);
     modern_player.ClearThoughts();
-    if (apply_persona) {
+    if (apply_persona && ml::RecordThoughts()) {
         const auto& prof = personality::ForSide(side);
         auto weights = personality::ArchetypeWeights(prof);
         std::string mix;
@@ -268,7 +273,8 @@ void PlayTurn(Game& game, Side& side, IAiTurnEvents* events, const ml::PolicyNet
             for (int dy = 0; dy <= 1 && mission_step.vacated_city != kNone; dy++) {
                 for (int dx = 0; dx <= 1 && mission_step.vacated_city != kNone; dx++) {
                     for (Army* army :
-                         game::ArmiesAt(game, vacated_city.X() + dx, vacated_city.Y() + dy)) {
+                         game::ArmiesOnTileSpan(game, vacated_city.X() + dx,
+                                                vacated_city.Y() + dy)) {
                         if (army->OwnerIndex() == side.Index()) {
                             mission_step.vacated_city = kNone;
                             break;

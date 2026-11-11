@@ -9,13 +9,13 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <sstream>
 
 #include "absl/base/no_destructor.h"
-#include "absl/base/thread_annotations.h"
 #include "absl/strings/str_format.h"
-#include "absl/synchronization/mutex.h"
+#include "absl/types/span.h"
 
 #include "nlohmann/json.hpp"
 #include "util/util.hpp"
@@ -27,26 +27,26 @@ namespace w2::ai::ml {
 
 namespace {
 
-inline float DotProduct(const float* a, const float* b, int n) {
+inline float DotProduct(const float* lhs, const float* rhs, int n) {
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
     float32x4_t acc0 = vdupq_n_f32(0.0F);
     float32x4_t acc1 = vdupq_n_f32(0.0F);
-    int j = 0;
-    for (; j + 7 < n; j += 8) {
-        acc0 = vmlaq_f32(acc0, vld1q_f32(a + j), vld1q_f32(b + j));
-        acc1 = vmlaq_f32(acc1, vld1q_f32(a + j + 4), vld1q_f32(b + j + 4));
+    int idx = 0;
+    for (; idx + 7 < n; idx += 8) {
+        acc0 = vmlaq_f32(acc0, vld1q_f32(lhs + idx), vld1q_f32(rhs + idx));
+        acc1 = vmlaq_f32(acc1, vld1q_f32(lhs + idx + 4), vld1q_f32(rhs + idx + 4));
     }
     acc0 = vaddq_f32(acc0, acc1);
     float sum = vaddvq_f32(acc0);
-    for (; j < n; ++j) {
-        sum += a[j] * b[j];
+    for (; idx < n; ++idx) {
+        sum += lhs[idx] * rhs[idx];
     }
     return sum;
 #elif defined(__AVX2__)
     __m256 acc = _mm256_setzero_ps();
-    int j = 0;
-    for (; j + 7 < n; j += 8) {
-        acc = _mm256_fmadd_ps(_mm256_loadu_ps(a + j), _mm256_loadu_ps(b + j), acc);
+    int idx = 0;
+    for (; idx + 7 < n; idx += 8) {
+        acc = _mm256_fmadd_ps(_mm256_loadu_ps(lhs + idx), _mm256_loadu_ps(rhs + idx), acc);
     }
     __m128 lo = _mm256_castps256_ps128(acc);
     __m128 hi = _mm256_extractf128_ps(acc, 1);
@@ -54,24 +54,25 @@ inline float DotProduct(const float* a, const float* b, int n) {
     sum128 = _mm_hadd_ps(sum128, sum128);
     sum128 = _mm_hadd_ps(sum128, sum128);
     float sum = _mm_cvtss_f32(sum128);
-    for (; j < n; ++j) {
-        sum += a[j] * b[j];
+    for (; idx < n; ++idx) {
+        sum += lhs[idx] * rhs[idx];
     }
     return sum;
 #elif defined(__SSE2__)
     __m128 acc0 = _mm_setzero_ps();
     __m128 acc1 = _mm_setzero_ps();
-    int j = 0;
-    for (; j + 7 < n; j += 8) {
-        acc0 = _mm_add_ps(acc0, _mm_mul_ps(_mm_loadu_ps(a + j), _mm_loadu_ps(b + j)));
-        acc1 = _mm_add_ps(acc1, _mm_mul_ps(_mm_loadu_ps(a + j + 4), _mm_loadu_ps(b + j + 4)));
+    int idx = 0;
+    for (; idx + 7 < n; idx += 8) {
+        acc0 = _mm_add_ps(acc0, _mm_mul_ps(_mm_loadu_ps(lhs + idx), _mm_loadu_ps(rhs + idx)));
+        acc1 = _mm_add_ps(acc1,
+                          _mm_mul_ps(_mm_loadu_ps(lhs + idx + 4), _mm_loadu_ps(rhs + idx + 4)));
     }
     acc0 = _mm_add_ps(acc0, acc1);
     alignas(16) float buf[4];
     _mm_store_ps(buf, acc0);
     float sum = buf[0] + buf[1] + buf[2] + buf[3];
-    for (; j < n; ++j) {
-        sum += a[j] * b[j];
+    for (; idx < n; ++idx) {
+        sum += lhs[idx] * rhs[idx];
     }
     return sum;
 #else
@@ -79,16 +80,16 @@ inline float DotProduct(const float* a, const float* b, int n) {
     float sum1 = 0.0F;
     float sum2 = 0.0F;
     float sum3 = 0.0F;
-    int j = 0;
-    for (; j + 3 < n; j += 4) {
-        sum0 += a[j] * b[j];
-        sum1 += a[j + 1] * b[j + 1];
-        sum2 += a[j + 2] * b[j + 2];
-        sum3 += a[j + 3] * b[j + 3];
+    int idx = 0;
+    for (; idx + 3 < n; idx += 4) {
+        sum0 += lhs[idx] * rhs[idx];
+        sum1 += lhs[idx + 1] * rhs[idx + 1];
+        sum2 += lhs[idx + 2] * rhs[idx + 2];
+        sum3 += lhs[idx + 3] * rhs[idx + 3];
     }
     float sum = (sum0 + sum1) + (sum2 + sum3);
-    for (; j < n; ++j) {
-        sum += a[j] * b[j];
+    for (; idx < n; ++idx) {
+        sum += lhs[idx] * rhs[idx];
     }
     return sum;
 #endif
@@ -97,45 +98,45 @@ inline float DotProduct(const float* a, const float* b, int n) {
 inline void Axpy(float* y, float alpha, const float* x, int n) {
     if (alpha == 0.0F) return;
 #if defined(__ARM_NEON) || defined(__ARM_NEON__)
-    float32x4_t a = vdupq_n_f32(alpha);
-    int j = 0;
-    for (; j + 7 < n; j += 8) {
-        float32x4_t y0 = vld1q_f32(y + j);
-        float32x4_t x0 = vld1q_f32(x + j);
-        vst1q_f32(y + j, vmlaq_f32(y0, a, x0));
+    float32x4_t alpha_vec = vdupq_n_f32(alpha);
+    int idx = 0;
+    for (; idx + 7 < n; idx += 8) {
+        float32x4_t dst0 = vld1q_f32(y + idx);
+        float32x4_t src0 = vld1q_f32(x + idx);
+        vst1q_f32(y + idx, vmlaq_f32(dst0, alpha_vec, src0));
 
-        float32x4_t y1 = vld1q_f32(y + j + 4);
-        float32x4_t x1 = vld1q_f32(x + j + 4);
-        vst1q_f32(y + j + 4, vmlaq_f32(y1, a, x1));
+        float32x4_t dst1 = vld1q_f32(y + idx + 4);
+        float32x4_t src1 = vld1q_f32(x + idx + 4);
+        vst1q_f32(y + idx + 4, vmlaq_f32(dst1, alpha_vec, src1));
     }
-    for (; j < n; ++j) {
-        y[j] += alpha * x[j];
+    for (; idx < n; ++idx) {
+        y[idx] += alpha * x[idx];
     }
 #elif defined(__AVX2__)
-    __m256 a = _mm256_set1_ps(alpha);
-    int j = 0;
-    for (; j + 7 < n; j += 8) {
-        __m256 y_vec = _mm256_loadu_ps(y + j);
-        __m256 x_vec = _mm256_loadu_ps(x + j);
-        _mm256_storeu_ps(y + j, _mm256_fmadd_ps(a, x_vec, y_vec));
+    __m256 alpha_vec = _mm256_set1_ps(alpha);
+    int idx = 0;
+    for (; idx + 7 < n; idx += 8) {
+        __m256 y_vec = _mm256_loadu_ps(y + idx);
+        __m256 x_vec = _mm256_loadu_ps(x + idx);
+        _mm256_storeu_ps(y + idx, _mm256_fmadd_ps(alpha_vec, x_vec, y_vec));
     }
-    for (; j < n; ++j) {
-        y[j] += alpha * x[j];
+    for (; idx < n; ++idx) {
+        y[idx] += alpha * x[idx];
     }
 #elif defined(__SSE2__)
-    __m128 a = _mm_set1_ps(alpha);
-    int j = 0;
-    for (; j + 7 < n; j += 8) {
-        __m128 y0 = _mm_loadu_ps(y + j);
-        __m128 x0 = _mm_loadu_ps(x + j);
-        _mm_storeu_ps(y + j, _mm_add_ps(y0, _mm_mul_ps(a, x0)));
+    __m128 alpha_vec = _mm_set1_ps(alpha);
+    int idx = 0;
+    for (; idx + 7 < n; idx += 8) {
+        __m128 dst0 = _mm_loadu_ps(y + idx);
+        __m128 src0 = _mm_loadu_ps(x + idx);
+        _mm_storeu_ps(y + idx, _mm_add_ps(dst0, _mm_mul_ps(alpha_vec, src0)));
 
-        __m128 y1 = _mm_loadu_ps(y + j + 4);
-        __m128 x1 = _mm_loadu_ps(x + j + 4);
-        _mm_storeu_ps(y + j + 4, _mm_add_ps(y1, _mm_mul_ps(a, x1)));
+        __m128 dst1 = _mm_loadu_ps(y + idx + 4);
+        __m128 src1 = _mm_loadu_ps(x + idx + 4);
+        _mm_storeu_ps(y + idx + 4, _mm_add_ps(dst1, _mm_mul_ps(alpha_vec, src1)));
     }
-    for (; j < n; ++j) {
-        y[j] += alpha * x[j];
+    for (; idx < n; ++idx) {
+        y[idx] += alpha * x[idx];
     }
 #else
     for (int j = 0; j < n; ++j) {
@@ -1028,30 +1029,26 @@ namespace {
 
 class MlRuntimeConfig {
   public:
-    float DeployTemp() const ABSL_LOCKS_EXCLUDED(deploy_temp_mutex_) {
-        absl::MutexLock temp_lock(&deploy_temp_mutex_);
-        return deploy_temperature_;
+    float DeployTemp() const { return deploy_temperature_.load(std::memory_order_relaxed); }
+
+    void SetDeployTemp(float temperature) {
+        deploy_temperature_.store(std::max(0.01F, temperature), std::memory_order_relaxed);
     }
 
-    void SetDeployTemp(float temperature) ABSL_LOCKS_EXCLUDED(deploy_temp_mutex_) {
-        absl::MutexLock temp_lock(&deploy_temp_mutex_);
-        deploy_temperature_ = std::max(0.01F, temperature);
-    }
+    float ArmyWeight() const { return army_score_weight_.load(std::memory_order_relaxed); }
 
-    float ArmyWeight() const ABSL_LOCKS_EXCLUDED(deploy_temp_mutex_) {
-        absl::MutexLock temp_lock(&deploy_temp_mutex_);
-        return army_score_weight_;
-    }
+    void SetArmyWeight(float weight) { army_score_weight_.store(weight, std::memory_order_relaxed); }
 
-    void SetArmyWeight(float weight) ABSL_LOCKS_EXCLUDED(deploy_temp_mutex_) {
-        absl::MutexLock temp_lock(&deploy_temp_mutex_);
-        army_score_weight_ = weight;
+    bool RecordThoughts() const { return record_thoughts_.load(std::memory_order_relaxed); }
+
+    void SetRecordThoughts(bool enabled) {
+        record_thoughts_.store(enabled, std::memory_order_relaxed);
     }
 
   private:
-    mutable absl::Mutex deploy_temp_mutex_;
-    float deploy_temperature_ ABSL_GUARDED_BY(deploy_temp_mutex_) = kDeployTemperature;
-    float army_score_weight_ ABSL_GUARDED_BY(deploy_temp_mutex_) = 0.25F;
+    std::atomic<float> deploy_temperature_{kDeployTemperature};
+    std::atomic<float> army_score_weight_{0.25F};
+    std::atomic<bool> record_thoughts_{true};
 };
 
 MlRuntimeConfig& GlobalMlRuntimeConfig() {
@@ -1071,6 +1068,14 @@ void SetDeployTemperature(float temperature) {
 
 void SetArmyScoreWeight(float weight) {
     GlobalMlRuntimeConfig().SetArmyWeight(weight);
+}
+
+bool RecordThoughts() {
+    return GlobalMlRuntimeConfig().RecordThoughts();
+}
+
+void SetRecordThoughts(bool enabled) {
+    GlobalMlRuntimeConfig().SetRecordThoughts(enabled);
 }
 
 float RolloutSampler::NextUniform01() {
@@ -1108,19 +1113,29 @@ int SelectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, 
     for (size_t i = 1; i < logits.size(); i++) {
         max_logit = std::max(max_logit, effective_logit(i));
     }
-    std::vector<float> probs(logits.size());
+    constexpr size_t kInlineProbsCap = 256;
+    std::array<float, kInlineProbsCap> inline_probs{};
+    std::vector<float> heap_probs;
+    float* probs = nullptr;
+    if (logits.size() <= kInlineProbsCap) {
+        probs = inline_probs.data();
+    } else {
+        heap_probs.resize(logits.size());
+        probs = heap_probs.data();
+    }
     float sum_exp = 0.0F;
     for (size_t i = 0; i < logits.size(); i++) {
         float exp_logit = std::exp(std::clamp(effective_logit(i) - max_logit, -30.0F, 0.0F));
         probs[i] = exp_logit;
         sum_exp += exp_logit;
     }
-    for (float& prob : probs) prob /= std::max(1e-12F, sum_exp);
+    const float denom = std::max(1e-12F, sum_exp);
+    for (size_t i = 0; i < logits.size(); i++) probs[i] /= denom;
 
     float sample = sampler->NextUniform01();
     float acc = 0.0F;
     int chosen = static_cast<int>(logits.size()) - 1;
-    for (size_t i = 0; i < probs.size(); i++) {
+    for (size_t i = 0; i < logits.size(); i++) {
         acc += probs[i];
         if (sample <= acc) {
             chosen = static_cast<int>(i);
@@ -1151,6 +1166,14 @@ float ComputeEmpireScore(const Game& game, int side_index) {
     if (side_index < 0 || side_index >= 8 || !map.Sides()[side_index].IsAlive()) {
         return 0.0F;
     }
+    const bool hidden_map = map.GameOptions().hidden_map != 0;
+    const game::SeenMasks seen =
+            hidden_map ? game::BuildSeenMasks(game, side_index) : game::SeenMasks{};
+    const Side* viewer = map.SideAt(side_index);
+    const CityId quest_city_id = (viewer && viewer->ActiveQuest())
+                                         ? viewer->ActiveQuest()->TargetCityId()
+                                         : CityId::None();
+
     int total_standing = 0, total_income = 0;
     int my_cities = 0, my_income = 0;
     int revealed_cities = 0;
@@ -1158,7 +1181,15 @@ float ComputeEmpireScore(const Game& game, int side_index) {
         if (city.IsRazed()) continue;
         total_standing++;
         total_income += std::max(1, city.Income());
-        if (ai::belief::IsCityVisible(game, side_index, city)) {
+        bool city_visible = !hidden_map || seen.all_visible || (city.Id() == quest_city_id);
+        if (!city_visible) {
+            for (int dy = 0; dy <= 1 && !city_visible; dy++) {
+                for (int dx = 0; dx <= 1 && !city_visible; dx++) {
+                    if (game::IsSeenAt(seen, city.X() + dx, city.Y() + dy)) city_visible = true;
+                }
+            }
+        }
+        if (city_visible) {
             revealed_cities++;
         }
         if (city.OwnerIndex() == side_index) {
@@ -1170,16 +1201,17 @@ float ComputeEmpireScore(const Game& game, int side_index) {
     total_income = std::max(1, total_income);
 
     float recon_term = 0.0F;
-    if (map.GameOptions().hidden_map != 0) {
+    if (hidden_map) {
         int sampled = 0, seen_sampled = 0;
         const int min_x = std::max(0, map.ActiveX0()),
                   max_x = std::min(map.Width() - 1, map.ActiveX1());
         const int min_y = std::max(0, map.ActiveY0()),
                   max_y = std::min(map.Height() - 1, map.ActiveY1());
         for (int y = min_y; y <= max_y; y += 2) {
+            size_t row = static_cast<size_t>(y) * static_cast<size_t>(seen.width);
             for (int x = min_x; x <= max_x; x += 2) {
                 sampled++;
-                if (game::Seen(game, side_index, x, y)) seen_sampled++;
+                if (game::IsSeenIndex(seen, row + static_cast<size_t>(x))) seen_sampled++;
             }
         }
         float seen_tile_frac =

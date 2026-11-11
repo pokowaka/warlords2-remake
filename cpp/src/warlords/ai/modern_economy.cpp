@@ -68,7 +68,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             for (int dy = 0; dy <= 1; dy++) {
                 for (int dx = 0; dx <= 1; dx++) {
                     city_armies += static_cast<int>(
-                            game::ArmiesAt(game, city->X() + dx, city->Y() + dy).size());
+                            game::ArmiesOnTileSpan(game, city->X() + dx, city->Y() + dy).size());
                 }
             }
             if (city_armies <= 2) continue;
@@ -173,7 +173,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         has_hero_out = false;
         for (int dy = 0; dy <= 1; dy++) {
             for (int dx = 0; dx <= 1; dx++) {
-                for (Army* army : game::ArmiesAt(game, city.X() + dx, city.Y() + dy)) {
+                for (Army* army : game::ArmiesOnTileSpan(game, city.X() + dx, city.Y() + dy)) {
                     if (army->OwnerIndex() == our_side) {
                         army_cnt++;
                         if (army->Hero()) has_hero_out = true;
@@ -306,7 +306,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         for (int dy = 0; dy <= 1; dy++) {
             for (int dx = 0; dx <= 1; dx++) {
                 gar_count += static_cast<int>(
-                        game::ArmiesAt(game, city->X() + dx, city->Y() + dy).size());
+                        game::ArmiesOnTileSpan(game, city->X() + dx, city->Y() + dy).size());
             }
         }
 
@@ -386,7 +386,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
     float std_dist_e = 100.0F;
     core::Flood std_land_flood{};
     if (std_x != kNone && std_y != kNone) {
-        auto std_here = game::ArmiesAt(game, std_x, std_y);
+        absl::Span<Army* const> std_here = game::ArmiesOnTileSpan(game, std_x, std_y);
         if ((std_here.empty() || std_here[0]->OwnerIndex() == our_side) &&
             static_cast<int>(std_here.size()) < rules::kMaxStack) {
             std_valid = true;
@@ -444,6 +444,21 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
 
     // City vectoring: re-evaluated each turn, but the vector already set is a
     // flagged candidate (ECON_CURRENT) rather than wiped, so keeping it is a choice
+    const bool want_thoughts = ml::RecordThoughts();
+    std::vector<int> vec_to_city_count(static_cast<size_t>(map.CityCount()), 0);
+    std::vector<int> own_city_armies(static_cast<size_t>(map.CityCount()), 0);
+    std::vector<uint8_t> own_city_hero(static_cast<size_t>(map.CityCount()), uint8_t{0});
+    if (policy.Version() >= 8 && policy.UseMuster()) {
+        for (City* city : own_cities) {
+            bool has_hero = false;
+            int cnt = city_army_stats(*city, has_hero);
+            if (city->Index() >= 0 && city->Index() < map.CityCount()) {
+                own_city_armies[static_cast<size_t>(city->Index())] = cnt;
+                own_city_hero[static_cast<size_t>(city->Index())] =
+                        has_hero ? uint8_t{1} : uint8_t{0};
+            }
+        }
+    }
     for (City* src : own_cities) {
         if (!game::Producing(*src) || src->ProducingSlot() < 0 ||
             src->ProducingSlot() >= src->SlotCount()) {
@@ -453,6 +468,16 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         if (!std_valid && src->IsVectoredToStandard()) {
             src->ClearVector();
         }
+        std::fill(vec_to_city_count.begin(), vec_to_city_count.end(), 0);
+        for (const auto& city : map.Cities()) {
+            if (city.VectoredCityId().IsValid() && city.VectoredCityId() != city.Id()) {
+                int target_idx = city.VectoredCityId().Value();
+                if (target_idx >= 0 && target_idx < map.CityCount()) {
+                    vec_to_city_count[static_cast<size_t>(target_idx)]++;
+                }
+            }
+        }
+
         const Slot& slot = src->SlotAt(src->ProducingSlot());
         const ArmyType* slot_at = game.ArmyTypes().ById(slot.type);
         const bool slot_flies = slot_at && slot_at->flies;
@@ -471,15 +496,16 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         keep_here[ml::kEconCurrent] = !src->IsVectored() ? 1.0F : 0.0F;
         if (policy.Version() >= 8 && policy.UseMuster() &&
             hub_usable_for_unit(*src, src->Index(), slot_flies)) {
-            bool src_hero = false;
-            int src_armies = city_army_stats(*src, src_hero);
+            int src_armies = own_city_armies[static_cast<size_t>(src->Index())];
+            bool src_hero = own_city_hero[static_cast<size_t>(src->Index())] != 0;
             keep_here[ml::kEconMusterHub] = 1.0F;
             keep_here[ml::kEconMusterNeed] =
                     std::clamp((8.0F - static_cast<float>(src_armies)) / 8.0F, -0.5F, 1.0F);
             keep_here[ml::kEconMusterFlow] =
                     0.5F * (src_hero ? 1.0F : 0.0F) +
-                    0.5F * std::min(1.0F,
-                                    static_cast<float>(game::VectoredTo(game, src).size()) / 4.0F);
+                    0.5F * std::min(1.0F, static_cast<float>(vec_to_city_count[static_cast<size_t>(
+                                                  src->Index())]) /
+                                                  4.0F);
         }
 
         std::vector<int> dest_targets = {kNone};
@@ -515,9 +541,8 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         for (City* dst : own_cities) {
             if (dst == src) continue;
             bool is_current = (src->VectoredCityId() == dst->Id());
-            if (!is_current &&
-                static_cast<int>(game::VectoredTo(game, dst).size()) >= game::kMaxVectoredTo)
-                continue;
+            int dst_vec_count = vec_to_city_count[static_cast<size_t>(dst->Index())];
+            if (!is_current && dst_vec_count >= game::kMaxVectoredTo) continue;
             int v_turns =
                     std::max(1, move::Distance(src->X(), src->Y(), dst->X(), dst->Y()) / 14 + 1);
             if (v_turns > 4) continue;
@@ -541,17 +566,15 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             vec_econ[17] = std::tanh(threat_gain);
             vec_econ[ml::kEconCurrent] = is_current ? 1.0F : 0.0F;
             if (policy.Version() >= 8 && policy.UseMuster()) {
-                bool dst_hero = false;
-                int dst_armies = city_army_stats(*dst, dst_hero);
+                int dst_armies = own_city_armies[static_cast<size_t>(dst->Index())];
+                bool dst_hero = own_city_hero[static_cast<size_t>(dst->Index())] != 0;
                 vec_econ[ml::kEconMusterHub] =
                         hub_usable_for_unit(*src, dst->Index(), slot_flies) ? 1.0F : 0.0F;
                 vec_econ[ml::kEconMusterNeed] =
                         std::clamp((8.0F - static_cast<float>(dst_armies)) / 8.0F, -0.5F, 1.0F);
                 vec_econ[ml::kEconMusterFlow] =
                         0.5F * (dst_hero ? 1.0F : 0.0F) +
-                        0.5F * std::min(1.0F,
-                                        static_cast<float>(game::VectoredTo(game, dst).size()) /
-                                                4.0F);
+                        0.5F * std::min(1.0F, static_cast<float>(dst_vec_count) / 4.0F);
             }
             dest_targets.push_back(dst->Index());
             cands.push_back(ml::PackEconInput(prod_ctx, vec_econ));
@@ -576,12 +599,14 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 bool was_std = src->IsVectoredToStandard();
                 if (game::VectorToStandard(game, *src, side)) {
                     if (!was_std) std_vectored_count++;
-                    if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
-                        modern_player->PushThought(AIThought{
-                            "Economy", src->Name(), "Standard", src->X(), src->Y(), std_x, std_y,
-                            logits[pick], 1.0F, false,
-                            absl::StrFormat("Vectoring %s from %s -> Standard (%d,%d)", slot.name,
-                                            src->Name(), std_x, std_y)});
+                    if (want_thoughts) {
+                        if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                            modern_player->PushThought(AIThought{
+                                "Economy", src->Name(), "Standard", src->X(), src->Y(), std_x,
+                                std_y, logits[pick], 1.0F, false,
+                                absl::StrFormat("Vectoring %s from %s -> Standard (%d,%d)",
+                                                slot.name, src->Name(), std_x, std_y)});
+                        }
                     }
                 }
             } else {
@@ -591,7 +616,7 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                                           ? &map.Cities()[chosen_target]
                                           : nullptr;
                 game::Vector(game, *src, best_dest);
-                if (best_dest) {
+                if (best_dest && want_thoughts) {
                     if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
                         modern_player->PushThought(AIThought{
                             "Economy", src->Name(), best_dest->Name(), src->X(), src->Y(),
@@ -616,7 +641,7 @@ void RunCityGuardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         std::vector<Army*> mobile;
         for (int dy = 0; dy <= 1; dy++) {
             for (int dx = 0; dx <= 1; dx++) {
-                for (Army* army : game::ArmiesAt(game, city->X() + dx, city->Y() + dy)) {
+                for (Army* army : game::ArmiesOnTileSpan(game, city->X() + dx, city->Y() + dy)) {
                     if (army->OwnerIndex() != our_side || !game.Alive(army) || army->InTransit())
                         continue;
                     if (army->Moves() <= 0 || moved_armies.contains(army->Id())) {
@@ -715,6 +740,119 @@ void RunMusterSelectionPhase(Game& game, Side& side, const ml::PolicyNetwork& po
     }
 
     const Map& map = game.GetMap();
+    const bool want_thoughts = ml::RecordThoughts();
+    struct EligibleMusterCity {
+        City* city = nullptr;
+        ml::MusterVec base_vec{};
+    };
+    std::vector<EligibleMusterCity> eligible_cities;
+    eligible_cities.reserve(own_cities.size());
+
+    std::vector<int> vec_to_city_count(static_cast<size_t>(map.CityCount()), 0);
+    for (const auto& city_entry : map.Cities()) {
+        if (city_entry.VectoredCityId().IsValid() &&
+            city_entry.VectoredCityId() != city_entry.Id()) {
+            int target_idx = city_entry.VectoredCityId().Value();
+            if (target_idx >= 0 && target_idx < map.CityCount()) {
+                vec_to_city_count[static_cast<size_t>(target_idx)]++;
+            }
+        }
+    }
+
+    for (City* city : own_cities) {
+        // Measure true land-path distance to visible enemy & neutral cities so
+        // water-locked island cities are not mistaken for frontline land hubs.
+        core::Flood city_land =
+                core::FloodFrom(game, our_side, city->X(), city->Y(), 72, move::kLand, our_side);
+        float dist_e = 100.0F;
+        float dist_n = 100.0F;
+        int land_obj_count = 0;
+        for (City* vis_city : belief.visible_cities) {
+            if (vis_city->IsRazed() || vis_city->OwnerIndex() == our_side) continue;
+            int best_step = core::kUnreached;
+            for (int dy = -1; dy <= 2; dy++) {
+                for (int dx = -1; dx <= 2; dx++) {
+                    int tile_x = vis_city->X() + dx;
+                    int tile_y = vis_city->Y() + dy;
+                    if (tile_x >= 0 && tile_y >= 0 && tile_x < map.Width() &&
+                        tile_y < map.Height()) {
+                        best_step = std::min(best_step, core::FloodAt(city_land, tile_x, tile_y));
+                    }
+                }
+            }
+            if (best_step >= core::kUnreached) continue;
+            float land_tiles = 0.5F * static_cast<float>(best_step);
+            if (vis_city->OwnerIndex() == kNone) {
+                dist_n = std::min(dist_n, land_tiles);
+                land_obj_count++;
+            } else if (!diplomacy::IsAllied(game, our_side, vis_city->OwnerIndex())) {
+                dist_e = std::min(dist_e, land_tiles);
+                land_obj_count++;
+            }
+        }
+        if (land_obj_count < 2) continue;  // tiny water-locked islet (<2 land targets)
+        float threat_2 = city->Index() < static_cast<int>(belief.city_threat2_turn.size())
+                                 ? belief.city_threat2_turn[city->Index()]
+                                 : 0.0F;
+
+        int city_armies = 0;
+        int city_str = 0;
+        bool near_hero = false;
+        float rear_str = 0.0F;
+        int in_transit = 0;
+        for (Army* army : game.Armies()) {
+            if (army->OwnerIndex() != our_side || army->IsDisbanded()) continue;
+            if (army->InTransit()) {
+                if (std::holds_alternative<CityId>(army->TransitState()->dest) &&
+                    std::get<CityId>(army->TransitState()->dest) == city->Id()) {
+                    in_transit++;
+                }
+                continue;
+            }
+            if (army->X() == kNone) continue;
+            int dist_tile = move::Distance(army->X(), army->Y(), city->X(), city->Y());
+            if (game::CityAt(game, army->X(), army->Y()) == city) {
+                city_armies++;
+                city_str += army->Strength();
+                if (army->Hero()) near_hero = true;
+            } else {
+                if (army->Hero() && dist_tile <= 6) near_hero = true;
+                if (army->Moves() > 0 && dist_tile <= 22)
+                    rear_str += static_cast<float>(army->Strength());
+            }
+        }
+
+        int best_slot_str = 0;
+        bool has_fly_or_spec = false;
+        for (const auto& slot : city->Slots()) {
+            best_slot_str = std::max(best_slot_str, slot.strength);
+            const ArmyType* army_type = game.ArmyTypes().ById(slot.type);
+            if (army_type && (army_type->flies || army_type->siege || army_type->IsMagical() ||
+                              army_type->Ability() != 0)) {
+                has_fly_or_spec = true;
+            }
+        }
+
+        int vec_in = (city->Index() >= 0 && city->Index() < map.CityCount())
+                             ? vec_to_city_count[static_cast<size_t>(city->Index())]
+                             : 0;
+        ml::MusterVec muster_vec{};
+        muster_vec[0] = 0.0F;
+        muster_vec[1] =
+                (city->Index() == prev_hubs[0] || city->Index() == prev_hubs[1]) ? 1.0F : 0.0F;
+        muster_vec[2] = std::tanh(dist_e / 35.0F);
+        muster_vec[3] = std::tanh(dist_n / 35.0F);
+        muster_vec[4] = std::tanh(threat_2 / 25.0F);
+        muster_vec[5] = std::min(1.5F, static_cast<float>(city_armies) / 8.0F);
+        muster_vec[6] = std::tanh(static_cast<float>(city_str) / 35.0F);
+        muster_vec[7] = near_hero ? 1.0F : 0.0F;
+        muster_vec[8] = std::min(1.5F, static_cast<float>(vec_in + in_transit) / 4.0F);
+        muster_vec[9] = std::tanh(rear_str / 30.0F);
+        muster_vec[10] = static_cast<float>(best_slot_str) / 9.0F;
+        muster_vec[11] = has_fly_or_spec ? 1.0F : 0.0F;
+        eligible_cities.push_back(EligibleMusterCity{city, muster_vec});
+    }
+
     for (int round = 0; round < 2; round++) {
         ml::MusterVec stop_feat{};
         stop_feat[0] = 1.0F;
@@ -729,100 +867,10 @@ void RunMusterSelectionPhase(Game& game, Side& side, const ml::PolicyNetwork& po
                                    ? &map.Cities()[belief.muster_cities[0]]
                                    : nullptr;
 
-        for (City* city : own_cities) {
+        for (const EligibleMusterCity& entry : eligible_cities) {
+            City* city = entry.city;
             if (round == 1 && city->Index() == belief.muster_cities[0]) continue;
-
-            // Measure true land-path distance to visible enemy & neutral cities so
-            // water-locked island cities are not mistaken for frontline land hubs.
-            core::Flood city_land = core::FloodFrom(game, our_side, city->X(), city->Y(), 72,
-                                                    move::kLand, our_side);
-            float dist_e = 100.0F;
-            float dist_n = 100.0F;
-            int land_obj_count = 0;
-            for (City* vis_city : belief.visible_cities) {
-                if (vis_city->IsRazed() || vis_city->OwnerIndex() == our_side) continue;
-                int best_step = core::kUnreached;
-                for (int dy = -1; dy <= 2; dy++) {
-                    for (int dx = -1; dx <= 2; dx++) {
-                        int tile_x = vis_city->X() + dx;
-                        int tile_y = vis_city->Y() + dy;
-                        if (tile_x >= 0 && tile_y >= 0 && tile_x < map.Width() &&
-                            tile_y < map.Height()) {
-                            best_step =
-                                    std::min(best_step, core::FloodAt(city_land, tile_x, tile_y));
-                        }
-                    }
-                }
-                if (best_step >= core::kUnreached) continue;
-                float land_tiles = 0.5F * static_cast<float>(best_step);
-                if (vis_city->OwnerIndex() == kNone) {
-                    dist_n = std::min(dist_n, land_tiles);
-                    land_obj_count++;
-                } else if (!diplomacy::IsAllied(game, our_side, vis_city->OwnerIndex())) {
-                    dist_e = std::min(dist_e, land_tiles);
-                    land_obj_count++;
-                }
-            }
-            if (land_obj_count < 2) continue;  // tiny water-locked islet (<2 land targets)
-            float threat_2 = city->Index() < static_cast<int>(belief.city_threat2_turn.size())
-                                     ? belief.city_threat2_turn[city->Index()]
-                                     : 0.0F;
-
-            int city_armies = 0;
-            int city_str = 0;
-            bool near_hero = false;
-            float rear_str = 0.0F;
-            int in_transit = 0;
-            for (Army* army : game.Armies()) {
-                if (army->OwnerIndex() != our_side || army->IsDisbanded()) continue;
-                if (army->InTransit()) {
-                    if (std::holds_alternative<CityId>(army->TransitState()->dest) &&
-                        std::get<CityId>(army->TransitState()->dest) == city->Id()) {
-                        in_transit++;
-                    }
-                    continue;
-                }
-                if (army->X() == kNone) continue;
-                int dist_tile = move::Distance(army->X(), army->Y(), city->X(), city->Y());
-                if (game::CityAt(game, army->X(), army->Y()) == city) {
-                    city_armies++;
-                    city_str += army->Strength();
-                    if (army->Hero()) near_hero = true;
-                } else {
-                    if (army->Hero() && dist_tile <= 6) near_hero = true;
-                    if (army->Moves() > 0 && dist_tile <= 22)
-                        rear_str += static_cast<float>(army->Strength());
-                }
-            }
-
-            int best_slot_str = 0;
-            bool has_fly_or_spec = false;
-            for (const auto& slot : city->Slots()) {
-                best_slot_str = std::max(best_slot_str, slot.strength);
-                const ArmyType* army_type = game.ArmyTypes().ById(slot.type);
-                if (army_type && (army_type->flies || army_type->siege || army_type->IsMagical() ||
-                                  army_type->Ability() != 0)) {
-                    has_fly_or_spec = true;
-                }
-            }
-
-            ml::MusterVec muster_vec{};
-            muster_vec[0] = 0.0F;
-            muster_vec[1] =
-                    (city->Index() == prev_hubs[0] || city->Index() == prev_hubs[1]) ? 1.0F : 0.0F;
-            muster_vec[2] = std::tanh(dist_e / 35.0F);
-            muster_vec[3] = std::tanh(dist_n / 35.0F);
-            muster_vec[4] = std::tanh(threat_2 / 25.0F);
-            muster_vec[5] = std::min(1.5F, static_cast<float>(city_armies) / 8.0F);
-            muster_vec[6] = std::tanh(static_cast<float>(city_str) / 35.0F);
-            muster_vec[7] = near_hero ? 1.0F : 0.0F;
-            muster_vec[8] = std::min(
-                    1.5F, static_cast<float>(static_cast<int>(game::VectoredTo(game, city).size()) +
-                                             in_transit) /
-                                  4.0F);
-            muster_vec[9] = std::tanh(rear_str / 30.0F);
-            muster_vec[10] = static_cast<float>(best_slot_str) / 9.0F;
-            muster_vec[11] = has_fly_or_spec ? 1.0F : 0.0F;
+            ml::MusterVec muster_vec = entry.base_vec;
             muster_vec[12] = static_cast<float>(round);
             muster_vec[13] = hub0 ? std::tanh(static_cast<float>(move::Distance(
                                                       city->X(), city->Y(), hub0->X(), hub0->Y())) /
@@ -847,11 +895,14 @@ void RunMusterSelectionPhase(Game& game, Side& side, const ml::PolicyNetwork& po
 
         City* chosen = cand_cities[pick];
         belief.muster_cities[round] = chosen->Index();
-        if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
-            modern_player->PushThought(AIThought{
-                "Empire", absl::StrFormat("Muster Hub #%d", round + 1), chosen->Name(), chosen->X(),
-                chosen->Y(), chosen->X(), chosen->Y(), logits[pick], 1.0F, false,
-                absl::StrFormat("Meeting point at %s (score %.2f)", chosen->Name(), logits[pick])});
+        if (want_thoughts) {
+            if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                modern_player->PushThought(AIThought{
+                    "Empire", absl::StrFormat("Muster Hub #%d", round + 1), chosen->Name(),
+                    chosen->X(), chosen->Y(), chosen->X(), chosen->Y(), logits[pick], 1.0F, false,
+                    absl::StrFormat("Meeting point at %s (score %.2f)", chosen->Name(),
+                                    logits[pick])});
+            }
         }
     }
 }
@@ -916,7 +967,7 @@ void RunStandardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         }
         int tile_armies = 0;
         int tile_str = 0;
-        for (Army* army : game::ArmiesAt(game, field_x, field_y)) {
+        for (Army* army : game::ArmiesOnTileSpan(game, field_x, field_y)) {
             if (army->OwnerIndex() == our_side) {
                 tile_armies++;
                 tile_str += army->Strength();
@@ -1010,19 +1061,21 @@ void RunStandardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         float log_prob = 0.0F;
         int pick = ml::SelectFromLogits(logits, std_sampler, &log_prob);
         if (pick == 1 && game::PlantFlag(game, side, carrier)) {
-            if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
-                modern_player->PushThought(
-                        AIThought{"Empire", "Standard", carrier->Name(), carrier->X(), carrier->Y(),
-                                  carrier->X(), carrier->Y(), logits[1], 1.0F, false,
-                                  absl::StrFormat("Planted Standard at (%d,%d) (score %.2f)",
-                                                  carrier->X(), carrier->Y(), logits[1])});
+            if (ml::RecordThoughts()) {
+                if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
+                    modern_player->PushThought(AIThought{
+                        "Empire", "Standard", carrier->Name(), carrier->X(), carrier->Y(),
+                        carrier->X(), carrier->Y(), logits[1], 1.0F, false,
+                        absl::StrFormat("Planted Standard at (%d,%d) (score %.2f)", carrier->X(),
+                                        carrier->Y(), logits[1])});
+                }
             }
         }
     } else if (std_item.status == 1 && std_item.planted && std_item.x != kNone) {
         int std_x = std_item.x;
         int std_y = std_item.y;
         Army* hero_here = nullptr;
-        for (Army* army : game::ArmiesAt(game, std_x, std_y)) {
+        for (Army* army : game::ArmiesOnTileSpan(game, std_x, std_y)) {
             if (army->OwnerIndex() == our_side && army->Hero() && !army->InTransit()) {
                 hero_here = army;
                 break;

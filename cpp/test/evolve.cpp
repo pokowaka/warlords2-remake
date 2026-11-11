@@ -594,7 +594,8 @@ float ComputeFitness(const Game& game, const SeatPlan& seat_plan, float mid_shar
         int defenders = 0;
         for (int dy = 0; dy <= 1; dy++) {
             for (int dx = 0; dx <= 1; dx++) {
-                for (const Army* army : game::ArmiesAt(game, city.X() + dx, city.Y() + dy)) {
+                for (const Army* army :
+                     game::ArmiesOnTileSpan(game, city.X() + dx, city.Y() + dy)) {
                     if (army->OwnerIndex() == owner) defenders++;
                 }
             }
@@ -683,7 +684,8 @@ float ComputeFitness(const Game& game, const SeatPlan& seat_plan, float mid_shar
             if (!army->Blessings().empty()) my_blessed++;
             if (army->X() != kNone && !army->InTransit()) {
                 my_field++;
-                int stack_cnt = static_cast<int>(game::ArmiesAt(game, army->X(), army->Y()).size());
+                int stack_cnt =
+                        static_cast<int>(game::ArmiesOnTileSpan(game, army->X(), army->Y()).size());
                 if (stack_cnt >= 4 || army->Strength() >= 6) my_heavy_legion++;
             }
         }
@@ -741,14 +743,22 @@ std::vector<MidGameSnap> BuildSnapshotBank(const Config& cfg, const ml::PolicyNe
     constexpr int kBankSize = 144;
     std::vector<MidGameSnap> raw(kBankSize);
     std::vector<char> valid(kBankSize, 0);
+    std::vector<int> bank_order(kBankSize);
+    for (int i = 0; i < kBankSize; ++i) bank_order[i] = i;
+    std::stable_sort(bank_order.begin(), bank_order.end(), [](int lhs, int rhs) {
+        auto w_lhs = ScenarioCostWeight(kScenarios[static_cast<size_t>(lhs / 2) % kScenarios.size()]);
+        auto w_rhs = ScenarioCostWeight(kScenarios[static_cast<size_t>(rhs / 2) % kScenarios.size()]);
+        return w_lhs > w_rhs;
+    });
     std::atomic<int> next_idx{0};
     std::vector<std::thread> pool;
     pool.reserve(threads);
     for (unsigned int thread_idx = 0; thread_idx < threads; thread_idx++) {
         pool.emplace_back([&]() {
             while (true) {
-                int bank_idx = next_idx.fetch_add(1);
-                if (bank_idx >= kBankSize) break;
+                int slot = next_idx.fetch_add(1);
+                if (slot >= kBankSize) break;
+                int bank_idx = bank_order[static_cast<size_t>(slot)];
                 uint32_t seed =
                         1U + ((cfg.seed_offset + static_cast<uint32_t>(bank_idx * 4099 + 313)) %
                               kTrainSeedMod);
@@ -822,14 +832,22 @@ SelectEval RunSelectionEval(const Config& cfg, const ml::PolicyNetwork& net, uns
     const int total_games = cfg.select_seeds * 2;
     std::vector<float> shares(total_games, 0.5F);
     std::vector<float> fits(total_games, 0.5F);
+    std::vector<int> eval_order(total_games);
+    for (int i = 0; i < total_games; ++i) eval_order[i] = i;
+    std::stable_sort(eval_order.begin(), eval_order.end(), [](int lhs, int rhs) {
+        auto w_lhs = ScenarioCostWeight(kScenarios[static_cast<size_t>(lhs / 2) % kScenarios.size()]);
+        auto w_rhs = ScenarioCostWeight(kScenarios[static_cast<size_t>(rhs / 2) % kScenarios.size()]);
+        return w_lhs > w_rhs;
+    });
     std::atomic<int> next_idx{0};
     std::vector<std::thread> pool;
     pool.reserve(threads);
     for (unsigned int thread_idx = 0; thread_idx < threads; thread_idx++) {
         pool.emplace_back([&]() {
             while (true) {
-                int game_idx = next_idx.fetch_add(1);
-                if (game_idx >= total_games) break;
+                int slot = next_idx.fetch_add(1);
+                if (slot >= total_games) break;
+                int game_idx = eval_order[static_cast<size_t>(slot)];
                 uint32_t seed = kSelectSeedBase + static_cast<uint32_t>(game_idx / 2);
                 int parity = game_idx % 2;
                 std::string scenario(
@@ -881,6 +899,7 @@ int main(int argc, char** argv) {
     const Config cfg = LoadConfigFromFlags();
     const unsigned int threads = std::max(2U, std::thread::hardware_concurrency());
     ml::SetDeployTemperature(cfg.eval_temp);
+    ml::SetRecordThoughts(false);
 
     ml::PolicyNetwork frozen;
     const ml::PolicyNetwork* frozen_ptr = nullptr;

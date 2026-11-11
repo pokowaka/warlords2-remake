@@ -808,7 +808,8 @@ struct HeadStats {
  */
 void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* log_mult,
                     int chosen, float old_log_prob, float adv, float inv_t, const Config& cfg,
-                    std::vector<float>& d_scores, HeadStats& stats) {
+                    std::vector<float>& d_scores, HeadStats& stats, std::vector<float>& logits,
+                    std::vector<float>& probs, std::vector<float>& log_probs) {
     const size_t candidate_count = scores.size();
     d_scores.assign(candidate_count, 0.0F);
     if (candidate_count <= 1) return;
@@ -816,12 +817,12 @@ void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* 
         return (log_mult && index < log_mult->size()) ? (*log_mult)[index] : 0.0F;
     };
     float max_logit = -1e30F;
-    std::vector<float> logits(candidate_count);
+    logits.resize(candidate_count);
     for (size_t i = 0; i < candidate_count; i++) {
         logits[i] = scores[i] * inv_t - lm_of(i);
         max_logit = std::max(max_logit, logits[i]);
     }
-    std::vector<float> probs(candidate_count);
+    probs.resize(candidate_count);
     float sum = 0.0F;
     for (size_t i = 0; i < candidate_count; i++) {
         probs[i] = std::exp(std::max(-30.0F, logits[i] - max_logit));
@@ -829,7 +830,16 @@ void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* 
     }
     for (float& prob : probs) prob /= sum;
 
-    float new_log_prob = std::log(std::max(1e-12F, probs[chosen]));
+    log_probs.resize(candidate_count);
+    float mean_adj = 0.0F, entropy = 0.0F;
+    for (size_t j = 0; j < candidate_count; j++) {
+        float log_prob = std::log(std::max(1e-12F, probs[j]));
+        log_probs[j] = log_prob;
+        mean_adj += probs[j] * (log_prob + lm_of(j));
+        entropy -= probs[j] * log_prob;
+    }
+
+    float new_log_prob = log_probs[chosen];
     float log_ratio = std::clamp(new_log_prob - old_log_prob, -10.0F, 10.0F);
     float ratio = std::exp(log_ratio);
     stats.policy_loss += -std::min(
@@ -840,21 +850,14 @@ void CategoricalPpo(const std::vector<float>& scores, const std::vector<float>* 
                    (adv < 0.0F && ratio < 1.0F - cfg.clip_eps);
     float d_loss_d_log_p = clipped ? 0.0F : -ratio * adv;
 
-    float mean_adj = 0.0F, entropy = 0.0F;
-    for (size_t j = 0; j < candidate_count; j++) {
-        float log_prob = std::log(std::max(1e-12F, probs[j]));
-        mean_adj += probs[j] * (log_prob + lm_of(j));
-        entropy -= probs[j] * log_prob;
-    }
     float norm_log_k = std::max(1.0F, std::log(static_cast<float>(candidate_count)));
     stats.entropy += entropy / norm_log_k;
     stats.ent_samples++;
     float kl_coef = cfg.ent_coef / norm_log_k;
     for (size_t j = 0; j < candidate_count; j++) {
         float indicator = (static_cast<int>(j) == chosen) ? 1.0F : 0.0F;
-        float log_prob = std::log(std::max(1e-12F, probs[j]));
         d_scores[j] = d_loss_d_log_p * (indicator - probs[j]) * inv_t +
-                      kl_coef * probs[j] * ((log_prob + lm_of(j)) - mean_adj) * inv_t;
+                      kl_coef * probs[j] * ((log_probs[j] + lm_of(j)) - mean_adj) * inv_t;
     }
 }
 
@@ -901,7 +904,8 @@ struct Normalizers {
 void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn,
                     const Normalizers& normalizers, float inv_t, const Config& cfg,
                     ml::PolicyNetwork& grad, HeadStats& stats, std::vector<float>& scores,
-                    std::vector<float>& d_scores,
+                    std::vector<float>& d_scores, std::vector<float>& logits_buf,
+                    std::vector<float>& probs_buf, std::vector<float>& log_probs_buf,
                     std::vector<ml::PolicyNetwork::MissionNet::Activations>& mission_acts,
                     std::vector<ml::PolicyNetwork::EconNet::Activations>& econ_acts) {
     // Critic: 0.5 (V - G)^2 on a linear head (search-trained turns have no return target)
@@ -938,7 +942,7 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
                         step.candidates[candidate], mission_acts[candidate])[0];
             }
             CategoricalPpo(scores, &step.log_mult, step.chosen_idx, step.old_log_prob, adv, inv_t,
-                           cfg, d_scores, stats);
+                           cfg, d_scores, stats, logits_buf, probs_buf, log_probs_buf);
             for (size_t candidate = 0; candidate < candidate_count; candidate++) {
                 if (d_scores[candidate] != 0.0F) {
                     net.MissionHead().BackwardWithActivations(
@@ -971,7 +975,8 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
                     econ_step.candidates[candidate], econ_acts[candidate])[0];
         }
         CategoricalPpo(scores, &econ_step.log_mult, econ_step.chosen_idx, econ_step.old_log_prob,
-                       econ_adv, inv_t, cfg, d_scores, stats);
+                       econ_adv, inv_t, cfg, d_scores, stats, logits_buf, probs_buf,
+                       log_probs_buf);
         for (size_t candidate = 0; candidate < candidate_count; candidate++) {
             if (d_scores[candidate] != 0.0F) {
                 net.EconHead().BackwardWithActivations(
@@ -987,9 +992,14 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
         ml::PolicyNetwork::DiploNet::Activations diplo_act;
         auto raw = net.DiploHead().ForwardWithActivations(diplo_step.input, diplo_act);
         std::array<float, ml::kDiploOutDim> d_out{};
-        scores = {raw[0], raw[1], raw[2], raw[3]};
+        scores.resize(4);
+        scores[0] = raw[0];
+        scores[1] = raw[1];
+        scores[2] = raw[2];
+        scores[3] = raw[3];
         CategoricalPpo(scores, nullptr, diplo_step.chosen_stance, diplo_step.old_stance_log_prob,
-                       diplo_adv, inv_t, cfg, d_scores, stats);
+                       diplo_adv, inv_t, cfg, d_scores, stats, logits_buf, probs_buf,
+                       log_probs_buf);
         for (int stance = 0; stance < 4; stance++) d_out[stance] = d_scores[stance];
         stats.diplo++;
         if (diplo_step.has_tribute) {
@@ -1151,6 +1161,15 @@ void PlayEvalCase(const Config& cfg, const ml::PolicyNetwork& policy, EvalCase& 
  * seeds), in parallel over all hardware threads.
  * @return One list of played cases per policy, in the order of `policies`.
  */
+int ScenarioCostWeight(std::string_view scenario) {
+    if (scenario == "HADESHA" || scenario == "ERYTHEA" || scenario == "ISLADIA" ||
+        scenario == "RANDOM") {
+        return 4;
+    }
+    if (scenario == "DRAGON") return 2;
+    return 1;
+}
+
 std::vector<std::vector<EvalCase>> RunEval(const Config& cfg,
                                            const std::vector<const ml::PolicyNetwork*>& policies,
                                            uint32_t seed_base, int seeds, int turns) {
@@ -1160,13 +1179,22 @@ std::vector<std::vector<EvalCase>> RunEval(const Config& cfg,
                                                EvalCases(seed_base, seeds, cfg.eval_preset));
     const size_t per_policy = results[0].size();
     const size_t total = per_policy * policies.size();
+    std::vector<size_t> task_order(total);
+    for (size_t i = 0; i < total; ++i) task_order[i] = i;
+    std::stable_sort(task_order.begin(), task_order.end(), [&](size_t lhs, size_t rhs) {
+        const EvalCase& c_lhs = results[lhs % policies.size()][lhs / policies.size()];
+        const EvalCase& c_rhs = results[rhs % policies.size()][rhs / policies.size()];
+        return ScenarioCostWeight(c_lhs.scenario) > ScenarioCostWeight(c_rhs.scenario);
+    });
     std::atomic<size_t> next{0};
     unsigned int workers = std::max(2U, std::thread::hardware_concurrency());
     std::vector<std::thread> pool;
     for (unsigned int worker = 0; worker < workers; worker++) {
         pool.emplace_back([&]() {
-            for (size_t i; (i = next.fetch_add(1)) < total;) {
-                size_t policy_index = i % policies.size(), case_index = i / policies.size();
+            for (size_t slot; (slot = next.fetch_add(1)) < total;) {
+                size_t task_idx = task_order[slot];
+                size_t policy_index = task_idx % policies.size();
+                size_t case_index = task_idx / policies.size();
                 PlayEvalCase(cfg, *policies[policy_index], results[policy_index][case_index], solo,
                              is_selection, turns);
             }
@@ -1404,6 +1432,7 @@ int main(int argc, char** argv) {
     }
     unsigned int threads = std::max(2U, std::thread::hardware_concurrency());
     ml::SetDeployTemperature(cfg.eval_temp);
+    ml::SetRecordThoughts(false);
     ml::PolicyNetwork frozen;
     if (!cfg.frozen_path.empty()) {
         if (!frozen.LoadJson(cfg.frozen_path).ok()) {
@@ -1543,28 +1572,49 @@ int main(int argc, char** argv) {
         float learning_rate = cfg.lr_start + (cfg.lr_end - cfg.lr_start) * progress;
         float inv_t = 1.0F / temperature;
 
-        // ---- rollouts
+        // ---- rollouts (scheduled Longest-Processing-Time-First to avoid tail stragglers)
         std::vector<RolloutSummary> games(cfg.games_per_iter);
+        std::vector<int> game_order(cfg.games_per_iter);
+        std::vector<int> game_cost(cfg.games_per_iter);
+        for (int gi = 0; gi < cfg.games_per_iter; ++gi) {
+            game_order[gi] = gi;
+            uint32_t seed = cfg.seed_offset + static_cast<uint32_t>(iter * 1009 + gi * 97 + 17);
+            const std::string& scen = kScenarios[(iter * 7 + gi) % kScenarios.size()];
+            float map_roll = static_cast<float>(((seed * 1597334677U) ^ 0x9e3779b9U) >> 8) /
+                             static_cast<float>(1U << 24);
+            bool uses_random_map = (cfg.search_k == 0) && (map_roll < cfg.random_map_frac);
+            int cost = uses_random_map ? 5 : ScenarioCostWeight(scen);
+            float roll =
+                    static_cast<float>((seed * 2654435761U) >> 8) / static_cast<float>(1U << 24);
+            if (!cfg.solo_learner && !(roll < cfg.classic_frac)) cost *= 2;
+            if ((kPresets[(iter + gi) % 4].hidden_map) != 0) cost += 1;
+            game_cost[gi] = cost;
+        }
+        std::stable_sort(game_order.begin(), game_order.end(),
+                         [&](int lhs, int rhs) { return game_cost[lhs] > game_cost[rhs]; });
+
         std::atomic<int> next_game{0};
         std::vector<std::thread> pool;
         for (unsigned int worker = 0; worker < std::min<unsigned int>(threads, cfg.games_per_iter);
              worker++) {
             pool.emplace_back([&]() {
-                for (int gi; (gi = next_game.fetch_add(1)) < cfg.games_per_iter;) {
-                    uint32_t seed =
-                            cfg.seed_offset + static_cast<uint32_t>(iter * 1009 + gi * 97 + 17);
-                    const std::string& scen = kScenarios[(iter * 7 + gi) % kScenarios.size()];
-                    const TrainingPreset& preset = kPresets[(iter + gi) % 4];
+                for (int slot; (slot = next_game.fetch_add(1)) < cfg.games_per_iter;) {
+                    int game_idx = game_order[slot];
+                    uint32_t seed = cfg.seed_offset +
+                                    static_cast<uint32_t>(iter * 1009 + game_idx * 97 + 17);
+                    const std::string& scen = kScenarios[(iter * 7 + game_idx) % kScenarios.size()];
+                    const TrainingPreset& preset = kPresets[(iter + game_idx) % 4];
                     float roll = static_cast<float>((seed * 2654435761U) >> 8) /
                                  static_cast<float>(1U << 24);
                     Opponent mode = roll < cfg.classic_frac ? Opponent::kClassic
-                                    : (gi % 2 == 0)         ? Opponent::kMirror
+                                    : (game_idx % 2 == 0)   ? Opponent::kMirror
                                                             : Opponent::kLeague;
-                    const auto& snap = hall_of_fame[(iter + gi) % hall_of_fame.size()];
-                    games[gi] = cfg.search_k > 0 ? RunSearchRollout(cfg, scen, preset, seed,
-                                                                    temperature, learner)
-                                                 : RunRollout(cfg, scen, preset, seed, temperature,
-                                                              learner, snap, mode);
+                    const auto& snap = hall_of_fame[(iter + game_idx) % hall_of_fame.size()];
+                    games[game_idx] = cfg.search_k > 0 ? RunSearchRollout(cfg, scen, preset, seed,
+                                                                          temperature, learner)
+                                                       : RunRollout(cfg, scen, preset, seed,
+                                                                    temperature, learner, snap,
+                                                                    mode);
                 }
             });
         }
@@ -1658,13 +1708,14 @@ int main(int argc, char** argv) {
                 for (unsigned int worker = 0; worker < grad_workers; worker++) {
                     grads[worker].Zero();
                     gpool.emplace_back([&, worker]() {
-                        std::vector<float> scores, d_scores;
+                        std::vector<float> scores, d_scores, logits_buf, probs_buf, log_probs_buf;
                         std::vector<ml::PolicyNetwork::MissionNet::Activations> mission_acts;
                         std::vector<ml::PolicyNetwork::EconNet::Activations> econ_acts;
                         for (size_t ti; (ti = next_turn.fetch_add(1)) < mb1;) {
                             AccumulateTurn(learner, *turns[ti], normalizers, inv_t, cfg,
                                            grads[worker], stats[worker], scores, d_scores,
-                                           mission_acts, econ_acts);
+                                           logits_buf, probs_buf, log_probs_buf, mission_acts,
+                                           econ_acts);
                         }
                     });
                 }

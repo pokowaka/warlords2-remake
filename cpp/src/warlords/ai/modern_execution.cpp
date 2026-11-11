@@ -136,8 +136,13 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
     }
 
     int our_side = side.Index();
-    std::map<Army*, int> start_moves;
-    for (Army* army : stack) start_moves[army] = army->Moves();
+    std::array<std::pair<Army*, int>, 32> start_moves{};
+    size_t start_moves_count = 0;
+    for (Army* army : stack) {
+        if (start_moves_count < start_moves.size()) {
+            start_moves[start_moves_count++] = {army, army->Moves()};
+        }
+    }
 
     // A coalition drawn from one owned 2x2 city may stand on different corners.
     // Members walk (by the normal rules, paying moves) onto the leader's tile;
@@ -145,8 +150,10 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
     // and remain free for later waves.
     {
         int leader_x = stack[0]->X(), leader_y = stack[0]->Y();
-        int on_leader_tile = static_cast<int>(game::ArmiesAt(game, leader_x, leader_y).size());
+        int on_leader_tile =
+                static_cast<int>(game::ArmiesOnTileSpan(game, leader_x, leader_y).size());
         std::vector<Army*> joined;
+        joined.reserve(stack.size());
         for (Army* army : stack) {
             if (army->X() == leader_x && army->Y() == leader_y) {
                 joined.push_back(army);
@@ -176,7 +183,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             for (int oy = 0; oy <= 1; oy++) {
                 for (int ox = 0; ox <= 1; ox++) {
                     int tile_x = tgt.city->X() + ox, tile_y = tgt.city->Y() + oy;
-                    if (static_cast<int>(game::ArmiesAt(game, tile_x, tile_y).size() +
+                    if (static_cast<int>(game::ArmiesOnTileSpan(game, tile_x, tile_y).size() +
                                          stack.size()) <= rules::kMaxStack) {
                         dest_x = tile_x;
                         dest_y = tile_y;
@@ -191,6 +198,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
     }
 
     const Map& map = game.GetMap();
+    game::SeenMasks seen = game::BuildSeenMasks(game, our_side);
     if (stage_near && (tgt.kind == TargetKind::kEnemyCity || tgt.kind == TargetKind::kNeutralCity ||
                        tgt.kind == TargetKind::kEnemyStack)) {
         int best_sx = dest_x, best_sy = dest_y;
@@ -204,11 +212,11 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                 if (next_x < 0 || next_y < 0 || next_x >= map.Width() || next_y >= map.Height())
                     continue;
                 if (tgt.city && game::CityAt(game, next_x, next_y) == tgt.city) continue;
-                if (!belief::IsTileVisible(game, our_side, next_x, next_y)) continue;
+                if (!game::IsSeenAt(seen, next_x, next_y)) continue;
                 int terr = map.TerrainTypeOf(map.TileWord(next_x, next_y));
                 if (terr == move::kWater || terr == move::kShore || terr == move::kMountains)
                     continue;
-                auto occ = game::ArmiesAt(game, next_x, next_y);
+                absl::Span<Army* const> occ = game::ArmiesOnTileSpan(game, next_x, next_y);
                 if (!occ.empty() &&
                     (occ[0]->OwnerIndex() != our_side ||
                      static_cast<int>(occ.size() + stack.size()) > rules::kMaxStack)) {
@@ -249,6 +257,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         auto path = move::FindPath(game, sel.armies, leader_x, leader_y, dest_x, dest_y);
         if (!path || path->empty()) break;
 
+        seen = game::BuildSeenMasks(game, our_side);
         int blocker_x = kNone, blocker_y = kNone;
         int blocker_cum_cost = 0, blocker_vis_count = 1;
         int cum_step_cost = 0;
@@ -260,8 +269,8 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             if (cum_step_cost > sel.min_moves + 8) break;
             City* city_tile = game::CityAt(game, step.x, step.y);
             if (city_tile && !city_tile->IsRazed()) continue;
-            if (!belief::IsTileVisible(game, our_side, step.x, step.y)) continue;
-            auto occ = game::ArmiesAt(game, step.x, step.y);
+            if (!game::IsSeenAt(seen, step.x, step.y)) continue;
+            absl::Span<Army* const> occ = game::ArmiesOnTileSpan(game, step.x, step.y);
             if (!occ.empty() && occ[0]->OwnerIndex() != our_side &&
                 diplomacy::MayAttack(game, our_side, occ[0]->OwnerIndex())) {
                 blocker_x = step.x;
@@ -323,9 +332,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
             for (int oy = -7; oy <= 7; oy++) {
                 for (int ox = -7; ox <= 7; ox++) {
                     int tile_x = leader_x + ox, tile_y = leader_y + oy;
-                    if (tile_x >= 0 && tile_y >= 0 && tile_x < map.Width() &&
-                        tile_y < map.Height() &&
-                        belief::IsTileVisible(game, our_side, tile_x, tile_y)) {
+                    if (game::IsSeenAt(seen, tile_x, tile_y)) {
                         seen_box_before++;
                     }
                 }
@@ -361,7 +368,7 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                 blocked = true;
                 break;
             }
-            auto def_armies = game::ArmiesAt(game, attack_x, attack_y);
+            absl::Span<Army* const> def_armies = game::ArmiesOnTileSpan(game, attack_x, attack_y);
             int def_owner = def_armies.empty() ? (att_city ? att_city->OwnerIndex() : kNone)
                                                : def_armies[0]->OwnerIndex();
 
@@ -413,13 +420,12 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
         }
 
         if (is_fog_mission && walk_result.steps > 0 && map.GameOptions().hidden_map != 0) {
+            seen = game::BuildSeenMasks(game, our_side);
             int seen_box_after = 0;
             for (int oy = -7; oy <= 7; oy++) {
                 for (int ox = -7; ox <= 7; ox++) {
                     int tile_x = leader_x + ox, tile_y = leader_y + oy;
-                    if (tile_x >= 0 && tile_y >= 0 && tile_x < map.Width() &&
-                        tile_y < map.Height() &&
-                        belief::IsTileVisible(game, our_side, tile_x, tile_y)) {
+                    if (game::IsSeenAt(seen, tile_x, tile_y)) {
                         seen_box_after++;
                     }
                 }
@@ -468,8 +474,13 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
 
     for (Army* army : sel.armies) {
         if (!game.Alive(army)) continue;
-        auto found = start_moves.find(army);
-        bool spent_moves = (found != start_moves.end() && army->Moves() < found->second);
+        bool spent_moves = false;
+        for (size_t i = 0; i < start_moves_count; ++i) {
+            if (start_moves[i].first == army) {
+                spent_moves = (army->Moves() < start_moves[i].second);
+                break;
+            }
+        }
         if (blocked && army->Moves() >= 2) {
             // Blocked on the way: MissionNet chooses again in the next wave
             moved_armies.erase(army->Id());
