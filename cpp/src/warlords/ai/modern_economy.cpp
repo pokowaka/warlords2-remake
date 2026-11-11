@@ -109,8 +109,12 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             float log_prob = 0.0F;
             int pick = ml::SelectFromLogits(logits, sampler, &log_prob);
             if (sampler && sampler->current_turn) {
-                sampler->current_turn->econ_steps.push_back(
-                        ml::EconStepRecord{std::move(cands), {}, pick, log_prob});
+                ml::EconStepRecord rec;
+                rec.candidates = std::move(cands);
+                rec.chosen_idx = pick;
+                rec.old_log_prob = log_prob;
+                rec.sample_temp = sampler->last_step_temp;
+                sampler->current_turn->econ_steps.push_back(std::move(rec));
             }
             if (pick == 1) {
                 game::Disband(game, side, {army});
@@ -267,8 +271,13 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             std::vector<ml::EconInVec> cands;
             cands.reserve(buy_opts.size());
             for (const auto& buy_opt : buy_opts) cands.push_back(buy_opt.in_vec);
-            sampler->current_turn->econ_steps.push_back(
-                    ml::EconStepRecord{std::move(cands), std::move(log_mult), pick, log_prob});
+            ml::EconStepRecord rec;
+            rec.candidates = std::move(cands);
+            rec.log_mult = std::move(log_mult);
+            rec.chosen_idx = pick;
+            rec.old_log_prob = log_prob;
+            rec.sample_temp = sampler->last_step_temp;
+            sampler->current_turn->econ_steps.push_back(std::move(rec));
         }
         if (pick == 0 || !buy_opts[pick].city) break;
 
@@ -363,8 +372,13 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         float log_prob = 0.0F;
         int pick = ml::SelectFromLogits(logits, sampler, &log_prob, &log_mult);
         if (sampler && sampler->current_turn) {
-            sampler->current_turn->econ_steps.push_back(
-                    ml::EconStepRecord{std::move(cands), std::move(log_mult), pick, log_prob});
+            ml::EconStepRecord rec;
+            rec.candidates = std::move(cands);
+            rec.log_mult = std::move(log_mult);
+            rec.chosen_idx = pick;
+            rec.old_log_prob = log_prob;
+            rec.sample_temp = sampler->last_step_temp;
+            sampler->current_turn->econ_steps.push_back(std::move(rec));
         }
 
         if (pick == 0) {
@@ -591,8 +605,13 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             float log_prob = 0.0F;
             int pick = ml::SelectFromLogits(logits, sampler, &log_prob, &log_mult);
             if (sampler && sampler->current_turn) {
-                sampler->current_turn->econ_steps.push_back(
-                        ml::EconStepRecord{std::move(cands), std::move(log_mult), pick, log_prob});
+                ml::EconStepRecord rec;
+                rec.candidates = std::move(cands);
+                rec.log_mult = std::move(log_mult);
+                rec.chosen_idx = pick;
+                rec.old_log_prob = log_prob;
+                rec.sample_temp = sampler->last_step_temp;
+                sampler->current_turn->econ_steps.push_back(std::move(rec));
             }
             int chosen_target = dest_targets[pick];
             if (chosen_target == kStandardTarget) {
@@ -705,6 +724,7 @@ void RunCityGuardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             rec.chosen_idx = pick;
             rec.old_log_prob = log_prob;
             rec.guard_city = city->Index();
+            rec.sample_temp = sampler->last_step_temp;
             sampler->current_turn->econ_steps.push_back(std::move(rec));
         }
         for (int i = 0; i < pick && i < static_cast<int>(mobile.size()); i++) {
@@ -891,6 +911,15 @@ void RunMusterSelectionPhase(Game& game, Side& side, const ml::PolicyNetwork& po
         }
         float log_prob = 0.0F;
         int pick = ml::SelectFromLogits(logits, muster_sampler, &log_prob, &log_mult);
+        if (sampler && sampler->current_turn) {
+            ml::MusterStepRecord rec;
+            rec.candidates = std::move(cands);
+            rec.log_mult = std::move(log_mult);
+            rec.chosen_idx = pick;
+            rec.old_log_prob = log_prob;
+            rec.sample_temp = muster_sampler->last_step_temp;
+            sampler->current_turn->muster_steps.push_back(std::move(rec));
+        }
         if (pick == 0 || !cand_cities[pick]) break;
 
         City* chosen = cand_cities[pick];
@@ -1054,12 +1083,20 @@ void RunStandardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         carry_m[13] = std::tanh(static_cast<float>(own_cities.size()) / 10.0F);
         ml::MusterVec plant_m = build_field_std_features(carrier->X(), carrier->Y(), false, 0);
 
+        std::vector<ml::MusterInVec> std_cands = {
+            ml::PackMusterInput(ctx, carry_m),
+            ml::PackMusterInput(ctx, plant_m),
+        };
         std::vector<float> logits = {
-            policy.ForwardMuster(ml::PackMusterInput(ctx, carry_m))[0],
-            policy.ForwardMuster(ml::PackMusterInput(ctx, plant_m))[0],
+            policy.ForwardMuster(std_cands[0])[0],
+            policy.ForwardMuster(std_cands[1])[0],
         };
         float log_prob = 0.0F;
         int pick = ml::SelectFromLogits(logits, std_sampler, &log_prob);
+        if (sampler && sampler->current_turn) {
+            sampler->current_turn->muster_steps.push_back(ml::MusterStepRecord{
+                std::move(std_cands), {}, pick, log_prob, std_sampler->last_step_temp, 0.0F});
+        }
         if (pick == 1 && game::PlantFlag(game, side, carrier)) {
             if (ml::RecordThoughts()) {
                 if (ModernMlPlayer* modern_player = ModernMlPlayer::FindMutableOn(side)) {
@@ -1097,12 +1134,20 @@ void RunStandardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         pickup_m[13] = std::tanh(static_cast<float>(own_cities.size()) / 10.0F);
         ml::MusterVec keep_m = build_field_std_features(std_x, std_y, true, cur_flow);
 
+        std::vector<ml::MusterInVec> std_cands = {
+            ml::PackMusterInput(ctx, pickup_m),
+            ml::PackMusterInput(ctx, keep_m),
+        };
         std::vector<float> logits = {
-            policy.ForwardMuster(ml::PackMusterInput(ctx, pickup_m))[0],
-            policy.ForwardMuster(ml::PackMusterInput(ctx, keep_m))[0],
+            policy.ForwardMuster(std_cands[0])[0],
+            policy.ForwardMuster(std_cands[1])[0],
         };
         float log_prob = 0.0F;
         int pick = ml::SelectFromLogits(logits, std_sampler, &log_prob);
+        if (sampler && sampler->current_turn) {
+            sampler->current_turn->muster_steps.push_back(ml::MusterStepRecord{
+                std::move(std_cands), {}, pick, log_prob, std_sampler->last_step_temp, 0.0F});
+        }
         if (pick == 0) {
             hero::TakeItem(game, hero_here, &std_item);
             for (City* city : own_cities) {

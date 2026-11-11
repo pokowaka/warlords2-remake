@@ -93,7 +93,8 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                          bool stage_near, const ml::PolicyNetwork& policy,
                          const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
                          MovedArmySet& moved_armies, const MissionFight& plan,
-                         bool* blocked_out = nullptr);
+                         bool* blocked_out = nullptr,
+                         std::vector<ml::DetourStepRecord>* detour_out = nullptr);
 
 /** @brief Returns the distinct candidate stack sizes to consider for a group led by `seed`. */
 std::vector<size_t> BuildCoalitionSizes(const Game& game, Army* seed,

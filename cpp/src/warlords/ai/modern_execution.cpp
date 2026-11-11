@@ -91,8 +91,12 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
     float log_prob = 0.0F;
     int pick = ml::SelectFromLogits(scores, sampler, &log_prob);
     if (sampler && sampler->current_turn && cand_inputs.size() > 1) {
-        sampler->current_turn->econ_steps.push_back(
-                ml::EconStepRecord{std::move(cand_inputs), {}, pick, log_prob});
+        ml::EconStepRecord rec;
+        rec.candidates = std::move(cand_inputs);
+        rec.chosen_idx = pick;
+        rec.old_log_prob = log_prob;
+        rec.sample_temp = sampler->last_step_temp;
+        sampler->current_turn->econ_steps.push_back(std::move(rec));
     }
 
     int best_mode = modes[pick];
@@ -123,7 +127,8 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
 bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, CandidateTarget& tgt,
                          bool stage_near, const ml::PolicyNetwork& policy,
                          const ml::ContextVec& ctx, ml::RolloutSampler* sampler,
-                         MovedArmySet& moved_armies, const MissionFight& plan, bool* blocked_out) {
+                         MovedArmySet& moved_armies, const MissionFight& plan, bool* blocked_out,
+                         std::vector<ml::DetourStepRecord>* detour_out) {
     if (blocked_out) *blocked_out = false;
     stack.erase(std::remove_if(stack.begin(), stack.end(),
                                [&](Army* army) { return !game.Alive(army) || army->Moves() <= 0; }),
@@ -311,11 +316,22 @@ bool ExecuteStackMission(Game& game, Side& side, std::vector<Army*>& stack, Cand
                         tv_through = BuildTargetFeatures(game, side, sel.armies, blk_tgt, 0.0F,
                                                          0.0F, blocker_cum_cost, policy.Version());
                     }
-                    float u_detour =
-                            policy.ForwardMission(ml::PackMissionInput(ctx, cur_sv, tv_detour))[0];
-                    float u_through =
-                            policy.ForwardMission(ml::PackMissionInput(ctx, cur_sv, tv_through))[0];
-                    if (u_detour + policy.DetourBias() > u_through) {
+                    ml::MissionInVec detour_in = ml::PackMissionInput(ctx, cur_sv, tv_detour);
+                    ml::MissionInVec through_in = ml::PackMissionInput(ctx, cur_sv, tv_through);
+                    float u_detour = policy.ForwardMission(detour_in)[0];
+                    float u_through = policy.ForwardMission(through_in)[0];
+                    float detour_logit = (u_detour + policy.DetourBias()) - u_through;
+                    float detour_log_prob = 0.0F;
+                    bool choose_detour =
+                            (sampler && sampler->current_turn)
+                                    ? ml::SelectBinary(detour_logit, sampler, &detour_log_prob)
+                                    : (detour_logit > 0.0F);
+                    if (detour_out && sampler && sampler->current_turn) {
+                        detour_out->push_back(ml::DetourStepRecord{detour_in, through_in,
+                                                                   choose_detour, detour_log_prob,
+                                                                   sampler->last_step_temp});
+                    }
+                    if (choose_detour) {
                         walk_steps = *clear_path;
                     } else {
                         cur_plan.decided_win = tv_through[10];

@@ -393,6 +393,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         rec.input = d_in;
         int best_choice = ml::SelectFromLogits(stance_vec, sampler, &rec.old_stance_log_prob);
         rec.chosen_stance = best_choice;
+        rec.stance_sample_temp = sampler ? sampler->last_step_temp : 0.0F;
         float best_logit = stance_vec[best_choice];
 
         if (best_choice == 0) {
@@ -416,6 +417,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         if (friendly && cur_st == diplomacy::kWar && side.Gold() >= 100) {
             rec.has_tribute = true;
             rec.tribute_chosen = ml::SelectBinary(raw[4], sampler, &rec.old_tribute_log_prob);
+            rec.tribute_sample_temp = sampler ? sampler->last_step_temp : 0.0F;
             if (rec.tribute_chosen) {
                 int offer =
                         std::clamp(side.Gold() / 4 / 25 * 25, 50, std::min(300, side.Gold() / 2));
@@ -428,6 +430,7 @@ void RunDiplomacyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
         if (friendly && primary_enemy != kNone && primary_enemy != other_idx) {
             rec.has_joint_war = true;
             rec.joint_war_chosen = ml::SelectBinary(raw[5], sampler, &rec.old_joint_war_log_prob);
+            rec.joint_war_sample_temp = sampler ? sampler->last_step_temp : 0.0F;
             if (rec.joint_war_chosen)
                 diplomacy::SetWarTarget(game, our_side, other_idx, primary_enemy);
         }

@@ -184,10 +184,11 @@ struct ResidualMLP {
     /**
      * @brief Accumulates parameter gradients using cached hidden activations, avoiding
      * recomputing forward matrix multiplications during training passes.
+     * @param d_posture Optional accumulator receiving `dL/d(input[25..29])` when `InDim >= 30`.
      */
     void BackwardWithActivations(const std::array<float, InDim>& input, const Activations& act,
-                                 const std::array<float, OutDim>& d_out,
-                                 ResidualMLP& grad_accum) const;
+                                 const std::array<float, OutDim>& d_out, ResidualMLP& grad_accum,
+                                 std::array<float, 5>* d_posture = nullptr) const;
 
     /** @brief Sets every weight and bias to zero. */
     void Zero();
@@ -274,6 +275,11 @@ class PolicyNetwork {
                                         EconNet::kParamCount + ValueNet::kParamCount +
                                         StackValueNet::kParamCount;
 
+    /// Total trainable parameters including v8 MusterNet, Commander (5x25 + 5), and detourBias.
+    static constexpr size_t kV8TrainableParams =
+            static_cast<size_t>(kTotalParams) + static_cast<size_t>(MusterNet::kParamCount) +
+            kCommanderWeights + 5U + 1U;
+
     // Legacy files: v7 lacks the 4 muster target inputs and 3 muster econ inputs;
     // v6 also lacks the 4 order-memory target inputs and 2 GuardCity econ inputs;
     // v5 also lacks the 6 added context features; v4/v3 also lack privileged critics.
@@ -352,6 +358,12 @@ class PolicyNetwork {
 
     /** @brief Loads parameters from a flat vector of kTotalParams values. */
     void Unflatten(const std::vector<float>& params);
+
+    /** @brief Flattens all trainable parameters (5 core heads + MusterNet + Commander + detourBias). */
+    std::vector<float> FlattenTrainable() const;
+
+    /** @brief Loads all trainable parameters from a vector of `kV8TrainableParams` values. */
+    void UnflattenTrainable(const std::vector<float>& params);
 
     /**
      * @brief Loads a legacy (v7/v6/v5/v4/v3) flat vector, widening the inputs without changing the
@@ -541,15 +553,43 @@ class PolicyNetwork {
 
 // --- Trajectory recording and stochastic exploration for PPO self-play ---
 
+/** @brief One road-blocker detour vs fight-through binary decision during stack execution. */
+struct DetourStepRecord {
+    MissionInVec detour_in{};    ///< MissionNet input for the clear detour path.
+    MissionInVec through_in{};   ///< MissionNet input for fighting through the blocker.
+    bool detour_chosen = false;  ///< True when the stack detoured around the blocker.
+    float old_log_prob = 0.0F;   ///< Log probability of `detour_chosen` when taken.
+    float sample_temp = 0.0F;    ///< Effective sampling temperature used (`0` = global iter temp).
+};
+
+/** @brief Off-turn battle/siege score delta attributed to a defending unit (`Army*` pool ID). */
+struct OffTurnUnitDelta {
+    std::uintptr_t unit_id = 0;  ///< Non-recycled Army* identity from ArmyRegistry.
+    float delta_score = 0.0F;    ///< Causal off-turn empire-score contribution.
+};
+
+/** @brief One muster-hub or side-standard decision made during a recorded turn. */
+struct MusterStepRecord {
+    std::vector<MusterInVec> candidates;  ///< Inputs of every option scored by MusterNet.
+    std::vector<float> log_mult;          ///< Log multiplicity prior of each option.
+    int chosen_idx = 0;                   ///< Option selected.
+    float old_log_prob = 0.0F;            ///< Log probability when selected.
+    float sample_temp = 0.0F;             ///< Effective sampling temperature used.
+    float advantage = 0.0F;               ///< Filled by trainer.
+};
+
 /** @brief One mission decision made during a recorded turn. */
 struct MissionStepRecord {
     std::vector<MissionInVec> candidates;  ///< The inputs of every option scored.
     std::vector<float> log_mult;           ///< Log multiplicity prior of each option.
     int chosen_idx = 0;                    ///< The option taken.
     float old_log_prob = 0.0F;             ///< Its log probability when it was taken.
+    float sample_temp = 0.0F;              ///< Effective sampling temperature of option choice.
     bool has_stage_choice = false;         ///< Whether attack-now vs stage-near was decided.
     bool stage_chosen = false;             ///< Staging near was chosen.
     float old_stage_log_prob = 0.0F;       ///< Log probability of that choice.
+    float stage_sample_temp = 0.0F;        ///< Effective sampling temperature of stage choice.
+    std::vector<DetourStepRecord> detour_steps;  ///< Detour vs fight-through choices on this move.
     float immediate_delta_score = 0.0F;    ///< Change in empire score while this stack acted.
     StackValueInVec stack_value_in{};      ///< Group state before the decision, for the baseline.
     float stack_value_pred = 0.0F;         ///< V_stack(s) at decision time.
@@ -573,6 +613,7 @@ struct EconStepRecord {
     int guard_city = kNone;             ///< v7: owned city whose garrison GuardCity decided.
     float guard_loss = 0.0F;            ///< Filled by trainer if guard_city fell by next turn.
     float advantage = 0.0F;             ///< Filled by trainer.
+    float sample_temp = 0.0F;           ///< Effective sampling temperature used.
 };
 
 /** @brief One diplomatic decision made during a recorded turn. */
@@ -580,13 +621,16 @@ struct DiploStepRecord {
     DiploInVec input{};                ///< The diplomacy head's input.
     int chosen_stance = 1;             ///< The stance taken (index into stance_logits).
     float old_stance_log_prob = 0.0F;  ///< Its log probability when it was taken.
+    float stance_sample_temp = 0.0F;   ///< Effective sampling temperature of stance choice.
     // Optional binary sub-decisions taken alongside a Peace/Ally stance
     bool has_tribute = false;             ///< Whether a tribute offer was decided (output 4).
     bool tribute_chosen = false;          ///< Gold was offered to end a war.
     float old_tribute_log_prob = 0.0F;    ///< Log probability of that choice.
+    float tribute_sample_temp = 0.0F;     ///< Effective sampling temperature of tribute choice.
     bool has_joint_war = false;           ///< Whether a joint war was decided (output 5).
     bool joint_war_chosen = false;        ///< The partner was asked to join our war.
     float old_joint_war_log_prob = 0.0F;  ///< Log probability of that choice.
+    float joint_war_sample_temp = 0.0F;   ///< Effective sampling temperature of joint-war choice.
 };
 
 /** @brief Everything recorded about one side's turn, for training. */
@@ -597,19 +641,27 @@ struct TurnStepRecord {
     float start_score = 0.0F;    ///< Empire score as the turn begins.
     float advantage = 0.0F;      ///< GAE, filled by the trainer.
     float return_target = 0.0F;  ///< Critic target, filled by the trainer.
-    std::vector<MissionStepRecord> mission_steps;  ///< The turn's mission decisions.
-    std::vector<EconStepRecord> econ_steps;        ///< The turn's economic decisions.
-    std::vector<DiploStepRecord> diplo_steps;      ///< The turn's diplomatic decisions.
+    std::vector<MissionStepRecord> mission_steps;      ///< The turn's mission decisions.
+    std::vector<EconStepRecord> econ_steps;            ///< The turn's economic decisions.
+    std::vector<DiploStepRecord> diplo_steps;          ///< The turn's diplomatic decisions.
+    std::vector<MusterStepRecord> muster_steps;        ///< Muster hub and Standard decisions.
+    std::vector<OffTurnUnitDelta> off_turn_unit_deltas;  ///< Causal off-turn defensive outcomes.
 };
 
 /** @brief Samples decisions during self-play and records them. */
 struct RolloutSampler {
     uint32_t rng_state = 0x9e3779b9U;        ///< Xorshift state, separate from the game's.
-    float temperature = 1.0F;                ///< Softmax temperature.
+    float temperature = 1.0F;                ///< Base (or sharp) softmax temperature.
+    float explore_eps = 0.0F;                ///< Probability of sampling at `explore_temp`.
+    float explore_temp = 0.65F;              ///< Exploration temperature used with `explore_eps`.
+    float last_step_temp = 1.0F;             ///< Effective temperature used by the last Select* call.
     TurnStepRecord* current_turn = nullptr;  ///< Where decisions are recorded, if anywhere.
 
     /** @brief The next uniform random number in [0, 1). */
     float NextUniform01();
+
+    /** @brief Draws the effective sampling temperature for one decision into `last_step_temp`. */
+    float DrawStepTemperature();
 };
 
 /** @brief Packs (ContextVec, RivalVec) into a single DiploInVec. */
@@ -664,12 +716,25 @@ bool SelectBinary(float logit, RolloutSampler* sampler, float* out_log_prob = nu
  */
 float ComputeEmpireScore(const Game& game, int side_index);
 
+/** @brief Returns the active army-power share weight in `ComputeEmpireScore` (default `0.25`). */
+float ArmyScoreWeight();
+
 /**
  * @brief Sets the weight of the army-power share in `ComputeEmpireScore` (default `0.25`).
  *
  * Set once before training starts.
  */
 void SetArmyScoreWeight(float weight);
+
+/** @brief Updates `input_ctx[25..29]` in-place from `input_ctx[0..24]` when `net.UseCommander()`. */
+void RefreshCommanderPosture(float* input_ctx, const PolicyNetwork& net);
+
+/**
+ * @brief Accumulates `dL/dCommanderW` and `dL/dCommanderB` into `grad` given `input_ctx[0..29]`
+ * and `d_posture` (`dL/d(input_ctx[25..29])`).
+ */
+void AccumulateCommanderGrad(const float* input_ctx, const std::array<float, 5>& d_posture,
+                             PolicyNetwork& grad);
 
 /** @brief Whether human-readable `AIThought` strings are constructed during AI turns (default
  * `true`). */

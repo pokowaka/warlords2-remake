@@ -61,6 +61,7 @@ class ModernMlPlayer final : public IModernBackedPlayer {
     bool OnQuestCapture(Game& game, Side& side, City& city, const ArmyStack& stack) override;
     void RecordBattle(Game& game, SideId defender, SideId attacker, TilePos pos, int heroes_lost,
                       int armies_lost, bool all_lost, bool city_tile) override;
+    void RecordDefenseOutcome(const Game& game, SideId defender, const Battle& battle) override;
     void RecordBattleObservation(Game& game, SideId observer, TilePos pos) override;
     nlohmann::ordered_json SaveState() const override;
     absl::Status LoadState(const nlohmann::ordered_json& state, const Game& game) override;
@@ -76,6 +77,10 @@ class ModernMlPlayer final : public IModernBackedPlayer {
     void SetLastBoardValue(float value) { last_board_value_ = value; }
     void SetCustomPolicy(const ai::ml::PolicyNetwork* policy) { custom_policy_ = policy; }
     void SetRolloutSampler(ai::ml::RolloutSampler* sampler) { sampler_ = sampler; }
+    void SetPendingOffTurn(ai::ml::TurnStepRecord* turn_record, float repel_city_weight = 0.5F) {
+        pending_off_turn_ = turn_record;
+        off_turn_repel_weight_ = repel_city_weight;
+    }
     const ai::BattleGrudge& Grudge() const { return grudge_; }
 
     /** @brief Returns (installing if absent) the `ModernMlPlayer` on `side`. */
@@ -95,6 +100,8 @@ class ModernMlPlayer final : public IModernBackedPlayer {
     float last_board_value_ = 0.0F;                         ///< Latest critic value prediction.
     const ai::ml::PolicyNetwork* custom_policy_ = nullptr;  ///< Optional policy override.
     ai::ml::RolloutSampler* sampler_ = nullptr;             ///< Optional rollout sampler.
+    ai::ml::TurnStepRecord* pending_off_turn_ = nullptr;    ///< Off-turn RL credit sink.
+    float off_turn_repel_weight_ = 0.5F;                    ///< Saved-city siege repel weight.
 };
 
 }  // namespace w2

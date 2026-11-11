@@ -13,6 +13,7 @@
 #include "warlords/ai.hpp"
 #include "warlords/ai/groups.hpp"
 #include "warlords/ai/modern_ai.hpp"
+#include "warlords/combat.hpp"
 #include "warlords/game.hpp"
 #include "warlords/quest.hpp"
 
@@ -93,6 +94,70 @@ void ModernMlPlayer::RecordBattle(Game&, SideId, SideId attacker, TilePos, int h
     if (city_tile) {
         city_battles_[atk]++;
         if (all_lost) grudge_.cities_lost[atk]++;
+    }
+}
+
+void ModernMlPlayer::RecordDefenseOutcome(const Game& game, SideId defender, const Battle& battle) {
+    if (pending_off_turn_ == nullptr || battle.lines.defenders.empty()) return;
+    const int def_idx = defender.Value();
+    if (def_idx < 0 || def_idx >= 8) return;
+
+    float post_my_str = 0.0F;
+    float post_all_str = 0.0F;
+    for (const Army* army : game.Armies()) {
+        if (army->IsDisbanded() || (army->X() == kNone && !army->InTransit()) ||
+            army->OwnerIndex() < 0 || army->OwnerIndex() >= 8) {
+            continue;
+        }
+        float power = static_cast<float>(army->Strength() * army->Strength());
+        post_all_str += power;
+        if (army->OwnerIndex() == def_idx) post_my_str += power;
+    }
+    float dead_my_str = 0.0F;
+    float dead_all_str = 0.0F;
+    for (const Army* dead_atk : battle.dead_attackers) {
+        if (dead_atk->OwnerIndex() >= 0 && dead_atk->OwnerIndex() < 8) {
+            float power = static_cast<float>(dead_atk->Strength() * dead_atk->Strength());
+            dead_all_str += power;
+            if (dead_atk->OwnerIndex() == def_idx) dead_my_str += power;
+        }
+    }
+    for (const Army* dead_def : battle.dead_defenders) {
+        if (dead_def->OwnerIndex() >= 0 && dead_def->OwnerIndex() < 8) {
+            float power = static_cast<float>(dead_def->Strength() * dead_def->Strength());
+            dead_all_str += power;
+            if (dead_def->OwnerIndex() == def_idx) dead_my_str += power;
+        }
+    }
+    const float pre_my_str = post_my_str + dead_my_str;
+    const float pre_all_str = post_all_str + dead_all_str;
+    const float post_share = post_all_str > 0.0F ? (post_my_str / post_all_str) : 0.0F;
+    const float pre_share = pre_all_str > 0.0F ? (pre_my_str / pre_all_str) : 0.0F;
+    const float delta_army = ai::ml::ArmyScoreWeight() * (post_share - pre_share);
+
+    float delta_city = 0.0F;
+    const City* defended_city = battle.lines.city;
+    if (defended_city != nullptr && !defended_city->IsRazed() &&
+        defended_city->OwnerIndex() == def_idx) {
+        int standing = 0;
+        int total_income = 0;
+        for (const auto& city : game.GetMap().Cities()) {
+            if (city.IsRazed()) continue;
+            standing++;
+            total_income += std::max(1, city.Income());
+        }
+        const float city_weight =
+                2.0F / static_cast<float>(std::max(1, standing)) +
+                0.5F * static_cast<float>(std::max(1, defended_city->Income())) /
+                        static_cast<float>(std::max(1, total_income));
+        delta_city = battle.won ? -city_weight : (off_turn_repel_weight_ * city_weight);
+    }
+
+    const float per_defender =
+            (delta_army + delta_city) / static_cast<float>(battle.lines.defenders.size());
+    for (const Army* def_army : battle.lines.defenders) {
+        pending_off_turn_->off_turn_unit_deltas.push_back(ai::ml::OffTurnUnitDelta{
+            reinterpret_cast<std::uintptr_t>(def_army), per_defender});
     }
 }
 

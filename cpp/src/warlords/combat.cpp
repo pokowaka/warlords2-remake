@@ -670,6 +670,11 @@ Battle& CombatResolver::ApplyAttack(Battle& result) {
     game_.Armies().RemoveAll(result.dead_attackers);
     game_.Armies().RemoveAll(result.dead_defenders);
     game::TidyTowers(game_);
+    if (def_owner >= 0 && def_owner <= 7) {
+        if (Side* def_side = map.SideAt(def_owner); def_side && def_side->ComputerPlayer()) {
+            def_side->ComputerPlayer()->RecordDefenseOutcome(game_, SideId(def_owner), result);
+        }
+    }
 
     if (result.won && city) {
         Side* winner = map.SideById(stack[0]->Owner());

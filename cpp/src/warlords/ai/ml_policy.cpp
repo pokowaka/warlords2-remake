@@ -182,7 +182,8 @@ std::array<float, OutDim> ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::Forward(
 template <int InDim, int H1Dim, int H2Dim, int OutDim>
 void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::BackwardWithActivations(
         const std::array<float, InDim>& input, const Activations& act,
-        const std::array<float, OutDim>& d_out, ResidualMLP& grad_accum) const {
+        const std::array<float, OutDim>& d_out, ResidualMLP& grad_accum,
+        std::array<float, 5>* d_posture) const {
     const auto& hidden1 = act.hidden1;
     const auto& hidden2 = act.hidden2;
 
@@ -194,6 +195,14 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::BackwardWithActivations(
         Axpy(grad_skip, grad_out, input.data(), InDim);
         float* grad_w3 = &grad_accum.w3[static_cast<size_t>(out_idx) * H2Dim];
         Axpy(grad_w3, grad_out, hidden2.data(), H2Dim);
+        if constexpr (InDim >= kContextDim) {
+            if (d_posture != nullptr) {
+                const float* skip_row = &w_skip[static_cast<size_t>(out_idx) * InDim + 25];
+                for (int post_idx = 0; post_idx < 5; post_idx++) {
+                    (*d_posture)[post_idx] += grad_out * skip_row[post_idx];
+                }
+            }
+        }
     }
 
     std::array<float, H2Dim> grad_z2{};
@@ -220,6 +229,14 @@ void ResidualMLP<InDim, H1Dim, H2Dim, OutDim>::BackwardWithActivations(
         grad_accum.b1[j] += grad1;
         float* grad_w1 = &grad_accum.w1[static_cast<size_t>(j) * InDim];
         Axpy(grad_w1, grad1, input.data(), InDim);
+        if constexpr (InDim >= kContextDim) {
+            if (d_posture != nullptr) {
+                const float* row_w1 = &w1[static_cast<size_t>(j) * InDim + 25];
+                for (int post_idx = 0; post_idx < 5; post_idx++) {
+                    (*d_posture)[post_idx] += grad1 * row_w1[post_idx];
+                }
+            }
+        }
     }
 }
 
@@ -367,6 +384,9 @@ void PolicyNetwork::Zero() {
     value_net_.Zero();
     stack_value_net_.Zero();
     muster_net_.Zero();
+    commander_w_.fill(0.0F);
+    commander_b_.fill(0.0F);
+    detour_bias_ = 0.0F;
 }
 
 DiploInVec PackDiploInput(const ContextVec& context, const RivalVec& rival) {
@@ -554,6 +574,38 @@ void PolicyNetwork::Unflatten(const std::vector<float>& params) {
     offset = econ_net_.FromFlat(params, offset);
     offset = value_net_.FromFlat(params, offset);
     stack_value_net_.FromFlat(params, offset);
+}
+
+std::vector<float> PolicyNetwork::FlattenTrainable() const {
+    std::vector<float> out;
+    out.reserve(kV8TrainableParams);
+    diplo_net_.ToFlat(out);
+    mission_net_.ToFlat(out);
+    econ_net_.ToFlat(out);
+    value_net_.ToFlat(out);
+    stack_value_net_.ToFlat(out);
+    muster_net_.ToFlat(out);
+    out.insert(out.end(), commander_w_.begin(), commander_w_.end());
+    out.insert(out.end(), commander_b_.begin(), commander_b_.end());
+    out.push_back(detour_bias_);
+    return out;
+}
+
+void PolicyNetwork::UnflattenTrainable(const std::vector<float>& params) {
+    size_t offset = 0;
+    offset = diplo_net_.FromFlat(params, offset);
+    offset = mission_net_.FromFlat(params, offset);
+    offset = econ_net_.FromFlat(params, offset);
+    offset = value_net_.FromFlat(params, offset);
+    offset = stack_value_net_.FromFlat(params, offset);
+    offset = muster_net_.FromFlat(params, offset);
+    for (float& weight : commander_w_) {
+        weight = offset < params.size() ? params[offset++] : 0.0F;
+    }
+    for (float& bias : commander_b_) {
+        bias = offset < params.size() ? params[offset++] : 0.0F;
+    }
+    if (offset < params.size()) detour_bias_ = params[offset];
 }
 
 namespace {
@@ -1066,8 +1118,35 @@ void SetDeployTemperature(float temperature) {
     GlobalMlRuntimeConfig().SetDeployTemp(temperature);
 }
 
+float ArmyScoreWeight() {
+    return GlobalMlRuntimeConfig().ArmyWeight();
+}
+
 void SetArmyScoreWeight(float weight) {
     GlobalMlRuntimeConfig().SetArmyWeight(weight);
+}
+
+void RefreshCommanderPosture(float* input_ctx, const PolicyNetwork& net) {
+    if (!net.UseCommander()) return;
+    for (int post_idx = 0; post_idx < 5; post_idx++) {
+        const float* row =
+                &net.CommanderW()[static_cast<size_t>(post_idx) * PolicyNetwork::kGateInDim];
+        float acc = net.CommanderB()[post_idx] + DotProduct(row, input_ctx, PolicyNetwork::kGateInDim);
+        input_ctx[25 + post_idx] = std::tanh(acc);
+    }
+}
+
+void AccumulateCommanderGrad(const float* input_ctx, const std::array<float, 5>& d_posture,
+                             PolicyNetwork& grad) {
+    for (int post_idx = 0; post_idx < 5; post_idx++) {
+        float act = input_ctx[25 + post_idx];
+        float d_pre = d_posture[post_idx] * (1.0F - act * act);
+        if (d_pre == 0.0F) continue;
+        grad.CommanderB()[post_idx] += d_pre;
+        float* grad_row =
+                &grad.CommanderW()[static_cast<size_t>(post_idx) * PolicyNetwork::kGateInDim];
+        Axpy(grad_row, d_pre, input_ctx, PolicyNetwork::kGateInDim);
+    }
 }
 
 bool RecordThoughts() {
@@ -1086,6 +1165,17 @@ float RolloutSampler::NextUniform01() {
     return static_cast<float>(rng_state & 0x00ffffffU) / static_cast<float>(0x01000000U);
 }
 
+float RolloutSampler::DrawStepTemperature() {
+    const float base_temp = std::max(0.02F, temperature);
+    if (explore_eps <= 0.0F) {
+        last_step_temp = base_temp;
+        return last_step_temp;
+    }
+    const float roll = NextUniform01();
+    last_step_temp = (roll < explore_eps) ? std::max(0.05F, explore_temp) : base_temp;
+    return last_step_temp;
+}
+
 int SelectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, float* out_log_prob,
                      const std::vector<float>* log_mult) {
     if (logits.empty()) {
@@ -1096,6 +1186,7 @@ int SelectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, 
         return (log_mult && index < log_mult->size()) ? (*log_mult)[index] : 0.0F;
     };
     if (!sampler || logits.size() == 1) {
+        if (sampler) sampler->last_step_temp = std::max(0.02F, sampler->temperature);
         float deploy_inv_t = 1.0F / DeployTemperature();
         int best = 0;
         for (size_t i = 1; i < logits.size(); i++) {
@@ -1107,7 +1198,8 @@ int SelectFromLogits(const std::vector<float>& logits, RolloutSampler* sampler, 
         return best;
     }
 
-    float inv_t = 1.0F / std::max(0.05F, sampler->temperature);
+    const float step_temp = sampler->DrawStepTemperature();
+    float inv_t = 1.0F / step_temp;
     auto effective_logit = [&](size_t index) { return logits[index] * inv_t - log_mult_of(index); };
     float max_logit = effective_logit(0);
     for (size_t i = 1; i < logits.size(); i++) {
@@ -1153,7 +1245,8 @@ bool SelectBinary(float logit, RolloutSampler* sampler, float* out_log_prob) {
         if (out_log_prob) *out_log_prob = 0.0F;
         return logit > 0.0F;
     }
-    float inv_t = 1.0F / std::max(0.05F, sampler->temperature);
+    const float step_temp = sampler->DrawStepTemperature();
+    float inv_t = 1.0F / step_temp;
     float scaled_logit = std::clamp(logit * inv_t, -15.0F, 15.0F);
     float prob_yes = 1.0F / (1.0F + std::exp(-scaled_logit));
     bool yes = sampler->NextUniform01() < prob_yes;

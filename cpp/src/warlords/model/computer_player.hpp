@@ -222,6 +222,16 @@ class IComputerPlayer {
                               int heroes_lost, int armies_lost, bool all_lost, bool city_tile) = 0;
 
     /**
+     * @brief Notifies `defender`'s strategy of a completed defensive battle after casualties are
+     * removed from active play (used for causal off-turn per-stack RL credit).
+     */
+    virtual void RecordDefenseOutcome(const Game& game, SideId defender, const Battle& battle) {
+        (void)game;
+        (void)defender;
+        (void)battle;
+    }
+
+    /**
      * @brief Updates fair-information enemy stack observations for `observer` after a battle at
      * `pos`.
      * @param game Active game state.

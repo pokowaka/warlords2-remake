@@ -796,6 +796,7 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
             }
             float chosen_log_prob = 0.0F;
             int chosen_opt_idx = ml::SelectFromLogits(logits, sampler, &chosen_log_prob, &log_mult);
+            const float chosen_sample_temp = sampler ? sampler->last_step_temp : 0.0F;
             const JointOption& chosen_opt = options[chosen_opt_idx];
             CandidateTarget& chosen_tgt = targets[chosen_opt.target_idx];
             std::vector<Army*> current_stack = pre_stacks[chosen_opt.stack_opt_idx].units;
@@ -832,14 +833,17 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                                      chosen_tgt.kind == TargetKind::kEnemyStack);
             bool stage_near = false;
             float stage_log_prob = 0.0F;
+            float stage_sample_temp = 0.0F;
             if (is_combat_target) {
                 stage_near =
                         ml::SelectBinary(chosen_opt.out.stage_near_logit, sampler, &stage_log_prob);
+                stage_sample_temp = sampler ? sampler->last_step_temp : 0.0F;
             }
 
             float score_before = (sampler && sampler->current_turn)
                                          ? ml::ComputeEmpireScore(game, our_side)
                                          : 0.0F;
+            std::vector<ml::DetourStepRecord> detour_steps;
 
             if (chosen_tgt.kind == TargetKind::kHoldGarrison) {
                 for (Army* army : current_stack) {
@@ -873,7 +877,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                 bool blocked_on_way = false;
                 bool moved = ExecuteStackMission(game, side, current_stack, chosen_tgt, stage_near,
                                                  policy, ctx, sampler, moved_armies, plan,
-                                                 &blocked_on_way);
+                                                 &blocked_on_way,
+                                                 recording ? &detour_steps : nullptr);
                 if (!moved) {
                     if (chosen_opt.target_idx >= blocked_targets.size()) {
                         blocked_targets.resize(chosen_opt.target_idx + 1, uint8_t{0});
@@ -1015,7 +1020,8 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                 if (!any_left) vacated_city = loc_group.city->Index();
             }
 
-            if (sampler && sampler->current_turn && (options.size() > 1 || is_combat_target)) {
+            if (sampler && sampler->current_turn &&
+                (options.size() > 1 || is_combat_target || !detour_steps.empty())) {
                 float score_after = ml::ComputeEmpireScore(game, our_side);
                 ml::MissionStepRecord rec;
                 rec.candidates.reserve(options.size());
@@ -1023,9 +1029,12 @@ void RunMilitaryAndExplorationPhase(Game& game, Side& side, const ml::PolicyNetw
                 rec.log_mult = std::move(log_mult);
                 rec.chosen_idx = chosen_opt_idx;
                 rec.old_log_prob = chosen_log_prob;
+                rec.sample_temp = chosen_sample_temp;
                 rec.has_stage_choice = is_combat_target;
                 rec.stage_chosen = stage_near;
                 rec.old_stage_log_prob = stage_log_prob;
+                rec.stage_sample_temp = stage_sample_temp;
+                rec.detour_steps = std::move(detour_steps);
                 rec.immediate_delta_score = score_after - score_before;
                 rec.stack_value_in = pre_group_state;
                 rec.stack_value_pred = pre_group_value;

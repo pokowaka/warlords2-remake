@@ -1053,5 +1053,219 @@ TEST(ModernAiTest, WardenPlayerGarrisonsCitiesAndExecutesPolymorphically) {
     EXPECT_TRUE(warden_side.ComputerPlayer() != nullptr);
 }
 
+TEST(ModernAiTest, V8EndToEndGradientsSharpSamplingAndCausalOffTurnCredit) {
+    // 1. V8 FlattenTrainable / UnflattenTrainable round-trip + Commander & MusterNet gradients
+    {
+        ai::ml::PolicyNetwork net;
+        net.SetUseCommander(true);
+        net.SetUseMuster(true);
+        net.SetUseStandard(true);
+        net.SetAvoidBlockers(true);
+        net.SetDetourBias(-0.075F);
+        for (size_t idx = 0; idx < net.CommanderW().size(); ++idx) {
+            net.CommanderW()[idx] = 0.08F * std::sin(static_cast<float>(idx + 1) * 0.41F);
+        }
+        for (size_t idx = 0; idx < net.CommanderB().size(); ++idx) {
+            net.CommanderB()[idx] = 0.03F * static_cast<float>(idx) - 0.06F;
+        }
+        for (size_t idx = 0; idx < net.MusterHead().w1.size(); ++idx) {
+            net.MusterHead().w1[idx] = 0.09F * std::cos(static_cast<float>(idx + 2) * 0.29F);
+        }
+        for (size_t idx = 0; idx < net.MusterHead().w2.size(); ++idx) {
+            net.MusterHead().w2[idx] = 0.07F * std::sin(static_cast<float>(idx + 3) * 0.31F);
+        }
+        for (size_t idx = 0; idx < net.MusterHead().w3.size(); ++idx) {
+            net.MusterHead().w3[idx] = 0.11F * std::cos(static_cast<float>(idx + 1) * 0.53F);
+        }
+        for (size_t idx = 0; idx < net.MusterHead().w_skip.size(); ++idx) {
+            net.MusterHead().w_skip[idx] = 0.04F * std::sin(static_cast<float>(idx + 5) * 0.19F);
+        }
+
+        auto flat_v8 = net.FlattenTrainable();
+        ASSERT_EQ(flat_v8.size(), ai::ml::PolicyNetwork::kV8TrainableParams);
+        ai::ml::PolicyNetwork copy_net;
+        copy_net.Zero();
+        copy_net.UnflattenTrainable(flat_v8);
+        EXPECT_FLOAT_EQ(copy_net.DetourBias(), -0.075F);
+        for (size_t idx = 0; idx < net.CommanderW().size(); ++idx) {
+            EXPECT_FLOAT_EQ(copy_net.CommanderW()[idx], net.CommanderW()[idx]);
+        }
+        for (size_t idx = 0; idx < net.MusterHead().w1.size(); ++idx) {
+            EXPECT_FLOAT_EQ(copy_net.MusterHead().w1[idx], net.MusterHead().w1[idx]);
+        }
+
+        // Finite-difference check of BackwardWithActivations d_posture + AccumulateCommanderGrad
+        ai::ml::MissionInVec m_in{};
+        for (size_t idx = 0; idx < m_in.size(); ++idx) {
+            m_in[idx] = 0.35F * std::sin(static_cast<float>(idx + 1) * 0.23F);
+        }
+        ai::ml::RefreshCommanderPosture(m_in.data(), net);
+        ai::ml::PolicyNetwork::MissionNet::Activations m_act{};
+        auto base_out = net.MissionHead().ForwardWithActivations(m_in, m_act);
+        (void)base_out;
+        std::array<float, 2> d_out = {0.65F, -0.40F};
+        std::array<float, 5> d_posture{};
+        ai::ml::PolicyNetwork grad_net;
+        grad_net.Zero();
+        net.MissionHead().BackwardWithActivations(m_in, m_act, d_out, grad_net.MissionHead(),
+                                                  &d_posture);
+        ai::ml::AccumulateCommanderGrad(m_in.data(), d_posture, grad_net);
+
+        constexpr float kEps = 1e-3F;
+        for (size_t idx = 0; idx < net.CommanderW().size(); idx += 11) {
+            ai::ml::PolicyNetwork plus_net = net;
+            ai::ml::PolicyNetwork minus_net = net;
+            plus_net.CommanderW()[idx] += kEps;
+            minus_net.CommanderW()[idx] -= kEps;
+            ai::ml::MissionInVec in_p = m_in;
+            ai::ml::MissionInVec in_m = m_in;
+            ai::ml::RefreshCommanderPosture(in_p.data(), plus_net);
+            ai::ml::RefreshCommanderPosture(in_m.data(), minus_net);
+            auto out_p = plus_net.MissionHead().Forward(in_p);
+            auto out_m = minus_net.MissionHead().Forward(in_m);
+            float loss_p = d_out[0] * out_p[0] + d_out[1] * out_p[1];
+            float loss_m = d_out[0] * out_m[0] + d_out[1] * out_m[1];
+            EXPECT_NEAR((loss_p - loss_m) / (2.0F * kEps), grad_net.CommanderW()[idx], 1e-3F);
+        }
+        for (size_t idx = 0; idx < net.CommanderB().size(); ++idx) {
+            ai::ml::PolicyNetwork plus_net = net;
+            ai::ml::PolicyNetwork minus_net = net;
+            plus_net.CommanderB()[idx] += kEps;
+            minus_net.CommanderB()[idx] -= kEps;
+            ai::ml::MissionInVec in_p = m_in;
+            ai::ml::MissionInVec in_m = m_in;
+            ai::ml::RefreshCommanderPosture(in_p.data(), plus_net);
+            ai::ml::RefreshCommanderPosture(in_m.data(), minus_net);
+            auto out_p = plus_net.MissionHead().Forward(in_p);
+            auto out_m = minus_net.MissionHead().Forward(in_m);
+            float loss_p = d_out[0] * out_p[0] + d_out[1] * out_p[1];
+            float loss_m = d_out[0] * out_m[0] + d_out[1] * out_m[1];
+            EXPECT_NEAR((loss_p - loss_m) / (2.0F * kEps), grad_net.CommanderB()[idx], 1e-3F);
+        }
+
+        // Verify PlayTurn records muster_steps when >= 3 owned cities exist
+        auto game_ptr = SetupGame("ERYTHEA", Seed(5));
+        Game& game = *game_ptr;
+        Side& side0 = game.GetMap().Sides()[0];
+        side0.SetComputerControlled(true);
+        ai::SetSideClassicAi(game, side0, false);
+        int given = 0;
+        for (auto& city : game.GetMap().Cities()) {
+            if (city.IsNeutral() && given < 4) {
+                city.SetOwner(SideId(0));
+                given++;
+            }
+        }
+        ai::ml::RolloutSampler sampler;
+        sampler.temperature = 0.5F;
+        ai::ml::TurnStepRecord turn_rec;
+        sampler.current_turn = &turn_rec;
+        ai::modern::PlayTurn(game, side0, nullptr, &net, &sampler);
+        EXPECT_FALSE(turn_rec.muster_steps.empty());
+    }
+
+    // 2. Sharp-temperature sampling + sparse epsilon exploration
+    {
+        std::vector<float> logits = {0.5F, 0.0F};
+        ai::ml::RolloutSampler sampler;
+        sampler.rng_state = 98765U;
+        sampler.temperature = 0.06F;
+        sampler.explore_eps = 0.15F;
+        sampler.explore_temp = 0.70F;
+
+        int explore_draws = 0;
+        int sharp_second_picks = 0;
+        int explore_second_picks = 0;
+        for (int trial = 0; trial < 2000; ++trial) {
+            float log_prob = 0.0F;
+            int pick = ai::ml::SelectFromLogits(logits, &sampler, &log_prob);
+            float used_temp = sampler.last_step_temp;
+            float logit0 = logits[0] / used_temp;
+            float logit1 = logits[1] / used_temp;
+            float prob0 = 1.0F / (1.0F + std::exp(logit1 - logit0));
+            float expected_lp = std::log(pick == 0 ? prob0 : (1.0F - prob0));
+            EXPECT_NEAR(log_prob, expected_lp, 1e-5F);
+            if (std::abs(used_temp - 0.70F) < 1e-5F) {
+                explore_draws++;
+                if (pick == 1) explore_second_picks++;
+            } else {
+                EXPECT_NEAR(used_temp, 0.06F, 1e-5F);
+                if (pick == 1) sharp_second_picks++;
+            }
+        }
+        EXPECT_TRUE(explore_draws >= 230 && explore_draws <= 370);
+        EXPECT_LE(sharp_second_picks, 5);
+        EXPECT_GE(explore_second_picks, 55);
+    }
+
+    // 3. Causal off-turn per-stack defensive battle credit (repelled siege vs wiped lone garrison)
+    {
+        auto game_ptr = SetupGame("TUTORIA", Seed(9));
+        Game& game = *game_ptr;
+        Side& def_side = game.GetMap().Sides()[0];
+        def_side.SetComputerControlled(true);
+        ai::SetSideClassicAi(game, def_side, false);
+        ModernMlPlayer* mod_player = ModernMlPlayer::FindMutableOn(def_side);
+        ASSERT_NE(mod_player, nullptr);
+
+        City* def_city = def_side.CapitalCity(game.GetMap());
+        ASSERT_NE(def_city, nullptr);
+        for (Army* existing : game::ArmiesAt(game, def_city->X(), def_city->Y())) {
+            game.Armies().Remove(existing);
+        }
+
+        // Scenario A: Strong defender garrison repels a weak attacker -> positive off-turn credit
+        Army def_proto;
+        def_proto.SetOwner(SideId(0));
+        def_proto.PlaceAt(def_city->Position());
+        def_proto.SetType(ArmyTypeId(2));
+        def_proto.SetStrength(8);
+        def_proto.SetMaxMoves(12);
+        def_proto.SetMoves(12);
+        Army* strong_def = game.Armies().Add(def_proto);
+
+        Army atk_proto;
+        atk_proto.SetOwner(SideId(1));
+        atk_proto.PlaceAt(TilePos(def_city->X() - 1, def_city->Y()));
+        atk_proto.SetType(ArmyTypeId(0));
+        atk_proto.SetStrength(1);
+        atk_proto.SetMaxMoves(12);
+        atk_proto.SetMoves(12);
+        Army* weak_atk = game.Armies().Add(atk_proto);
+
+        ai::ml::TurnStepRecord repel_turn;
+        mod_player->SetPendingOffTurn(&repel_turn, 0.5F);
+        Battle repel_battle = game::ResolveAttack(game, {weak_atk}, def_city->X(), def_city->Y());
+        mod_player->SetPendingOffTurn(nullptr);
+        ASSERT_FALSE(repel_battle.won);
+        ASSERT_EQ(repel_turn.off_turn_unit_deltas.size(), 1U);
+        EXPECT_EQ(repel_turn.off_turn_unit_deltas[0].unit_id,
+                  reinterpret_cast<std::uintptr_t>(strong_def));
+        EXPECT_GT(repel_turn.off_turn_unit_deltas[0].delta_score, 0.01F);
+
+        // Scenario B: Lone weak scout garrison is wiped out and loses the city -> negative credit
+        game.Armies().Remove(strong_def);
+        def_proto.SetStrength(1);
+        Army* lone_scout = game.Armies().Add(def_proto);
+
+        std::vector<Army*> heavy_attackers;
+        for (int idx = 0; idx < 4; ++idx) {
+            atk_proto.SetStrength(9);
+            heavy_attackers.push_back(game.Armies().Add(atk_proto));
+        }
+
+        ai::ml::TurnStepRecord wipe_turn;
+        mod_player->SetPendingOffTurn(&wipe_turn, 0.5F);
+        Battle wipe_battle =
+                game::ResolveAttack(game, heavy_attackers, def_city->X(), def_city->Y());
+        mod_player->SetPendingOffTurn(nullptr);
+        ASSERT_TRUE(wipe_battle.won);
+        ASSERT_EQ(wipe_turn.off_turn_unit_deltas.size(), 1U);
+        EXPECT_EQ(wipe_turn.off_turn_unit_deltas[0].unit_id,
+                  reinterpret_cast<std::uintptr_t>(lone_scout));
+        EXPECT_LT(wipe_turn.off_turn_unit_deltas[0].delta_score, -0.02F);
+    }
+}
+
 }  // namespace
 }  // namespace w2
