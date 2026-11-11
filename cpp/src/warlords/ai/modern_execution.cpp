@@ -95,6 +95,9 @@ void DecideCaptureSpoils(Game& game, Side& side, City& city, const std::vector<A
         rec.candidates = std::move(cand_inputs);
         rec.chosen_idx = pick;
         rec.old_log_prob = log_prob;
+        rec.family = ml::EconFamily::kSpoils;
+        rec.city_idx = city.Index();
+        rec.target_idx = modes[pick];
         rec.sample_temp = sampler->last_step_temp;
         sampler->current_turn->econ_steps.push_back(std::move(rec));
     }

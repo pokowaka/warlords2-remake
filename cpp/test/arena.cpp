@@ -141,6 +141,15 @@ ABSL_FLAG(double, explore_temp, 0.65,
           "Exploration temperature used on --explore-eps rollout decisions.");
 ABSL_FLAG(bool, temp_rescale, false,
           "Rescale per-decision policy gradients by T_step / 0.50 for temperature-invariant steps.");
+ABSL_FLAG(int, threads, 0, "Worker thread count (0 = hardware_concurrency).");
+ABSL_FLAG(bool, econ_lineage, false,
+          "Propagate post-birth unit returns back to BuySlot, Produce, and Vector decisions.");
+ABSL_FLAG(double, econ_lineage_weight, 1.0,
+          "Weight on discounted post-birth unit return added to economy advantages.");
+ABSL_FLAG(bool, econ_family_norm, false,
+          "Standardize and frequency-balance EconNet advantages separately per action family.");
+ABSL_FLAG(double, concentration_weight, 0.0,
+          "Stack-concentration synergy weight in ComputeEmpireScore.");
 ABSL_FLAG(std::string, frozen_opponent, "", "Fixed Modern checkpoint path for opponent seats.");
 ABSL_FLAG(double, frozen_frac, 0.0, "Share of non-learner seats played by --frozen-opponent.");
 ABSL_FLAG(int, search_k, 0, "Candidate turns per learner turn (0 = no search training).");
@@ -264,6 +273,11 @@ struct Config {
     float explore_temp = 0.65F;          ///< --explore-temp: temperature on exploration draws.
     bool temp_rescale = false;           ///< --temp-rescale: temperature-invariant grad scaling.
     float grad_ref_temp = 0.5F;          ///< Reference temperature for --temp-rescale.
+    int threads = 0;                     ///< --threads: worker thread count (0 = hardware).
+    bool econ_lineage = false;           ///< --econ-lineage: unit-lineage credit into EconNet.
+    float econ_lineage_weight = 1.0F;    ///< --econ-lineage-weight: scale on lineage return.
+    bool econ_family_norm = false;       ///< --econ-family-norm: per-family EconNet normalizers.
+    float concentration_weight = 0.0F;   ///< --concentration-weight: stack synergy score weight.
     int dev_seeds = 0;                 ///< --dev-seeds: benchmark/compare on the development set
     bool breakdown = false;            ///< --breakdown: print shares per preset and scenario.
     int critic_warmup = 0;             ///< --critic-warmup: iterations where only the critics learn
@@ -744,6 +758,7 @@ void ComputeAdvantages(std::vector<SideEpisode>& episodes, const Config& cfg) {
         const int turn_count = static_cast<int>(episode.turns.size());
         float gae = 0.0F;
         std::unordered_map<std::uintptr_t, float> unit_future_local;
+        ml::UnitReturnMap unit_birth_returns;
         for (int turn_index = turn_count - 1; turn_index >= 0; turn_index--) {
             auto& turn = episode.turns[turn_index];
             bool last = (turn_index == turn_count - 1);
@@ -798,6 +813,23 @@ void ComputeAdvantages(std::vector<SideEpisode>& episodes, const Config& cfg) {
             }
             for (auto& muster_step : turn.muster_steps) {
                 muster_step.advantage = turn.advantage;
+            }
+            if (cfg.econ_lineage) {
+                for (const auto& prod_ev : turn.produced_units) {
+                    auto found = unit_future_local.find(prod_ev.unit_id);
+                    if (found != unit_future_local.end()) {
+                        unit_birth_returns[prod_ev.unit_id] = found->second;
+                    }
+                }
+            }
+        }
+        if (cfg.econ_lineage && !unit_birth_returns.empty()) {
+            ml::PropagateEconomyLineage(absl::MakeSpan(episode.turns), unit_birth_returns,
+                                        kStackGamma);
+            for (auto& turn : episode.turns) {
+                for (auto& econ_step : turn.econ_steps) {
+                    econ_step.advantage += cfg.econ_lineage_weight * econ_step.lineage_return;
+                }
             }
         }
     }
@@ -956,12 +988,26 @@ float BinaryPpo(float logit, bool chosen, float old_log_prob, float adv, float s
            cfg.ent_coef * prob_yes * (1.0F - prob_yes) * scaled_logit * grad_inv_t;
 }
 
-/** @brief One advantage normalizer per policy head. */
+constexpr size_t kNumEconFamilies = static_cast<size_t>(ml::EconFamily::kCount);
+
+/** @brief One advantage normalizer per policy head (plus optional per-family economy slices). */
 struct Normalizers {
     Normalizer mission;  ///< For the mission head's per-move advantages.
-    Normalizer econ;     ///< For the economy head's per-turn advantages.
+    Normalizer econ;     ///< For the economy head's pooled advantages.
+    std::array<Normalizer, kNumEconFamilies> econ_family{};  ///< Per-family economy normalizers.
+    std::array<bool, kNumEconFamilies> has_econ_family{};    ///< Active when family count >= 8.
+    std::array<float, kNumEconFamilies> econ_family_weight{};  ///< Dampened inverse-sqrt weights.
     Normalizer diplo;    ///< For the diplomacy head's per-turn advantages.
     Normalizer muster;   ///< For the muster head's per-turn advantages.
+
+    /** @brief Returns normalized advantage for `step`, using per-family stats when `by_family`. */
+    float NormalizeEcon(const ml::EconStepRecord& step, bool by_family) const {
+        const size_t fam = static_cast<size_t>(step.family);
+        if (by_family && fam < kNumEconFamilies && has_econ_family[fam]) {
+            return econ_family[fam](step.advantage) * econ_family_weight[fam];
+        }
+        return econ(step.advantage);
+    }
 };
 
 /**
@@ -1096,7 +1142,7 @@ void AccumulateTurn(const ml::PolicyNetwork& net, const ml::TurnStepRecord& turn
     for (const auto& econ_step : turn.econ_steps) {
         const size_t candidate_count = econ_step.candidates.size();
         if (candidate_count <= 1) continue;
-        float econ_adv = normalizers.econ(econ_step.advantage);
+        float econ_adv = normalizers.NormalizeEcon(econ_step, cfg.econ_family_norm);
         scores.resize(candidate_count);
         econ_acts.resize(candidate_count);
         const ml::EconInVec* cands_ptr = econ_step.candidates.data();
@@ -1375,7 +1421,9 @@ std::vector<std::vector<EvalCase>> RunEval(const Config& cfg,
         return ScenarioCostWeight(c_lhs.scenario) > ScenarioCostWeight(c_rhs.scenario);
     });
     std::atomic<size_t> next{0};
-    unsigned int workers = std::max(2U, std::thread::hardware_concurrency());
+    unsigned int workers =
+            cfg.threads > 0 ? static_cast<unsigned int>(cfg.threads)
+                            : std::max(2U, std::thread::hardware_concurrency());
     std::vector<std::thread> pool;
     for (unsigned int worker = 0; worker < workers; worker++) {
         pool.emplace_back([&]() {
@@ -1591,6 +1639,13 @@ bool ParseArgs(int argc, char** argv, Config& cfg) {
             std::clamp(static_cast<float>(absl::GetFlag(FLAGS_explore_eps)), 0.0F, 0.99F);
     cfg.explore_temp = std::max(0.05F, static_cast<float>(absl::GetFlag(FLAGS_explore_temp)));
     cfg.temp_rescale = absl::GetFlag(FLAGS_temp_rescale);
+    cfg.threads = std::max(0, absl::GetFlag(FLAGS_threads));
+    cfg.econ_lineage = absl::GetFlag(FLAGS_econ_lineage);
+    cfg.econ_lineage_weight =
+            std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_econ_lineage_weight)));
+    cfg.econ_family_norm = absl::GetFlag(FLAGS_econ_family_norm);
+    cfg.concentration_weight =
+            std::max(0.0F, static_cast<float>(absl::GetFlag(FLAGS_concentration_weight)));
     cfg.frozen_path = absl::GetFlag(FLAGS_frozen_opponent);
     cfg.frozen_frac = std::clamp(static_cast<float>(absl::GetFlag(FLAGS_frozen_frac)), 0.0F, 1.0F);
     cfg.search_k = std::max(0, absl::GetFlag(FLAGS_search_k));
@@ -1634,7 +1689,9 @@ int main(int argc, char** argv) {
                      cfg.data_dir.c_str());
         return 1;
     }
-    unsigned int threads = std::max(2U, std::thread::hardware_concurrency());
+    unsigned int threads =
+            cfg.threads > 0 ? static_cast<unsigned int>(cfg.threads)
+                            : std::max(2U, std::thread::hardware_concurrency());
     ml::SetDeployTemperature(cfg.eval_temp);
     ml::SetRecordThoughts(false);
     ml::PolicyNetwork frozen;
@@ -1710,6 +1767,7 @@ int main(int argc, char** argv) {
     if (cfg.a_legacy_blockers) learner.SetAvoidBlockers(false);
     if (cfg.a_no_personalities) learner.SetUsePersonalities(false);
     ml::SetArmyScoreWeight(cfg.army_weight);
+    ml::SetConcentrationScoreWeight(cfg.concentration_weight);
     std::printf("=== w2arena: PPO self-play | params %zu | threads %u | %s ===\n",
                 ml::PolicyNetwork::kV8TrainableParams, threads,
                 loaded ? ("loaded " + load_path).c_str() : "random init");
@@ -1904,19 +1962,50 @@ int main(int argc, char** argv) {
 
         std::vector<const ml::TurnStepRecord*> turns;
         std::vector<float> m_adv, e_adv, d_adv, mst_adv;
+        std::array<std::vector<float>, kNumEconFamilies> econ_fam_adv;
         for (const auto& episode : episodes) {
             for (const auto& turn : episode.turns) {
                 turns.push_back(&turn);
                 for (const auto& mission_step : turn.mission_steps)
                     m_adv.push_back(mission_step.advantage);
-                for (const auto& econ_step : turn.econ_steps) e_adv.push_back(econ_step.advantage);
+                for (const auto& econ_step : turn.econ_steps) {
+                    e_adv.push_back(econ_step.advantage);
+                    const size_t fam = static_cast<size_t>(econ_step.family);
+                    if (fam < kNumEconFamilies) econ_fam_adv[fam].push_back(econ_step.advantage);
+                }
                 for (const auto& muster_step : turn.muster_steps)
                     mst_adv.push_back(muster_step.advantage);
                 if (!turn.diplo_steps.empty()) d_adv.push_back(turn.advantage);
             }
         }
-        Normalizers normalizers{Normalizer::Fit(m_adv), Normalizer::Fit(e_adv),
-                                Normalizer::Fit(d_adv), Normalizer::Fit(mst_adv)};
+        Normalizers normalizers;
+        normalizers.mission = Normalizer::Fit(m_adv);
+        normalizers.econ = Normalizer::Fit(e_adv);
+        normalizers.diplo = Normalizer::Fit(d_adv);
+        normalizers.muster = Normalizer::Fit(mst_adv);
+        size_t active_econ_fams = 0;
+        size_t active_econ_total = 0;
+        for (size_t fam = 0; fam < kNumEconFamilies; ++fam) {
+            if (econ_fam_adv[fam].size() >= 8) {
+                normalizers.econ_family[fam] = Normalizer::Fit(econ_fam_adv[fam]);
+                normalizers.has_econ_family[fam] = true;
+                active_econ_fams++;
+                active_econ_total += econ_fam_adv[fam].size();
+            } else {
+                normalizers.econ_family_weight[fam] = 1.0F;
+            }
+        }
+        if (active_econ_fams > 0) {
+            const float mean_fam_steps =
+                    static_cast<float>(active_econ_total) / static_cast<float>(active_econ_fams);
+            for (size_t fam = 0; fam < kNumEconFamilies; ++fam) {
+                if (normalizers.has_econ_family[fam]) {
+                    float raw_w = std::sqrt(mean_fam_steps /
+                                            static_cast<float>(econ_fam_adv[fam].size()));
+                    normalizers.econ_family_weight[fam] = std::clamp(raw_w, 0.5F, 2.5F);
+                }
+            }
+        }
 
         // Explained variance of the critics' rollout-time predictions:
         // 1 - Var(target - prediction) / Var(target); 1 is perfect, <= 0 is useless.

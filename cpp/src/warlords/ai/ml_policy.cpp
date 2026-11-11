@@ -1091,6 +1091,14 @@ class MlRuntimeConfig {
 
     void SetArmyWeight(float weight) { army_score_weight_.store(weight, std::memory_order_relaxed); }
 
+    float ConcentrationWeight() const {
+        return concentration_score_weight_.load(std::memory_order_relaxed);
+    }
+
+    void SetConcentrationWeight(float weight) {
+        concentration_score_weight_.store(std::max(0.0F, weight), std::memory_order_relaxed);
+    }
+
     bool RecordThoughts() const { return record_thoughts_.load(std::memory_order_relaxed); }
 
     void SetRecordThoughts(bool enabled) {
@@ -1100,6 +1108,7 @@ class MlRuntimeConfig {
   private:
     std::atomic<float> deploy_temperature_{kDeployTemperature};
     std::atomic<float> army_score_weight_{0.25F};
+    std::atomic<float> concentration_score_weight_{0.0F};
     std::atomic<bool> record_thoughts_{true};
 };
 
@@ -1124,6 +1133,105 @@ float ArmyScoreWeight() {
 
 void SetArmyScoreWeight(float weight) {
     GlobalMlRuntimeConfig().SetArmyWeight(weight);
+}
+
+float ConcentrationScoreWeight() {
+    return GlobalMlRuntimeConfig().ConcentrationWeight();
+}
+
+void SetConcentrationScoreWeight(float weight) {
+    GlobalMlRuntimeConfig().SetConcentrationWeight(weight);
+}
+
+void PropagateEconomyLineage(absl::Span<TurnStepRecord> turns,
+                             const UnitReturnMap& unit_birth_returns, float stack_gamma) {
+    struct StepRef {
+        int turn_idx = kNone;
+        size_t step_idx = 0;
+    };
+    absl::flat_hash_map<int, StepRef> active_produce;
+    absl::flat_hash_map<int, StepRef> active_vector;
+    absl::flat_hash_map<uint64_t, StepRef> bought_slots;
+
+    auto make_slot_key = [](int city_idx, int unit_type) -> uint64_t {
+        return (static_cast<uint64_t>(static_cast<uint32_t>(city_idx)) << 32U) |
+               static_cast<uint64_t>(static_cast<uint32_t>(unit_type));
+    };
+
+    for (auto& turn : turns) {
+        for (auto& econ_step : turn.econ_steps) {
+            econ_step.lineage_return = 0.0F;
+        }
+    }
+
+    for (int turn_idx = 0; turn_idx < static_cast<int>(turns.size()); ++turn_idx) {
+        for (const auto& prod : turns[turn_idx].produced_units) {
+            auto ret_it = unit_birth_returns.find(prod.unit_id);
+            if (ret_it == unit_birth_returns.end() || ret_it->second == 0.0F) continue;
+            const float birth_ret = ret_it->second;
+
+            if (auto prod_it = active_produce.find(prod.city_idx);
+                prod_it != active_produce.end() && prod_it->second.turn_idx >= 0 &&
+                prod_it->second.turn_idx < turn_idx) {
+                float disc = std::pow(stack_gamma,
+                                      static_cast<float>(turn_idx - prod_it->second.turn_idx));
+                turns[prod_it->second.turn_idx].econ_steps[prod_it->second.step_idx].lineage_return +=
+                        disc * birth_ret;
+            }
+            if (auto vec_it = active_vector.find(prod.city_idx);
+                vec_it != active_vector.end() && vec_it->second.turn_idx >= 0 &&
+                vec_it->second.turn_idx < turn_idx) {
+                float disc = std::pow(stack_gamma,
+                                      static_cast<float>(turn_idx - vec_it->second.turn_idx));
+                turns[vec_it->second.turn_idx].econ_steps[vec_it->second.step_idx].lineage_return +=
+                        disc * birth_ret;
+            }
+            if (prod.city_idx >= 0 && prod.unit_type >= 0) {
+                uint64_t slot_key = make_slot_key(prod.city_idx, prod.unit_type);
+                if (auto buy_it = bought_slots.find(slot_key);
+                    buy_it != bought_slots.end() && buy_it->second.turn_idx >= 0 &&
+                    buy_it->second.turn_idx < turn_idx) {
+                    float disc = std::pow(stack_gamma,
+                                          static_cast<float>(turn_idx - buy_it->second.turn_idx));
+                    turns[buy_it->second.turn_idx]
+                            .econ_steps[buy_it->second.step_idx]
+                            .lineage_return += disc * birth_ret;
+                }
+            }
+        }
+
+        const auto& econ_steps = turns[turn_idx].econ_steps;
+        for (size_t step_idx = 0; step_idx < econ_steps.size(); ++step_idx) {
+            const auto& step = econ_steps[step_idx];
+            switch (step.family) {
+                case EconFamily::kBuySlot:
+                    if (step.chosen_idx > 0 && step.city_idx >= 0 && step.unit_type >= 0) {
+                        bought_slots[make_slot_key(step.city_idx, step.unit_type)] =
+                                StepRef{turn_idx, step_idx};
+                    }
+                    break;
+                case EconFamily::kProduce:
+                    if (step.city_idx >= 0) {
+                        if (step.chosen_idx > 0) {
+                            active_produce[step.city_idx] = StepRef{turn_idx, step_idx};
+                        } else {
+                            active_produce.erase(step.city_idx);
+                        }
+                    }
+                    break;
+                case EconFamily::kVector:
+                    if (step.city_idx >= 0) {
+                        active_vector[step.city_idx] = StepRef{turn_idx, step_idx};
+                    }
+                    break;
+                case EconFamily::kRetain:
+                case EconFamily::kSpoils:
+                case EconFamily::kGuardCity:
+                case EconFamily::kCount:
+                    break;
+            }
+        }
+    }
 }
 
 void RefreshCommanderPosture(float* input_ctx, const PolicyNetwork& net) {
@@ -1314,7 +1422,9 @@ float ComputeEmpireScore(const Game& game, int side_index) {
         recon_term = 0.08F * rev_city_frac + 0.02F * seen_tile_frac;
     }
 
+    const float conc_weight = GlobalMlRuntimeConfig().ConcentrationWeight();
     float my_army_str = 0.0F, all_army_str = 0.0F;
+    float my_synergy = 0.0F, all_synergy = 0.0F;
     for (const Army* army : game.Armies()) {
         if (army->IsDisbanded() || (army->X() == kNone && !army->InTransit()) ||
             army->OwnerIndex() < 0 || army->OwnerIndex() >= 8)
@@ -1322,13 +1432,43 @@ float ComputeEmpireScore(const Game& game, int side_index) {
         float power = static_cast<float>(army->Strength() * army->Strength());
         all_army_str += power;
         if (army->OwnerIndex() == side_index) my_army_str += power;
+
+        if (conc_weight > 0.0F && army->OnMap()) {
+            absl::Span<Army* const> tile_stack =
+                    game::ArmiesOnTileSpan(game, army->X(), army->Y());
+            int same_owner_cnt = 0;
+            bool stack_has_hero = false;
+            for (const Army* mate : tile_stack) {
+                if (!mate->IsDisbanded() && mate->OwnerIndex() == army->OwnerIndex()) {
+                    same_owner_cnt++;
+                    if (mate->Hero()) stack_has_hero = true;
+                }
+            }
+            int bless_bonus = std::min(2, static_cast<int>(army->Blessings().size()));
+            int hero_bonus = (stack_has_hero && same_owner_cnt >= 2) ? 1 : 0;
+            float eff_str = static_cast<float>(
+                    std::min(9, army->Strength() + bless_bonus + hero_bonus));
+            float eff_power = eff_str * eff_str;
+            float size_frac = static_cast<float>(std::min(8, std::max(1, same_owner_cnt)) - 1) /
+                              7.0F;
+            float unit_synergy = eff_power * size_frac + (eff_power - power);
+            all_synergy += unit_synergy;
+            if (army->OwnerIndex() == side_index) my_synergy += unit_synergy;
+        }
     }
     float army_share = all_army_str > 0.0F ? my_army_str / all_army_str : 0.0F;
+    float conc_term = 0.0F;
+    if (conc_weight > 0.0F && my_synergy > 0.0F) {
+        float turn_ramp =
+                std::clamp(static_cast<float>(game.Turn() - 4) / 16.0F, 0.25F, 1.0F);
+        float conc_share = my_synergy / std::max(1.0F, all_army_str + all_synergy);
+        conc_term = conc_weight * turn_ramp * conc_share;
+    }
 
     float city_share = static_cast<float>(my_cities) / static_cast<float>(total_standing);
     float inc_share = static_cast<float>(my_income) / static_cast<float>(total_income);
     return 2.0F * city_share + 0.5F * inc_share +
-           GlobalMlRuntimeConfig().ArmyWeight() * army_share + recon_term;
+           GlobalMlRuntimeConfig().ArmyWeight() * army_share + conc_term + recon_term;
 }
 
 PolicyNetwork& ActivePolicy() {

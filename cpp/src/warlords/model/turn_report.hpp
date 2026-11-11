@@ -4,6 +4,7 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -29,6 +30,7 @@ struct Produced {
     int type = 0;                              ///< Army type identifier.
     CityId city = CityId::None();              ///< Relevant city, or `CityId::None()`.
     bool standard = false;                     ///< True when delivered to the planted standard.
+    std::uintptr_t unit_id = 0;                ///< Pool identity (`Army*`) when newly built.
 };
 
 /** @brief Record of a hero promoted as a side's turn opened and the strength gained. */

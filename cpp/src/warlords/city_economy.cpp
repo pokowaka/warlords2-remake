@@ -112,10 +112,11 @@ std::vector<Produced> CityEconomy::RunProduction(Side& side) {
                         if (vectored) {
                             army.SendIntoTransit(Transit{kTransitTurns, city->VectorDestination()});
                         }
-                        game_.Add(army);
+                        Army* built_army = game_.Add(army);
                         built.push_back(
                                 Produced{vectored ? ProducedKind::kSent : ProducedKind::kBuilt,
-                                         army.TypeIndex(), city->Id(), false});
+                                         army.TypeIndex(), city->Id(), false,
+                                         reinterpret_cast<std::uintptr_t>(built_army)});
                     }
                 }
             }

@@ -18,7 +18,9 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
+#include "absl/types/span.h"
 
 #include "warlords/ai/personality.hpp"
 #include "warlords/types.hpp"
@@ -604,16 +606,40 @@ struct MissionStepRecord {
     float advantage = 0.0F;  ///< Filled by the trainer.
 };
 
+/** @brief Action family category of an `EconNet` decision step. */
+enum class EconFamily : uint8_t {
+    kBuySlot = 0,    ///< Empire-wide production slot purchase vs HoldGold.
+    kProduce = 1,    ///< City production slot selection vs StopProduction.
+    kVector = 2,     ///< City vectoring destination selection vs KeepHere.
+    kRetain = 3,     ///< Over-budget army retention vs disbanding.
+    kSpoils = 4,     ///< Captured city Occupy / Pillage / Sack / Raze choice.
+    kGuardCity = 5,  ///< Pre-wave city garrison lock decision.
+    kCount = 6,      ///< Number of distinct economy action families.
+};
+
 /** @brief One economic decision made during a recorded turn. */
 struct EconStepRecord {
     std::vector<EconInVec> candidates;  ///< The inputs of every option scored.
     std::vector<float> log_mult;        ///< Log multiplicity prior of each option.
     int chosen_idx = 0;                 ///< The option taken.
     float old_log_prob = 0.0F;          ///< Its log probability when it was taken.
+    EconFamily family = EconFamily::kProduce;  ///< Action family category of this decision.
+    int city_idx = kNone;               ///< Target or source city index when applicable.
+    int unit_type = kNone;              ///< Bought or produced ArmyType ID (`kNone` for Hold/Stop).
+    int target_idx = kNone;             ///< Vector destination city index (`-2` for Standard).
     int guard_city = kNone;             ///< v7: owned city whose garrison GuardCity decided.
     float guard_loss = 0.0F;            ///< Filled by trainer if guard_city fell by next turn.
+    float lineage_return = 0.0F;        ///< Discounted post-birth return of units from this choice.
     float advantage = 0.0F;             ///< Filled by trainer.
     float sample_temp = 0.0F;           ///< Effective sampling temperature used.
+};
+
+/** @brief Record of an army built by one of the side's cities as a turn opens. */
+struct ProducedUnitRecord {
+    std::uintptr_t unit_id = 0;  ///< Pool identity (`Army*`) of the newly built unit.
+    int city_idx = kNone;        ///< Producing city index.
+    int unit_type = kNone;       ///< Produced `ArmyType` catalog ID.
+    bool vectored = false;       ///< True when dispatched immediately into road transit.
 };
 
 /** @brief One diplomatic decision made during a recorded turn. */
@@ -646,6 +672,7 @@ struct TurnStepRecord {
     std::vector<DiploStepRecord> diplo_steps;          ///< The turn's diplomatic decisions.
     std::vector<MusterStepRecord> muster_steps;        ///< Muster hub and Standard decisions.
     std::vector<OffTurnUnitDelta> off_turn_unit_deltas;  ///< Causal off-turn defensive outcomes.
+    std::vector<ProducedUnitRecord> produced_units;    ///< Units built at the opening of this turn.
 };
 
 /** @brief Samples decisions during self-play and records them. */
@@ -719,12 +746,27 @@ float ComputeEmpireScore(const Game& game, int side_index);
 /** @brief Returns the active army-power share weight in `ComputeEmpireScore` (default `0.25`). */
 float ArmyScoreWeight();
 
-/**
- * @brief Sets the weight of the army-power share in `ComputeEmpireScore` (default `0.25`).
- *
- * Set once before training starts.
- */
+/** @brief Sets the weight of the army-power share in `ComputeEmpireScore` (default `0.25`). */
 void SetArmyScoreWeight(float weight);
+
+/** @brief Returns the active stack-concentration score weight in `ComputeEmpireScore` (default `0.0`). */
+float ConcentrationScoreWeight();
+
+/** @brief Sets the stack-concentration shaping weight in `ComputeEmpireScore` (default `0.0`). */
+void SetConcentrationScoreWeight(float weight);
+
+/** @brief Map from `Army*` pool identity (`std::uintptr_t`) to discounted post-birth return. */
+using UnitReturnMap = absl::flat_hash_map<std::uintptr_t, float>;
+
+/**
+ * @brief Propagates discounted post-birth unit returns (`unit_birth_returns`) backward into
+ * the originating `kBuySlot`, `kProduce`, and `kVector` `EconStepRecord::lineage_return` fields.
+ * @param turns Recorded turns for a single side in chronological order.
+ * @param unit_birth_returns Map from `unit_id` to its discounted return starting at its birth turn.
+ * @param stack_gamma Per-turn discount factor applied across build/vector delays.
+ */
+void PropagateEconomyLineage(absl::Span<TurnStepRecord> turns,
+                             const UnitReturnMap& unit_birth_returns, float stack_gamma);
 
 /** @brief Updates `input_ctx[25..29]` in-place from `input_ctx[0..24]` when `net.UseCommander()`. */
 void RefreshCommanderPosture(float* input_ctx, const PolicyNetwork& net);

@@ -17,6 +17,7 @@
 #include "test/opponents.hpp"
 #include "test/test_helpers.hpp"
 #include "warlords/ai.hpp"
+#include "warlords/armytype.hpp"
 #include "warlords/ai/belief.hpp"
 #include "warlords/ai/ml_policy.hpp"
 #include "warlords/ai/modern_ai.hpp"
@@ -1264,6 +1265,185 @@ TEST(ModernAiTest, V8EndToEndGradientsSharpSamplingAndCausalOffTurnCredit) {
         EXPECT_EQ(wipe_turn.off_turn_unit_deltas[0].unit_id,
                   reinterpret_cast<std::uintptr_t>(lone_scout));
         EXPECT_LT(wipe_turn.off_turn_unit_deltas[0].delta_score, -0.02F);
+    }
+}
+
+TEST(ModernAiTest, EconomyFamiliesUnitLineageAndStackConcentrationShaping) {
+    // Stack-concentration shaping: concentrated blessed Hero stack outscores scattered 1-stacks
+    {
+        auto game_ptr = SetupGame("ERYTHEA", Seed(21));
+        Game& game = *game_ptr;
+        while (game.Turn() < 20) {
+            game.AdvanceTurn();
+        }
+        for (int idx = static_cast<int>(game.Armies().size()) - 1; idx >= 0; --idx) {
+            game.Armies().Remove(game.Armies()[idx]);
+        }
+
+        City* city0 = game.GetMap().Sides()[0].CapitalCity(game.GetMap());
+        City* city1 = game.GetMap().Sides()[1].CapitalCity(game.GetMap());
+        ASSERT_NE(city0, nullptr);
+        ASSERT_NE(city1, nullptr);
+
+        // Give both sides identical city count and income so only stack organization differs
+        for (auto& city : game.GetMap().Cities()) {
+            if (&city == city0) {
+                city.SetOwner(SideId(0));
+                city.SetIncome(20);
+            } else if (&city == city1) {
+                city.SetOwner(SideId(1));
+                city.SetIncome(20);
+            } else {
+                city.SetOwner(SideId::None());
+            }
+        }
+
+        // Side 0: 1 Hero + 3 units concentrated together on city0, blessed once
+        for (int unit_idx = 0; unit_idx < 4; ++unit_idx) {
+            Army proto;
+            proto.SetOwner(SideId(0));
+            proto.PlaceAt(city0->Position());
+            proto.SetType(ArmyTypeId(unit_idx == 0 ? armytype::kHero : 2));
+            proto.SetStrength(5);
+            proto.SetMaxMoves(12);
+            proto.SetMoves(12);
+            proto.AddBlessing(0);
+            game.Armies().Add(proto);
+        }
+
+        // Side 1: 4 identical Strength-5 non-hero unblessed units scattered on separate tiles
+        for (int unit_idx = 0; unit_idx < 4; ++unit_idx) {
+            Army proto;
+            proto.SetOwner(SideId(1));
+            proto.PlaceAt(TilePos(std::max(1, city1->X() - unit_idx), city1->Y()));
+            proto.SetType(ArmyTypeId(2));
+            proto.SetStrength(5);
+            proto.SetMaxMoves(12);
+            proto.SetMoves(12);
+            game.Armies().Add(proto);
+        }
+
+        ai::ml::SetConcentrationScoreWeight(0.0F);
+        float base_s0 = ai::ml::ComputeEmpireScore(game, 0);
+        float base_s1 = ai::ml::ComputeEmpireScore(game, 1);
+        EXPECT_NEAR(base_s0, base_s1, 1e-5F);
+
+        ai::ml::SetConcentrationScoreWeight(0.15F);
+        EXPECT_NEAR(ai::ml::ConcentrationScoreWeight(), 0.15F, 1e-6F);
+        float conc_s0 = ai::ml::ComputeEmpireScore(game, 0);
+        float conc_s1 = ai::ml::ComputeEmpireScore(game, 1);
+        EXPECT_GT(conc_s0 - conc_s1, 0.025F);
+        EXPECT_NEAR(conc_s1, base_s1, 1e-5F);
+        ai::ml::SetConcentrationScoreWeight(0.0F);
+    }
+
+    // Economy family tagging, newly built unit capture, and backward causal lineage propagation
+    {
+        auto game_ptr = SetupGame("ERYTHEA", Seed(33));
+        Game& game = *game_ptr;
+        Side& our_side = game.GetMap().Sides()[0];
+        for (int side_idx = 0; side_idx < 8; ++side_idx) {
+            Side& side = game.GetMap().Sides()[side_idx];
+            if (!side.InUse()) continue;
+            side.SetComputerControlled(true);
+            ai::SetSideClassicAi(game, side, side_idx != 0);
+        }
+        our_side.SetGold(2500);
+        int extra_assigned = 0;
+        for (auto& city : game.GetMap().Cities()) {
+            if (city.IsNeutral() && extra_assigned < 2) {
+                city.SetOwner(our_side.Id());
+                extra_assigned++;
+            }
+        }
+
+        ai::ml::PolicyNetwork net;
+        net.InitRandomWeights(321);
+        net.SetVersion(8);
+        net.SetUseMuster(true);
+
+        std::vector<ai::ml::TurnStepRecord> recorded_turns;
+        ai::ml::RolloutSampler sampler;
+        sampler.rng_state = 777U;
+        sampler.temperature = 0.80F;
+
+        Side* cur = game::Begin(game);
+        int safety = 0;
+        bool saw_produced_unit = false;
+        while (cur && safety++ < 64 && recorded_turns.size() < 6) {
+            if (cur->IsComputerControlled() && cur->IsAlive()) {
+                if (cur->Index() == 0) {
+                    recorded_turns.emplace_back();
+                    sampler.current_turn = &recorded_turns.back();
+                    ai::modern::PlayTurn(game, *cur, nullptr, &net, &sampler);
+                    sampler.current_turn = nullptr;
+                    if (!recorded_turns.back().produced_units.empty()) {
+                        saw_produced_unit = true;
+                    }
+                    // Force at least one fast production slot in capital if stopped so build ticks
+                    City* cap = our_side.CapitalCity(game.GetMap());
+                    if (cap && !cap->Slots().empty() && !game::Producing(*cap)) {
+                        game::SetProduction(game, *cap, 0);
+                        cap->SetCountdown(1);
+                    }
+                } else {
+                    ai::PlayTurn(game, *cur, nullptr);
+                }
+            }
+            cur = game::EndTurn(game);
+        }
+
+        ASSERT_GE(recorded_turns.size(), 3U);
+        bool saw_buy_family = false;
+        bool saw_prod_family = false;
+        bool saw_vec_family = false;
+        for (const auto& turn_rec : recorded_turns) {
+            for (const auto& econ_step : turn_rec.econ_steps) {
+                if (econ_step.family == ai::ml::EconFamily::kBuySlot) saw_buy_family = true;
+                if (econ_step.family == ai::ml::EconFamily::kProduce) saw_prod_family = true;
+                if (econ_step.family == ai::ml::EconFamily::kVector) saw_vec_family = true;
+            }
+        }
+        EXPECT_TRUE(saw_buy_family);
+        EXPECT_TRUE(saw_prod_family);
+        EXPECT_TRUE(saw_vec_family);
+        ASSERT_TRUE(saw_produced_unit);
+
+        // Verify deterministic causal lineage propagation across BuySlot + Produce + Vector -> Birth
+        std::vector<ai::ml::TurnStepRecord> synthetic_turns(3);
+        ai::ml::EconStepRecord buy_rec;
+        buy_rec.family = ai::ml::EconFamily::kBuySlot;
+        buy_rec.chosen_idx = 1;
+        buy_rec.city_idx = 4;
+        buy_rec.unit_type = 7;
+        synthetic_turns[0].econ_steps.push_back(buy_rec);
+
+        ai::ml::EconStepRecord prod_rec;
+        prod_rec.family = ai::ml::EconFamily::kProduce;
+        prod_rec.chosen_idx = 1;
+        prod_rec.city_idx = 4;
+        prod_rec.unit_type = 7;
+        synthetic_turns[0].econ_steps.push_back(prod_rec);
+
+        ai::ml::EconStepRecord vec_rec;
+        vec_rec.family = ai::ml::EconFamily::kVector;
+        vec_rec.chosen_idx = 1;
+        vec_rec.city_idx = 4;
+        vec_rec.target_idx = 9;
+        synthetic_turns[1].econ_steps.push_back(vec_rec);
+
+        constexpr std::uintptr_t kUnitA = 0x1001U;
+        synthetic_turns[2].produced_units.push_back(
+                ai::ml::ProducedUnitRecord{kUnitA, 4, 7, /*vectored=*/true});
+
+        ai::ml::UnitReturnMap birth_returns;
+        birth_returns[kUnitA] = 0.20F;
+        ai::ml::PropagateEconomyLineage(absl::MakeSpan(synthetic_turns), birth_returns, 0.90F);
+
+        // Turn 0 -> Turn 2 has delay 2 (0.90^2 = 0.81); Turn 1 -> Turn 2 has delay 1 (0.90^1 = 0.90)
+        EXPECT_NEAR(synthetic_turns[0].econ_steps[0].lineage_return, 0.20F * 0.81F, 1e-5F);
+        EXPECT_NEAR(synthetic_turns[0].econ_steps[1].lineage_return, 0.20F * 0.81F, 1e-5F);
+        EXPECT_NEAR(synthetic_turns[1].econ_steps[0].lineage_return, 0.20F * 0.90F, 1e-5F);
     }
 }
 

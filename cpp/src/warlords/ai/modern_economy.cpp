@@ -113,6 +113,9 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 rec.candidates = std::move(cands);
                 rec.chosen_idx = pick;
                 rec.old_log_prob = log_prob;
+                rec.family = ml::EconFamily::kRetain;
+                rec.city_idx = city->Index();
+                rec.unit_type = army->TypeIndex();
                 rec.sample_temp = sampler->last_step_temp;
                 sampler->current_turn->econ_steps.push_back(std::move(rec));
             }
@@ -276,6 +279,11 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             rec.log_mult = std::move(log_mult);
             rec.chosen_idx = pick;
             rec.old_log_prob = log_prob;
+            rec.family = ml::EconFamily::kBuySlot;
+            if (pick > 0 && buy_opts[pick].city != nullptr) {
+                rec.city_idx = buy_opts[pick].city->Index();
+                rec.unit_type = buy_opts[pick].type_id;
+            }
             rec.sample_temp = sampler->last_step_temp;
             sampler->current_turn->econ_steps.push_back(std::move(rec));
         }
@@ -377,6 +385,11 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             rec.log_mult = std::move(log_mult);
             rec.chosen_idx = pick;
             rec.old_log_prob = log_prob;
+            rec.family = ml::EconFamily::kProduce;
+            rec.city_idx = city->Index();
+            if (pick > 0 && slot_indices[pick] >= 0 && slot_indices[pick] < city->SlotCount()) {
+                rec.unit_type = city->SlotAt(static_cast<size_t>(slot_indices[pick])).type;
+            }
             rec.sample_temp = sampler->last_step_temp;
             sampler->current_turn->econ_steps.push_back(std::move(rec));
         }
@@ -610,6 +623,9 @@ void RunEconomyPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
                 rec.log_mult = std::move(log_mult);
                 rec.chosen_idx = pick;
                 rec.old_log_prob = log_prob;
+                rec.family = ml::EconFamily::kVector;
+                rec.city_idx = src->Index();
+                rec.target_idx = dest_targets[pick];
                 rec.sample_temp = sampler->last_step_temp;
                 sampler->current_turn->econ_steps.push_back(std::move(rec));
             }
@@ -723,6 +739,8 @@ void RunCityGuardPhase(Game& game, Side& side, const ml::PolicyNetwork& policy,
             rec.candidates = std::move(cands);
             rec.chosen_idx = pick;
             rec.old_log_prob = log_prob;
+            rec.family = ml::EconFamily::kGuardCity;
+            rec.city_idx = city->Index();
             rec.guard_city = city->Index();
             rec.sample_temp = sampler->last_step_temp;
             sampler->current_turn->econ_steps.push_back(std::move(rec));

@@ -110,6 +110,7 @@ ABSL_FLAG(int, eval_turns, 45, "Maximum turns per selection evaluation game.");
 ABSL_FLAG(int, select_seeds, 32, "Number of paired selection seeds (plays 2x games).");
 ABSL_FLAG(int, save_every, 20, "Save periodic snapshots every N generations (0 disables).");
 ABSL_FLAG(uint32_t, seed_offset, 10000U, "Offset added to training seed schedule.");
+ABSL_FLAG(int, threads, 0, "Worker thread count (0 = hardware_concurrency).");
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 using namespace w2;
@@ -897,7 +898,10 @@ int main(int argc, char** argv) {
     }
 
     const Config cfg = LoadConfigFromFlags();
-    const unsigned int threads = std::max(2U, std::thread::hardware_concurrency());
+    const int req_threads = absl::GetFlag(FLAGS_threads);
+    const unsigned int threads =
+            req_threads > 0 ? static_cast<unsigned int>(req_threads)
+                            : std::max(2U, std::thread::hardware_concurrency());
     ml::SetDeployTemperature(cfg.eval_temp);
     ml::SetRecordThoughts(false);
 

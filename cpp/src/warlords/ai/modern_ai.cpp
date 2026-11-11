@@ -243,6 +243,15 @@ void PlayTurn(Game& game, Side& side, IAiTurnEvents* events, const ml::PolicyNet
                 sampler->current_turn->start_critic = critic;
                 sampler->current_turn->value_pred = board_value;
                 sampler->current_turn->start_score = ml::ComputeEmpireScore(game, side.Index());
+                for (const auto& prod_ev : game.TurnNews(side.Id()).produced) {
+                    if ((prod_ev.kind == ProducedKind::kBuilt ||
+                         prod_ev.kind == ProducedKind::kSent) &&
+                        prod_ev.unit_id != 0 && prod_ev.city.IsValid()) {
+                        sampler->current_turn->produced_units.push_back(ml::ProducedUnitRecord{
+                            prod_ev.unit_id, prod_ev.city.Value(), prod_ev.type,
+                            prod_ev.kind == ProducedKind::kSent});
+                    }
+                }
             }
         }
         RunDiplomacyPhase(game, side, policy, wave_ctx, sampler, diplo_decided);
