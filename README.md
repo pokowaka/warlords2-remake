@@ -30,7 +30,7 @@ Two distinct computer player architectures implement `IComputerPlayer` and can b
 |---|---|---|
 | **Architecture** | Faithful 19-phase expert system reverse-engineered from 1993 `WARLORD2.EXE` (`ClassicAiPlayer`) | Learned neural policy (`ModernMlPlayer`) with `v8` multi-head residual MLPs (`cpp/ai_weights.json`) |
 | **Information** | Omniscient (reads the full map even under Hidden Map, as the 1993 original does) | **Fair information**: sees only what a human player would via per-side `SideBelief` fog-of-war tracking |
-| **Capabilities** | Original 1993 targeting, city claiming, production, hero recruitment, and `.CRD` personality cards | Multi-head `PolicyNetwork` (`DiploNet`, `MissionNet`, `EconNet`, `ValueNet`, `StackValueNet`, `MusterNet`, `Commander` + MoE experts), 27 affine personality adapters (5 archetypes across 9 Knights/Lords/Warlords levels), cross-turn Order Memory, Field-Stack Rallying, standard planting/vectoring, and optional online portfolio lookahead search (`--ai-search`) |
+| **Capabilities** | Original 1993 targeting, city claiming, production, hero recruitment, and `.CRD` personality cards | Multi-head `PolicyNetwork` (`DiploNet`, `MissionNet`, `EconNet`, `ValueNet`, `StackValueNet`, `MusterNet`, `Commander` + MoE experts), 27 affine personality adapters (5 archetypes across 9 Knights/Lords/Warlords levels), cross-turn Order Memory, Field-Stack Rallying, standard planting/vectoring, and optional fair lookahead (`--warlord-lookahead` / `w2search`) |
 
 ---
 
@@ -47,21 +47,21 @@ The Modern AI represents a complete departure from 1990s strategy game AI design
 * **High-Throughput Headless Self-Play**: By decoupling the rules engine (`//cpp:w2core`) from rendering, the simulation runs at thousands of full turns per second across multi-core CPUs, allowing millions of game steps to be simulated in minutes.
 
 #### 2. Architecture & Decision Pipeline
-Each turn, the Modern AI (`modern::playTurn`) executes through a coordinated multi-head residual network:
+Each turn, the Modern AI (`modern::PlayTurn`) executes through a coordinated multi-head residual network:
 
 1. **Belief State Update (`SideBelief`)**: Tracks visible terrain, estimated enemy stack trajectories, city ownership history, frontier fog lines, and localized threat heatmaps.
-2. **Diplomacy (`DiploNet`)**: Evaluates bilateral relations across 4 distinct stances (*Ally*, *Peace*, *Uneasy*, *War*), determining peace tributes, war declarations, and multi-faction joint alliance requests.
-3. **Multi-Wave Tactical Military Waves (`MissionNet`)**: In up to 6 iterative waves per turn, groups of armies evaluate every legal target (garrison holding, neutral claiming, enemy city sieges, field stack intercepts, ruin exploration, and fog scouting) paired with dynamic coalition sizes (1, 2, 4, $N-1$, or all armies). Moves are sampled via softmax, with support for field rallies, multi-stack synchronization, and tactical retreat.
-4. **Macro-Economy & Upkeep (`EconNet`)**: Decides when to preserve capital, expand production capacity across conquered cities, establish long-range reinforcement vectors, or disband obsolete units when upkeep exceeds treasury income.
-5. **Hero & Quest Recruitment (`MusterNet`)**: Evaluates incoming hero offers, ally summons, and sage quests against empire-wide strategic posture.
-6. **Commander Posture & Mixture of Experts (MoE)**: High-level posture projection dynamically modulates decision logits based on personality cards and strategic state (e.g. Expansionist, Warmonger, Defensive Turtle).
-7. **27 Affine Personality Adapters**: Fine-tunes behavior to mirror the distinct playstyles of the 1993 character cards (`.CRD`) across 9 Knights, Lords, and Warlords difficulty ratings.
+2. **Diplomacy (`DiploNet`)**: Evaluates bilateral relations across 4 distinct stances (*Allied*, *Peace*, *Uneasy*, *War*), determining peace tributes, war declarations, and multi-faction joint alliance requests.
+3. **Empire Meeting Points & Side Standard (`MusterNet`)**: Selects `0..2` land-connected Muster Hub castles where feeder cities and nearby armies consolidate, and decides when a Hero plants or retrieves the faction's Standard for field vectoring.
+4. **Multi-Wave Tactical Military Waves (`MissionNet`)**: In up to 6 iterative waves per turn, groups of armies evaluate every legal target (garrison holding, neutral claiming, enemy city sieges, field stack intercepts, ruin/temple exploration, Muster/Standard rallies, and fog scouting) paired with dynamic coalition sizes (1, 2, 4, $N-1$, or all armies) and selective obstacle detouring.
+5. **Macro-Economy & Spoils (`EconNet`)**: Decides unit retention vs. disbanding when over budget, up to 3 empire-wide production-slot upgrades per turn, per-city unit production and vectoring, and city-capture spoils (occupy / pillage / sack / raze).
+6. **Commander Posture & Mixture of Experts (MoE)**: High-level posture projection (`ctx[25..29]`) modulates decision heads based on game rules, map scale, and empire state.
+7. **27 Affine Personality Adapters**: Exact affine Product-of-Experts (`ArchetypeHead`) blends 5 evolved specialists (`Imperial`, `Berserker`, `Guardian`, `Schemer`, `Questor`) across all 27 original character cards and `Knight` / `Lord` / `Warlord` difficulty tiers.
 
 #### 3. Training Curriculum
-* **Asymmetric-Critic PPO (`w2arena`)**: Trained via Proximal Policy Optimization where the policy network acts solely on imperfect `SideBelief`, while an asymmetric privileged critic (`ValueNet`) observes the full map during training to guide stable value baseline estimation.
-* **Antithetic Evolution Strategies (`w2evolve`)**: Applied paired-seed parameter mutations with mid-game snapshot forking to refine tactical micro-behavior and avoid local minima.
-* **Behavioral Cloning & Adversarial Sparring (`w2imitate`)**: Bootstrapped against the 1993 Classic AI, specialized defensive Wardens, and aggressive Raiders to instill foundational tactical literacy before pure discovery self-play.
-* **Online Lookahead Tree Search (`w2search` / `--ai-search`)**: Provides optional 1-ply/2-ply fair portfolio rollout search, pushing Modern AI win rates above 50% parity against the omniscient 1993 Classic AI.
+* **Asymmetric-Critic PPO (`w2arena`)**: Trained via Proximal Policy Optimization where the policy network acts solely on imperfect `SideBelief`, while privileged critics (`ValueNet`, `StackValueNet`) observe the full map during training to guide stable advantage estimation.
+* **Antithetic Evolution Strategies (`w2evolve`)**: Applies paired-seed parameter perturbations at deployment temperature (`T = 0.02`) with mid-game snapshot forking to refine consolidation, Muster Hubs, Standard vectoring, and specialist archetypes.
+* **Adversarial Sparring & Imitation Probes (`opponents.cpp`, `w2imitate`)**: Evaluates and trains against the 1993 Classic AI, specialized defensive Wardens, empty-city Raiders, and frozen checkpoints across 4 disjoint seed splits.
+* **Online Lookahead Search (`w2search` / `--warlord-lookahead`)**: Provides optional 1-ply Warlord tactical lookahead and 2-ply fair specialist portfolio rollout search, pushing Modern AI city share above 50% parity against the omniscient 1993 Classic AI.
 
 #### 4. The `F10` AI Brain Inspector
 When launched with `--modern-ui`, human players can press **`F10`** at any time to open the interactive **AI Brain Inspector**:

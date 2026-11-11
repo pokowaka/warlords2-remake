@@ -1,124 +1,161 @@
-# Modern AI: design, training, and how to continue (`AI-DESIGN.md`)
+# Modern AI: design, training, and roadmap (`AI-DESIGN.md`)
 
-This document is the handoff for the learnable "Modern AI" on the `ai` branch:
-what it is, how it is trained and measured, what has been learned so far, and
-exactly how to continue training on a larger machine.
+This document is the technical reference and training guide for the learnable
+"Modern AI" in the unified C++23 engine (`oo-ai` branch, evolved from `ai`):
+how the architecture works, how it is trained and measured, what experiments
+have shown so far, and the roadmap for the next generation of training.
 
 > [!IMPORTANT]
-> **Status (2026-11-08).** The installed checkpoint (`cpp/ai_weights.json`, v7,
-> `9,886` core parameters + `130`-parameter `Commander` posture projection)
-> comes from the 4-track improvement tournament (§6.4): paired-seed antithetic
-> Evolution Strategies (`w2evolve`) with mid-game snapshot forking, `v7`
-> cross-turn Order Memory, Field-Stack Rallying, public game-mode context
-> (`diplomacy`, `hiddenMap`, `neutralCities`, map scale), and trajectory
-> step-size damping (`damped_v7_soup`). Across `768` paired games (`512` dev +
-> `256` held-out report), it improves over the `v6` curriculum checkpoint by
-> **`+1.22 % ± 1.99 %`** at Turn 40 (`48.5 %` on `512` dev, `44.9 %` on `256`
-> report; **4 / 4 presets up on dev**) and **`+2.04 % ± 2.41 %`** at Turn 60
-> (`47.4 %` on `512` dev, **4 / 4 presets and 6 / 6 scenarios up**), while
-> holding parity against garrisoning Wardens (`142W / 124L`). Adding fair
-> online portfolio lookahead (`w2search portfolio`, `Judge::Fair`) pushes
-> Modern **above 50 % parity (`50.8 % ± 5.8 %`)** against the 1993 Classic AI.
+> **Status (2026-11-11).** The installed checkpoint (`cpp/ai_weights.json`, `v8`
+> format: `10,097` core parameters + `669`-parameter `MusterNet` + `130`-parameter
+> `Commander` posture projection + `5` evolved `ArchetypeHead` specialists [`670`
+> affine readout/skip parameters each] across all 27 Warlords II character cards,
+> `usePersonalities: 1`) combines the `damped_v7_soup` tournament champion trunk
+> (§6.4.3; `0.000000` difference under `--no-personalities`) with the 5-archetype
+> Product-of-Experts personality mixer and `Knight` (`38.5 %`) / `Lord` (`45.3 %`) /
+> `Warlord` (`49.8 %`) difficulty ladder (§6.4.7). Across `768` paired games (`512`
+> dev + `256` held-out report), the `v7` trunk improved over the `v6` curriculum
+> checkpoint by **`+1.22 % ± 1.99 %`** at Turn 40 (`48.5 %` dev, `44.9 %` report)
+> and **`+2.04 % ± 2.41 %`** at Turn 60 (`47.4 %` dev, **4 / 4 presets and 6 / 6
+> scenarios up**), while the damped 27-card release holds full Warlord parity on
+> Gate 2 (`48.4 %` vs `48.5 %`, **`234 / 512` #1 finishes vs `228 / 512`**,
+> `Interm-Diplo` **`+4.5 %`** to `65.9 %`). Adding fair online portfolio lookahead
+> (`w2search` `portfolio`, `Judge::kFair`) pushes Modern **above 50 % parity
+> (`50.8 % ± 5.8 %`)** against the omniscient 1993 Classic AI.
 
 ---
 
 ## 1. What the Modern AI is
 
-Two computer players coexist, selected per side by `Side::classicAi`:
+Two polymorphic `IComputerPlayer` strategies coexist, selected per side via
+`Side::IsClassicAi()`:
 
-| | Classic AI | Modern AI |
+| | Classic AI (`ClassicAiPlayer`) | Modern AI (`ModernMlPlayer`) |
 |---|---|---|
-| Code | `cpp/src/warlords/ai.cpp` and `ai/{cities,groups,moves,heroes,diplomacy}.cpp` | `cpp/src/warlords/ai/modern_ai.cpp`, `ml_policy.cpp`, `belief.cpp` |
-| Origin | Reverse-engineered 1993 expert system (faithful to original DOS WARLORD2.EXE) | Learned policy (PPO self-play & `1 vs K−1` Classic curriculum) |
-| Information | Reads the whole map (ignores Hidden Map for itself) | Fair information: sees only what a human would (§3) |
+| Code | `cpp/src/warlords/ai.cpp`, `ai/classic_ai_player.cpp`, `ai/{cities,groups,moves,heroes,diplomacy,attitude}.cpp` | `cpp/src/warlords/ai/modern_{ai,military,economy,diplomacy,execution,ml_player}.cpp`, `ml_policy.cpp`, `belief.cpp`, `personality.cpp` |
+| Origin | Reverse-engineered 1993 19-phase expert system (faithful to DOS `WARLORD2.EXE`) | Learned neural policy (`w2arena` PPO curriculum + `w2evolve` Antithetic ES) |
+| Information | Omniscient (reads the whole map and ignores Hidden Map for itself) | Fair information: sees only what a human would via `SideBelief` (§3) |
 | Selected by | `--classic-ai`, Game › Classic AI | default; `--modern-ai`, Game › Modern AI |
 
 The game also has an optional modern UI (`--modern-ui`: Parley, envoy
-missives, F10 AI Brain inspector). It is independent of which AI plays.
+missives, `F10` AI Brain & Neural Policy Inspector). It is independent of which
+AI plays.
 
 ## 2. How a Modern AI turn works
 
-`modern::playTurn` (`modern_ai.cpp`) runs:
+`modern::PlayTurn` (`modern_ai.cpp`) runs:
 
-1. **Belief update** (`belief::update`): visible cities, sites and items, observed
-   enemy stacks, threat maps, border strengths and fog frontiers.
-2. **Diplomacy** (whenever Diplomacy is on, once per encountered rival per turn,
-   including rivals newly revealed mid-turn by scouting). For each known rival,
-   DiploNet picks a stance (Ally / Peace / Uneasy / War) plus two yes/no
-   sub-decisions: offer gold to end a war, and ask a friend to join our war.
-3. **Military waves** (up to 6). For each group of the side's armies sharing a
-   location, rules code lists every legal **target**: hold garrison, reinforce an
-   own city, neutral city, enemy city, enemy stack, ruin/sage, temple/item, fog
-   frontier. Each target (including `HOLD_GARRISON`) is combined with candidate
-   **coalition sizes** (1, 2, 4, N−1, N, fast prefix). MissionNet scores every
-   (target, size) pair with zero tactical `if-then-else` filtering. One is sampled
-   from a softmax, plus a yes/no "stage nearby first" for attacks, and executed
-   with the normal movement and combat rules. Stacks that win or reveal fog with
-   moves left go again in the next wave.
-4. **Economy**. EconNet scores, as separate categorical choices:
-   - keep vs disband (`e[5] = 1`, only offered when upkeep exceeds income);
-   - up to 3 empire-wide production-slot purchase rounds per turn (`e[3] = 1`,
-     including slot fullness `e[16]`, strength upgrade delta `e[17]`, and legal
-     slot-0 replacement in full 4-slot cities), stopping as soon as EconNet picks
-     `HoldGold` (`e[0] = 1`);
+1. **Persona materialization & optional Warlord lookahead** (`MaterializeForSide`,
+   `ShouldSwitchToImperialLookahead`). When `usePersonalities` is active, the side's
+   `(level, card)` profile is projected onto the 5 evolved `ArchetypeHead`s into a
+   single materialized `PolicyNetwork` (`< 2 µs`, exact affine Product-of-Experts),
+   and sampling temperature is scaled by difficulty (`Knight` `0.35`, `Lord` `0.12`,
+   `Warlord` `0.02`). With `--warlord-lookahead` on level-2 non-standard cards, two
+   1-round fair-view rollouts (`RestrictToFairView`, paired fresh dice) switch to
+   the `Imperial` anchor if it beats the persona turn by `> 1.5 SE` and `> 0.02`
+   empire score.
+2. **Waves (`0..5`, up to 6 per turn):**
+   - **Belief & context update** (`belief::Update`, `ml::BuildContext`): visible
+     cities, sites and items, observed enemy stacks, threat maps, border strengths,
+     fog frontiers, and optional learned `Commander` posture projection `ctx[25..29]`.
+   - **Diplomacy** (`RunDiplomacyPhase` in `modern_diplomacy.cpp`, whenever Diplomacy
+     is on, once per encountered rival per turn, including rivals newly revealed
+     mid-turn by scouting). For each known rival, `DiploNet` picks a stance
+     (`Allied` / `Peace` / `Uneasy` / `War`) plus two yes/no sub-decisions: offer
+     gold to end a war, and ask a friend to join our war.
+   - **Empire Meeting Points** (`RunMusterSelectionPhase` in `modern_economy.cpp`,
+     wave 0 when `useMuster` is enabled): `MusterNet` runs up to 2 rounds (`round =
+     0, 1`) to select `0..2` land-connected owned castles as `muster_cities` (stopping
+     early if `NoHub` wins). (`RunCityGuardPhase` also runs at wave 0 only if
+     `enableCityGuard` is set; default `false`.)
+   - **Military & exploration** (`RunMilitaryAndExplorationPhase` in
+     `modern_military.cpp` + `ExecuteStackMission` in `modern_execution.cpp`). For
+     each location group (scheduled feeder-cities-first when Muster Hubs are active),
+     rules code lists every legal **target**: hold garrison, reinforce an own city
+     (or Muster Hub), neutral city, enemy city, enemy stack, ruin/sage, temple/item,
+     fog frontier, plus `v7`/`v8` field-stack and planted-Standard rally points. Each
+     target is paired with candidate **coalition sizes** (`1, 2, 4, N−1, N`, fast
+     prefix). `MissionNet` scores every `(target, coalition)` pair with zero tactical
+     `if-then-else` filtering (comparing `u_detour + detourBias > u_through` via
+     `move::FindPathClear` when `avoidBlockers` is active). One option is sampled
+     from a multiplicity-corrected softmax, plus a binary "stage nearby first"
+     choice on combat targets. Stacks that win or reveal fog with `>= 2` moves left
+     act again in the next wave.
+3. **Side Standard phase** (`RunStandardPhase` in `modern_economy.cpp`, when
+   `useStandard` is enabled): `MusterNet` (`round = 2`) decides whether a Hero
+   carrying the faction's Standard plants it (`game::PlantFlag`) for field vectoring
+   or picks a planted Standard back up (`hero::TakeItem`).
+4. **Economy** (`RunEconomyPhase` in `modern_economy.cpp` + `DecideCaptureSpoils`
+   in `modern_execution.cpp`). `EconNet` scores, as separate categorical choices:
+   - keep vs disband (`econ[5] = 1`, only offered when upkeep exceeds income);
+   - up to 3 empire-wide production-slot purchase rounds per turn (`econ[3] = 1`,
+     including slot fullness `econ[16]`, strength upgrade delta `econ[17]`, and legal
+     slot-0 replacement in full 4-slot cities), stopping as soon as `EconNet` picks
+     `HoldGold` (`econ[0] = 1`);
    - per city, macro-action production (`Stop` vs each production slot via
-     `game::setProduction`), queried whenever a city is idle or has just finished
-     a unit (`c->countdown == slot.time`) so multi-turn elite builds are never
+     `game::SetProduction`), queried whenever a city is idle or has just finished
+     a unit (`city->Countdown() == slot.time`) so multi-turn elite builds are never
      cancelled mid-countdown;
-   - per city, the vectoring destination;
-   - after a capture: occupy / pillage / sack / raze.
+   - per city, the vectoring destination (owned cities or a planted `Standard`);
+   - immediately upon capturing a city: occupy / pillage / sack / raze (`econ[6] = 1`).
 
-**Rules, not learned:** legal candidate generation, pathing, combat estimation,
-the hero-arrival city (most threatened own city), and the treaty rule (an attack
-needing a declaration happens only while DiploNet is not proposing peace to that
-side; `attackable()` / `mustDeclare`).
+**Rules, not learned:** legal candidate generation, pathing (`Pathfinder`), combat
+estimation, the hero-arrival city (`SelectHeroCity`: most threatened own city, else
+capital), and the treaty rule (an attack needing a declaration happens only while
+`DiploNet` is not proposing peace to that side; `Attackable()` / `diplomacy::MustDeclare`).
 
 **Sampling in real games.** Real games sample the policy at
-`DEPLOY_TEMPERATURE` = 0.02 (`ml::deployTemperature()`), i.e. near-greedy. The
-generator is seeded from the game's dice state, the turn and the side, and
-never advances the game's RNG, so games stay reproducible. Training still
-anneals to `TRAIN_TEMPERATURE_END` = 0.5, because PPO needs exploration. A
-sweep with the installed weights (512 dev games each, turn 40) was monotonic:
-T = 0.5 → 35.9 %, 0.25 → 38.2 %, 0.15 → 39.7 %, 0.08 → 42.4 %, 0.02 → 43.4 %
-city share; on the held-out report set 32.1 % → 40.9 % (§6). (An earlier
-observation that greedy play was worse was made with the much weaker handoff
-checkpoint.)
+`kDeployTemperature = 0.02` (`ml::DeployTemperature()`, scaled by
+`personality::DifficultyTemperature` on `Knight`/`Lord` tiers when personalities are
+active), i.e. near-greedy on `Warlord`. The sampler is seeded from the game's RNG
+state, the turn, and the side, and never advances the game's RNG, so games stay
+reproducible. PPO training still anneals to `kTrainTemperatureEnd = 0.5`, because
+plain softmax PPO needs exploration. A sweep on the `v6` weights (512 dev games
+each, turn 40) was monotonic: `T = 0.5 → 35.9 %`, `0.25 → 38.2 %`, `0.15 → 39.7 %`,
+`0.08 → 42.4 %`, `0.02 → 43.4 %` city share; on the held-out report set
+`32.1 % → 40.9 %` (§6.3).
 
-### The network (`ml_policy.hpp`)
-Five residual MLPs, `y = W_skip·x + W3·tanh(W2·tanh(W1·x + b1) + b2) + b3`,
-**10,097 parameters** in `v8` (`9,886` in `v7`, plus an optional `130`-parameter
-`Commander` projection, optional `669`-parameter `MusterNet`, and optional
-`454`-parameter `GateNet`), with hand-written forward and backward passes
-(no ML library):
+### The network (`ml_policy.{hpp,cpp}`)
+Six residual MLPs (plus an optional `GateNet` for MoE routing),
+`y = w_skip·x + w3·tanh(w2·tanh(w1·x + b1) + b2) + b3`, with **10,097 core
+parameters** in `v8` (`9,886` in `v7`), plus optional `130`-parameter `Commander`
+projection, `669`-parameter `MusterNet`, `5 × 670`-parameter `ArchetypeHead`
+readouts, and `454`-parameter `GateNet`. Forward and backward passes are
+hand-written in C++23 with `NEON` / `AVX2` / `SSE2` SIMD dot-product and AXPY
+kernels and cached hidden activations (`ForwardWithActivations` /
+`BackwardWithActivations`, zero external ML framework):
 
 | Head | Input | Output |
 |---|---|---|
-| DiploNet 48→24→12→6 | context 30 + rival 18 | 4 stance logits, tribute logit, joint-war logit |
-| MissionNet 75→32→16→2 | context 30 + stack 16 + target 29 | utility, stage-near logit |
-| EconNet 56→24→12→1 | context 30 + econ 26 | score (disjoint `[0..6]` selects decision type; `[20]` flags current choice; `[23..25]` `v8` Muster Hub) |
-| ValueNet 46→24→12→1 | context 30 + critic 16 | V(s), empire-level critic in empire-score units |
-| StackValueNet 62→24→12→1 | context 30 + stack 16 + critic 16 | V_stack(s), pre-decision pool critic for multi-turn per-stack local returns |
-| MusterNet 44→12→6→1 *(optional `v8`)* | context 30 + city 14 | score for selecting `0..2` Empire Meeting Points (`"muster"` in JSON) |
+| `DiploNet` `48→24→12→6` | context `30` + rival `18` | 4 stance logits, tribute logit, joint-war logit |
+| `MissionNet` `75→32→16→2` | context `30` + stack `16` + target `29` | utility, stage-near logit |
+| `EconNet` `56→24→12→1` | context `30` + econ `26` | score (disjoint `[0..6]` selects decision type; `[20]` flags current choice; `[21..22]` GuardCity; `[23..25]` `v8` Muster Hub) |
+| `ValueNet` `46→24→12→1` | context `30` + critic `16` | `V(s)`, empire-level critic in empire-score units |
+| `StackValueNet` `62→24→12→1` | context `30` + stack `16` + critic `16` | `V_stack(s)`, pre-decision pool critic for multi-turn per-stack local returns |
+| `MusterNet` `44→12→6→1` *(`v8`)* | context `30` + muster `14` | score for selecting `0..2` Empire Meeting Points (`round = 0,1`) and Standard plant/pickup (`round = 2`) |
+| `GateNet` `25→10→6→4` *(optional MoE)* | context `[0..24]` | routing logits across up to 4 `ExpertHeads` |
 
 **Privileged critics (asymmetric actor-critic).** The two critics are only used
-to compute training advantages, so they also read 16 true-state features
-(`buildCriticFeatures`: true city/income/army shares, strongest rival, neutrals,
-map size, sides alive/in use, Hidden Map and Diplomacy flags, share of Classic
-rivals, threatened own cities, empire score, an unsaturated turn counter). The
-policy heads never see them. This raised the critic's explained variance from
-~0.56 to ~0.70 (logged as `ev` per iteration).
+to compute training advantages in `w2arena`, so they also read 16 true-state
+features (`BuildCriticFeatures`: true city/income/army shares, strongest rival,
+neutrals, map size, sides alive/in use, Hidden Map and Diplomacy flags, share of
+Classic rivals, threatened own cities, empire score, richer-rival share, max rival
+power share, and an unsaturated turn counter). The policy heads never see them.
+This raised the critic's explained variance from `~0.56` to `~0.70` (logged as `ev`
+per iteration).
 
-Context is 20 global fair-information features (`c[0..19]`), plus in `v7` five
-public lobby/map-scale context features (`c[20..24]`: Total War `diplomacy == 0`,
-`hiddenMap != 0`, weak 1-strength Scout neutrals `neutralCities <= 0`, active
-strong neutrals `neutralCities >= 2`, and active map area ratio) and five empire
-posture channels (`c[25..29]`, computed by the learned `Commander` projection
-when `"commander"` is present in JSON). Target features `t[21..24]` carry `v7`
-cross-turn **Order Memory** persisted in `Army::aiOrder/aiDest/aiGroup` (share of
-coalition already marching on this target, whether staged outside it last turn,
-turns committed, and total allied strength en route), and `v7` adds **Field-Stack
-Rally** targets onto friendly field hero or staged siege stacks (`< 8` units) so
-reinforcements merge in the field.
+Context is 20 global fair-information features (`ctx[0..19]`), plus in `v7+` five
+public lobby/map-scale context features (`ctx[20..24]`: Total War `diplomacy == 0`,
+`hidden_map != 0`, weak 1-strength Scout neutrals `neutral_cities <= 0`, active
+strong neutrals `neutral_cities >= 2`, and active map area ratio) and five empire
+posture channels (`ctx[25..29]`, computed by `tanh(commander_w · ctx[0..24] +
+commander_b)` when `"commander"` is present in JSON). Target features `t[21..24]`
+carry `v7` cross-turn **Order Memory** persisted in `Army::AiOrder/AiDest/AiGroup`
+(share of coalition already marching on this target, whether staged outside it last
+turn, turns committed, and total allied strength en route), `t[25..28]` carry `v8`
+**Muster Hub** target/hold features, and `v7+` adds **Field-Stack Rally** targets
+onto friendly field hero or staged siege stacks (`< 8` units) plus planted-Standard
+rally points so reinforcements merge in the field.
 
 **Multiplicity prior.** Option families have very different sizes (40 fog
 frontiers vs 1 hold). The policy logit at temperature `T` is therefore
@@ -128,86 +165,116 @@ probability mass at any temperature (fixing an earlier `(u_i − ln N)/T` bug th
 penalised multi-option families by `1/N²` at `T = 0.5`). A KL pull toward the
 uniform-family prior `q_i ∝ 1 / N_family(i)` is the entropy regulariser.
 
-Weights live in `cpp/ai_weights.json` (`v7` champion `damped_v7_soup`, `9,886`
-parameters + `130` `commander` parameters, loaded function-preservingly into the
-`10,097`-parameter `v8` engine). Version 7 (`9,886`), 6 (`9,700`), 5 (`8,866`),
-4 (`8,066`) and 3 (`6,729`) files all load function-preserving (`unflattenLegacy`):
+Weights live in `cpp/ai_weights.json` (`v8` format: `10,097` core parameters +
+`130` `commander` + `669` `muster` + `5` `archetypes` [`670` params each]). Version
+8 (`10,097`), 7 (`9,886`), 6 (`9,700`), 5 (`8,866`), 4 (`8,066`), and 3 (`6,729`)
+files all load function-preservingly (`UnflattenLegacy` / `FromFlatWidenInput`):
 input columns an older format lacked start at zero, so any migrated network plays
-identically until training uses the new inputs.
+identically until training updates the new columns.
 
 ## 3. Fair-information rules
-- Pathing obeys Hidden Map for Modern AI sides exactly as for humans
-  (`move::prepare`).
+- Pathing obeys Hidden Map for Modern AI sides (`Pathfinder` / `move::Prepare` /
+  `move::FindPathClear`) just as for humans.
 - Enemy stacks: only flag count and top unit, unless View Enemies is on. Fuller
-  knowledge comes only from battles fought (`recordBattleObservation`).
-- Combat estimates (`estimateCombat`) build defenders from those observations
-  and run 8 simulated battles with the game's RNG saved and restored.
-- The attitude score fed to DiploNet counts only visible cities.
-- Known remaining public-knowledge assumptions: capital identity, diplomatic
+  knowledge comes only from battles fought (`RecordBattleObservation`).
+- Combat estimates (`belief::EstimateCombat`) reconstruct defenders from those
+  observations and run 8 simulated battles with the game's RNG saved and restored.
+- The attitude score fed to `DiploNet` counts only visible cities.
+- Known remaining public-knowledge approximations: capital identity, diplomatic
   scores (shown in the diplomatic report), and neutral garrisons standing on a
-  city's top-left tile.
-- The empire score (§4) reads the true state, but only as a training reward,
-  never as a policy input.
+  city's top-left tile (plus visible/unseen city garrisons retained in
+  `RestrictToFairView` / `RestrictToView` lookahead copies).
+- The empire score (§4) reads the true state, but only as an offline training
+  reward or benchmark metric, never as a live policy input (except during 1-ply
+  fair-view rollout scoring where unseen enemy field/transit armies are stripped
+  first).
 
-## 4. Training objective (`cpp/test/arena.cpp`)
+## 4. Training objective (`cpp/test/arena.cpp`, `cpp/test/evolve.cpp`)
 
-**Empire score** (`computeEmpireScore`, `ml_policy.cpp`):
+**Empire score** (`ComputeEmpireScore`, `ml_policy.cpp`):
 
-    S = 2·cityShare + 0.5·incomeShare + 0.25·armyShare (+ ≤0.15 recon under Hidden Map),  S = 0 when eliminated
+    S = 2·city_share + 0.5·income_share + 0.25·army_share (+ ≤0.10 recon under Hidden Map),  S = 0 when eliminated
 
-Shares are of all standing cities, total income, and Lanchester `strength²`
-across all sides' armies (including vectored units in `transit`), with `recon`
-measured over the active map box (`activeX0..activeX1 × activeY0..activeY1`).
-S is the **one deliberate prior**: a hand-chosen definition of "doing well".
+Shares are of all standing cities, total income, and Lanchester `Strength()²`
+across all sides' armies (including vectored units in `InTransit()`), with `recon`
+(`0.08 · rev_city_frac + 0.02 · seen_tile_frac`) measured over the active map box
+(`ActiveX0..ActiveX1 × ActiveY0..ActiveY1`). `S` is the **one deliberate prior**: a
+hand-chosen definition of "doing well".
 
-**Reward** for a side's turn t is `S(start of its next turn) − S(start of turn t)`,
-so losses during rivals' turns count. A win adds +1 and elimination −0.5.
+**Reward (PPO)** for a side's turn `t` is `S(start of its next turn) − S(start of turn t)`,
+so losses during rivals' turns count. A win adds `+1` and elimination `−0.5`.
 Training games stop after `--turns`. That cut-off is a time limit, not the end
-of the game, so the critic bootstraps there. The objective is therefore the
-discounted growth of S with no fixed horizon (γ = 0.97, so about 33 turns
-ahead).
+of the game, so `ValueNet` bootstraps there. The objective is therefore the
+discounted growth of `S` with no fixed horizon (`γ = 0.97`, ~33 turns ahead).
 
-## 5. Trainer, small-to-large curriculum, and evaluation
+## 5. Trainers (`w2arena` PPO & `w2evolve` Antithetic ES) and evaluation
 
-**PPO.** Each iteration:
-1. Play `--games-per-iter` games in parallel (one thread per game). Two opponent
+Two complementary C++ trainers operate on `PolicyNetwork`:
+
+### 5.1 `w2arena` — Asymmetric-Critic PPO & Curriculum Trainer (`cpp/test/arena.cpp`)
+Currently updates the `10,097` core parameters (`DiploNet`, `MissionNet`, `EconNet`,
+`ValueNet`, `StackValueNet`; see §8.2 for wiring `MusterNet` / `Commander` into PPO).
+Each iteration:
+1. Play `--games-per-iter` games in parallel across hardware threads. Two opponent
    modes are supported:
-   - **`--solo-learner` (`1 vs K − 1` Classic AI):** exactly 1 active seat
-     (rotated uniformly via `seed % K`) is the recorded Modern AI learner; all
-     `K − 1` remaining active seats run the 1993 Classic AI (`level = 2`,
-     Warlord). Combined with `--active-sides K --crop-margin M --random-map-frac F`,
-     this supports a small-to-large curriculum (`1v1` cropped maps → `1v3`
-     cropped maps → `1v7` full 8-side scenarios, plus thread-safe in-memory
-     random maps via `scn::loadFromFiles`).
+   - **`--solo-learner` (`1 vs K − 1` Classic AI):** 1 active seat (rotated via
+     `seed % K`) is the recorded Modern AI learner (`--mixed-frac` optionally plays a
+     fraction as 4v4); remaining seats run Classic AI (`level = 2`, Warlord) or
+     `--raider-frac` / `--warden-frac` / `--frozen-opponent` variants. Combined with
+     `--active-sides K --crop-margin M --random-map-frac F`, this drives the
+     small-to-large curriculum (`1v1` cropped → `1v3` → `1v5` → `1v7` full 8-side
+     maps, plus thread-safe in-memory random maps via `randommap::GenerateNow`).
    - **Self-play / league (`--classic-frac F`):** half mirror matches, half
      hall-of-fame league matches, with fraction `F` against the Classic AI.
-2. Compute GAE per side (λ = `--lambda`, default 0.95). Mission decisions get the
-   turn's advantage plus `--local-weight` × `(G_pool − V_stack(s))`, where
-   `G_pool` sums multi-turn (`γ_stack = 0.90`) immediate score changes over the
-   pre-decision group's permanent `Game::pool` `Army*` addresses (`uintptr_t`,
-   avoiding recycled `Army::slot` aliasing when units die). Early curriculum
-   stages (`1v1`, `1v3`) use `--local-weight 1.5–2.0` for sharp per-stack
-   offensive credit; full 8-side `1v7` polishing uses `--local-weight 0.0` so
-   rival-turn counter-captures are weighted cleanly via empire-score GAE.
-3. Normalise advantages per head, then run 4 epochs × 8 minibatches of turns.
-   Each head's loss is a mean over its own decisions; `ValueNet` and
-   `StackValueNet` MSE losses each carry weight 0.5. Gradients are clipped to a
-   global norm of 0.5. Adam decays linearly from `--lr` to `3e-4`. Epochs stop
-   early if the approximate KL exceeds 0.03.
-4. Temperature anneals `--temp-start` (default 1.0) → 0.5 (`DEPLOY_TEMPERATURE`).
+2. Compute GAE per side (`λ = --lambda`, default `0.95`). Mission decisions get the
+   turn's advantage plus `--local-weight × (G_pool − V_stack(s))`, where `G_pool`
+   sums multi-turn (`γ_stack = 0.90`) immediate on-turn score changes over the
+   pre-decision group's stable `ArmyRegistry` `Army*` addresses (`uintptr_t`). Early
+   curriculum stages (`1v1`, `1v3`) use `--local-weight 1.5` for sharp per-stack
+   offensive credit; full 8-side `1v7` polishing sets `--local-weight 0.0` so
+   rival-turn counter-captures are weighted via turn-level GAE (see §8.1 for why
+   making `G_pool` off-turn-aware is the highest-leverage next fix).
+3. Normalise advantages per head (`Mission`, `Econ`, `Diplo`), then run `4 epochs ×
+   8 minibatches` of turns with multithreaded activation-cached backprop. Each
+   head's loss is a mean over its own decisions; `ValueNet` and `StackValueNet`
+   squared-error gradient steps are scaled by `value_coef = 0.5`. Gradients are clipped
+   to norm `0.5` (globally or `--clip-per-head`). Adam decays linearly from `--lr`
+   to `--lr-end` (`3e-4`). Epochs stop early if approximate KL exceeds `0.03`.
+4. Exploration temperature anneals `--temp-start` (`1.0`) → `--temp-end`
+   (`kTrainTemperatureEnd = 0.5`).
 
-**Evaluation (never used for training).** Mixed 4-vs-4 games on full maps (or
-`1 vs K − 1` during cropped-map selection when `--solo-learner` is set), Modern
-vs Classic, cut off at `--eval-turns`. On full maps each seed is played twice
-with the side assignment swapped. There are two disjoint seed sets, both
-disjoint from training seeds (`< 700000`, shifted per stage via `--seed-offset`):
-- **selection** (`--select-seeds`, base 700000): every `--eval-every`
-  iterations. The best score is saved to `--out`.
-- **report** (`--report-seeds`, base 800000): kept at `0` throughout training
-  and model selection, and measured on the final checkpoint (`--benchmark-only`).
+### 5.2 `w2evolve` — Paired-Seed Antithetic Evolution Strategies (`cpp/test/evolve.cpp`)
+Optimises actor slices (`--heads`: `actor`, `mission`, `econ`, `diplo`, `muster`,
+`muster+commander`, `standard+mission`, `archetype`, `gate`, `commander`, `readout`)
+directly on full-game outcomes at deployment temperature (`T = 0.02`), bypassing
+per-move PPO credit assignment and critic bias:
+- Samples `K = --dirs` Gaussian perturbation directions `ε_k` (normalised to
+  `sqrt(active_dim)`), playing `+σ·ε_k` and `−σ·ε_k` on the **exact same** scenario,
+  preset, seat assignment, and RNG seed (`--seeds-per-dir` pairs each), optionally
+  forking `--fork-frac` of pairs from cached mid-game snapshots around `--fork-turn`
+  (`save::Encode` / `save::Decode`), scheduled Longest-Processing-Time-First.
+- Maps within-pair fitness differences `Δ_k` via centered magnitude-rank shaping to
+  unit-RMS weights and steps Adam with optional `--l2` and `--anchor-l2` decay.
 
-Scenarios and presets rotate over ERYTHEA, ISLADIA, DRAGON, TUTORIA, SORCERY
-and HADESHA, × {Beginner-Open, Interm-Diplo, Adv-Hidden, Fog-TotalWar}.
+### 5.3 Four-Split Seed Hygiene & Evaluation
+Mixed `4 vs 4` games on full maps (or `1 vs K − 1` when `--eval-mode=solo` or during
+cropped-map selection), Modern vs opponent (`classic` / `raider` / `warden` /
+`frozen`), cut off at `--eval-turns`, each seed played **twice with seat assignments
+swapped**:
+- **Training (`< 700000`, `680000` mod in `w2evolve`, shifted via `--seed-offset`):**
+  used for rollouts and ES perturbations.
+- **Selection (`--select-seeds`, base `700000`):** run every `--eval-every`
+  iterations/generations to pick the saved `--out` checkpoint.
+- **Development (`--dev-seeds`, base `750000`):** paired A/B comparisons
+  (`--compare`) for model/recipe Gate 1 (`256g`) and Gate 2 (`512g`) decisions.
+- **Report (`--report-seeds`, base `800000`):** kept at `0` throughout training and
+  tuning, and touched strictly once on a final release candidate.
+
+Built-in training/benchmark games currently cycle through `ERYTHEA`, `ISLADIA`,
+`DRAGON`, `TUTORIA`, `SORCERY`, and `HADESHA` × `{Beginner-Open, Interm-Diplo,
+Adv-Hidden, Fog-TotalWar}` (4 generated scenarios — `Stormmoor`, `Wild Steppe`,
+`Frostwick`, `Gilded Realms` — were also added in `83efaae` and are available for
+out-of-distribution map testing; §8.2).
 
 ## 6. Results
 
@@ -695,18 +762,20 @@ three-tier seed hygiene (`< 700000` training, `700000+` in-run selection,
      affine readout + linear-skip parameters `(wSkip, w3, b3)` across `DiploNet`,
      `MissionNet`, `EconNet`, and `MusterNet` (`--heads archetype` in `w2evolve`,
      stored in `PolicyNetwork::ArchetypeHead`). Because every head is affine in
-     `(wSkip, w3, b3)`, materializing $\bar{\theta}(\text{card}) = \sum_{k=0}^4 w_k \theta^{(k)}$
-     once at the start of `runTurn` (`materializeForSide`) is mathematically
+     `(w_skip, w3, b3)`, materializing $\bar{\theta}(\text{card}) = \sum_{k=0}^4 w_k \theta^{(k)}$
+     once at the start of `PlayTurn` (`MaterializeForSide`) is mathematically
      identical to running 5 forward passes and taking a weighted average of their
      logits, with zero hidden-layer interference and zero runtime overhead.
-   - **27-Card Trait Projection (`personality::archetypeWeights`):** Projects each
-     of the 27 original Warlords II character cards' 10 traits (`PROFILES[3][9]` in
-     `personality.cpp`) onto the 5-simplex (`Standard Warlord` = `100 % Imperial`),
-     and scales policy sampling temperature by difficulty (`Knight` `level 0`:
-     `T = 0.35`, `Lord` `level 1`: `T = 0.12`, `Warlord` `level 2`: `T = 0.02`,
-     plus optional fair 1-round `--warlord-lookahead`). The F10 Brain Inspector
-     displays an amber `"Persona"` header showing the active card, dominant
-     archetype, specialist mix `%`, and temperature `T`.
+   - **27-Card Trait Projection (`personality::ArchetypeWeights`):** Projects each
+     of the 27 original Warlords II character cards' 10 traits (`kProfiles[3][9]` in
+     `personality.cpp`) onto the 5-simplex via a `1.15`-gain softmax (`card == 0`
+     receives a `+1.65` `Imperial` anchor boost — `~54 % Imperial` on `Standard
+     Warlord`, while `--no-personalities` forces `100 % Imperial` trunk), and scales
+     policy sampling temperature by difficulty (`Knight` `level 0`: `T = 0.35`,
+     `Lord` `level 1`: `T = 0.12`, `Warlord` `level 2`: `T = 0.02`, plus optional
+     fair 1-round `--warlord-lookahead`). The `F10` Brain Inspector displays an
+     amber `"Persona"` header showing the active card, dominant archetype,
+     specialist mix `%`, and temperature `T`.
    - **Multi-Objective Specialist Evolution (`w2evolve --archetype`, 72 threads):**
      - `Imperial` (`@0`): `damped_v7_soup` tournament champion (`48.5 %` T40).
      - `Berserker` (`@1`, `runs/arch_berserker`, Gen 10): seeded from `t1c` blitz
@@ -727,7 +796,7 @@ three-tier seed hygiene (`< 700000` training, `700000+` in-run selection,
    - **11-Card Behavioral Diversity Audit (`w2aidiag`, 4 games/card across `ERYTHEA` + `HADESHA` × Diplo/TotalWar, T40):**
      | Character Card | Dominant Mix | `4+` Battles | Road Fights (`onWay`) | Garrisoned Cities | Mean Gold | Ally / War `%` | Muster Hubs | Standards | Blessed Units |
      |---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-     | `Standard Warlord` | `100 % Imperial` | `6.8 %` | `359` | `42.3 %` | `3,158` | `30.1 / 18.7 %` | `0` | `0` | `46` |
+     | `Standard Warlord` *(trunk)* | `100 % Imperial` | `6.8 %` | `359` | `42.3 %` | `3,158` | `30.1 / 18.7 %` | `0` | `0` | `46` |
      | `Attila the Hun` | `58 % Berserker` | `8.0 %` | `368` | `45.1 %` | `2,980` | `23.2 / 19.1 %` | `0` | `0` | `59` |
      | `Roger Unrepentant` | `32 % Quest / 30 % Bers / 29 % Guard` | **`10.0 %`** | `381` | **`50.1 %`** | `3,507` | `26.9 / 17.1 %` | `123` | `10` | **`104`** |
      | `Ian the Infamous` | `44 % Bers / 32 % Quest` | `7.0 %` | `439` | `44.7 %` | `2,949` | `24.2 / 15.3 %` | `97` | `10` | `73` |
@@ -743,187 +812,347 @@ three-tier seed hygiene (`< 700000` training, `700000+` in-run selection,
      - **Gate 2 (`512g` T40 + `512g` T60 + `256g` Warden):** **`48.4 %` vs `48.5 %` (`−0.10 % ± 2.55 %`)** at T40 (**`234/512` #1 finishes vs `228/512`**, 4/6 scenarios up, `Interm-Diplo` **`+4.5 %`** to `65.9 %`), **`47.0 %` vs `47.4 %` (`−0.43 % ± 3.12 %`, `182W / 182L` exact tie in game wins, `Interm-Diplo` `+3.6 %` to `69.0 %`, `Fog-TotalWar` `+2.8 %` to `35.4 %`)** at T60, and `−0.52 % ± 3.75 %` vs Wardens.
      - **Untouched Holdout `report` (`256g` T40 + `256g` T60, `800000+`):** `−0.51 % ± 2.95 %` T40 (pooled `768g`: **`−0.24 % ± 1.98 %`**) and `−0.95 % ± 3.49 %` T60 (`80W / 85L`; pooled `768g`: **`−0.60 % ± 2.38 %`**). Because the root weights inside `cpp/ai_weights.json` are the exact `damped_v7_soup` trunk (`0.000000` difference under `--no-personalities`), installing `ai_weights_personalities_damped.json` activates all 27 Warlords II character cards and the Knight/Lord/Warlord difficulty ladder by default while preserving full Warlord tournament parity.
 
-## 7. Continuing the work on a large Linux machine
+## 7. Building, training, and evaluating (`Bazel`)
 
 ### Setup
+The repository builds with **Bazel** (use `bazelisk` so `.bazelversion` is
+picked up automatically). Headless AI tools (`//cpp:w2arena`, `//cpp:w2evolve`,
+`//cpp:w2aidiag`, `//cpp:w2search`, `//cpp:w2imitate`) depend only on
+`//cpp:w2core` and never require SDL2 on headless servers; `--config=native`
+enables `-march=native` (`AVX2` / `NEON` SIMD kernels in `ml_policy.cpp`, while
+`.bazelrc` sets `-c opt` by default):
+
 ```bash
-# Ubuntu/Debian: compiler, CMake, Ninja (SDL2 is NOT needed for training)
-sudo apt install build-essential cmake ninja-build git
-git clone <repo> warlords2-remake && cd warlords2-remake && git checkout ai
-# The original game files must be in original/ (same layout as on the dev machine):
+# Linux / macOS: C++23 compiler + bazelisk + game data at original/ (-> reference/original)
+git clone <repo> warlords2-remake && cd warlords2-remake && git checkout oo-ai
 ls original/TERRAIN0/ARMYTYPE.DAT
+
+# Run the 11 headless GoogleTest suites & build all AI training/diagnostic binaries
+bazel test --config=native //cpp:headless_tests
+bazel build --config=native //cpp:w2arena //cpp:w2evolve //cpp:w2aidiag //cpp:w2search //cpp:w2imitate
 ```
 
-### Train (curriculum or `train.sh`)
-```bash
-# Build headless trainer & run unit tests
-cmake -G Ninja -S cpp -B cpp/build-train -DCMAKE_BUILD_TYPE=Release -DW2_BUILD_GAME=OFF -DW2_NATIVE=ON
-cmake --build cpp/build-train -j && cpp/build-train/w2test
+*(Note: `w2::ParseCliFlags` normalises `--kebab-case` flags to `--snake_case`, so
+both `--games-per-iter` and `--games_per_iter` work identically across every CLI
+binary. In `cpp/test/train.sh`, pass `--report-seeds 0` explicitly until a final
+release check, and note `cpp/test/curriculum.sh` still points `A=` at the pre-Bazel
+`cpp/build-train/w2arena` path unless updated to `bazel-bin/cpp/w2arena`.)*
 
-# Stage 1: 1v1 cropped maps from scratch (--report-seeds 0 throughout tuning!)
+### Train with PPO (`w2arena`) or Antithetic ES (`w2evolve`)
+```bash
+B=bazel-bin/cpp
+
+# Stage 1 (PPO): 1v1 cropped maps from scratch (--report-seeds 0 throughout tuning!)
 mkdir -p runs/s1_1v1
-cpp/build-train/w2arena --solo-learner --from-scratch \
-  --iterations 60 --games-per-iter 288 --turns 28 \
+$B/w2arena --solo-learner --from-scratch \
+  --iterations 100 --games-per-iter 288 --turns 28 \
   --eval-every 10 --eval-turns 28 --select-seeds 32 --report-seeds 0 \
-  --active-sides 2 --crop-margin 14 --random-map-frac 0.40 \
-  --local-weight 1.5 --lr 3.8e-3 --seed-offset 100000 \
+  --active-sides 2 --crop-margin 14 --random-map-frac 0.50 \
+  --local-weight 1.5 --lr 4.0e-3 --seed-offset 400000 \
   --out runs/s1_1v1/weights.json --log runs/s1_1v1/log.csv
 
-# Stage 2 -> Stage 3: copy weights forward, widen --active-sides (4 -> 8, crop 0),
-# and switch full-map 1v7 polishing to --local-weight 0.0 --temp-start 0.70.
-```
+# Stage 2 -> Stage 5: copy weights.final.json forward, widen --active-sides (4 -> 6 -> 8, crop 0),
+# and switch full-map 1v7 polishing to --local-weight 0.0 --temp-start 0.65 (until §8.2 off-turn credit lands).
 
-The whole curriculum, as run for the installed weights, is one script:
-`cpp/test/curriculum.sh [OUT_DIR]` (all five stages, then paired compares of
-the candidates against `cpp/ai_weights.json`; ~3 h on 72 threads).
-
-### Evaluate, inspect, install
-```bash
-B=cpp/build-train
-$B/w2arena --benchmark-only --select-seeds 96 --report-seeds 0 --eval-turns 40 --out runs/X/weights.json  # 192g selection
-$B/w2arena --benchmark-only --report-seeds 64 --eval-turns 40 --out runs/X/weights.json                   # 128g held-out report
-$B/w2arena --out cpp/ai_weights.json --compare runs/X/weights.json --dev-seeds 256 --breakdown  # paired A/B on dev seeds
-$B/w2aidiag runs/X/weights.json ERYTHEA 750011 40 0 8 0 -1 0 raider  # economy, captures/losses by garrison, missions
-cp runs/X/weights.json cpp/ai_weights.json                 # install; commit with the report numbers
+# Antithetic ES polish or specialist evolution at T = 0.02 with mid-game snapshot forks:
+mkdir -p runs/es_polish
+$B/w2evolve --in cpp/ai_weights.json --out runs/es_polish/weights.json \
+  --heads actor --generations 60 --dirs 72 --seeds-per-dir 2 --turns 50 \
+  --fork-turn 22 --fork-frac 0.45 --warden-frac 0.25 --raider-frac 0.10 \
+  --select-seeds 32 --eval-turns 45 --log runs/es_polish/log.csv
 ```
-**Resuming.** Without `--from-scratch`, `w2arena` loads `--out` if it exists.
+**Resuming PPO.** Without `--from-scratch`, `w2arena` loads `--out` if it exists.
 Pass `--temp-start 0.70 --lr 1.8e-3` when warm-restarting an already competent
 checkpoint so high-temperature noise does not wash out learned weights.
 
-### w2arena flags
+### Evaluate, inspect, and install
+```bash
+B=bazel-bin/cpp
+
+# In-run selection (192g) vs paired dev Gate 1/2 (512g) vs one-time held-out report (256g)
+$B/w2arena --benchmark-only --select-seeds 96 --report-seeds 0 --eval-turns 40 --out runs/X/weights.json
+$B/w2arena --out cpp/ai_weights.json --compare runs/X/weights.json --dev-seeds 256 --breakdown
+$B/w2arena --out cpp/ai_weights.json --compare runs/X/weights.json --dev-seeds 128 --eval-preset 0 --eval-opponent warden
+$B/w2arena --benchmark-only --report-seeds 128 --eval-turns 40 --out runs/X/weights.json
+
+# Behaviour & battle-calibration audit (flags or positional args after WEIGHTS)
+$B/w2aidiag runs/X/weights.json --scenario ERYTHEA --seed 750011 --turns 40 --opponent raider
+
+# Fair online specialist portfolio search (128 dev games: 64 seed pairs)
+$B/w2search cpp/ai_weights.json portfolio 64 3 3 2 40 fair 0.02 1.5 0 \
+  runs/finals/t3a1.json runs/finals/u12_damped50_avoid.json runs/finals/m5_tw_muster.json
+
+cp runs/X/weights.json cpp/ai_weights.json   # install & run `sh tools/check.sh`
+```
+
+### `w2arena` flags
 | Flag | Default | Meaning |
 |---|---|---|
-| `--iterations N` | 300 | PPO iterations |
-| `--games-per-iter G` | 48 | games per iteration (use a multiple of hardware threads, e.g. `288`/`360`/`432`) |
-| `--turns T` | 40 | training game cut-off (time limit; critic bootstraps) |
-| `--eval-every E` | 10 | selection evaluation interval |
-| `--eval-turns T` | 40 | evaluation game cut-off |
-| `--select-seeds S` | 12 | selection seeds (×2 games each on full maps) |
-| `--report-seeds R` | 32 | held-out report seeds (set `0` during training/tuning!) |
-| `--epochs` / `--minibatches` | 4 / 8 | PPO passes and minibatches per iteration |
-| `--lr X` | 3e-3 | starting learning rate (decays linearly to 3e-4) |
-| `--temp-start T` / `--temp-end T` | 1.0 / 0.5 | training temperature, annealed linearly |
-| `--eval-temp T` | 0.02 | temperature evaluation games are played at (`DEPLOY_TEMPERATURE`) |
-| `--eval-level L` | 2 | AI difficulty level for Modern evaluation seats (`0` = Knight, `1` = Lord, `2` = Warlord) |
-| `--b-no-personalities` | off | disable 27-card personality mixing for policy B in `--compare` |
-| `--b-warlord-lookahead` | off | enable fair 1-round lookahead for policy B on Warlord difficulty |
-| `--seed-offset N` | 0 | offset (`<= 500000`) keeping stage training seeds disjoint from `700000+` |
-| `--lambda L` | 0.95 | GAE λ |
-| `--local-weight W` | 1 | weight of `G_pool − V_stack(s)` in mission advantages |
-| `--solo-learner` | off | `1` recorded Modern learner vs `K − 1` Classic AIs |
-| `--active-sides K` | 8 | keep `K` (`2..8`) nearest capitals for curriculum scaling |
-| `--crop-margin M` | 0 | crop map to active capitals `± M` tiles (`0` = full map) |
-| `--random-map-frac F` | 0 | fraction of training games on generated in-memory random maps |
-| `--classic-frac F` | 0 | fraction of non-solo games against the Classic AI |
-| `--from-scratch` | off | random init instead of loading `--out` |
-| `--out PATH` / `--log CSV` | `cpp/ai_weights.json` / none | checkpoint and log |
-| `--benchmark-only` | off | run selection (`--report-seeds 0`) or report (`--report-seeds > 0`) on `--out` |
-| `--data DIR` | `original` | game files |
-| `--compare PATH` | — | play `--out` (A) and PATH (B) on the same seeds; paired difference with 95 % interval |
-| `--dev-seeds N` | 0 | benchmark/compare on the development set (750000+) |
-| `--eval-mode mixed\|solo` | mixed | 4 vs 4 alternating seats, or 1 Modern vs K − 1 Classic |
-| `--eval-opponent classic\|raider` | classic | which opponent evaluation games use |
-| `--breakdown` | off | per-preset and per-scenario shares |
-| `--critic-warmup N` | 0 | first N iterations train only the critics |
-| `--mixed-frac F` | 0 | in `--solo-learner` runs, share of games played 4 vs 4 with all learner seats recorded |
-| `--raider-frac F` | 0 | share of Classic training seats played by the Raider |
-| `--departure-weight W` | 0 | departure credit (§6.3) |
-| `--save-every N` | 0 | also write `<out>.iterN.json`; the last iteration is always `<out>.final.json` |
-| `--frozen-opponent PATH` / `--frozen-frac F` | — / 0 | share of non-learner training seats played by a fixed Modern checkpoint |
-| `--search-k K` / `--search-r R` / `--search-h H` | 0 / 2 / 2 | search-as-teacher training (K candidate turns, R rollouts, H rounds) |
+| `--iterations N` | `300` | PPO iterations |
+| `--games-per-iter G` | `48` | games per iteration (use a multiple of hardware threads, e.g. `288`/`360`/`432`) |
+| `--turns T` | `40` | training game cut-off (time limit; critic bootstraps) |
+| `--eval-every E` / `--eval-turns T` | `10` / `40` | selection evaluation interval and cut-off turn |
+| `--select-seeds S` / `--dev-seeds D` | `12` / `0` | selection (`700000+`) or development (`750000+`) seed pairs (`×2` games each) |
+| `--report-seeds R` | `32` | held-out report seed pairs (`800000+`; **set `0` during training/tuning!**) |
+| `--epochs` / `--minibatches` | `4` / `8` | PPO passes and minibatches per iteration |
+| `--lr X` / `--lr-end Y` | `3e-3` / `3e-4` | initial and final Adam learning rate (linear decay) |
+| `--mup` / `--clip-per-head` | off / off | scale hidden-layer LRs by `1/width`; clip gradient norm per head |
+| `--temp-start T` / `--temp-end T` | `1.0` / `0.5` | training temperature, annealed linearly |
+| `--eval-temp T` / `--eval-level L` | `0.02` / `-1` | evaluation temperature and optional difficulty tier override (`0..2`) |
+| `--b-no-personalities` | off | disable 27-card personality mixing on `--compare` B |
+| `--b-warlord-lookahead` | off | enable fair 1-ply Warlord lookahead on `--compare` B |
+| `--a-legacy-blockers` / `--b-detour-bias X` | off / — | obstacle-detour A/B overrides in `--compare` |
+| `--seed-offset N` | `0` | offset (`<= 500000`) keeping stage training seeds disjoint from `700000+` |
+| `--lambda L` / `--local-weight W` | `0.95` / `1.0` | GAE `λ` and weight of `G_pool − V_stack(s)` in mission advantages |
+| `--departure-weight W` / `--army-weight A` | `0.0` / `0.25` | vacated-city loss credit (§6.3) and `army_share` weight in `ComputeEmpireScore` |
+| `--solo-learner` / `--mixed-frac F` | off / `0` | `1` learner vs `K − 1` opponents (with optional `F` fraction played `4v4`) |
+| `--active-sides K` / `--crop-margin M` | `8` / `0` | keep `K` (`2..8`) nearest capitals and crop map `± M` tiles (`0` = full map) |
+| `--random-map-frac F` / `--classic-frac F` | `0` / `0` | share of random maps; share of non-solo games against Classic AI |
+| `--raider-frac F` / `--warden-frac F` | `0` / `0` | share of Classic training seats played by `RaiderPlayer` or `WardenPlayer` |
+| `--frozen-opponent P` / `--frozen-frac F` | — / `0` | fixed Modern checkpoint path and share of opponent seats playing it |
+| `--eval-mode mixed\|solo` / `--eval-preset P` | `mixed` / `-1` | seat split and preset filter (`0..3`, `-1` = all) in evaluation |
+| `--eval-opponent classic\|raider\|warden\|frozen` | `classic` | opponent strategy in evaluation games |
+| `--compare PATH` / `--breakdown` | — / off | paired A/B evaluation (`--out` vs `PATH`) and per-preset/scenario breakdown |
+| `--from-scratch` / `--upgrade-v7` / `--critic-warmup N` | off / off / `0` | random init, in-place `< v7` upgrade, and critic-only warm-up iterations |
+| `--out PATH` / `--log CSV` / `--save-every N` | `cpp/ai_weights.json` / — / `0` | checkpoint output, per-iter CSV log, and `.iterN.json` snapshot cadence |
+| `--search-k K` / `--search-r R` / `--search-h H` | `0` / `2` / `2` | search-as-teacher rollouts (`K` candidates, `R` copies, `H` rounds) |
 
-## 8. Recommended next experiments (in order)
+### `w2evolve` key flags
+| Flag | Default | Meaning |
+|---|---|---|
+| `--in PATH` / `--out PATH` | `cpp/ai_weights.json` / `runs/evolve/weights.json` | starting checkpoint and best-selection output path |
+| `--heads SLICE` | `actor` | `actor`, `mission`, `econ`, `diplo`, `mission+econ`, `muster`, `muster+commander`, `standard+mission`, `archetype`, `gate`, `commander`, `v7-focus`, `readout`, `mission-readout`, `actor-readout` |
+| `--archetype NAME` | `imperial` | multi-objective specialist target (`imperial`, `berserker`, `guardian`, `schemer`, `questor`) |
+| `--generations G` / `--dirs K` / `--seeds-per-dir M` | `60` / `72` / `2` | ES generations, antithetic directions per generation, paired seeds per direction |
+| `--turns T` / `--fork-turn F` / `--fork-frac P` | `50` / `22` / `0.0` | game horizon and fraction of pairs forked from cached mid-game snapshots |
+| `--sigma` / `--sigma-end` / `--lr` / `--lr-end` | `0.03` / `0.02` / `0.006` / `0.002` | Gaussian perturbation scale and Adam step size schedules |
+| `--l2` / `--anchor-l2` | `1e-4` / `0.0` | L2 decay toward zero and toward the initial `--in` checkpoint |
+| `--warden-frac` / `--raider-frac` / `--totalwar-frac` | `0.25` / `0.10` / `0.50` | opponent mix and share of Total War presets in ES rollouts |
+| `--use-commander` / `--use-muster` / `--use-standard` / `--avoid-blockers` | off | activate `v7`/`v8` posture, Muster Hub, Side Standard, and detour features |
 
-1. **From-scratch `v8` Muster-Hub Curriculum Co-Training:** Short ES patches onto
-   frozen `v7` weights (`m5_tw_muster`) already raised `4+`-army battles by
-   `+45 %` over `v6` and beat `v7` in head-to-head game wins (`210W / 183L`),
-   tying on mean city share (`−0.52 % ± 1.99 %`). Co-training `MusterNet`,
-   `MissionNet`, and `EconNet` together from scratch in the 5-stage curriculum
-   (`curriculum.sh`) is the natural next step if pushing Total War further.
-2. **Portfolio Search Distillation (AlphaZero-style policy iteration):** Use fair
-   `w2search portfolio` (`50.8 %` city share) offline to label turn trajectories
-   where a specialist beat `P0` by `> 1.5 SE`, and distil those multi-turn
-   choices back into the single fast network.
-3. **Optional "Warlord+" Think-Ahead Difficulty Toggle:** Expose fair portfolio
-   search (`R = 2–3, H = 2, z = 1.5`) on an asynchronous worker thread for players
-   who want stronger mid/late-game AI turns (`~150–300 ms` per AI turn).
-4. **Fair-fog Classic benchmark toggle** remains open.
+---
 
-Tried and not helpful on their own (§6.3–§6.4): higher learning rate, 4v4 training
-games, low training temperature, 60-turn PPO games, wider networks (`2×` μP),
-`--yield-blockers`, unconditional road-blocker detouring (`−1.7 %` to `−3.5 %`),
-higher `--army-weight`, pre-wave `GuardCity` defender locks (`−9.4 %` T40 /
-`−14.3 %` T60), and single-policy temperature rollout search.
+## 8. Architectural Improvements & Next-Generation Training Roadmap
 
-## 9. Change history of this design (`ai` branch)
+### 8.1 Root-Cause Diagnosis of Remaining Strategic Gaps
+
+Across both Classic Total War benchmarks (`39.9 %` in `Fog-TotalWar` vs `65.9 %` in
+`Interm-Diplo`) and the human playtest (§6.3), Modern AI shows a consistent
+failure mode: **explosive expansion to Turn 20 (`51.3 %`), followed by mid/late-game
+erosion (`~300` castles lost/game, `88 %` undefended; `45 %` single-army attacks at
+`~50 %` win odds; `3k–10k` gold unspent).** Four structural bottlenecks in the
+current training formulation cause this:
+
+1. **Asymmetric On-Turn-Only Per-Stack Credit (`G_pool` Blindness):**
+   In `arena.cpp` (`ComputeAdvantages`) and `modern_military.cpp`, `unit_future_local`
+   (`G_pool`) accumulates **only** `immediate_delta_score` (`score_after −
+   score_before`) *during our own stack's execution*.
+   - A lone unit walking into an undefended city gets immediate positive `G_pool`
+     (`+city_share`). When that same lone unit is destroyed on the **rival's** turn
+     and loses the city right back, `G_pool` records **`0` penalty**.
+   - Conversely, a defender choosing `HOLD_GARRISON` and repelling an enemy siege
+     on the rival's turn receives **`G_pool = 0`** every turn.
+   - Because curriculum Stages 1–3 (`228` iterations) train with `--local-weight
+     1.5 → 1.0`, the shared trunk is actively rewarded for single-army empty-city
+     ping-pong, and setting `--local-weight 0.0` in Stage 4 dilutes rival-turn
+     penalties across `~70` intra-turn moves so the trunk never unlearns it.
+2. **`v8` Heads Disconnected from PPO (`w2arena`):**
+   `TurnStepRecord` (`ml_policy.hpp`) currently records only `mission_steps`,
+   `econ_steps`, and `diplo_steps`. `RunMusterSelectionPhase` and `RunStandardPhase`
+   discard `log_prob`, and `w2arena` neither backpropagates through `MusterNet`,
+   `Commander` (`ctx[25..29]`), or `detourBias` nor enables `useMuster`/`useCommander`
+   on `--from-scratch`. Thus `v8` features have only ever been patched post-hoc via
+   ES onto a `v6`/`v7` trunk rather than co-trained end-to-end.
+3. **`25×` Train/Deploy Temperature Gap (`T_train = 0.50` vs `T_deploy = 0.02`):**
+   Sampling `~70` moves/turn at `T = 0.50` injects dozens of suboptimal noisy moves
+   into every rollout turn. `ValueNet` therefore learns $V^{\pi_{T=0.5}}(s)$ (where
+   garrisoned castles are vacated two turns later by random noise anyway) rather
+   than $V^{\pi_{T=0.02}}(s)$. Naive low-temperature PPO (`E4`, `T = 0.25 → 0.15`)
+   failed because `CategoricalPpo` multiplies gradients by `1/T` (`3.3×` logit step
+   inflation) while collapsing exploration uniformly.
+4. **Delayed Unattributed Economy Payoffs & Concentration-Blind Shaping:**
+   - Buying a `600–1,500g` production slot pays off `6–10` turns later (multi-turn
+     build + vectoring + march), buried under `~500` military decisions in
+     `turn.advantage`, while `Normalizer::econ` pools rare `BuySlot` steps with
+     `20×` more frequent per-city `Produce`/`Vector` choices.
+   - `ComputeEmpireScore` sums `Strength()²` per unit independently, valuing eight
+     scattered 1-stacks identically to an 8-unit Hero-led blessed stack, even though
+     Warlords II sequential combat + stack leadership/terrain modifiers strongly
+     favour concentrated stacks after Turn 20.
+
+### 8.2 High-Leverage Code & Representation Improvements
+
+1. **Wire Full `v8` End-to-End Backprop in `w2arena`:**
+   Add `MusterStepRecord` to `TurnStepRecord`, record `RunMusterSelectionPhase`
+   (`round = 0, 1`) and `RunStandardPhase` (`round = 2`) under `sampler->current_turn`,
+   backpropagate exact gradients into `MusterNet`, `detourBias`, and through
+   `ctx[25..29]` into `Commander` (`commander_w`, `commander_b`), and add
+   `--use-commander --use-muster --use-standard --avoid-blockers` flags to `w2arena`.
+2. **Causal Off-Turn Per-Stack & Garrison Ledger (`G_pool` v2):**
+   Hook `RecordBattle` and round-end city-ownership diffs into `SideEpisode` so
+   off-turn enemy strength killed (`+Δarmy_share`), own unit death (`−Δarmy_share`),
+   and defended or lost city value (`±Δcity_share`) are attributed directly to the
+   participating/garrisoning `Army*` IDs in `unit_future_local` (and vacated-city
+   losses to `vacated_city`). This turns `StackValueNet` into a survival- and
+   defense-aware critic that keeps `--local-weight 1.0` valid in full `1v7` games.
+3. **Temperature-Invariant Sharp Rollouts + Sparse Exploration:**
+   Decouple policy sharpness from exploration in `w2arena`: score logits at
+   `T_base = 0.08–0.10` (multiplying `d_scores` by `T_base` so gradient norms stay
+   invariant to `T_base`), and inject exploration on only `10–15 %` of decisions
+   via an $\epsilon$-mixture with the multiplicity prior (or Gumbel noise) so rollouts
+   and `ValueNet` closely track deployment play.
+4. **`EconNet` Unit-Lineage Credit, Per-Family Normalisers, & Concentration Shaping:**
+   - Split `Normalizer::econ` and minibatch loss scaling by economy family
+     (`BuySlot`, `Produce`, `Vector`, `Retain`, `Spoils`).
+   - Tag newly produced `Army*` instances with the `(BuySlot, Produce, Vector)`
+     step indices that created them so `EconNet` receives a discounted share of
+     their downstream `G_pool` combat/capture return.
+   - Add a mild stack-concentration term to `ComputeEmpireScore` (e.g. effective
+     tile-stack power accounting for stack size and Hero/blessing presence) so
+     holding `8` units together is valued above `8` isolated scouts in mid/late game.
+5. **Broader Map Topologies, OOD Holdout Scenarios, & Fair/Human-Style Opponents:**
+   - Expand `--random-map-frac` in `w2arena`/`w2evolve` beyond fixed classic sliders
+     `{3, 3, 2, 3}` to sample `scengen` topologies (`continents`, `pangaea`,
+     `islands`, varied mountains/water), while keeping the 4 generated scenarios
+     (`Stormmoor`, `Wild Steppe`, `Frostwick`, `Gilded Realms`) as a **zero-shot
+     map-generalisation benchmark**.
+   - Add `--fair-classic` (masking Classic AI visibility under Hidden Map) to
+     separate fog-omniscience advantage from tactical skill.
+   - Add a fair-fog **`WarbandPlayer`** sparring opponent in `cpp/test/opponents.cpp`
+     modeling the human playtest strategy: always holds `>= 1` garrison per city,
+     buys `1–2` elite citadel slots early, and marches a blessed `6–8` unit
+     Hero-led main stack.
+
+### 8.3 Recommended 4-Stage Hybrid Training Pipeline
+
+PPO, League Self-Play, Portfolio Search, and Evolution Strategies solve different
+parts of the problem and work best as a staged pipeline:
+
+```mermaid
+flowchart LR
+    P1["Phase 1: End-to-End v8 Causal PPO Curriculum<br/>(Off-turn G_pool + Muster/Commander grads, T=0.10)"] --> P2["Phase 2: PFSP League PPO<br/>(Fair-Classic, Warden, Raider, Warband, Frozen)"]
+    P2 --> P3["Phase 3: Portfolio Search Distillation<br/>(CRN rollouts + Fair ValueNet leaf bootstrap)"]
+    P3 --> P4["Phase 4: sep-CMA-ES Consolidation & Personas<br/>(Mid-game forks T20..40 -> T65 survival fitness)"]
+```
+
+1. **Phase 1 — End-to-End `v8` Causal PPO Curriculum (`~3–4 h` on 72 threads):**
+   Train all `v8` heads (`DiploNet`, `MissionNet`, `EconNet`, `MusterNet`,
+   `Commander`, `ValueNet`, `StackValueNet`) together from scratch across
+   `1v1 (crop 14, T28)` → `1v3 (crop 14, T34)` → `1v5 (crop 14, T40)` →
+   `1v7 (full, T45)` → `1v7 long-horizon (full, T60, 40 % mid-game snapshot starts)`,
+   keeping `--local-weight 1.0` active throughout with off-turn `G_pool` credit.
+2. **Phase 2 — Prioritized Fictitious Self-Play (PFSP) League:**
+   Replace uniform Hall-of-Fame sampling in `w2arena` with **PFSP opponent & preset
+   weighting** ($p_i \propto (1 - \text{score}_i)^2$) over `{Classic, Fair-Classic,
+   Raider, Warden, Warband, Frozen Checkpoints}` and `{Beginner-Open, Interm-Diplo,
+   Adv-Hidden, Fog-TotalWar}`, automatically concentrating compute on Total War and
+   garrisoned Hero-stack opponents without forgetting diplomacy.
+3. **Phase 3 — Value-Bootstrapped Portfolio Search Distillation (Expert Iteration):**
+   Train a fair-information `ValueNet_fair(ctx)` head alongside the privileged
+   critic, and evaluate `w2search portfolio` (`Judge::kFair`) rollouts at `H = 2`
+   using **Common Random Numbers (CRN)** across candidates plus leaf bootstrap
+   $S(s_{t+H}) + \gamma^H V_{\text{fair}}(s_{t+H})$ (so 2-round search values
+   delayed slot purchases, ruin quests, and muster gathering). Distil turns where a
+   specialist beats the trunk by `> 1.5 SE` back into the single fast policy (or a
+   lightweight `GateNet` router over the 5 `ArchetypeHead`s).
+4. **Phase 4 — Diagonal `sep-CMA-ES` Late-Game Polish & 27-Card Re-Evolution:**
+   Upgrade `w2evolve` from isotropic `σ·N(0, I)` to separable diagonal `sep-CMA-ES`
+   (adapting per-parameter step sizes across `detourBias`, `Commander`, `MusterNet`,
+   `w_skip`, and `w3`), fork `50 %` of pairs from turns `20–40` out to **Turn 65**
+   on a composite fitness (`0.45 · Share@T40 + 0.45 · Share@T65 + 0.10 · #1_Finish`),
+   and re-evolve the 5 `ArchetypeHead` specialists on top of the new `v8` trunk.
+   *(Optionally expose async `R = 2, H = 2` fair portfolio search in `AiTurnRunner`
+   as a `"Warlord+"` think-ahead difficulty tier.)*
+
+### 8.4 Tried and Not Helpful in Isolation (§6.3–§6.4)
+Do not re-run these without fixing the underlying credit/temperature bottlenecks
+above: higher PPO learning rate, shared-live-policy `4v4` PPO (co-adaptation),
+unrescaled low-temperature PPO (`T = 0.15`), short warm-start PPO with re-weighted
+`--army-weight`, `2×`/`4×` wider MLPs (`W2_NET_WIDTH=2 --mup`), `--yield-blockers`,
+unconditional road-blocker detouring (`−1.7 %` to `−3.5 %`), pre-wave `GuardCity`
+defender locks (`−9.4 %` T40 / `−14.3 %` T60), naive Classic behaviour cloning
+(`11.0 %`), and single-policy high-temperature rollout search without CRN/value
+bootstrapping.
+
+---
+
+## 9. Change history of this design (`ai` → `oo-ai`)
 
 | Commit | Change |
 |---|---|
 | `2869e5e`, `da1734d` | First learnable AI and trainer (on `main`). Overclaimed: "zero priors, learns from win/loss", 35 % vs Classic. A later review found the issues below. |
 | `d04ad44` | Classic UI by default (`--modern-ui` opts in); Game-menu Modern/Classic AI toggle; Classic saves stay Classic. |
-| `101a05a` | Closed info leaks (attitude score, stale stack checks). Units walk onto one tile instead of teleporting (stack limit). Tribute and joint war are trained binary actions. Declarations use `mustDeclare`. Econ "current choice" input; disband only when over budget. |
+| `101a05a` | Closed info leaks (attitude score, stale stack checks). Units walk onto one tile instead of teleporting (stack limit). Tribute and joint war are trained binary actions. Declarations use `MustDeclare`. Econ "current choice" input; disband only when over budget. |
 | `792a2c9` | Trainer rewrite: honest empire-score objective with bootstrapping, linear critic with proper weight, minibatched PPO with KL stop, disjoint selection/report seeds with swapped sides and CIs. |
-| `1302ed6` | Real games sample the policy at T = 0.5 instead of greedy argmax. |
+| `1302ed6` | Real games sample the policy at `T = 0.5` instead of greedy argmax. |
 | `8aeaab3` | ~1.5× faster AI turns (per-tile army index; flying flood only for fliers). |
-| `52813b0` | Headless trainer build (`W2_BUILD_GAME=OFF`, `W2_NATIVE`), `cpp/test/train.sh`, `--local-weight`, `--lambda`. |
+| `52813b0` | Headless trainer build, `cpp/test/train.sh`, `--local-weight`, `--lambda`. |
 | `d443982` | `w2aidiag`; the game warns when weights fail to load; run B checkpoint installed (`19.8 % ± 8.4 %` on 48g; `18.4 % ± 4.9 %` on 128g); initial handoff doc. |
-| (2026-11-06) | 5th head `StackValueNet` (`8,066` params, v4 JSON with v3 compat); fixed `z_i = u_i/T − ln N` temperature-multiplicity bug, `midCountdown` & `setProduction` economy MDP, multi-unit `HOLD_GARRISON` (`optSv[14]`), decoupled `DisbandArmy`, `uintptr_t` unit lineage, thread-safe in-memory random maps & cropped-map `1 vs K−1` curriculum (`--solo-learner`); installed `pure_s6_1v7_unlocked` (`32.8 % ± 5.6 %` on 128g, `32.1 % ± 4.0 %` on 256g, `35.3 % ± 4.8 %` on 192g selection). |
-
+| (2026-11-06) | 5th head `StackValueNet` (`8,066` params, v4 JSON with v3 compat); fixed `z_i = u_i/T − ln N` temperature-multiplicity bug, `mid_countdown` & `SetProduction` economy MDP, multi-unit `HOLD_GARRISON` (`opt_sv[14]`), decoupled `Disband`, `uintptr_t` unit lineage, thread-safe in-memory random maps & cropped-map `1 vs K−1` curriculum (`--solo-learner`); installed `pure_s6_1v7_unlocked` (`32.8 % ± 5.6 %` on 128g, `32.1 % ± 4.0 %` on 256g, `35.3 % ± 4.8 %` on 192g selection). |
 | `e35d923` | Privileged critic inputs (v5, 8,866 params); `--compare`, `--dev-seeds`, `--eval-mode`, `--breakdown`, `--critic-warmup`, `--mixed-frac`, `--save-every`, explained-variance logging. |
 | `391f577` | `w2aidiag` economy statistics. |
-| `b1a0da3` | Real games near-greedy (`DEPLOY_TEMPERATURE` 0.02; training anneals to `TRAIN_TEMPERATURE_END` 0.5); `--eval-temp`, `--temp-end`. Report 32.1 % → 40.9 %. |
+| `b1a0da3` | Real games near-greedy (`kDeployTemperature = 0.02`; training anneals to `kTrainTemperatureEnd = 0.5`); `--eval-temp`, `--temp-end`. Report `32.1 % → 40.9 %`. |
 | `efcd30a` | Raider training opponent (`cpp/test/opponents.cpp`), `--raider-frac`, `--eval-opponent`; `w2aidiag` captures/losses by garrison. |
 | `7c7d995` | Departure credit (`--departure-weight`) and six empty-city/scale context inputs (v6, 9,700 params; v5/v4/v3 load function-preserving). |
-
 | `56be37b` | Frozen Modern training opponents (`--frozen-opponent`, `--frozen-frac`, `--eval-opponent frozen`). |
-| `6870c09` | `w2search` lookahead experiment (first version peeked at its own dice: +11.2 %; honest version −6.0 %). |
+| `6870c09` | `w2search` lookahead experiment (first version peeked at its own dice: `+11.2 %`; honest version `−6.0 %`). |
 | `96038bc` | Search-as-teacher training mode (`--search-k/-r/-h`). |
 | `de8afd3`, `fc868d6` | `w2search` honest / fair judges, candidate temperature and conservative switching. |
-| `09d3aa8` | Classic imitation experiment (`w2imitate`, `modern::snapshotMissions`). |
-
+| `09d3aa8` | Classic imitation experiment (`w2imitate`, `modern::SnapshotMissions`). |
 | `0fd0905` | Recorded `W2_NET_WIDTH=2` width race (`55.9 %` vs `58.6 %` baseline on 1v1). |
-| `a32161b` | Battle-calibration diagnostics (`modern::onMissionFight`) and `--yield-blockers` / `--army-weight` warm-start probes. |
-| `e91f582`, `ddd81e6` | `v7` policy (`9,886` params + `130p` `Commander` + optional MoE `GateNet`): Order Memory (`t[21..24]`), public setup context (`c[20..24]`), Field-Stack Rally; paired-seed Antithetic ES trainer (`w2evolve`) with mid-game snapshot fork bank; fair `w2search portfolio` (`50.8 %` vs Classic); installed `damped_v7_soup` (`+1.55 %` T40 / `+2.65 %` T60 on `512` dev games, `+0.56 %` T40 / `+0.81 %` T60 on `256` report games). |
+| `a32161b` | Battle-calibration diagnostics (`modern::SetMissionFightCallback`) and `--yield-blockers` / `--army-weight` warm-start probes. |
+| `e91f582`, `ddd81e6` | `v7` policy (`9,886` params + `130p` `Commander` + optional MoE `GateNet`): Order Memory (`t[21..24]`), public setup context (`ctx[20..24]`), Field-Stack Rally; paired-seed Antithetic ES trainer (`w2evolve`) with mid-game snapshot fork bank; fair `w2search portfolio` (`50.8 %` vs Classic); installed `damped_v7_soup` (`+1.55 %` T40 / `+2.65 %` T60 on `512` dev games, `+0.56 %` T40 / `+0.81 %` T60 on `256` report games). |
 | `cb4629d` | `v8` Learned Empire Meeting Points (`MusterNet` `44→12→6→1`, `10,097` core params, feeder-before-hub wave scheduling, same-continent vectoring checks); `210W / 183L` game wins and `+45 %` `4+`-army battles on `512` dev games. |
-| `0a127a7` | Learned Side Standard planting/vectoring (`useStandard`, `game::STANDARD`, `STANDARD` transit co-occupancy fix) and fair obstacle-aware selective road-blocker detouring (`move::findPathClear`, `avoidBlockers` + `detourBias`: `−65.7 %` off-target road collisions, `45.2 → 68.2 %` road-fight win rate, `216W / 198L` at T40 on `512` dev games). |
-| (2026-11-09) | 5 Evolved Archetypes + 27-Card Personality Mixer (`personality::archetypeWeights`, `PolicyNetwork::ArchetypeHead`, exact affine Product-of-Experts `materializeForSide`) and `Knight` (`38.5 %`) / `Lord` (`45.3 %`) / `Warlord` (`49.8 %`) difficulty ladder; installed `ai_weights_personalities_damped.json` as `cpp/ai_weights.json` (`+1.31 %` on Gate 1, `234/512` #1 finishes on Gate 2 T40, `182W / 182L` at T60). |
+| `0a127a7` | Learned Side Standard planting/vectoring (`useStandard`, `PlantedStandard` transit co-occupancy fix) and fair obstacle-aware selective road-blocker detouring (`move::FindPathClear`, `avoidBlockers` + `detourBias`: `−65.7 %` off-target road collisions, `45.2 → 68.2 %` road-fight win rate, `216W / 198L` at T40 on `512` dev games). |
+| (2026-11-09) | 5 Evolved Archetypes + 27-Card Personality Mixer (`personality::ArchetypeWeights`, `PolicyNetwork::ArchetypeHead`, exact affine Product-of-Experts `MaterializeForSide`) and `Knight` (`38.5 %`) / `Lord` (`45.3 %`) / `Warlord` (`49.8 %`) difficulty ladder; installed `ai_weights_personalities_damped.json` as `cpp/ai_weights.json` (`+1.31 %` on Gate 1, `234/512` #1 finishes on Gate 2 T40, `182W / 182L` at T60). |
+| `26707e2`..`a10aeb7` | Unified OO C++23 & Bazel architecture (`IComputerPlayer`, `ModernMlPlayer`, `ClassicAiPlayer`, modular `modern_*.cpp` split, Abseil CLI flags, 4 generated scenarios + modern `scengen` presets). |
+| `8d94181`, `3af31c7` | Accelerated inference & PPO backprop via `NEON` / `AVX2` / `SSE2` SIMD dot-product/AXPY kernels, `ForwardWithActivations` caching, and faster fog-frontier sorting & tactical combat rollouts. |
 
 **Review items deliberately left open** (they do not affect training):
-- `Side::classicAi` doubles as the diplomacy rule-variant flag, and it is set on
+- `Side::IsClassicAi()` doubles as the diplomacy rule-variant flag, and it is set on
   human sides too. With Modern AI + the classic UI, a human pays hidden trust
   penalties.
-- Run `bazel test //cpp:golden_test` to re-confirm Classic-AI parity
-  against golden traces after shared `diplomacy.cpp` / `game.cpp` changes.
+- Run `bazel test //cpp:golden_test` (or `sh tools/check.sh`) to re-confirm
+  Classic-AI parity against golden traces after shared `diplomacy.cpp` / `game.cpp`
+  changes.
 
 ## 10. File map
 
 | File | Role |
 |---|---|
-| `cpp/src/warlords/ai/modern_ai.cpp` | Turn engine: legal candidates, 27-card persona materialization, difficulty scaling, Cross-Turn Order Memory, Field-Stack Rally, Muster Hubs, Side Standard planting/vectoring, selective blocker detours, economy, diplomacy (zero `if-then-else` tactical filters) |
-| `cpp/src/warlords/ai/ml_policy.{hpp,cpp}` | 6-head residual MLP (`v8`, `10,097` core params + `669p` `MusterNet` + `130p` `Commander` + 5 `ArchetypeHead` specialists + optional `GateNet` MoE; `v7/v6/v5/v4/v3` load function-preserving), privileged critic features, sampling, weights I/O |
-| `cpp/src/warlords/move.{hpp,cpp}` | Dijkstra pathfinding, `PathCache`, and fair obstacle-aware `findPathClear` / `floodClear` |
-| `cpp/src/warlords/ai/belief.{hpp,cpp}` | Fair-information belief, fog frontiers, combat estimates, `ScopedTileIndex` |
-| `cpp/src/warlords/ai/personality.{hpp,cpp}` | 27 character-card profiles (`PROFILES[3][9]`), 5-archetype simplex projection (`archetypeWeights`), and `Knight` / `Lord` / `Warlord` temperature scaling (`difficultyTemperature`) |
-| `cpp/src/warlords/diplomacy.{hpp,cpp}` | Alliances, truces, tribute, trust, `computeAttitude` |
-| `cpp/src/warlords/scn.{hpp,cpp}`, `game.{hpp,cpp}` | Thread-safe in-memory random maps (`loadFromFiles`) & curriculum map scaling (`activeSides`, `cropMargin`) |
-| `cpp/test/arena.cpp` | `w2arena`: PPO self-play & `--solo-learner` curriculum trainer and Classic/Warden/difficulty benchmark |
-| `cpp/test/evolve.cpp` | `w2evolve`: Paired-seed Antithetic OpenAI-ES trainer with mid-game snapshot fork bank, `Commander`, `MusterNet`, Standard/detour, 5-archetype (`--heads archetype --archetype`), & `GateNet` MoE evolution |
-| `cpp/test/aidiag.cpp` | `w2aidiag`: behaviour diagnostic for a checkpoint and character card (economy, captures/losses by garrison, battle calibration, missions, persona metrics) |
-| `cpp/test/opponents.{hpp,cpp}` | Training-only opponents: Raider and Warden (on the Classic AI) and Frozen (a fixed Modern checkpoint) |
-| `cpp/test/search.cpp` | `w2search`: lookahead over candidate turns (`probe` / `play` / fair specialist `portfolio`) |
-| `cpp/test/train.sh` | Headless build and training launcher |
-| `cpp/test/curriculum.sh` | The from-scratch PPO curriculum script |
-| `cpp/test/run.cpp` (`testModernAi`) | Unit tests: fog pathing, diplomacy, sampling, multiplicity prior, `v8/v7/v6/v5/v4/v3` migration, `Commander`, `MusterNet`, Standard & blocker-detour, and 27-card `ArchetypeHead` Product-of-Experts equivalence tests |
-| `cpp/ai_weights.json` | Installed checkpoint (`v8`, `damped_v7_soup` trunk + 5 evolved `ArchetypeHead` specialists for all 27 character cards) |
+| `cpp/src/warlords/ai/modern_ai.{hpp,cpp}` | Turn orchestrator (`modern::PlayTurn`), persona materialization, optional 1-ply Warlord lookahead, and `SnapshotMissions` inspector |
+| `cpp/src/warlords/ai/modern_military.cpp` | Wave target collection, Order Memory & Muster/Standard rally features, coalition enumeration, `MissionNet` scoring, and multiplicity softmax |
+| `cpp/src/warlords/ai/modern_execution.cpp` | Stack movement execution (`ExecuteStackMission`), selective blocker detouring, ruin/temple actions, and capture spoils (`DecideCaptureSpoils`) |
+| `cpp/src/warlords/ai/modern_economy.cpp` | `RunEconomyPhase` (retention, slot buying, production, vectoring), `RunMusterSelectionPhase`, `RunStandardPhase`, `RunCityGuardPhase`, and `SelectHeroCity` |
+| `cpp/src/warlords/ai/modern_diplomacy.cpp` | `RunDiplomacyPhase` (`DiploNet` stances, peace tribute, joint-war requests) and `EvaluateModernProposal` |
+| `cpp/src/warlords/ai/modern_ml_player.{hpp,cpp}` | `ModernMlPlayer` (`IComputerPlayer` adapter, `AIThought` inspector buffer, battle observation hooks, save/load state) |
+| `cpp/src/warlords/ai/ml_policy.{hpp,cpp}` | 6-head residual MLP (`v8`, `10,097` core params + `669p` `MusterNet` + `130p` `Commander` + 5 `ArchetypeHead` specialists + optional `GateNet` MoE; `NEON`/`AVX2`/`SSE2` SIMD; `v7..v3` function-preserving loader) |
+| `cpp/src/warlords/ai/belief.{hpp,cpp}` | Fair-information `SideBelief`, fog frontiers, threat heatmaps, combat odds estimation (`EstimateCombat`) |
+| `cpp/src/warlords/ai/personality.{hpp,cpp}` | 27 character-card profiles (`kProfiles[3][9]`), 5-archetype simplex projection (`ArchetypeWeights`), and `Knight` / `Lord` / `Warlord` temperature scaling (`DifficultyTemperature`) |
+| `cpp/src/warlords/move.{hpp,cpp}`, `pathfinder.cpp` | Dijkstra pathfinding, `PathCache`, and fair obstacle-aware `FindPathClear` / `FloodClear` |
+| `cpp/src/warlords/diplomacy.{hpp,cpp}` | Alliances, truces, tribute, trust, `ComputeAttitude` |
+| `cpp/src/warlords/randommap.{hpp,cpp}`, `scengen.{hpp,cpp}` | Thread-safe in-memory classic & modern procedural world generation |
+| `cpp/test/arena.cpp` | `//cpp:w2arena`: PPO self-play & `--solo-learner` curriculum trainer and paired Classic/Warden/difficulty benchmark |
+| `cpp/test/evolve.cpp` | `//cpp:w2evolve`: Paired-seed Antithetic OpenAI-ES trainer with mid-game snapshot fork bank, `Commander`, `MusterNet`, Standard/detour, 5-archetype (`--heads archetype --archetype`), & `GateNet` MoE evolution |
+| `cpp/test/aidiag.cpp` | `//cpp:w2aidiag`: Behaviour & battle-calibration diagnostic for checkpoints and character cards |
+| `cpp/test/opponents.{hpp,cpp}` | `RaiderPlayer`, `WardenPlayer` (Classic decorators), and `FrozenPlayer` training/eval opponents |
+| `cpp/test/search.cpp` | `//cpp:w2search`: Candidate-turn lookahead (`probe` / `play` / fair specialist `portfolio`) |
+| `cpp/test/imitate.cpp` | `//cpp:w2imitate`: Classic AI mission snapshot imitation & behaviour-cloning probes |
+| `cpp/test/ai_modern_test.cpp`, `ai_benchmark.cpp` | `//cpp:ai_modern_test` GoogleTest suite (fog pathing, analytic gradients, multiplicity prior, `v3..v8` migration, `ArchetypeHead` PoE identity) and `//cpp:ai_benchmark` |
+| `cpp/test/train.sh`, `cpp/test/curriculum.sh` | Headless Bazel training launcher and 5-stage curriculum runner |
+| `cpp/ai_weights.json` | Installed `v8` checkpoint (`damped_v7_soup` trunk + 5 evolved `ArchetypeHead` specialists across all 27 character cards) |
 
 ## 11. Playing against it
 ```bash
-cpp/build/warlords2 --window --scenario ERYTHEA --diplomacy --hidden-map               # Modern AI + 27-card personalities, classic UI
-cpp/build/warlords2 --window --modern-ui --scenario ERYTHEA --diplomacy --hidden-map   # with Parley / F10 inspector (shows Persona mix)
-cpp/build/warlords2 --window --no-personalities --scenario ERYTHEA                     # uniform Imperial trunk on all sides
-cpp/build/warlords2 --window --warlord-lookahead --scenario ERYTHEA                    # fair 1-round lookahead on Warlord sides
-cpp/build/warlords2 --window --classic-ai --scenario ERYTHEA                           # the 1993 AI
-cpp/build/warlords2 --window --modern-ui --scenario ERYTHEA --spectate                 # watch 8 AIs, full map
-cpp/build/warlords2 --weights runs/X/weights.json ...                                  # try a checkpoint
+bazel build //:warlords2
+B=bazel-bin/cpp
+
+$B/warlords2 --window --scenario ERYTHEA --diplomacy --hidden-map               # Modern AI + 27-card personalities, classic UI
+$B/warlords2 --window --modern-ui --scenario ERYTHEA --diplomacy --hidden-map   # with Parley / F10 Brain Inspector (shows Persona mix)
+$B/warlords2 --window --no-personalities --scenario ERYTHEA                     # uniform Imperial trunk on all sides
+$B/warlords2 --window --warlord-lookahead --scenario ERYTHEA                    # fair 1-ply lookahead on Warlord sides
+$B/warlords2 --window --classic-ai --scenario ERYTHEA                           # the 1993 Classic AI
+$B/warlords2 --window --modern-ui --scenario ERYTHEA --spectate                 # watch 8 AIs battle, full map
+$B/warlords2 --window --weights runs/X/weights.json --scenario ERYTHEA          # test a candidate checkpoint
 ```
 The Military Advisor (`--military-advisor`, active by default; `--no-military-advisor` to disable) speculates on combat odds via Shift-hover/click over adjacent enemy armies and cities.
